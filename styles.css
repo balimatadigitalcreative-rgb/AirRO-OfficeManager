@@ -1,0 +1,130 @@
+/* ============================================================
+   AirRO Reverse Osmosis — Finance Design System
+   Brand v1.0 — blue family + fresh tosca, Poppins + Inter
+   "Air Bersih, Hidup Lebih Jernih"
+   (token names kept from the original build; values are AirRO brand)
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* AirRO blue family (names retained for cascade) */
+  --green-900: #06334F;   /* deep blue — headings, footer, strong text */
+  --green-800: #065489;   /* AirRO Deep Blue — primary brand / dark card */
+  --green-700: #0B7EB1;   /* RO Blue — CTA / buttons / primary hover */
+  --green-600: #138FB3;   /* Aqua Blue — highlight / link */
+  --ink:       #1C2B33;   /* primary text */
+
+  /* Tosca / aqua accents (names retained) */
+  --lime-500:  #22A7A1;   /* Fresh Tosca — signature accent (bars, highlights) */
+  --lime-400:  #3FB8B2;
+  --mint-300:  #8DD3D0;
+  --mint-200:  #BFE9E7;
+  --mint-100:  #DDF7F6;   /* Soft Aqua */
+
+  /* Warm accent (5% usage) */
+  --sand:      #F7CB6C;   /* Warm Sand — promo / profit pop */
+  --sand-soft: #FBEFD0;
+
+  /* Surfaces */
+  --canvas:    #EAF8FF;   /* Ice Blue — app background */
+  --surface:   #FFFFFF;   /* clean white content panel */
+  --card:      #FFFFFF;
+  --card-soft: #F2F8FB;
+  --border:    #DCE7EC;
+  --border-soft:#EAF1F4;
+
+  /* Text */
+  --text:      #1C2B33;
+  --text-mut:  #5E7480;
+  --text-faint:#93A6AE;
+
+  /* Status */
+  --pos:       #0B7EB1;   /* income — RO blue */
+  --pos-bg:    #DDF7F6;
+  --neg:       #E5484D;   /* expense / error (functional) */
+  --neg-bg:    #FCE6E4;
+  --warn:      #B07A12;   /* warm sand text */
+  --warn-bg:   #FCF1D6;
+
+  /* Misc */
+  --shadow-sm: 0 1px 2px rgba(6,51,79,.05);
+  --shadow-md: 0 8px 24px rgba(6,51,79,.07);
+  --shadow-lg: 0 18px 48px rgba(6,51,79,.12);
+  --r-lg: 20px;
+  --r-md: 16px;
+  --r-sm: 12px;
+  --sidebar-w: 244px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--canvas);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input { font-family: inherit; }
+::selection { background: var(--lime-500); color: #fff; }
+
+/* Display type uses Poppins (rounded, modern) per AirRO brand */
+h1, h2, h3, h4, .brand-name, .lb-name, .topbar h1, .sec-title { font-family: 'Poppins', system-ui, sans-serif; }
+
+/* Numbers use tabular figures for clean alignment */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* Scrollbars */
+.scroll-y { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--mint-300) transparent; }
+.scroll-y::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-y::-webkit-scrollbar-thumb { background: var(--mint-300); border-radius: 8px; }
+.scroll-y::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- Reusable atoms ---- */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 999px; font-weight: 600; font-size: 12px;
+  padding: 3px 9px; line-height: 1.2;
+}
+.pill-pos { background: var(--pos-bg); color: var(--pos); }
+.pill-neg { background: var(--neg-bg); color: var(--neg); }
+.pill-warn{ background: var(--warn-bg); color: var(--warn); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.icon-tile {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 11px;
+  background: var(--mint-100); color: var(--green-800);
+}
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: 11px; font-weight: 600; font-size: 13px; height: 38px; padding: 0 16px;
+  transition: transform .12s ease, background .15s ease, box-shadow .15s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--green-800); color: #fff; }
+.btn-primary:hover { background: var(--green-700); }
+.btn-lime { background: var(--lime-500); color: #fff; }
+.btn-lime:hover { background: var(--lime-400); }
+.btn-ghost { background: var(--card); color: var(--ink); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--card-soft); }
+
+/* progress bar */
+.bar-track { background: var(--green-800); border-radius: 999px; height: 8px; overflow: hidden; }
+.bar-fill  { background: var(--lime-500); height: 100%; border-radius: 999px; }
+
+/* fade-in for screen swaps (transform-only so resting opacity is always 1) */
+@keyframes airroFade { from { transform: translateY(8px); } to { transform: none; } }
+.screen-enter { animation: airroFade .3s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-enter { animation: none; }
+}

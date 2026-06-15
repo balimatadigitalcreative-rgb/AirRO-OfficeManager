@@ -1,0 +1,32 @@
+/* ============================================================
+   AirRO Water — desktop density
+   The desktop layout (sidebar view, >= 861px) renders a touch large, so we
+   scale it down. This is scoped to desktop ONLY: phones and tablets (<= 860px,
+   the breakpoint where the sidebar collapses to the bottom nav) keep their
+   native 100% responsive layout untouched.
+
+   Adjust --desk-scale to taste: 0.8 = 80%, 0.75 = 75%, 1 = original.
+   Loaded last so it overrides everything.
+   ============================================================ */
+:root {
+  --desk-scale: 0.8;
+}
+
+@media (min-width: 861px) {
+  /* `zoom` scales layout AND reflows (no transform cropping / empty gutters).
+     Media queries evaluate the real viewport width, so this can't feed back on
+     itself. */
+  html {
+    zoom: var(--desk-scale);
+  }
+
+  /* Compensate viewport-height shells: under `zoom: s`, a `100vh` element is
+     laid out against the full viewport then scaled by s, rendering at only
+     s x 100vh and leaving an empty band. Dividing by the scale makes them fill
+     the window again after the zoom. */
+  .app            { min-height: calc(100vh / var(--desk-scale)); }
+  .sidebar        { height:     calc(100vh / var(--desk-scale)); }
+  .content        { min-height: calc(100vh / var(--desk-scale) - 32px); }
+  .login-stage    { min-height: calc(100vh / var(--desk-scale)); }
+  .advisor-screen { height:     calc(100vh / var(--desk-scale) - 230px); }
+}

@@ -1,0 +1,147 @@
+// AirRO Water — finance API data model.
+// Local dev uses SQLite; switch `provider` to "postgresql" for production
+// (the schema is written to be portable across both).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ── Auth / people ────────────────────────────────────────────────────────
+// Roles mirror the frontend permission matrix in finance-store.js.
+// Stored as String for SQLite portability; valid values are enforced by Zod
+// at the API layer: owner | gm | hrd | finance | adminfin.
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  passwordHash String
+  pin          String? // optional quick-login PIN (hashed)
+  role         String   @default("finance")
+  sub          String? // subtitle shown in the UI, e.g. "Finance · Keuangan"
+  color        String   @default("#22A7A1")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  entries   Entry[]
+  setorans  Setoran[]
+  transfers Transfer[]
+}
+
+// ── Cash book ────────────────────────────────────────────────────────────
+// EntryType is "income" | "expense" — stored as String (SQLite-portable),
+// validated by Zod at the API layer.
+
+model Account {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   @default("bank") // "cash" | "bank"
+  bank      String   @default("")
+  number    String   @default("")
+  opening   Int      @default(0) // opening balance in IDR (whole rupiah)
+  color     String   @default("#065489")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  entries       Entry[]
+  transfersFrom Transfer[] @relation("TransferFrom")
+  transfersTo   Transfer[] @relation("TransferTo")
+}
+
+model Category {
+  id    String    @id @default(cuid())
+  key   String    @unique
+  label String
+  icon  String    @default("IconDots")
+  type  String // "income" | "expense"
+
+  entries Entry[]
+}
+
+model Entry {
+  id          String    @id @default(cuid())
+  type        String // "income" | "expense"
+  amount      Int // always positive; sign derived from `type`
+  note        String    @default("")
+  method      String    @default("Cash")
+  date        String // YYYY-MM-DD (business date, tz-agnostic)
+  time        String    @default("00:00") // HH:mm
+  status      String    @default("Completed") // Completed | Pending | Failed
+  createdAt   DateTime  @default(now())
+
+  category   Category? @relation(fields: [categoryKey], references: [key])
+  categoryKey String?
+  account    Account?  @relation(fields: [accountId], references: [id])
+  accountId  String?
+  createdBy  User?     @relation(fields: [createdById], references: [id])
+  createdById String?
+
+  @@index([date])
+  @@index([type])
+}
+
+model Transfer {
+  id        String   @id @default(cuid())
+  amount    Int
+  date      String
+  note      String   @default("")
+  createdAt DateTime @default(now())
+
+  from   Account @relation("TransferFrom", fields: [fromId], references: [id])
+  fromId String
+  to     Account @relation("TransferTo", fields: [toId], references: [id])
+  toId   String
+  createdBy   User?  @relation(fields: [createdById], references: [id])
+  createdById String?
+}
+
+// ── Delivery setoran (per-fleet daily deposit) ───────────────────────────
+model Fleet {
+  id    String @id @default(cuid())
+  plate String @unique
+
+  setorans Setoran[]
+}
+
+model Setoran {
+  id        String   @id @default(cuid())
+  date      String // YYYY-MM-DD
+  cash      Int      @default(0)
+  bonPay    Int      @default(0) // receivable payments collected in the field
+  expense   Int      @default(0) // field expenses paid from cash
+  note      String   @default("")
+  createdAt DateTime @default(now())
+
+  fleet     Fleet?  @relation(fields: [fleetId], references: [id])
+  fleetId   String?
+  createdBy   User?  @relation(fields: [createdById], references: [id])
+  createdById String?
+
+  @@index([date])
+}
+
+// ── HRD / payroll ────────────────────────────────────────────────────────
+model Employee {
+  id         String   @id @default(cuid())
+  name       String
+  department String   @default("Staff")
+  base       Int      @default(0) // base salary (IDR)
+  allowance  Int      @default(0)
+  risk       String   @default("Low") // JKK occupational-risk class
+  jp         Boolean  @default(true) // enrolled in JP (pension)
+  religion   String   @default("Islam")
+  joinedDate String? // YYYY-MM-DD, for THR proration
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+// ── Key/value settings (alert thresholds, HR rates, budget, etc.) ────────
+model Setting {
+  key   String @id
+  value String // JSON-encoded value
+}

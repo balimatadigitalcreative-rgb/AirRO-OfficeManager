@@ -1,0 +1,38 @@
+'use strict';
+const { z } = require('zod');
+const authService = require('../services/auth.service');
+const asyncHandler = require('../utils/asyncHandler');
+
+const ROLES = ['owner', 'gm', 'hrd', 'finance', 'adminfin'];
+
+const registerSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  username: z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/,
+    'Username may contain only letters, numbers, dot, underscore and hyphen'),
+  password: z.string().min(6).max(200),
+  role: z.enum(ROLES).default('finance'),
+  sub: z.string().trim().max(120).optional(),
+  color: z.string().trim().max(20).optional(),
+});
+
+const loginSchema = z.object({
+  username: z.string().trim().min(1),
+  password: z.string().min(1),
+});
+
+const register = asyncHandler(async (req, res) => {
+  const result = await authService.register(req.body);
+  res.status(201).json(result);
+});
+
+const login = asyncHandler(async (req, res) => {
+  const result = await authService.login(req.body);
+  res.status(200).json(result);
+});
+
+const me = asyncHandler(async (req, res) => {
+  const user = await authService.me(req.user.id);
+  res.status(200).json({ user });
+});
+
+module.exports = { register, login, me, schemas: { registerSchema, loginSchema } };
