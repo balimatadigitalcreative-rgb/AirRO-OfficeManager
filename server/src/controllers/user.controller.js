@@ -12,6 +12,8 @@ const createSchema = z.object({
   sub: z.string().max(120).optional(),
   color: z.string().max(20).optional(),
   active: z.boolean().optional(),
+  // Per-user capability override (object of booleans); null/omit = role defaults.
+  permissions: z.record(z.boolean()).nullable().optional(),
 });
 const updateSchema = createSchema.partial();
 const idParams = z.object({ id: z.string().min(1) });

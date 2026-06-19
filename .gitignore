@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Databases & secrets (never commit these)
+*.db
+*.db-journal
+.env
+.env.local
+.env.*.local
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db

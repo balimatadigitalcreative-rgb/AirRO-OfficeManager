@@ -1,44 +1,99 @@
 /* global React, FS, API, CLOUD */
 /* AirRO — User Management (General Manager). window.USERMGMT
-   When signed into the backend, this screen reads/writes real backend users
-   via the /users API so created accounts can actually log in. When offline it
-   falls back to the local (localStorage) user list. */
+   Backend-connected: reads/writes real backend users via the /users API, with
+   per-user feature permissions and GM-driven password reset. */
 const { useState: uSu } = React;
 const trU = (k, v) => window.t(k, v);
 function IcU(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
 const ROLE_OPTS = ['owner', 'gm', 'hrd', 'finance', 'adminfin'];
 
+// Feature toggles shown to the GM, grouped. Keys map to the permission flags
+// used across the app (see finance-store.js ROLES[*].perms).
+const CAP_GROUPS = [
+  { title: 'Keuangan', caps: [
+    ['cashflow', 'Lihat Arus Kas'],
+    ['seeMoney', 'Lihat Nominal Uang'],
+    ['addEntry', 'Tambah Transaksi'],
+    ['edit', 'Edit Transaksi'],
+    ['delete', 'Hapus Transaksi'],
+    ['allEntries', 'Semua Catatan'],
+    ['setoran', 'Setoran'],
+    ['reports', 'Laporan'],
+  ] },
+  { title: 'SDM / HRD', caps: [
+    ['employees', 'Karyawan'],
+    ['empDetail', 'Detail Karyawan'],
+    ['attendance', 'Absensi'],
+    ['payroll', 'Penggajian'],
+  ] },
+  { title: 'Perusahaan & Admin', caps: [
+    ['company', 'Dashboard Perusahaan'],
+    ['approvals', 'Persetujuan'],
+    ['settings', 'Pengaturan'],
+    ['reset', 'Kelola User'],
+  ] },
+];
+
 function UserModal({ row, users, onSave, onClose, busy }) {
   const [f, setF] = uSu(row);
   React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const set = (p) => setF({ ...f, ...p });
   const dupUser = users.some((u) => u.id !== f.id && (u.user || '').toLowerCase() === (f.user || '').trim().toLowerCase());
-  // PIN required when creating; on edit, leave blank to keep the existing password.
   const pinOk = f._new ? /^\d{4,}$/.test(f.pin || '') : (!f.pin || /^\d{4,}$/.test(f.pin));
   const valid = f.name.trim() && /^[a-zA-Z0-9._-]{3,}$/.test((f.user || '').trim()) && pinOk && !dupUser;
+
+  // Effective permissions: the per-user override if set, else the role defaults.
+  const eff = f.permissions || FS.perms(f.role);
+  const custom = !!f.permissions;
+  const toggleCap = (key) => set({ permissions: { ...eff, [key]: !eff[key] } });
+  const changeRole = (r) => set({ role: r, color: FS.ROLE_COLORS[r] || f.color, permissions: null }); // reset to new role defaults
+  const resetToRole = () => set({ permissions: null });
+
   return (
     <div className="modal-scrim" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{f._new ? trU('um.add') : trU('um.edit')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
-        <div className="modal-body">
+        <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
           <label className="fld-label" style={{ marginTop: 0 }}>{trU('um.name')}</label>
           <input className="fld" value={f.name} placeholder="e.g. Budi Santoso" onChange={(e) => set({ name: e.target.value })} />
           <label className="fld-label">{trU('um.role')}</label>
-          <UI.Dropdown value={f.role} options={ROLE_OPTS.map((r) => ({ value: r, label: trU('role.' + r) }))} onChange={(r) => set({ role: r, color: FS.ROLE_COLORS[r] || f.color })} />
+          <UI.Dropdown value={f.role} options={ROLE_OPTS.map((r) => ({ value: r, label: trU('role.' + r) }))} onChange={changeRole} />
           <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <label className="fld-label" style={{ marginTop: 0 }}>{trU('um.username')}</label>
               <input className="fld" value={f.user} placeholder="username" onChange={(e) => set({ user: e.target.value.replace(/\s/g, '') })} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <label className="fld-label" style={{ marginTop: 0 }}>{trU('um.password')}</label>
-              <input className="fld tnum" inputMode="numeric" value={f.pin} placeholder={f._new ? '4-digit PIN' : '•••• (unchanged)'} onChange={(e) => set({ pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
+              <label className="fld-label" style={{ marginTop: 0 }}>{f._new ? 'Password (PIN)' : 'Password baru'}</label>
+              <input className="fld tnum" inputMode="numeric" value={f.pin} placeholder={f._new ? 'min. 4 angka' : 'kosongkan jika tetap'} onChange={(e) => set({ pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
             </div>
           </div>
+          {!f._new && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 4 }}>Lupa password? Isi PIN baru di sini lalu Simpan, beri tahu user.</div>}
           {dupUser && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={14} />{trU('um.dup')}</div>}
           <label className="fld-label">{trU('um.note')}</label>
           <input className="fld" value={f.sub || ''} placeholder={trU('um.notePh')} onChange={(e) => set({ sub: e.target.value })} />
+
+          {/* ---- per-user feature permissions ---- */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 18 }}>
+            <label className="fld-label" style={{ margin: 0 }}>Hak Akses Fitur</label>
+            <span style={{ fontSize: 11.5, color: custom ? 'var(--green-700)' : 'var(--text-faint)' }}>
+              {custom ? 'disesuaikan' : 'default role'}{custom && <button className="link-btn" style={{ marginLeft: 8, background: 'none', border: 'none', color: 'var(--green-700)', cursor: 'pointer', fontWeight: 600 }} onClick={resetToRole}>reset</button>}
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '2px 0 8px' }}>Centang fitur yang boleh diakses user ini.</div>
+          {CAP_GROUPS.map((g) => (
+            <div key={g.title} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-mut)', marginBottom: 6 }}>{g.title}</div>
+              <div className="cat-chips">
+                {g.caps.map(([key, label]) => (
+                  <button key={key} type="button" className={`cat-chip ${eff[key] ? 'on' : ''}`} onClick={() => toggleCap(key)}>
+                    {eff[key] ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
         <div className="modal-foot">
           {!f._new && users.length > 1 && <button className="btn btn-ghost" style={{ color: 'var(--neg)', marginRight: 'auto' }} disabled={busy} onClick={() => onSave(f, true)}><IconClose s={15} />{trU('um.remove')}</button>}
@@ -57,13 +112,13 @@ function UserManagement({ users, setUsers, currentId }) {
   const [busy, setBusy] = uSu(false);
   const [err, setErr] = uSu(null);
 
-  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1' });
+  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null });
 
   const refresh = () => {
     if (!cloud) { setRows(users || []); return; }
     window.API.users.list()
       .then((r) => setRows((r.data || []).map(toRow)))
-      .catch((e) => setErr((e.body && e.body.error && e.body.error.message) || e.message || 'Failed to load users'));
+      .catch((e) => setErr((e.body && e.body.error && e.body.error.message) || e.message || 'Gagal memuat user'));
   };
   React.useEffect(() => { refresh(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -72,7 +127,6 @@ function UserManagement({ users, setUsers, currentId }) {
   const save = async (u, remove) => {
     setErr(null);
     if (!cloud) {
-      // offline fallback: local-only list
       if (remove) { if (!confirm(trU('um.removeConfirm'))) return; setUsers((p) => p.filter((x) => x.id !== u.id)); setEdit(null); return; }
       const clean = { ...u }; delete clean._new;
       setUsers((p) => p.find((x) => x.id === u.id) ? p.map((x) => x.id === u.id ? clean : x) : [...p, clean]);
@@ -84,22 +138,22 @@ function UserManagement({ users, setUsers, currentId }) {
         if (!confirm(trU('um.removeConfirm'))) { setBusy(false); return; }
         await window.API.users.remove(u.id);
       } else if (u._new) {
-        await window.API.users.create({ name: u.name.trim(), username: u.user.trim(), password: u.pin, role: u.role, sub: u.sub || '', color: u.color });
+        await window.API.users.create({ name: u.name.trim(), username: u.user.trim(), password: u.pin, role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null });
       } else {
-        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color };
+        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null };
         if (u.pin) body.password = u.pin;   // only change the password when re-entered
         await window.API.users.update(u.id, body);
       }
       setEdit(null);
       refresh();
     } catch (e) {
-      setErr((e.body && e.body.error && e.body.error.message) || e.message || 'Save failed');
+      setErr((e.body && e.body.error && e.body.error.message) || e.message || 'Gagal menyimpan');
     } finally {
       setBusy(false);
     }
   };
 
-  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.ROLE_COLORS.finance, _new: true }); };
+  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.ROLE_COLORS.finance, permissions: null, _new: true }); };
   const RoleBadge = window.AUTH.RoleBadge;
   return (
     <div className="screen-enter">
@@ -118,7 +172,10 @@ function UserManagement({ users, setUsers, currentId }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="um-name">{u.name}{u.id === currentId && <span className="um-you">{trU('um.you')}</span>}</div>
               <div className="um-user">@{u.user}</div>
-              <div style={{ marginTop: 6 }}><RoleBadge role={u.role} size="sm" /></div>
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <RoleBadge role={u.role} size="sm" />
+                {u.permissions && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--green-700)', background: 'var(--pos-bg)', padding: '2px 7px', borderRadius: 999 }}>akses khusus</span>}
+              </div>
             </div>
             <span className="um-edit"><IconPencil s={15} /></span>
           </div>

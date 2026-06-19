@@ -109,7 +109,8 @@
   }
 
   function frontendUser(u) {
-    return { id: u.id, name: u.name, role: u.role, user: u.username, sub: u.sub, color: u.color || '#22A7A1' };
+    return { id: u.id, name: u.name, role: u.role, user: u.username, sub: u.sub, color: u.color || '#22A7A1',
+      permissions: u.permissions || null };  // per-user capability override (or null = role defaults)
   }
 
   function logout() { try { API.logout(); } catch (e) {} state.active = false; state.user = null; }

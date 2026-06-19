@@ -25,6 +25,7 @@ model User {
   sub          String? // subtitle shown in the UI, e.g. "Finance · Keuangan"
   color        String   @default("#22A7A1")
   active       Boolean  @default(true)
+  permissions  String? // JSON capability map; null = use the role's defaults
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

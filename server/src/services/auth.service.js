@@ -4,15 +4,22 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
+const { parsePerms } = require('../config/permissions');
 
 const PUBLIC_FIELDS = {
   id: true, name: true, username: true, role: true, sub: true,
-  color: true, active: true, createdAt: true,
+  color: true, active: true, permissions: true, createdAt: true,
 };
+
+// Shape a user row for API responses: permissions returned as a parsed object.
+function publicUser(user) {
+  return { ...user, permissions: parsePerms(user.permissions) };
+}
 
 function signToken(user) {
   return jwt.sign(
-    { sub: user.id, role: user.role, username: user.username },
+    // The raw permissions JSON string travels in the token; requireCap resolves it.
+    { sub: user.id, role: user.role, username: user.username, permissions: user.permissions || null },
     config.jwt.secret,
     { expiresIn: config.jwt.expiresIn },
   );
@@ -27,7 +34,7 @@ async function register({ name, username, password, role, sub, color }) {
     data: { name, username, passwordHash, role, sub, color },
     select: PUBLIC_FIELDS,
   });
-  return { user, token: signToken(user) };
+  return { user: publicUser(user), token: signToken(user) };
 }
 
 async function login({ username, password }) {
@@ -38,13 +45,13 @@ async function login({ username, password }) {
   if (!ok) throw ApiError.unauthorized('Invalid credentials');
 
   const { passwordHash, pin, updatedAt, ...safe } = user;
-  return { user: safe, token: signToken(user) };
+  return { user: publicUser(safe), token: signToken(user) };
 }
 
 async function me(userId) {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: PUBLIC_FIELDS });
   if (!user) throw ApiError.notFound('User not found');
-  return user;
+  return publicUser(user);
 }
 
-module.exports = { register, login, me, signToken, PUBLIC_FIELDS };
+module.exports = { register, login, me, signToken, publicUser, PUBLIC_FIELDS };

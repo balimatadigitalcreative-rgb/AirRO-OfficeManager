@@ -2,27 +2,39 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
-const { PUBLIC_FIELDS } = require('./auth.service');
+const { PUBLIC_FIELDS, publicUser } = require('./auth.service');
+
+// `permissions` arrives as an object (or null) — store it as a JSON string.
+function normalize({ permissions, ...rest }) {
+  const data = { ...rest };
+  if (permissions !== undefined) {
+    data.permissions = permissions ? JSON.stringify(permissions) : null;
+  }
+  return data;
+}
 
 async function list() {
-  return prisma.user.findMany({ select: PUBLIC_FIELDS, orderBy: { createdAt: 'asc' } });
+  const rows = await prisma.user.findMany({ select: PUBLIC_FIELDS, orderBy: { createdAt: 'asc' } });
+  return rows.map(publicUser);
 }
 async function getById(id) {
   const u = await prisma.user.findUnique({ where: { id }, select: PUBLIC_FIELDS });
   if (!u) throw ApiError.notFound('User not found');
-  return u;
+  return publicUser(u);
 }
 async function create({ password, ...rest }) {
   const existing = await prisma.user.findUnique({ where: { username: rest.username } });
   if (existing) throw ApiError.conflict('Username is already taken');
   const passwordHash = await bcrypt.hash(password, 10);
-  return prisma.user.create({ data: { ...rest, passwordHash }, select: PUBLIC_FIELDS });
+  const u = await prisma.user.create({ data: { ...normalize(rest), passwordHash }, select: PUBLIC_FIELDS });
+  return publicUser(u);
 }
 async function update(id, { password, ...rest }) {
   await getById(id);
-  const data = { ...rest };
+  const data = normalize(rest);
   if (password) data.passwordHash = await bcrypt.hash(password, 10);
-  return prisma.user.update({ where: { id }, data, select: PUBLIC_FIELDS });
+  const u = await prisma.user.update({ where: { id }, data, select: PUBLIC_FIELDS });
+  return publicUser(u);
 }
 async function remove(id, currentUserId) {
   if (id === currentUserId) throw ApiError.badRequest('You cannot delete your own account');

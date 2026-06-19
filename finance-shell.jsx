@@ -81,7 +81,8 @@ function FApp() {
   uEh(() => { CO.saveProjects(projects); }, [projects]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
-  const p = FS.perms(user ? user.role : 'cashier');
+  // Per-user permission override (set by the GM) takes precedence over the role defaults.
+  const p = (user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier');
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   const login = (u) => {

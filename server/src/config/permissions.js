@@ -37,4 +37,23 @@ function hasPerm(role, perm) {
   return !!(p && p[perm]);
 }
 
-module.exports = { ROLE_PERMS, ROLES, hasPerm };
+// Parse a stored permissions JSON string into an object (or null on absent/bad).
+function parsePerms(str) {
+  if (!str) return null;
+  if (typeof str === 'object') return str;
+  try {
+    const o = JSON.parse(str);
+    return o && typeof o === 'object' ? o : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Effective capability map for a user: their per-user override if set,
+// otherwise the role defaults.
+function resolvePerms(role, permsStrOrObj) {
+  const override = parsePerms(permsStrOrObj);
+  return override || ROLE_PERMS[role] || ROLE_PERMS.finance;
+}
+
+module.exports = { ROLE_PERMS, ROLES, hasPerm, parsePerms, resolvePerms };
