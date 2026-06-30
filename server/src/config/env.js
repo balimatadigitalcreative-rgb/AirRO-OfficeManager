@@ -1,5 +1,8 @@
 'use strict';
-require('dotenv').config();
+// override:true makes .env authoritative over any stray/inherited environment
+// variables (e.g. a leftover DATABASE_URL from another setup). Skipped under
+// test so the test runner's explicit DATABASE_URL/NODE_ENV still win.
+require('dotenv').config({ override: process.env.NODE_ENV !== 'test' });
 
 function required(name, fallback) {
   const v = process.env[name] ?? fallback;
