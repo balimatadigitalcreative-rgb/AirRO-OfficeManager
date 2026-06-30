@@ -66,7 +66,11 @@
     categories: collection('categories'),
     setoran: collection('setoran'),
     fleet: collection('fleet'),
-    employees: collection('employees'),
+    employees: Object.assign(collection('employees'), {
+      // Allocate a unique NIP server-side (race-safe). Body: { office, contractStart? }.
+      nip: (data) => req('POST', '/employees/nip', data),
+      regenerateNip: (id) => req('POST', '/employees/' + id + '/regenerate-nip'),
+    }),
     users: collection('users'),
     settings: {
       all: () => req('GET', '/settings'),

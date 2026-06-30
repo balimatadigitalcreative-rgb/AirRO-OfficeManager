@@ -135,7 +135,11 @@
     const yr = 2019 + Math.floor(rnd() * 6), mo = 1 + Math.floor(rnd() * 12);
     return { bank: BANKS[Math.floor(rnd() * BANKS.length)], account: acc, joined: `${yr}-${PAD(mo)}-01`,
       nik: '32' + Array.from({ length: 14 }, () => Math.floor(rnd() * 10)).join(''),
-      status: rnd() < 0.8 ? 'Tetap' : 'Kontrak', phone: '08' + Array.from({ length: 10 }, () => Math.floor(rnd() * 10)).join('') };
+      status: rnd() < 0.8 ? 'Tetap' : 'Kontrak', phone: '08' + Array.from({ length: 10 }, () => Math.floor(rnd() * 10)).join(''),
+      // extended HR profile defaults (kept blank; only office/maritalStatus carry a default)
+      nip: '', office: 'AIRRO', noSurat: '', noKk: '', noBpjsKes: '', noBpjsTk: '',
+      contractStart: '', contractEnd: '', birthPlace: '', birthDate: '',
+      addressKtp: '', addressDomisili: '', maritalStatus: 'TK' };
   }
   function accountInfo(staff) { const ov = loadAccMap()[staff.id] || {}; return { ...genAccount(staff), ...ov }; }
   function saveAccount(staffId, data) { const m = loadAccMap(); m[staffId] = { ...(m[staffId] || {}), ...data }; saveAccMap(m); }

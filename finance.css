@@ -265,6 +265,16 @@
 .ed-af span { font-size: 11px; color: var(--text-faint); font-weight: 600; }
 .ed-af input, .ed-af select { height: 38px; border: 1.5px solid var(--border); border-radius: 9px; padding: 0 11px; font-family: 'Inter'; font-size: 13px; color: var(--ink); background: var(--card); }
 .ed-af input:focus, .ed-af select:focus { outline: none; border-color: var(--green-700); box-shadow: 0 0 0 3px rgba(11,126,177,.08); }
+.ed-af input[readonly] { background: var(--card-soft); color: var(--text-mut); }
+/* grouped sub-headers + full-width rows inside the account form/grid */
+.ed-grp-t { grid-column: 1 / -1; font-family: 'Poppins'; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--green-700); margin: 8px 0 -2px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
+.ed-acc-form > .ed-grp-t:first-child, .ed-acc-grid > .ed-grp-t:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+.ed-af-wide, .ed-acc-wide { grid-column: 1 / -1; }
+.ed-nip-row { display: flex; gap: 8px; align-items: stretch; }
+.ed-nip-row input { flex: 1; min-width: 0; font-weight: 700; letter-spacing: .03em; }
+.ed-nip-btn { flex-shrink: 0; height: 38px; padding: 0 13px; border-radius: 9px; background: var(--mint-100); color: var(--green-700); font-size: 12px; font-weight: 700; white-space: nowrap; transition: background .14s; }
+.ed-nip-btn:hover:not(:disabled) { background: var(--mint-200); }
+.ed-nip-btn:disabled { opacity: .55; cursor: default; }
 @media (max-width: 560px) { .ed-acc-form { grid-template-columns: 1fr; } }
 
 .ed-day-opt { height: 34px; border-radius: 9px; border: 1px solid var(--border); background: var(--card); font-size: 12px; font-weight: 600; color: var(--text-mut); transition: all .12s; }

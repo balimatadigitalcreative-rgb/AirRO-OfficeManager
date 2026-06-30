@@ -139,6 +139,38 @@ model Employee {
   joinedDate String? // YYYY-MM-DD, for THR proration
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
+
+  // Extended HR profile (all optional / defaulted → old rows stay valid).
+  nip             String?  @unique // auto-generated <OFFICE>-YY-NNN, see employee.service
+  noSurat         String? // No Surat (assignment/decree letter no.)
+  noKk            String? // No KK (family card)
+  noBpjsKes       String? // BPJS Kesehatan no.
+  noBpjsTk        String? // BPJS Ketenagakerjaan no.
+  office          String   @default("AIRRO") // posisi kantor: AIRRO | NSN | MFG
+  contractStart   String? // YYYY-MM-DD
+  contractEnd     String? // YYYY-MM-DD (for contract-expiry alerts later)
+  birthPlace      String? // TTL — place of birth
+  birthDate       String? // YYYY-MM-DD — date of birth
+  addressKtp      String?
+  addressDomisili String?
+  maritalStatus   String   @default("TK") // TK | K | Cerai
+}
+
+// ── NIP allocation ledger ────────────────────────────────────────────────
+// One row per issued NIP. The unique constraints make sequence allocation
+// race-safe (concurrent requests can't claim the same office+year+seq). This
+// is the source of truth for NIP counters even though employee records
+// themselves live in the shared /state document store, not in `Employee`.
+model EmployeeNip {
+  id        String   @id @default(cuid())
+  nip       String   @unique // <OFFICE>-YY-NNN
+  office    String // AIRRO | NSN | MFG
+  year      String // 2-digit, e.g. "26"
+  seq       Int // running counter within office+year, starts at 1
+  createdAt DateTime @default(now())
+
+  @@unique([office, year, seq])
+  @@index([office, year])
 }
 
 // ── Key/value settings (alert thresholds, HR rates, budget, etc.) ────────

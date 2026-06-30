@@ -320,6 +320,19 @@ function EmployeeDetail({ staff, rates, monthKey, today, seeMoney, canEdit, canE
   uEc(() => { if (onSyncDeduct) onSyncDeduct(staff.id, late.amount, trC('co.lateDeduct'), ot.amount); }, [late.amount, ot.amount]);
   const setDay = (date, status, patch) => { CO.setAttDay(staff.id, monthKey, date, status, patch); setAtt(CO.attendance(staff, monthKey, today)); };
   const setAccField = (k, v) => { const next = { ...acc, [k]: v }; setAcc(next); CO.saveAccount(staff.id, { [k]: v }); };
+  // NIP is allocated server-side (race-safe & unique). Generated once; only the
+  // explicit button re-allocates — editing office/contract never changes it.
+  const [nipBusy, setNipBusy] = uSc(false);
+  const genNip = async () => {
+    if (nipBusy || !(window.API && window.API.employees)) { if (!window.API) alert(trC('co.nipOffline')); return; }
+    setNipBusy(true);
+    try {
+      const r = await window.API.employees.nip({ office: acc.office || 'AIRRO', contractStart: acc.contractStart || undefined });
+      if (r && r.data && r.data.nip) setAccField('nip', r.data.nip);
+      else alert(trC('co.nipOffline'));
+    } catch (e) { alert(trC('co.nipOffline')); }
+    finally { setNipBusy(false); }
+  };
   const deds = (staff.deductions || []).filter((d) => +d.amount > 0 && !d.auto);
   return (
     <div className="modal-scrim" onClick={onClose}>
@@ -401,21 +414,73 @@ function EmployeeDetail({ staff, rates, monthKey, today, seeMoney, canEdit, canE
           <div className="ed-section-t">{trC('co.account')}{canEditAtt && <button className="ed-acc-edit" onClick={() => setAccEdit(!accEdit)}>{accEdit ? <><IconCheck s={13} />{trC('co.done')}</> : <><IconPencil s={12} />{trC('co.editData')}</>}</button>}</div>
           {accEdit ? (
             <div className="ed-acc-form">
+              {/* ── Identitas ── */}
+              <div className="ed-grp-t">{trC('co.grpIdentity')}</div>
+              <label className="ed-af ed-af-wide"><span>{trC('co.nip')}</span>
+                <div className="ed-nip-row">
+                  <input value={acc.nip || ''} readOnly placeholder="—" />
+                  <button type="button" className="ed-nip-btn" disabled={nipBusy} onClick={genNip}>{nipBusy ? trC('co.nipBusy') : (acc.nip ? trC('co.regenNip') : trC('co.genNip'))}</button>
+                </div>
+              </label>
+              <label className="ed-af"><span>{trC('co.office')}</span><UI.Dropdown value={acc.office || 'AIRRO'} options={['AIRRO', 'NSN', 'MFG']} onChange={(v) => setAccField('office', v)} /></label>
+              <label className="ed-af"><span>{trC('co.maritalStatus')}</span><UI.Dropdown value={acc.maritalStatus || 'TK'} options={[{ value: 'TK', label: trC('co.mTK') }, { value: 'K', label: trC('co.mK') }, { value: 'Cerai', label: trC('co.mCerai') }]} onChange={(v) => setAccField('maritalStatus', v)} /></label>
+              <label className="ed-af"><span>NIK</span><input value={acc.nik} inputMode="numeric" onChange={(e) => setAccField('nik', e.target.value.replace(/\D/g, ''))} /></label>
+              <label className="ed-af"><span>{trC('co.noKk')}</span><input value={acc.noKk || ''} inputMode="numeric" onChange={(e) => setAccField('noKk', e.target.value.replace(/\D/g, ''))} /></label>
+              <label className="ed-af"><span>{trC('co.birthPlace')}</span><input value={acc.birthPlace || ''} onChange={(e) => setAccField('birthPlace', e.target.value)} /></label>
+              <label className="ed-af"><span>{trC('co.birthDate')}</span><DP.DateField value={acc.birthDate || ''} max={today} onChange={(v) => setAccField('birthDate', v)} /></label>
+
+              {/* ── Kontrak ── */}
+              <div className="ed-grp-t">{trC('co.grpContract')}</div>
+              <label className="ed-af"><span>{trC('co.empStatus')}</span><UI.Dropdown value={acc.status} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => setAccField('status', v)} /></label>
+              <label className="ed-af"><span>{trC('co.noSurat')}</span><input value={acc.noSurat || ''} onChange={(e) => setAccField('noSurat', e.target.value)} /></label>
+              <label className="ed-af"><span>{trC('co.joined')}</span><DP.DateField value={acc.joined} max={today} onChange={(v) => setAccField('joined', v)} /></label>
+              <label className="ed-af"><span>{trC('co.contractStart')}</span><DP.DateField value={acc.contractStart || ''} allowFuture onChange={(v) => setAccField('contractStart', v)} /></label>
+              <label className="ed-af"><span>{trC('co.contractEnd')}</span><DP.DateField value={acc.contractEnd || ''} allowFuture onChange={(v) => setAccField('contractEnd', v)} /></label>
+
+              {/* ── Alamat ── */}
+              <div className="ed-grp-t">{trC('co.grpAddress')}</div>
+              <label className="ed-af ed-af-wide"><span>{trC('co.addressKtp')}</span><input value={acc.addressKtp || ''} onChange={(e) => setAccField('addressKtp', e.target.value)} /></label>
+              <label className="ed-af ed-af-wide"><span>{trC('co.addressDomisili')}</span><input value={acc.addressDomisili || ''} onChange={(e) => setAccField('addressDomisili', e.target.value)} /></label>
+              <label className="ed-af"><span>{trC('co.phone')}</span><input value={acc.phone} inputMode="numeric" onChange={(e) => setAccField('phone', e.target.value.replace(/[^\d]/g, ''))} /></label>
+
+              {/* ── BPJS & Bank ── */}
+              <div className="ed-grp-t">{trC('co.grpBpjs')}</div>
+              <label className="ed-af"><span>{trC('co.noBpjsKes')}</span><input value={acc.noBpjsKes || ''} inputMode="numeric" onChange={(e) => setAccField('noBpjsKes', e.target.value.replace(/\D/g, ''))} /></label>
+              <label className="ed-af"><span>{trC('co.noBpjsTk')}</span><input value={acc.noBpjsTk || ''} inputMode="numeric" onChange={(e) => setAccField('noBpjsTk', e.target.value.replace(/\D/g, ''))} /></label>
               <label className="ed-af"><span>{trC('co.bank')}</span><UI.Dropdown value={acc.bank} options={['BCA', 'BRI', 'Mandiri', 'BNI', 'BSI', 'CIMB']} onChange={(v) => setAccField('bank', v)} /></label>
               <label className="ed-af"><span>{trC('co.accNo')}</span><input value={acc.account} inputMode="numeric" onChange={(e) => setAccField('account', e.target.value.replace(/\D/g, ''))} /></label>
-              <label className="ed-af"><span>{trC('co.empStatus')}</span><UI.Dropdown value={acc.status} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => setAccField('status', v)} /></label>
-              <label className="ed-af"><span>{trC('co.joined')}</span><DP.DateField value={acc.joined} max={today} onChange={(v) => setAccField('joined', v)} /></label>
-              <label className="ed-af"><span>{trC('co.phone')}</span><input value={acc.phone} inputMode="numeric" onChange={(e) => setAccField('phone', e.target.value.replace(/[^\d]/g, ''))} /></label>
-              <label className="ed-af"><span>NIK</span><input value={acc.nik} inputMode="numeric" onChange={(e) => setAccField('nik', e.target.value.replace(/\D/g, ''))} /></label>
             </div>
           ) : (
             <div className="ed-acc-grid">
-              <div className="ed-acc"><span>{trC('co.bank')}</span><b>{acc.bank} · {acc.account}</b></div>
-              <div className="ed-acc"><span>{trC('co.empStatus')}</span><b>{acc.status} · {staff.jp ? 'JP' : trC('hrd.notenroll')}</b></div>
-              <div className="ed-acc"><span>{trC('co.joined')}</span><b className="tnum">{acc.joined}</b></div>
-              <div className="ed-acc"><span>{trC('co.phone')}</span><b className="tnum">{acc.phone}</b></div>
-              <div className="ed-acc"><span>JKK</span><b>{staff.risk}</b></div>
+              {/* ── Identitas ── */}
+              <div className="ed-grp-t">{trC('co.grpIdentity')}</div>
+              <div className="ed-acc"><span>{trC('co.nip')}</span><b className="tnum">{acc.nip || '—'}</b></div>
+              <div className="ed-acc"><span>{trC('co.office')}</span><b>{acc.office || 'AIRRO'}</b></div>
+              <div className="ed-acc"><span>{trC('co.maritalStatus')}</span><b>{trC('co.m' + (acc.maritalStatus || 'TK'))}</b></div>
               <div className="ed-acc"><span>NIK</span><b className="tnum">{acc.nik}</b></div>
+              <div className="ed-acc"><span>{trC('co.noKk')}</span><b className="tnum">{acc.noKk || '—'}</b></div>
+              <div className="ed-acc"><span>{trC('co.ttl')}</span><b>{acc.birthPlace || '—'}{acc.birthDate ? `, ${acc.birthDate}` : ''}</b></div>
+
+              {/* ── Kontrak ── */}
+              <div className="ed-grp-t">{trC('co.grpContract')}</div>
+              <div className="ed-acc"><span>{trC('co.empStatus')}</span><b>{acc.status} · {staff.jp ? 'JP' : trC('hrd.notenroll')}</b></div>
+              <div className="ed-acc"><span>{trC('co.noSurat')}</span><b>{acc.noSurat || '—'}</b></div>
+              <div className="ed-acc"><span>{trC('co.joined')}</span><b className="tnum">{acc.joined}</b></div>
+              <div className="ed-acc"><span>{trC('co.contractStart')}</span><b className="tnum">{acc.contractStart || '—'}</b></div>
+              <div className="ed-acc"><span>{trC('co.contractEnd')}</span><b className="tnum">{acc.contractEnd || '—'}</b></div>
+              <div className="ed-acc"><span>JKK</span><b>{staff.risk}</b></div>
+
+              {/* ── Alamat ── */}
+              <div className="ed-grp-t">{trC('co.grpAddress')}</div>
+              <div className="ed-acc ed-acc-wide"><span>{trC('co.addressKtp')}</span><b>{acc.addressKtp || '—'}</b></div>
+              <div className="ed-acc ed-acc-wide"><span>{trC('co.addressDomisili')}</span><b>{acc.addressDomisili || '—'}</b></div>
+              <div className="ed-acc"><span>{trC('co.phone')}</span><b className="tnum">{acc.phone}</b></div>
+
+              {/* ── BPJS & Bank ── */}
+              <div className="ed-grp-t">{trC('co.grpBpjs')}</div>
+              <div className="ed-acc"><span>{trC('co.noBpjsKes')}</span><b className="tnum">{acc.noBpjsKes || '—'}</b></div>
+              <div className="ed-acc"><span>{trC('co.noBpjsTk')}</span><b className="tnum">{acc.noBpjsTk || '—'}</b></div>
+              <div className="ed-acc"><span>{trC('co.bank')}</span><b>{acc.bank} · {acc.account}</b></div>
             </div>
           )}
         </div>
