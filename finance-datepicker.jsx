@@ -122,7 +122,7 @@ function DateField({ value, onChange, max, allowFuture }) {
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
-  const today = max || (allowFuture ? '2030-12-31' : (window.FIN ? FIN.TODAY : '2026-06-04'));
+  const today = max || (allowFuture ? '2030-12-31' : ((window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA')));
   const anchor = value || today;
   const niceDate = (s) => { const d = new Date(s + 'T00:00'); const M = (window.PERIOD ? PERIOD.mon(d.getMonth()) : d.getMonth() + 1); return `${d.getDate()} ${M} ${d.getFullYear()}`; };
   return (

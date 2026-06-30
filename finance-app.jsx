@@ -14,7 +14,14 @@ const Dw = () => DOW_L[window.I18N.lang] || DOW_L.en;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FULLMON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const TODAY = '2026-06-04';
+// "Hari ini" untuk kalender, batas tanggal, & agregasi harian.
+// DEMO_TODAY: isi 'YYYY-MM-DD' untuk MEMBEKUKAN tanggal (mode demo dgn dataset
+// contoh), atau null untuk pakai tanggal asli perangkat (mode produksi).
+const DEMO_TODAY = null; // contoh demo: '2026-06-04'
+const TODAY = DEMO_TODAY || (() => {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; // tanggal lokal, BUKAN UTC
+})();
 const fmtDate = (ds) => { const d = new Date(ds + 'T00:00'); return `${Dw()[d.getDay()]}, ${d.getDate()} ${Mn()[d.getMonth()]} ${d.getFullYear()}`; };
 
 /* ---------------- Amount input (IDR grouped) ---------------- */
