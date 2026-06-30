@@ -52,6 +52,37 @@ Tips:
 - Back up the DB regularly: `cp server/prod.db ~/airro-backup-$(date +%F).db` (or `pg_dump` for Postgres).
 - For zero-downtime backend reloads: `pm2 reload airro-api` instead of `restart`.
 
+## Safe updates (no data loss)
+
+Future code/feature updates use **migrations** + an automated script so existing
+data is never wiped.
+
+**One-time setup on the VPS** (baseline the current database to the migration
+history — run once):
+```bash
+cd /var/www/airrooffice
+git fetch origin && git reset --hard origin/master      # get the migrations + update.sh
+cd server && unset DATABASE_URL && npx prisma migrate resolve --applied 0_init
+```
+
+**Every update after that** — just run:
+```bash
+cd /var/www/airrooffice && bash deploy/update.sh
+```
+It backs up → pulls code → applies only new migrations → restarts. Data is safe
+because: `.env`/`*.db` are gitignored (untouched by `git pull`), and
+`prisma migrate deploy` only *adds* schema changes and refuses anything that
+would lose data.
+
+**Workflow for a schema change (developer side):**
+1. Edit `prisma/schema.prisma` (add a table/column — never remove on prod).
+2. `npx prisma migrate dev --name describe_change` → creates a migration file.
+3. Commit + push.
+4. On the VPS: `bash deploy/update.sh` applies it safely.
+
+**Golden rules:** never run `prisma migrate reset` or `prisma db push --force-reset`
+on production (those wipe data). Always let `update.sh` back up first.
+
 ## Database backups
 
 `deploy/backup-db.sh` makes a dated, gzipped snapshot (SQLite or Postgres) and
