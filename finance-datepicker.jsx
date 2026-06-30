@@ -102,11 +102,14 @@ function PeriodNav({ gran, anchor, onAnchor, label, today }) {
       <button className={`pn-label ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)}><IconCalendar s={14} />{label}</button>
       <button className="mn-arrow" disabled={nextDisabled} onClick={() => onAnchor(PERIOD.stepAnchor(anchor, gran, 1))}><IconCaret s={16} style={{ transform: 'rotate(-90deg)' }} /></button>
       {open && (
-        <div className="pop-cal-wrap">
-          {(gran === 'day' || gran === 'week') && <DayGrid gran={gran} anchor={anchor} today={today} onPick={pick} />}
-          {gran === 'month' && <MonthGrid anchor={anchor} today={today} onPick={pick} />}
-          {gran === 'year' && <YearGrid anchor={anchor} today={today} onPick={pick} />}
-        </div>
+        <React.Fragment>
+          <div className="pop-cal-backdrop" onClick={() => setOpen(false)} />
+          <div className="pop-cal-wrap">
+            {(gran === 'day' || gran === 'week') && <DayGrid gran={gran} anchor={anchor} today={today} onPick={pick} />}
+            {gran === 'month' && <MonthGrid anchor={anchor} today={today} onPick={pick} />}
+            {gran === 'year' && <YearGrid anchor={anchor} today={today} onPick={pick} />}
+          </div>
+        </React.Fragment>
       )}
     </div>
   );
@@ -133,9 +136,12 @@ function DateField({ value, onChange, max, allowFuture }) {
         <IconCaret s={15} style={{ flexShrink: 0, color: 'var(--text-mut)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
       {open && (
-        <div className="pop-cal-wrap" style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 'auto' }}>
-          <DayGrid gran="day" anchor={anchor} today={today} onPick={(iso) => { onChange(iso); setOpen(false); }} />
-        </div>
+        <React.Fragment>
+          <div className="pop-cal-backdrop" onClick={() => setOpen(false)} />
+          <div className="pop-cal-wrap dd-cal">
+            <DayGrid gran="day" anchor={anchor} today={today} onPick={(iso) => { onChange(iso); setOpen(false); }} />
+          </div>
+        </React.Fragment>
       )}
     </div>
   );
