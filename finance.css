@@ -1076,3 +1076,14 @@ img, svg, canvas, video { max-width: 100%; }
   .lang-btn { display: inline-flex; align-items: center; }
   .pc-cell { min-height: 38px; }
 }
+
+/* Compact stat cards on phones (<=480px) — tighten icon / number / label
+   spacing so the cards aren't oversized. Desktop & tablet untouched. */
+@media (max-width: 480px) {
+  .stat-box { padding: 9px 11px !important; }
+  .stat-box .icon-tile { width: 22px; height: 22px; border-radius: 7px; }
+  .stat-box .icon-tile svg { width: 13px; height: 13px; }
+  .stat-box .tnum { margin-top: 2px !important; line-height: 1.05; }
+  /* label & sub sit right under the number */
+  .stat-box > div:nth-child(n+3) { margin-top: 0 !important; line-height: 1.2; }
+}
