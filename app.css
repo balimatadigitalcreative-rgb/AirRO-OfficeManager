@@ -201,8 +201,10 @@
   .mnav.on { color: var(--green-800); }
   .mnav.on svg { color: var(--green-800); }
   /* slide-in drawer */
-  .drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--canvas); z-index: 60; padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)) 16px; transform: translateX(-100%); transition: transform .26s ease; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-lg); }
+  .drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--canvas); z-index: 60; padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)) 16px; transform: translateX(-100%); transition: transform .26s ease; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-lg); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .drawer.open { transform: none; }
+  /* Lock the page behind the open drawer so only the drawer scrolls. */
+  body.drawer-lock { overflow: hidden; }
   .scrim { display: block; position: fixed; inset: 0; background: rgba(20,32,29,.4); z-index: 50; opacity: 0; pointer-events: none; transition: opacity .26s; }
   .scrim.open { opacity: 1; pointer-events: auto; }
   .tx-summary { gap: 12px; }

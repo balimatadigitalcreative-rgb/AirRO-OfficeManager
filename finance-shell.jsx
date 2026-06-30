@@ -119,6 +119,12 @@ function FApp() {
     return () => { if (window.CLOUD) window.CLOUD.onSync = null; };
   }, []);
 
+  // Lock the page scroll behind the mobile drawer while it's open.
+  uEh(() => {
+    document.body.classList.toggle('drawer-lock', drawer);
+    return () => document.body.classList.remove('drawer-lock');
+  }, [drawer]);
+
   const add = (e) => { setEntries((prev) => [e, ...prev]); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
   const del = (id) => { if (!p.delete) { setToast(tr('toast.onlyOwnerDelete')); return; } const e = entries.find((x) => x.id === id); if (e && !confirm(tr('toast.deleteConfirm', { n: e.note || '', amt: FIN.fmt(e.amount || 0) }))) return; setEntries((prev) => prev.filter((x) => x.id !== id)); setToast(tr('toast.deleted')); };
   const saveEdit = (upd) => { setEntries((prev) => prev.map((x) => x.id === upd.id ? upd : x)); setEditing(null); setToast(tr('toast.updated')); };
