@@ -82,5 +82,10 @@
       run: () => req('GET', '/payroll'),
       post: (data) => req('POST', '/payroll/post', data),
     },
+    // Shared app-state document store (mirrors localStorage across all accounts).
+    state: {
+      all: () => req('GET', '/state'),
+      set: (key, value) => req('PUT', '/state/' + key, { value }),
+    },
   };
 })();

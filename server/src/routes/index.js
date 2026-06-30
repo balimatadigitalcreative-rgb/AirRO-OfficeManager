@@ -20,5 +20,6 @@ router.use('/employees', require('./employee.routes'));
 router.use('/payroll', require('./payroll.routes'));
 router.use('/settings', require('./settings.routes'));
 router.use('/reports', require('./report.routes'));
+router.use('/state', require('./state.routes'));   // shared app-state document store
 
 module.exports = router;

@@ -85,13 +85,22 @@ function FApp() {
   const p = (user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier');
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
+  // Re-read every data slice from the (server-hydrated) stores into React state.
+  // Used after login and whenever the cloud poll pulls remote changes.
+  const refreshAllSlices = () => {
+    setEntries(FS.load()); setCats(FS.loadCats()); setSettings(FS.loadSettings());
+    setAccounts(FS.loadAccts()); setSetoran(FS.loadSetoran()); setFleet(FS.loadFleet());
+    setTransfers(FS.loadTransfers());
+    setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget());
+    setApprovals(CO.load()); setProjects(CO.loadProjects());
+    setUsers(FS.loadUsers());
+  };
+
   const login = (u) => {
     FS.setSession(u.id); setUser(u); setScreen(FS.landingScreen(u.role));
-    // When a backend session is active, the cloud adapter has hydrated its
-    // cache — re-pull the cloud-backed slices so the UI shows server data.
-    if (window.CLOUD && window.CLOUD.active) {
-      setAccounts(FS.loadAccts()); setTransfers(FS.loadTransfers()); setSettings(FS.loadSettings());
-    }
+    // Backend session active → the cloud adapter hydrated localStorage from the
+    // server; re-pull ALL slices so the UI shows the shared data.
+    if (window.CLOUD && window.CLOUD.active) refreshAllSlices();
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -101,6 +110,13 @@ function FApp() {
     let live = true;
     window.CLOUD.restore().then((cu) => { if (live && cu) login(cu); });
     return () => { live = false; };
+  }, []);
+
+  // Auto-refresh: when the cloud poll detects remote changes, re-read slices.
+  uEh(() => {
+    if (!window.CLOUD) return;
+    window.CLOUD.onSync = () => refreshAllSlices();
+    return () => { if (window.CLOUD) window.CLOUD.onSync = null; };
   }, []);
 
   const add = (e) => { setEntries((prev) => [e, ...prev]); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };

@@ -146,3 +146,14 @@ model Setting {
   key   String @id
   value String // JSON-encoded value
 }
+
+// ── Shared app state ─────────────────────────────────────────────────────
+// Server-side mirror of the app's data slices (entries, setoran, staff,
+// categories, accounts, etc.), one JSON document per key, shared across all
+// users so everyone reads/writes the same data. The frontend cloud adapter
+// mirrors its localStorage here.
+model Document {
+  key       String   @id
+  value     String // JSON blob (the localStorage value, verbatim)
+  updatedAt DateTime @updatedAt
+}

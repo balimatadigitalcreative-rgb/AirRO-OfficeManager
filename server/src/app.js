@@ -12,7 +12,7 @@ function createApp() {
 
   app.use(helmet());
   app.use(cors({ origin: config.corsOrigin === '*' ? true : config.corsOrigin.split(',') }));
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '12mb' })); // shared-state blobs can include attached photos
   if (!config.isTest) app.use(morgan('dev'));
 
   // All endpoints live under /api/v1.
