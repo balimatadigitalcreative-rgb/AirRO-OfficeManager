@@ -144,5 +144,16 @@
   function accountInfo(staff) { const ov = loadAccMap()[staff.id] || {}; return { ...genAccount(staff), ...ov }; }
   function saveAccount(staffId, data) { const m = loadAccMap(); m[staffId] = { ...(m[staffId] || {}), ...data }; saveAccMap(m); }
 
-  window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId };
+  // ---- Kasbon (employee cash advances) — shared via /state ----
+  const CB_KEY = 'airro_cashbon_v1';
+  function loadCashbons() { try { const r = localStorage.getItem(CB_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) return a; } } catch (e) {} return []; }
+  function saveCashbons(list) { try { localStorage.setItem(CB_KEY, JSON.stringify(Array.isArray(list) ? list : [])); } catch (e) {} }
+  const newCashbonId = () => 'kb' + Date.now().toString(36) + Math.floor(Math.random() * 1e3).toString(36);
+  function cashbonsFor(staffId) { return loadCashbons().filter((c) => c.employeeId === staffId); }
+  function addCashbon(cb) { const list = loadCashbons(); list.push(cb); saveCashbons(list); return list; }
+  function updateCashbon(id, patch) { const list = loadCashbons().map((c) => c.id === id ? { ...c, ...patch } : c); saveCashbons(list); return list; }
+  function removeCashbon(id) { const list = loadCashbons().filter((c) => c.id !== id); saveCashbons(list); return list; }
+
+  window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId,
+    CB_KEY, loadCashbons, saveCashbons, newCashbonId, cashbonsFor, addCashbon, updateCashbon, removeCashbon };
 })();

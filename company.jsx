@@ -299,8 +299,50 @@ function CompanyDashboard({ fin, staff, rates, budget, approvals, setApprovals, 
   );
 }
 
+/* ---------- Kasbon add modal ---------- */
+function CashbonModal({ staff, rates, onSave, onClose }) {
+  const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
+  const [amount, setAmount] = uSc(0);
+  const [date, setDate] = uSc(today);
+  const [installments, setInstallments] = uSc(1);
+  const [note, setNote] = uSc('');
+  uEc(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const max = HRD.cashbonMax(staff, rates);
+  const per = installments > 0 ? Math.round(amount / installments) : amount;
+  const over = amount > max;
+  const valid = amount > 0 && installments >= 1 && !over;
+  const save = () => { if (!valid) return; onSave({ id: CO.newCashbonId(), employeeId: staff.id, amount: +amount, date, note: note.trim(), installments: +installments, status: 'active', createdAt: Date.now() }); };
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <div className="modal-head">
+          <div style={{ fontSize: 17, fontWeight: 700 }}>{trC('co.kasbonAdd')} · {staff.name}</div>
+          <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
+        </div>
+        <div className="ed-acc-form" style={{ padding: '4px 2px' }}>
+          <label className="ed-af ed-af-wide"><span>{trC('co.kasbonAmount')}</span>
+            <div className="amt-input" style={{ padding: '8px 13px' }}><span className="amt-rp" style={{ fontSize: 14 }}>Rp</span>
+              <input inputMode="numeric" style={{ fontSize: 16 }} value={amount ? (+amount).toLocaleString('id-ID') : ''} onChange={(e) => setAmount(+e.target.value.replace(/\D/g, '') || 0)} /></div>
+          </label>
+          <label className="ed-af"><span>{trC('co.kasbonInstall')}</span><input inputMode="numeric" value={installments} onChange={(e) => setInstallments(Math.max(1, +e.target.value.replace(/\D/g, '') || 1))} /></label>
+          <label className="ed-af"><span>{trC('co.kasbonDate')}</span><DP.DateField value={date} max={today} onChange={setDate} /></label>
+          <label className="ed-af ed-af-wide"><span>{trC('co.kasbonNote')}</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="—" /></label>
+        </div>
+        <div className={`kb-hint ${over ? 'over' : ''}`}>
+          {over ? `⚠ ${trC('co.kasbonOver')} — ` : ''}{trC('co.kasbonMax', { v: rpC(max) })} ({Math.round((rates.cashbonMaxPct != null ? rates.cashbonMaxPct : 0.5) * 100)}%).
+          {amount > 0 && installments > 0 && !over && ` ${trC('co.kasbonPreview', { per: rpC(per), n: installments })}`}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trC('common.cancel')}</button>
+          <button className="btn btn-primary" disabled={!valid} onClick={save}>{trC('co.kasbonAdd')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Employee Detail ---------- */
-function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff }) {
+function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, setCashbons }) {
   const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
   const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
   const acc = uMc(() => CO.accountInfo(staffProp), [staffProp]);   // legacy fallback for fields not yet on the staff object
@@ -313,12 +355,19 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
   // late penalty (auto, from attendance + rate policy)
   const late = uMc(() => CO.lateInfo(staff, monthKey, today, rates), [staff, monthKey, today, rates, att]);
   const ot = uMc(() => CO.overtimeInfo(staff, monthKey, today, rates), [staff, monthKey, today, rates, att]);
-  // staff with auto late-penalty + overtime merged in (for the live payroll snapshot)
+  // this employee's kasbon (loans) + this month's installment cuts
+  const [kbAdd, setKbAdd] = uSc(false);
+  const myCashbons = uMc(() => (cashbons || []).filter((c) => c.employeeId === staff.id), [cashbons, staff.id]);
+  const kbExtras = uMc(() => myCashbons.map((c, i) => { const amt = HRD.cashbonInstallment(c, monthKey); return amt > 0 ? { id: 'kasbon-' + (c.id || i), label: 'Kasbon' + (c.note ? ' · ' + c.note : ''), amount: amt, auto: true, kasbon: true } : null; }).filter(Boolean), [myCashbons, monthKey]);
+  const kbRemaining = uMc(() => myCashbons.reduce((a, c) => a + HRD.cashbonRemaining(c, monthKey), 0), [myCashbons, monthKey]);
+  const saveCashbon = (cb) => { CO.addCashbon(cb); if (setCashbons) setCashbons(CO.loadCashbons()); setKbAdd(false); };
+  const cancelCashbon = (id) => { if (confirm(trC('co.kasbonCancelConfirm'))) { CO.updateCashbon(id, { status: 'cancelled' }); if (setCashbons) setCashbons(CO.loadCashbons()); } };
+  // staff with auto late-penalty + overtime + kasbon merged in (for the live payroll snapshot)
   const augStaff = uMc(() => {
     const manual = (staff.deductions || []).filter((d) => !d.auto);
     const extra = late.amount > 0 ? [{ id: 'auto-late', label: trC('co.lateDeduct'), amount: late.amount, auto: true }] : [];
-    return { ...staff, deductions: [...manual, ...extra], otPay: ot.amount };
-  }, [staff, late, ot]);
+    return { ...staff, deductions: [...manual, ...extra, ...kbExtras], otPay: ot.amount };
+  }, [staff, late, ot, kbExtras]);
   const c = HRD.compute(augStaff, rates);
   // keep the roster in sync so payroll/payslip reflect late penalty + overtime
   uEc(() => { if (onSyncDeduct) onSyncDeduct(staff.id, late.amount, trC('co.lateDeduct'), ot.amount); }, [late.amount, ot.amount]);
@@ -388,7 +437,8 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
             {late.amount > 0 && <div className="ed-ded-row"><span><IconClock s={15} /> {trC('co.lateDeduct')} ({trC('co.lateMins', { n: late.minutes })})</span>{seeMoney && <b className="tnum amt-neg">−{rpC(late.amount)}</b>}</div>}
             {ot.amount > 0 && <div className="ed-ded-row"><span><IconTrendUp s={15} /> {trC('co.overtime')} ({trC('co.otHours', { n: ot.hours })})</span>{seeMoney && <b className="tnum amt-pos">+{rpC(ot.amount)}</b>}</div>}
             {deds.map((d) => <div className="ed-ded-row" key={d.id}><span><IconCoinOut s={15} /> {d.label}</span>{seeMoney && <b className="tnum amt-neg">−{rpC(+d.amount)}</b>}</div>)}
-            {att.absent === 0 && late.amount === 0 && ot.amount === 0 && deds.length === 0 && <div className="ed-empty">{trC('co.noDeducts')}</div>}
+            {kbExtras.map((d) => <div className="ed-ded-row" key={d.id}><span><IconWallet s={15} /> {d.label}</span>{seeMoney && <b className="tnum amt-neg">−{rpC(+d.amount)}</b>}</div>)}
+            {att.absent === 0 && late.amount === 0 && ot.amount === 0 && deds.length === 0 && kbExtras.length === 0 && <div className="ed-empty">{trC('co.noDeducts')}</div>}
           </div>
 
           {seeMoney && (
@@ -402,6 +452,37 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
                   <div className="ed-pay"><span>{trC('hrd.cCost')}</span><b className="tnum">{rpC(c.companyCost)}</b></div>
                 </div>
               ) : <div className="ed-empty">{trC('co.salaryNotSet')}</div>}
+            </>
+          )}
+
+          {seeMoney && (
+            <>
+              <div className="ed-section-t">{trC('co.kasbon')}{canEdit && <button className="ed-acc-edit" onClick={() => setKbAdd(true)}><IconPlus s={12} />{trC('co.kasbonAdd')}</button>}</div>
+              {myCashbons.filter((cb) => cb.status !== 'cancelled').length === 0 ? (
+                <div className="ed-empty">{trC('co.kasbonNone')}</div>
+              ) : (
+                <div className="kb-list">
+                  {myCashbons.filter((cb) => cb.status !== 'cancelled').map((cb) => {
+                    const per = HRD.cashbonInstallment(cb, monthKey);
+                    const rem = HRD.cashbonRemaining(cb, monthKey);
+                    const perStd = Math.round(cb.amount / Math.max(1, cb.installments));
+                    return (
+                      <div className="kb-row" key={cb.id}>
+                        <div className="kb-main">
+                          <div className="kb-amt tnum">{rpC(cb.amount)}<span className="kb-inst"> · {cb.installments}× {rpC(perStd)}</span></div>
+                          <div className="kb-sub">{cb.date}{cb.note ? ' · ' + cb.note : ''}</div>
+                        </div>
+                        <div className="kb-right">
+                          {rem > 0 ? <div className="kb-rem">{trC('co.kasbonRemaining')}: <b className="tnum">{rpC(rem)}</b></div> : <span className="kb-paid">{trC('co.kasbonPaid')}</span>}
+                          {per > 0 && <div className="kb-cut">{trC('co.kasbonThisMonth')}: <b className="tnum amt-neg">−{rpC(per)}</b></div>}
+                        </div>
+                        {canEdit && <button className="icon-btn del" title={trC('co.kasbonCancel')} onClick={() => cancelCashbon(cb.id)}><IconClose s={15} /></button>}
+                      </div>
+                    );
+                  })}
+                  {kbRemaining > 0 && <div className="kb-total"><span>{trC('co.kasbonTotalRem')}</span><b className="tnum">{rpC(kbRemaining)}</b></div>}
+                </div>
+              )}
             </>
           )}
 
@@ -438,6 +519,7 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
             <div className="ed-acc"><span>{trC('co.bank')}</span><b>{(g('bank') || '—')}{g('account') ? ` · ${g('account')}` : ''}</b></div>
           </div>
           {identEdit && <PAYROLL.StaffModal staff={staff} rates={rates} variant="identity" onSave={saveIdentity} onClose={() => setIdentEdit(false)} />}
+          {kbAdd && <CashbonModal staff={staff} rates={rates} onSave={saveCashbon} onClose={() => setKbAdd(false)} />}
         </div>
       </div>
     </div>

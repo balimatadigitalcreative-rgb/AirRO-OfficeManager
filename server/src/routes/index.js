@@ -17,6 +17,7 @@ router.use('/transfers', require('./transfer.routes'));
 router.use('/setoran', require('./setoran.routes'));
 router.use('/fleet', require('./fleet.routes'));
 router.use('/employees', require('./employee.routes'));
+router.use('/cashbon', require('./cashbon.routes'));
 router.use('/payroll', require('./payroll.routes'));
 router.use('/settings', require('./settings.routes'));
 router.use('/reports', require('./report.routes'));

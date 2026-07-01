@@ -131,6 +131,11 @@ function RatesPanel({ rates, onChange, onReset }) {
           </div>
           <div className="rate-note">{trH('hrd.otNote')}</div>
         </div>
+        <div className="rate-group">
+          <div className="rate-group-title">{trH('hrd.cashbon')}</div>
+          <RatePct label={trH('hrd.cashbonMax')} value={rates.cashbonMaxPct != null ? rates.cashbonMaxPct : 0.5} onChange={(v) => set({ cashbonMaxPct: v })} />
+          <div className="rate-note">{trH('hrd.cashbonNote')}</div>
+        </div>
       </div>
     </div>
   );
@@ -415,11 +420,13 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
 }
 
 /* ---------------- Main HRD screen ---------------- */
-function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit }) {
+function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit, cashbons, monthKey }) {
   const [showRates, setShowRates] = uShr(false);
   const [editStaff, setEditStaff] = uShr(null);
   const [payslip, setPayslip] = uShr(null);
-  const t = HRD.totals(staff, rates);
+  // Fold this month's kasbon installments in as auto deductions before computing.
+  const aug = (s) => HRD.withCashbon(s, cashbons, monthKey);
+  const t = HRD.totals(staff.map(aug), rates);
 
   const saveStaff = (s) => {
     setStaff((prev) => { const ex = prev.find((x) => x.id === s.id); const clean = { ...s }; delete clean._isNew; return ex ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
@@ -458,7 +465,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
             </thead>
             <tbody>
               {staff.map((s) => {
-                const c = HRD.compute(s, rates);
+                const c = HRD.compute(aug(s), rates);
                 const bpjsKes = c.kesEmployer + c.kesEmployee;
                 const bpjsTk = c.jhtEmployer + c.jhtEmployee + c.jpEmployer + c.jpEmployee + c.jkk + c.jkm;
                 return (
@@ -487,7 +494,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
                     <td className="tnum strong">{rp(c.companyCost)}</td>
                     <td className="hcell-act">
                       <div className="hrow-actions">
-                        <button className="icon-btn" title="Payslip" onClick={() => setPayslip(s)}><IconInvoice s={17} /></button>
+                        <button className="icon-btn" title="Payslip" onClick={() => setPayslip(aug(s))}><IconInvoice s={17} /></button>
                         {canEdit && <button className="icon-btn" title="Edit" onClick={() => setEditStaff(s)}><IconPencil s={16} /></button>}
                         {canEdit && <button className="icon-btn del" title="Remove" onClick={() => delStaff(s.id)}><IconClose s={16} /></button>}
                       </div>

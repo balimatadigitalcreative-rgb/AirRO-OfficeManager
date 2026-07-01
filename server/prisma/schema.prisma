@@ -162,6 +162,24 @@ model Employee {
   addressKtp      String?
   addressDomisili String?
   maritalStatus   String   @default("TK") // TK | K | Cerai
+
+  cashbons Cashbon[]
+}
+
+// ── Kasbon (employee cash advance / loan → auto salary deduction) ─────────
+model Cashbon {
+  id           String   @id @default(cuid())
+  employeeId   String
+  amount       Int // nominal kasbon (IDR)
+  date         String // YYYY-MM-DD pengajuan
+  note         String   @default("")
+  installments Int      @default(1) // dicicil berapa bulan
+  status       String   @default("active") // active | paid | cancelled
+  createdAt    DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
 }
 
 // ── NIP allocation ledger ────────────────────────────────────────────────

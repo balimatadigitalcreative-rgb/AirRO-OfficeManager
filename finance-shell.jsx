@@ -63,6 +63,7 @@ function FApp() {
   const [fleet, setFleet] = uSh(() => FS.loadFleet());
   const [transfers, setTransfers] = uSh(() => FS.loadTransfers());
   const [projects, setProjects] = uSh(() => CO.loadProjects());
+  const [cashbons, setCashbons] = uSh(() => CO.loadCashbons());
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
@@ -79,6 +80,7 @@ function FApp() {
   uEh(() => { FS.saveFleet(fleet); }, [fleet]);
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
   uEh(() => { CO.saveProjects(projects); }, [projects]);
+  uEh(() => { CO.saveCashbons(cashbons); }, [cashbons]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
@@ -92,7 +94,7 @@ function FApp() {
     setAccounts(FS.loadAccts()); setSetoran(FS.loadSetoran()); setFleet(FS.loadFleet());
     setTransfers(FS.loadTransfers());
     setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget());
-    setApprovals(CO.load()); setProjects(CO.loadProjects());
+    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons());
     setUsers(FS.loadUsers());
   };
 
@@ -474,7 +476,7 @@ function FApp() {
           )}
 
           {screen === 'payroll' && p.payroll && (
-            <PAYROLL.PayrollScreen rates={hrdRates} setRates={setHrdRates} staff={hrdStaff} setStaff={setHrdStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={true} />
+            <PAYROLL.PayrollScreen rates={hrdRates} setRates={setHrdRates} staff={hrdStaff} setStaff={setHrdStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={true} cashbons={cashbons} monthKey={monthKey} />
           )}
 
           {screen === 'settings' && p.settings && (
@@ -504,7 +506,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} />
       )}
     </div>
   );

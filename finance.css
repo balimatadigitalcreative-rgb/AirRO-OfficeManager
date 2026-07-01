@@ -1147,3 +1147,19 @@ img, svg, canvas, video { max-width: 100%; }
 .hrd-allow-title { font-size: 11.5px; font-weight: 700; color: var(--text-mut); margin: 14px 0 2px; }
 .hrd-allow-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
 @media (max-width: 560px) { .hrd-allow-grid { grid-template-columns: 1fr; } }
+
+/* ── Kasbon (employee loans) ── */
+.kb-list { display: flex; flex-direction: column; gap: 8px; }
+.kb-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--card-soft); border-radius: 11px; border: 1px solid var(--border-soft); }
+.kb-main { flex: 1; min-width: 0; }
+.kb-amt { font-size: 14px; font-weight: 700; color: var(--ink); }
+.kb-inst { font-size: 12px; font-weight: 600; color: var(--text-mut); }
+.kb-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 1px; }
+.kb-right { text-align: right; font-size: 11.5px; color: var(--text-mut); white-space: nowrap; }
+.kb-right b { color: var(--ink); }
+.kb-cut { margin-top: 1px; }
+.kb-paid { display: inline-block; font-size: 11px; font-weight: 700; color: var(--green-700); background: var(--mint-100); padding: 2px 8px; border-radius: 999px; }
+.kb-total { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; margin-top: 2px; font-size: 12.5px; font-weight: 700; color: var(--ink); border-top: 1px dashed var(--border); }
+.kb-hint { font-size: 11.5px; color: var(--text-mut); padding: 4px 4px 10px; line-height: 1.5; }
+.kb-hint.over { color: var(--neg); font-weight: 600; }
+@media (max-width: 560px) { .kb-row { flex-wrap: wrap; } .kb-right { text-align: left; width: 100%; } }

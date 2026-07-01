@@ -26,6 +26,8 @@
     lateStart: '08:00', latePerMin: 500, lateBasis: 'minute',
     // Overtime pay per hour
     otPerHour: 25000,
+    // Kasbon (employee cash advance): max new kasbon = this % of monthly gross
+    cashbonMaxPct: 0.5,
     // THR holiday dates per religion (Tunjangan Hari Raya keagamaan)
     holidayDates: { Islam: '2026-03-20', Kristen: '2026-12-25', Katolik: '2026-12-25', Hindu: '2026-03-19', Buddha: '2026-05-31' },
     // THR portion per religion (1 = full at one holiday; 0.5 = half, e.g. religions with 2 holidays/year)
@@ -171,10 +173,47 @@
     return { monthly, months, amount, eligible, ratio };
   }
 
+  // ---- Kasbon (employee cash advance → automatic monthly salary deduction) ----
+  const MONTHKEY = (d) => (typeof d === 'string' ? d.slice(0, 7) : '');
+  function monthGap(fromMk, toMk) { // whole months from fromMk to toMk
+    if (!fromMk || !toMk) return 0;
+    const a = fromMk.split('-').map(Number), b = toMk.split('-').map(Number);
+    return (b[0] - a[0]) * 12 + (b[1] - a[1]);
+  }
+  function installmentAt(cb, idx, n) { const per = Math.round((+cb.amount || 0) / n); return idx === n - 1 ? (+cb.amount || 0) - per * (n - 1) : per; }
+  // Installment due in a given payroll month (0 outside the schedule / not active).
+  function cashbonInstallment(cb, monthKey) {
+    if (!cb || cb.status !== 'active') return 0;
+    const n = Math.max(1, +cb.installments || 1);
+    const idx = monthGap(MONTHKEY(cb.date), monthKey);
+    if (idx < 0 || idx >= n) return 0;
+    return installmentAt(cb, idx, n); // final installment absorbs rounding remainder
+  }
+  // Outstanding balance still owed at the START of asOfMonthKey (before that month's cut).
+  function cashbonRemaining(cb, asOfMonthKey) {
+    if (!cb || cb.status === 'cancelled' || cb.status === 'paid') return 0;
+    const n = Math.max(1, +cb.installments || 1);
+    const passed = Math.max(0, Math.min(monthGap(MONTHKEY(cb.date), asOfMonthKey), n));
+    let paid = 0; for (let i = 0; i < passed; i++) paid += installmentAt(cb, i, n);
+    return Math.max(0, (+cb.amount || 0) - paid);
+  }
+  // Max new kasbon allowed for a staff = cashbonMaxPct × monthly gross.
+  function cashbonMax(staff, rates) { const g = compute(staff, rates).gross; return Math.round(g * (rates.cashbonMaxPct != null ? rates.cashbonMaxPct : 0.5)); }
+  // Return a staff clone whose deductions include this month's kasbon installments
+  // as auto rows (so compute()/payslip/breakdown pick them up automatically).
+  function withCashbon(staff, cashbons, monthKey) {
+    const extra = [];
+    (cashbons || []).forEach((c, i) => { if (c.employeeId !== staff.id) return; const amt = cashbonInstallment(c, monthKey); if (amt > 0) extra.push({ id: 'kasbon-' + (c.id || i), label: 'Kasbon' + (c.note ? ' · ' + c.note : ''), amount: amt, auto: true, kasbon: true }); });
+    if (!extra.length) return staff;
+    const keep = Array.isArray(staff.deductions) ? staff.deductions.filter((d) => !d.kasbon) : [];
+    return { ...staff, deductions: [...keep, ...extra] };
+  }
+
   window.HRD = {
     RATES_KEY, STAFF_KEY, JKK, DEFAULT_RATES, DEFAULT_STAFF, DEPARTMENTS, DEFAULT_BUDGET,
     loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newStaff, newDedId,
     loadBudget, saveBudget, affordability, simulateHire, thr,
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
+    cashbonInstallment, cashbonRemaining, cashbonMax, withCashbon,
   };
 })();
