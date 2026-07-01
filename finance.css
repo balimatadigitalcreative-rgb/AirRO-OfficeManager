@@ -318,8 +318,11 @@
 .pn-label:hover { background: var(--card-soft); }
 .pn-label.open { background: var(--mint-100); }
 .pop-cal-wrap { position: absolute; top: 46px; right: 0; z-index: 70; animation: jernihPop .18s ease both; }
-.pop-cal-wrap.dd-cal { top: calc(100% + 6px); left: 0; right: auto; } /* posisi popup di bawah field (DateField) — desktop */
-.pop-cal-backdrop { display: none; } /* hanya muncul di mobile (lihat media query <=560px) */
+/* DateField popup = fixed floating sheet on EVERY size, so it never adds to the
+   height/width of the modal it sits in (that was what triggered modal scrollbars). */
+.pop-cal-wrap.dd-cal { position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%); z-index: 1210; animation: jernihSheet .2s ease both; }
+.pop-cal-backdrop { display: none; } /* PeriodNav backdrop: mobile-only (media query <=560px) */
+.pop-cal-backdrop.dd-back { display: block; position: fixed; inset: 0; background: rgba(15, 23, 32, .38); z-index: 1200; animation: jernihFade .18s ease both; } /* DateField backdrop: always (tap to close) */
 .pop-cal { width: 288px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 16px; }
 .pc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .pc-head > span { font-family: 'Poppins'; font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
@@ -728,11 +731,17 @@ select.fld::-ms-expand { display: none; }
 
 /* ============ Edit modal ============ */
 .modal-scrim { position: fixed; inset: 0; z-index: 90; background: rgba(6,51,79,.46); display: grid; place-items: center; padding: 20px; animation: airroFade .18s ease; }
-.modal-card { width: 100%; max-width: 440px; max-height: 92vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; padding: 22px; box-shadow: var(--shadow-lg); }
-.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+/* Height follows content. overflow: hidden auto → NEVER horizontal scroll; vertical
+   only as a safety when content is taller than max-height (short phones). When the
+   content fits, there is no scrollbar at all (the fixed calendar popup no longer
+   inflates it). box-sizing:border-box is global (styles.css). */
+.modal-card { width: 100%; max-width: 440px; height: auto; max-height: min(88vh, calc(100vh - 32px)); overflow: hidden auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; padding: 20px; box-shadow: var(--shadow-lg); }
+.modal-body { overflow-x: hidden; }   /* content never scrolls sideways */
+.modal-card input, .modal-card select, .modal-card textarea, .modal-card .ui-dd, .modal-card .amt-input { max-width: 100%; }   /* no child wider than the modal */
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .modal-head > div:first-child { flex: 1; min-width: 0; }
 .modal-head > div:first-child > div:first-child { white-space: nowrap; }
-.modal-foot { display: flex; gap: 10px; margin-top: 22px; }
+.modal-foot { display: flex; gap: 10px; margin-top: 16px; }
 
 /* ============ Reports ============ */
 .rep-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
@@ -1022,7 +1031,7 @@ select.fld::-ms-expand { display: none; }
   .staff-edit-grid { grid-template-columns: 1fr; }
   .staff-breakdown { border-left: none; border-top: 1px solid var(--border); max-height: none; }
   .staff-form { max-height: none; }
-  .modal-card.wide { max-height: 88vh; overflow-y: auto; }
+  .modal-card.wide { max-height: min(88vh, calc(100vh - 24px)); overflow: hidden auto; }
 }
 
 /* payslip */

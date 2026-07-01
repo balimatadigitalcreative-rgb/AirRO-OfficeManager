@@ -168,7 +168,7 @@ function DateField({ value, onChange, min, max, allowFuture, placeholder }) {
       </button>
       {open && (
         <React.Fragment>
-          <div className="pop-cal-backdrop" onClick={() => setOpen(false)} />
+          <div className="pop-cal-backdrop dd-back" onClick={() => setOpen(false)} />
           <div className="pop-cal-wrap dd-cal">
             <DayGrid gran="day" anchor={anchor} today={today} min={min} onPick={(iso) => { onChange(iso); setOpen(false); }} />
           </div>
