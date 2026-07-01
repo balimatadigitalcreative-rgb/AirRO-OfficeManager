@@ -24,8 +24,10 @@
     workDays: 26,
     // Late-attendance penalty: deduction per minute late, vs a standard start time
     lateStart: '08:00', latePerMin: 500, lateBasis: 'minute',
-    // Overtime pay per hour
+    // Overtime pay per hour (shared by monthly payroll AND orientation).
     otPerHour: 25000,
+    // Optional orientation-specific overtime rate; 0 = reuse otPerHour above.
+    otOrientation: 0,
     // Kasbon (cash advance): ceiling = 50% of BASE per payroll cycle (16→15),
     // max 1×/week, weekly max = ceiling/4. Week window definition:
     cashbonWeekMode: 'cutoff', // 'cutoff' = 7 days from the 16th | 'calendar' = Mon–Sun
@@ -255,6 +257,46 @@
   }
   // ---- Lifecycle stage + new-hire orientation ----
   const stageOf = (s) => s.stage || 'permanent';   // legacy rows (no stage) → permanent
+  // The "orientation bucket" — paid a daily lump sum via attendance, NOT monthly payroll.
+  const ORI_STAGES = ['orientation', 'dw'];
+  const isOrientationStage = (s) => ORI_STAGES.indexOf(stageOf(s)) >= 0;
+
+  // ---- Orientation/DW daily wage from attendance (REUSES rates.late* / rates.ot*) ----
+  const hmMin = (t) => { if (!t) return 0; const p = String(t).split(':'); return (+p[0] || 0) * 60 + (+p[1] || 0); };
+  // Minutes late for a check-in vs rates.lateStart (0 if on time / no check-in).
+  function oriLateMinutes(checkIn, rates) { if (!checkIn) return 0; return Math.max(0, hmMin(checkIn) - hmMin((rates && rates.lateStart) || '08:00')); }
+  // Auto-classify a day from its check-in: status 'present'|'late'|'absent' + lateMinutes.
+  function orientationClassify(checkIn, rates, absent) {
+    if (absent) return { status: 'absent', lateMinutes: 0 };
+    if (!checkIn) return { status: 'present', lateMinutes: 0 };
+    const mins = oriLateMinutes(checkIn, rates);
+    return { status: mins > 0 ? 'late' : 'present', lateMinutes: mins };
+  }
+  // Wage for a single attendance day, using the SAME config as monthly payroll:
+  //   base           = (status != 'absent') ? dailyWage : 0
+  //   lateDeduct     = lateBasis 'minute' → lateMinutes × latePerMin
+  //                    lateBasis 'hour'   → ceil(lateMinutes/60) × latePerMin (per-hour value)
+  //   otPay          = overtimeHours × (otOrientation || otPerHour)
+  //   pay            = max(0, base − lateDeduct + otPay)
+  function orientationDayPay(day, rates, dailyWage) {
+    const r = rates || {}, dw = +dailyWage || 0;
+    const status = day.status || 'present';
+    const base = status === 'absent' ? 0 : dw;
+    const lateMin = +day.lateMinutes || 0;
+    const basis = r.lateBasis === 'hour' ? 'hour' : 'minute';
+    const per = +r.latePerMin || 0;
+    const lateDeduct = base === 0 ? 0 : (basis === 'hour' ? Math.ceil(lateMin / 60) * per : lateMin * per);
+    const otRate = (+r.otOrientation > 0) ? +r.otOrientation : (+r.otPerHour || 0);
+    const otPay = Math.round((+day.overtimeHours || 0) * otRate);
+    const pay = Math.max(0, base - lateDeduct + otPay);
+    return { date: day.date, status, base, lateMinutes: lateMin, lateDeduct, overtimeHours: +day.overtimeHours || 0, otRate, otPay, pay };
+  }
+  // Aggregate wage over all attendance days → per-day rows + subtotals.
+  function orientationWage(days, rates, dailyWage) {
+    const rows = (days || []).slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map((d) => orientationDayPay(d, rates, dailyWage));
+    const sum = (f) => rows.reduce((a, r) => a + r[f], 0);
+    return { rows, days: rows.length, total: sum('pay'), sumBase: sum('base'), sumLate: sum('lateDeduct'), sumOt: sum('otPay') };
+  }
   function addDaysISO(iso, n) { const a = iso.split('-').map(Number); const dt = new Date(Date.UTC(a[0], a[1] - 1, a[2]) + n * 86400000); return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`; }
   function daysBetweenISO(a, b) { const x = a.split('-').map(Number), y = b.split('-').map(Number); return Math.round((Date.UTC(y[0], y[1] - 1, y[2]) - Date.UTC(x[0], x[1] - 1, x[2])) / 86400000); }
   // Orientation ends the day AFTER the last worked day (probation starts here).
@@ -269,14 +311,20 @@
     }
     return dur;
   }
-  function orientationTotal(staff) { return (+((staff.orientation || {}).dailyWage) || 0) * orientationDaysServed(staff); }
+  // Total orientation wage. When `days` (attendance) is supplied → attendance-based
+  // (base − late + overtime, per day). Otherwise falls back to the flat
+  // dailyWage × daysServed estimate (used before any attendance is recorded).
+  function orientationTotal(staff, days, rates) {
+    if (Array.isArray(days) && days.length) return orientationWage(days, rates || {}, (staff.orientation || {}).dailyWage).total;
+    return (+((staff.orientation || {}).dailyWage) || 0) * orientationDaysServed(staff);
+  }
   function orientationRemaining(staff, today) { const o = staff.orientation || {}; if (!o.startDate || !today) return 0; return Math.max(0, daysBetweenISO(today, addDaysISO(o.startDate, +o.durationDays || 7))); }
 
   // Active + prorated staff list for a payroll month. EXCLUDES orientation-stage
   // staff (they are paid via the orientation lump sum, never monthly payroll — no
   // double pay) and those who left before this month; prorates the separation month.
   function payrollStaff(list, monthKey, rates) {
-    return (list || []).filter((s) => stageOf(s) !== 'orientation').map((s) => prorateForMonth(s, monthKey, rates)).filter((r) => r.included).map((r) => r.staff);
+    return (list || []).filter((s) => !isOrientationStage(s)).map((s) => prorateForMonth(s, monthKey, rates)).filter((r) => r.included).map((r) => r.staff);
   }
   function severance(staff, rates) {
     const rule = ((rates.severanceRules || {})[staff.sepStatus]) || { baseMonths: 0, perYearMonths: 0, capMonths: 0 };
@@ -312,6 +360,7 @@
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
     payCycle, cashbonCeiling, cashbonWeeklyMax, cashbonsInCycle, cashbonCycleTotal, cashbonOutstanding, withCashbon,
     SEP_STATUSES, isActive, activeStaff, tenureYears, prorateForMonth, payrollStaff, severance, finalSettlement,
-    stageOf, orientationEnd, orientationDaysServed, orientationTotal, orientationRemaining, addDaysISO,
+    stageOf, ORI_STAGES, isOrientationStage, orientationEnd, orientationDaysServed, orientationTotal, orientationRemaining, addDaysISO,
+    oriLateMinutes, orientationClassify, orientationDayPay, orientationWage,
   };
 })();

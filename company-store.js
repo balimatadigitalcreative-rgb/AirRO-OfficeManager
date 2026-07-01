@@ -164,6 +164,22 @@
   function updateTraining(id, patch) { const list = loadTrainings().map((t) => t.id === id ? { ...t, ...patch } : t); saveTrainings(list); return list; }
   function removeTraining(id) { const list = loadTrainings().filter((t) => t.id !== id); saveTrainings(list); return list; }
 
+  // ---- Orientation/DW daily attendance — shared via /state ----
+  // Map: { [staffId]: { [date]: { checkIn, status, lateMinutes, overtimeHours, note } } }
+  const ORIATT_KEY = 'airro_oriatt_v1';
+  function loadOriAtt() { try { const r = localStorage.getItem(ORIATT_KEY); if (r) { const o = JSON.parse(r); if (o && typeof o === 'object') return o; } } catch (e) {} return {}; }
+  function saveOriAtt(m) { try { localStorage.setItem(ORIATT_KEY, JSON.stringify(m || {})); } catch (e) {} }
+  function oriAtt(staffId) {
+    const days = loadOriAtt()[staffId] || {};
+    return Object.keys(days).map((date) => ({ date, ...days[date] })).sort((a, b) => (a.date < b.date ? -1 : 1));
+  }
+  function setOriAttDay(staffId, date, rec) {
+    const m = loadOriAtt(); m[staffId] = m[staffId] || {};
+    m[staffId][date] = { checkIn: rec.checkIn || null, status: rec.status || 'present', lateMinutes: +rec.lateMinutes || 0, overtimeHours: +rec.overtimeHours || 0, note: rec.note || '' };
+    saveOriAtt(m);
+  }
+  function removeOriAttDay(staffId, date) { const m = loadOriAtt(); if (m[staffId]) { delete m[staffId][date]; saveOriAtt(m); } }
+
   // ---- HR calendar events (holiday | leave | permit) — shared via /state ----
   const CAL_KEY = 'airro_calendar_v1';
   function loadEvents() { try { const r = localStorage.getItem(CAL_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) return a; } } catch (e) {} return []; }
@@ -182,5 +198,6 @@
   window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId,
     CB_KEY, loadCashbons, saveCashbons, newCashbonId, cashbonsFor, addCashbon, updateCashbon, removeCashbon,
     TR_KEY, loadTrainings, saveTrainings, newTrainingId, trainingsFor, addTraining, updateTraining, removeTraining,
+    ORIATT_KEY, oriAtt, setOriAttDay, removeOriAttDay,
     CAL_KEY, loadEvents, saveEvents, newEventId, addEvent, updateEvent, removeEvent, hasEventForSource, addEventFromRequest };
 })();

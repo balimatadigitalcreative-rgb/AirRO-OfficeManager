@@ -1222,6 +1222,38 @@ img, svg, canvas, video { max-width: 100%; }
 .ori-nh-total { font-size: 13px; margin-top: 10px; }
 .ori-nh-total b { font-weight: 800; color: var(--green-700); }
 .ori-nh-total span { color: var(--text-mut); font-size: 12px; }
+.ori-badge.stage-orientation { color: var(--blue-700); background: #E3F2FB; }
+.ori-badge.stage-dw { color: #8a5a00; background: #FCF0D6; }
+.ori-badge.stage-probation { color: var(--green-700); background: var(--mint-100); }
+.ori-badge.stage-permanent { color: var(--green-800); background: var(--mint-200); }
+.ori-badge.stage-contract { color: #5b4bb8; background: #ECE8FB; }
+/* Orientation attendance table */
+.ori-att { margin-top: 12px; border-top: 1px solid var(--border-soft); padding-top: 10px; }
+.ori-att-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--green-700); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.ori-att-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ori-att-tbl th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); }
+.ori-att-tbl td { padding: 5px 6px; border-bottom: 1px dashed var(--border-soft); vertical-align: middle; }
+.ori-att-tbl .tr, .ori-slip-tbl .tr { text-align: right; }
+.ori-att-tbl th.tr { text-align: right; }
+.ori-ot-in { width: 52px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; font-size: 12.5px; text-align: center; }
+.ori-abs { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-mut); margin-left: 8px; cursor: pointer; }
+.ori-abs input { margin: 0; }
+.ori-mut { color: var(--text-faint); }
+.ori-st { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.ori-st.present { color: var(--green-700); background: var(--mint-100); }
+.ori-st.late { color: #8a5a00; background: #FCF0D6; }
+.ori-st.absent { color: var(--neg); background: #FDEBEC; }
+.ori-att-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.ori-att-sum { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-soft); font-size: 12px; }
+.ori-att-sum > span { color: var(--text-mut); }
+.ori-att-sum > b { font-size: 14px; color: var(--green-700); }
+.ori-empty { padding: 10px 0; color: var(--text-mut); font-size: 12.5px; text-align: center; }
+.btn.btn-sm { padding: 6px 11px; font-size: 12.5px; }
+/* Orientation slip breakdown */
+.ori-slip-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+.ori-slip-tbl th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; padding: 5px 7px; border-bottom: 1.5px solid var(--border); }
+.ori-slip-tbl td { padding: 5px 7px; border-bottom: 1px dashed var(--border-soft); }
+.ori-slip-tbl tfoot td { border-top: 1.5px solid var(--border); border-bottom: none; font-weight: 700; padding-top: 8px; }
 
 /* ── HR Calendar ── */
 .hrcal-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }

@@ -129,7 +129,11 @@ function RatesPanel({ rates, onChange, onReset }) {
             <label>{trH('hrd.otPerHour')}</label>
             <div className="rate-input wide"><span className="rm-rp">Rp</span><input inputMode="numeric" value={(rates.otPerHour || 0).toLocaleString('id-ID')} onChange={(e) => set({ otPerHour: +e.target.value.replace(/\D/g, '') || 0 })} /></div>
           </div>
-          <div className="rate-note">{trH('hrd.otNote')}</div>
+          <div className="rate-item">
+            <label>{trH('hrd.otOrientation')}</label>
+            <div className="rate-input wide"><span className="rm-rp">Rp</span><input inputMode="numeric" value={(rates.otOrientation || 0).toLocaleString('id-ID')} onChange={(e) => set({ otOrientation: +e.target.value.replace(/\D/g, '') || 0 })} /></div>
+          </div>
+          <div className="rate-note">{trH('hrd.otOrientationNote')}</div>
         </div>
         <div className="rate-group">
           <div className="rate-group-title">{trH('hrd.cashbon')}</div>
@@ -304,22 +308,26 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
     </div>
   );
 
-  // ── Orientation block (new hires start in orientation → paid a daily lump sum,
-  //    excluded from monthly payroll until passed to probation) ──
+  // ── Orientation/DW block (new hires start in orientation OR daily-worker (DW) →
+  //    paid a daily wage via attendance, excluded from monthly payroll until
+  //    graduated to a payroll stage) ──
   const oo = f.orientation || {};
   const setOri = (patch) => set({ orientation: { ...(f.orientation || {}), ...patch } });
   const oriDays = +oo.durationDays || 7;
   const oriTotal = oriDays * (+oo.dailyWage || 0);
-  const orientationBlock = HRD.stageOf(f) === 'orientation' ? (
+  const orientationBlock = HRD.isOrientationStage(f) ? (
     <div className="ori-newhire">
       <div className="ed-grp-t">{trH('ori.section')}</div>
       <div className="ori-nh-hint">{trH('ori.newHireHint')}</div>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label className="ed-af"><span>{trH('ori.bucketStage')}</span><UI.Dropdown value={HRD.stageOf(f)} options={[{ value: 'orientation', label: trH('stage.orientation') }, { value: 'dw', label: trH('stage.dw') }]} onChange={(v) => set({ stage: v })} /></label>
         <label className="ed-af"><span>{trH('ori.start')}</span><DP.DateField value={oo.startDate || ''} allowFuture onChange={(v) => setOri({ startDate: v })} /></label>
-        <div style={{ width: 120 }}>
-          <label className="fld-label" style={{ marginTop: 0 }}>{trH('ori.durationDays')}</label>
-          <input className="fld" inputMode="numeric" value={oriDays} onChange={(e) => setOri({ durationDays: Math.max(1, +e.target.value.replace(/\D/g, '') || 7) })} />
-        </div>
+        {HRD.stageOf(f) === 'orientation' && (
+          <div style={{ width: 120 }}>
+            <label className="fld-label" style={{ marginTop: 0 }}>{trH('ori.durationDays')}</label>
+            <input className="fld" inputMode="numeric" value={oriDays} onChange={(e) => setOri({ durationDays: Math.max(1, +e.target.value.replace(/\D/g, '') || 7) })} />
+          </div>
+        )}
         <div style={{ flex: 1, minWidth: 150 }}>
           <label className="fld-label" style={{ marginTop: 0 }}>{trH('ori.dailyWage')}</label>
           <div className="amt-input" style={{ padding: '8px 13px' }}>
@@ -328,7 +336,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
           </div>
         </div>
       </div>
-      <div className="ori-nh-total">{trH('ori.estTotal')}: <b>{rp(oriTotal)}</b> <span>({rp(+oo.dailyWage || 0)} × {oriDays} {trH('ori.days')})</span></div>
+      <div className="ori-nh-total">{HRD.stageOf(f) === 'orientation' ? <React.Fragment>{trH('ori.estTotal')}: <b>{rp(oriTotal)}</b> <span>({rp(+oo.dailyWage || 0)} × {oriDays} {trH('ori.days')})</span></React.Fragment> : <span>{trH('ori.dwHint')}</span>}</div>
     </div>
   ) : null;
 
@@ -460,8 +468,9 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
   // Fold the current payroll cycle's kasbon total in as a deduction before computing.
   const cycleAnchor = HRD.payCycle().anchor;
   const aug = (s) => HRD.withCashbon(s, cashbons, cycleAnchor);
-  // Exclude staff who left before this payroll month; prorate the separation month.
-  const rows = staff.map((s) => ({ o: s, pr: HRD.prorateForMonth(s, monthKey, rates) })).filter((x) => x.pr.included);
+  // Exclude the orientation/DW bucket (paid via daily lump sum, never monthly payroll)
+  // and staff who left before this payroll month; prorate the separation month.
+  const rows = staff.filter((s) => !HRD.isOrientationStage(s)).map((s) => ({ o: s, pr: HRD.prorateForMonth(s, monthKey, rates) })).filter((x) => x.pr.included);
   const t = HRD.totals(rows.map((x) => aug(x.pr.staff)), rates);
 
   const saveStaff = (s) => {

@@ -139,12 +139,14 @@ function FApp() {
   // Upsert one staff into the roster (used by orientation actions + detail edits).
   const upsertStaff = (s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
   // ---- Orientation actions (new-hire lifecycle) ----
-  const graduateOrientation = (s) => { upsertStaff({ ...s, stage: 'probation', orientation: { ...(s.orientation || {}), outcome: 'passed', endDate: HRD.orientationEnd(s) } }); setToast(tr('ori.toastPassed', { n: s.name })); };
+  // Graduating passes the employee out of the orientation/DW bucket into a payroll
+  // stage (permanent/contract/probation) → they move to Data Karyawan automatically.
+  const graduateOrientation = (s, targetStage) => { const stage = ['permanent', 'contract', 'probation'].indexOf(targetStage) >= 0 ? targetStage : 'permanent'; upsertStaff({ ...s, stage, orientation: { ...(s.orientation || {}), outcome: 'passed', endDate: HRD.orientationEnd(s) } }); setToast(tr('ori.toastPassed', { n: s.name, st: tr('stage.' + stage) })); };
   const failOrientation = (s) => { upsertStaff({ ...s, orientation: { ...(s.orientation || {}), outcome: 'failed' }, sepStatus: 'orientation_failed', active: false, separationDate: FIN.TODAY, separationReason: tr('ori.failReason') }); setToast(tr('ori.toastFailed', { n: s.name })); };
   // Orientation lump sum already posted to the cash book (by staff id) — no double post.
   const orientationPaidIds = uMh(() => (entries || []).filter((e) => e.orientation).map((e) => e.orientation), [entries]);
   const payOrientation = (s, alsoRecordExpense) => {
-    const total = HRD.orientationTotal(s);
+    const total = HRD.orientationTotal(s, CO.oriAtt(s.id), hrdRates);
     upsertStaff({ ...s, orientation: { ...(s.orientation || {}), paid: true, paidAt: FIN.TODAY } });
     if (alsoRecordExpense && total > 0 && !orientationPaidIds.includes(s.id)) {
       const bank = accounts.find((a) => a.type === 'bank') || accounts[0] || {};
@@ -507,7 +509,7 @@ function FApp() {
           )}
 
           {screen === 'orientation' && p.payroll && (
-            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={setHrdStaff} today={FIN.TODAY} canEdit={p.payroll} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
+            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={setHrdStaff} rates={hrdRates} today={FIN.TODAY} canEdit={p.payroll} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
           )}
 
           {screen === 'approvals' && p.approvals && (
