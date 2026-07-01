@@ -18,12 +18,21 @@
   const API = window.API;
   const state = { active: false, user: null };
 
-  // Sync every airro_* key EXCEPT per-browser / auth-only ones.
-  const SKIP = new Set(['airro_session_v1', 'airro_navopen_v1', 'airro_users_v1', 'airro_jwt_v1']);
+  // Sync every airro_* key EXCEPT per-browser / auth-only ones. The sync-meta key
+  // (per-key last local-write time) is also local-only.
+  const META_KEY = 'airro_synmeta_v1';
+  const SKIP = new Set(['airro_session_v1', 'airro_navopen_v1', 'airro_users_v1', 'airro_jwt_v1', META_KEY]);
   const shouldSync = (k) => /^airro_/i.test(k) && !SKIP.has(k);
 
   const rawSet = localStorage.setItem.bind(localStorage);
   const rawGet = localStorage.getItem.bind(localStorage);
+
+  // Per-key timestamp (client clock, ms) of the last LOCAL write, persisted so it
+  // survives a refresh. Lets hydrate() tell an unsynced local edit from a stale
+  // server value. (Stored under META_KEY, which is skipped from sync.)
+  function loadMeta() { try { const r = rawGet(META_KEY); if (r) { const o = JSON.parse(r); if (o && typeof o === 'object') return o; } } catch (e) {} return {}; }
+  const localMTime = loadMeta();
+  const saveMeta = () => { try { rawSet(META_KEY, JSON.stringify(localMTime)); } catch (e) {} };
 
   // Last value known to be in sync with the server, per key.
   const confirmed = Object.create(null);
@@ -75,18 +84,47 @@
   }
   localStorage.setItem = function (key, value) {
     rawSet(key, value);
-    if (state.active && shouldSync(key)) schedulePush(key);
+    if (shouldSync(key)) {
+      // Stamp the local write time even while offline, so a later hydrate can see
+      // this edit is newer than the server's stale value and must not be clobbered.
+      localMTime[key] = Date.now(); saveMeta();
+      if (state.active) schedulePush(key);
+    }
   };
 
   // Server timestamp of the last pull; sent back as `since` so each poll only
   // fetches keys changed since then (incremental — cheap even at 3s).
   let lastPollAt = null;
 
-  // ---- hydrate localStorage from the server (full snapshot, no echo back) ----
+  // ---- hydrate localStorage from the server (full snapshot) ----
+  // Same protection as poll(): never overwrite a key that holds an unsynced local
+  // edit. Accept the server value only when it is genuinely newer than our last
+  // local write (server.updatedAt > localMTime) or when we have nothing local;
+  // otherwise keep the local value and push it up.
   async function hydrate() {
     const r = await API.state.all();
     const docs = (r && r.data) || {};
-    Object.keys(docs).forEach((k) => { if (shouldSync(k)) { rawSet(k, docs[k]); confirmed[k] = docs[k]; } });
+    const meta = (r && r.meta) || {};
+    Object.keys(docs).forEach((k) => {
+      if (!shouldSync(k)) return;
+      const serverVal = docs[k];
+      const localVal = rawGet(k);
+      if (localVal == null || localVal === serverVal) {
+        rawSet(k, serverVal); confirmed[k] = serverVal;   // nothing local, or already equal → accept
+        return;
+      }
+      // Values differ — decide by last-local-write vs server's updatedAt.
+      const localMs = localMTime[k];
+      const serverMs = meta[k] ? Date.parse(meta[k]) : NaN;
+      // No local stamp (legacy data) or no server time → safe default: keep local,
+      // push it up (don't risk losing an unsynced edit).
+      const keepLocal = (localMs == null) || isNaN(serverMs) || (localMs > serverMs);
+      if (keepLocal) {
+        schedulePush(k);            // local is newer/unsynced → send it, leave localStorage as-is
+      } else {
+        rawSet(k, serverVal); confirmed[k] = serverVal;   // server is newer → accept it
+      }
+    });
     lastPollAt = (r && r.now) || lastPollAt;
   }
 

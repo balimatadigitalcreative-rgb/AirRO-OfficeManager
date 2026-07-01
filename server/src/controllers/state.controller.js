@@ -14,7 +14,8 @@ const getAll = asyncHandler(async (req, res) => {
   const now = new Date().toISOString();
   const raw = typeof req.query.since === 'string' ? req.query.since : null;
   const since = raw && !Number.isNaN(Date.parse(raw)) ? raw : null;
-  res.json({ data: await service.getAll(since), now });
+  const { data, meta } = await service.getAll(since);
+  res.json({ data, meta, now });
 });
 
 const set = asyncHandler(async (req, res) => {

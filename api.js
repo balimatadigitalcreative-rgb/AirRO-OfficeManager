@@ -95,6 +95,8 @@
     // Shared app-state document store (mirrors localStorage across all accounts).
     // all(since): pass the server `now` from the previous pull to fetch only keys
     // changed since then (incremental poll); omit for a full snapshot (hydrate).
+    // Returns { data, meta, now } — meta[key] = server updatedAt ISO, used by the
+    // cloud adapter to avoid overwriting a newer unsynced local edit.
     state: {
       all: (since) => req('GET', '/state' + (since ? '?since=' + encodeURIComponent(since) : '')),
       set: (key, value) => req('PUT', '/state/' + key, { value }),
