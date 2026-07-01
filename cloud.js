@@ -27,6 +27,22 @@
   const rawSet = localStorage.setItem.bind(localStorage);
   const rawGet = localStorage.getItem.bind(localStorage);
 
+  // Content-equal comparison that ignores JSON property-order differences, so a
+  // value re-serialized with keys in another order (React re-render, different
+  // store) isn't mistaken for a real change / a dirty local edit. Object keys are
+  // sorted; arrays keep their order (list order is real data). Non-JSON → exact.
+  function canon(v) {
+    if (Array.isArray(v)) return v.map(canon);
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).sort().forEach((k) => { o[k] = canon(v[k]); }); return o; }
+    return v;
+  }
+  function sameJSON(a, b) {
+    if (a === b) return true;
+    if (a == null || b == null) return a === b;
+    try { return JSON.stringify(canon(JSON.parse(a))) === JSON.stringify(canon(JSON.parse(b))); }
+    catch (e) { return a === b; }
+  }
+
   // Per-key timestamp (client clock, ms) of the last LOCAL write, persisted so it
   // survives a refresh. Lets hydrate() tell an unsynced local edit from a stale
   // server value. (Stored under META_KEY, which is skipped from sync.)
@@ -39,8 +55,9 @@
   const timers = {};    // debounce timer per key
   const retries = {};   // pending retry timer per key
   const attempts = {};  // consecutive failed attempts per key (for backoff)
-  // "dirty" = there is a local value that hasn't been confirmed on the server yet.
-  const isDirty = (k) => { const v = rawGet(k); return v != null && v !== confirmed[k]; };
+  // "dirty" = there is a local value whose CONTENT hasn't been confirmed on the
+  // server yet (tolerant of property-order-only differences).
+  const isDirty = (k) => { const v = rawGet(k); return v != null && !sameJSON(v, confirmed[k]); };
 
   // ---- sync status (saving | saved | error) for the UI indicator ----
   let inflight = 0, hadError = false;
@@ -60,8 +77,8 @@
     API.state.set(key, value).then(() => {
       inflight--;
       attempts[key] = 0; hadError = false;
-      // Only mark clean if the value hasn't changed again during the push.
-      if (rawGet(key) === value) confirmed[key] = value;
+      // Only mark clean if the content hasn't changed again during the push.
+      if (sameJSON(rawGet(key), value)) confirmed[key] = value;
       else schedulePush(key);
       emit();
     }).catch((e) => {
@@ -109,8 +126,8 @@
       if (!shouldSync(k)) return;
       const serverVal = docs[k];
       const localVal = rawGet(k);
-      if (localVal == null || localVal === serverVal) {
-        rawSet(k, serverVal); confirmed[k] = serverVal;   // nothing local, or already equal → accept
+      if (localVal == null || sameJSON(localVal, serverVal)) {
+        rawSet(k, serverVal); confirmed[k] = serverVal;   // nothing local, or same content → accept
         return;
       }
       // Values differ — decide by last-local-write vs server's updatedAt.
@@ -135,15 +152,21 @@
     try {
       const r = await API.state.all(lastPollAt);   // only keys changed since last pull
       const docs = (r && r.data) || {};
-      let changed = false;
+      let changed = false, skipped = false;
       Object.keys(docs).forEach((k) => {
         if (!shouldSync(k)) return;
+        const remoteDiffers = !sameJSON(rawGet(k), docs[k]);
         // Never clobber an unsynced local edit or a key with a push in progress —
-        // wait until our own push is confirmed (confirmed[k] catches up).
-        if (timers[k] || retries[k] || isDirty(k)) return;
-        if (rawGet(k) !== docs[k]) { rawSet(k, docs[k]); confirmed[k] = docs[k]; changed = true; }
+        // wait until our own push is confirmed (confirmed[k] catches up). But if a
+        // real remote change is being skipped, remember it so we DON'T advance the
+        // cursor past it (else it would only reappear on a full refresh).
+        if (timers[k] || retries[k] || isDirty(k)) { if (remoteDiffers) skipped = true; return; }
+        if (remoteDiffers) { rawSet(k, docs[k]); confirmed[k] = docs[k]; changed = true; }
       });
-      if (r && r.now) lastPollAt = r.now;
+      // Advance the incremental cursor ONLY when nothing was left behind; otherwise
+      // keep it so the next poll re-requests the skipped change and applies it once
+      // the key is free.
+      if (r && r.now && !skipped) lastPollAt = r.now;
       if (changed && typeof window.CLOUD.onSync === 'function') window.CLOUD.onSync();
     } catch (e) { /* transient — try again next tick */ }
   }
