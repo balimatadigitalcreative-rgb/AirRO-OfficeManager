@@ -787,8 +787,10 @@ select.fld::-ms-expand { display: none; }
 .range-btn { height: 38px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); font-size: 13px; font-weight: 600; color: var(--text-mut); transition: all .14s; }
 .range-btn:hover { border-color: var(--mint-300); color: var(--ink); }
 .range-btn.on { background: var(--green-800); color: #fff; border-color: var(--green-800); }
-.custom-range { display: inline-flex; align-items: center; gap: 8px; margin-left: 4px; }
-.custom-date { height: 38px; width: 150px; }
+.custom-range { display: inline-flex; align-items: center; gap: 8px; margin-left: 4px; flex-wrap: wrap; }
+.custom-date { width: 150px; }
+.custom-date .ui-dd, .custom-date .ui-dd-control { width: 100%; }
+@media (max-width: 560px) { .custom-date { width: 100%; } .custom-range { width: 100%; } }
 .rep-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .rep-subhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 .rep-subhead > span:first-child { white-space: nowrap; }

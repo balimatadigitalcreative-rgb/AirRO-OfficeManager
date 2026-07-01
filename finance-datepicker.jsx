@@ -10,7 +10,7 @@ const ISO = (y, m, d) => `${y}-${PAD(m + 1)}-${PAD(d)}`;
 const WD_HEAD = () => Array.from({ length: 7 }, (_, i) => PERIOD.dow(new Date(2024, 0, 1 + i)));
 
 /* ---- day / week picker (month grid) ---- */
-function DayGrid({ gran, anchor, today, onPick }) {
+function DayGrid({ gran, anchor, today, min, onPick }) {
   const [view, setView] = uSdp(() => { const d = new Date(anchor + 'T00:00'); return { y: d.getFullYear(), m: d.getMonth() }; });
   const { y, m } = view;
   const daysInMonth = new Date(y, m + 1, 0).getDate();
@@ -33,10 +33,11 @@ function DayGrid({ gran, anchor, today, onPick }) {
           if (!d) return <span key={i} className="pc-cell empty" />;
           const iso = ISO(y, m, d);
           const future = iso > today;
+          const tooEarly = min && iso < min;   // honor min (e.g. range end >= start)
           const inSel = iso >= sel.start && iso <= sel.end;
           const isToday = iso === today;
           return (
-            <button key={i} disabled={future}
+            <button key={i} disabled={future || tooEarly}
               className={`pc-cell ${inSel ? 'sel' : ''} ${gran === 'week' ? 'wk' : ''} ${isToday ? 'today' : ''}`}
               onClick={() => onPick(iso)}>{d}</button>
           );
@@ -115,8 +116,11 @@ function PeriodNav({ gran, anchor, onAnchor, label, today }) {
   );
 }
 
-/* ---- styled single-date field (matches UI.Dropdown control + calendar popover) ---- */
-function DateField({ value, onChange, max, allowFuture }) {
+/* ---- styled single-date field (matches UI.Dropdown control + calendar popover) ----
+   Props: value (YYYY-MM-DD), onChange, min, max (YYYY-MM-DD; dates outside are
+   disabled/dimmed), allowFuture, placeholder. The SAME custom .pop-cal / DayGrid
+   the period navigator uses, so every date field looks identical. */
+function DateField({ value, onChange, min, max, allowFuture, placeholder }) {
   const [open, setOpen] = uSdp(false);
   const ref = uRdp(null);
   uEdp(() => {
@@ -126,20 +130,21 @@ function DateField({ value, onChange, max, allowFuture }) {
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
   const today = max || (allowFuture ? '2030-12-31' : ((window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA')));
-  const anchor = value || today;
+  let anchor = value || today;
+  if (min && anchor < min) anchor = min;   // open on a month within [min, max]
   const niceDate = (s) => { const d = new Date(s + 'T00:00'); const M = (window.PERIOD ? PERIOD.mon(d.getMonth()) : d.getMonth() + 1); return `${d.getDate()} ${M} ${d.getFullYear()}`; };
   return (
     <div className={`ui-dd ${open ? 'open' : ''}`} ref={ref}>
       <button type="button" className="ui-dd-control" onClick={() => setOpen((o) => !o)}>
         <IconCalendar s={15} style={{ color: 'var(--green-700)', flexShrink: 0 }} />
-        <span className={`ui-dd-text ${value ? '' : 'ph'}`}>{value ? niceDate(value) : '—'}</span>
+        <span className={`ui-dd-text ${value ? '' : 'ph'}`}>{value ? niceDate(value) : (placeholder || '—')}</span>
         <IconCaret s={15} style={{ flexShrink: 0, color: 'var(--text-mut)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
       {open && (
         <React.Fragment>
           <div className="pop-cal-backdrop" onClick={() => setOpen(false)} />
           <div className="pop-cal-wrap dd-cal">
-            <DayGrid gran="day" anchor={anchor} today={today} onPick={(iso) => { onChange(iso); setOpen(false); }} />
+            <DayGrid gran="day" anchor={anchor} today={today} min={min} onPick={(iso) => { onChange(iso); setOpen(false); }} />
           </div>
         </React.Fragment>
       )}

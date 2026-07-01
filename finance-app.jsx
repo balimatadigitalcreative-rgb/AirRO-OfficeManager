@@ -117,7 +117,7 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
       <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
         <div style={{ flex: '0 0 150px' }}>
           <label className="fld-label">{trF('add.date')}</label>
-          <input type="date" className="fld" value={date} max={TODAY} onChange={(e) => setDate(e.target.value)} />
+          <DP.DateField value={date} max={TODAY} onChange={setDate} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <label className="fld-label">{trF('add.note')}</label>

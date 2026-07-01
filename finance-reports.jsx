@@ -322,9 +322,9 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
             <DP.PeriodNav gran={gran} anchor={anchor} onAnchor={setAnchor} label={label} today={FIN.TODAY} />
           ) : (
             <span className="custom-range">
-              <input type="date" className="fld custom-date" value={cStart} max={cEnd} onChange={(e) => setCStart(e.target.value)} />
+              <span className="custom-date"><DP.DateField value={cStart} max={cEnd} onChange={setCStart} /></span>
               <span style={{ color: 'var(--text-faint)' }}>{trR('rep.to')}</span>
-              <input type="date" className="fld custom-date" value={cEnd} min={cStart} max={FIN.TODAY} onChange={(e) => setCEnd(e.target.value)} />
+              <span className="custom-date"><DP.DateField value={cEnd} min={cStart} max={FIN.TODAY} onChange={setCEnd} /></span>
             </span>
           )}
         </div>
