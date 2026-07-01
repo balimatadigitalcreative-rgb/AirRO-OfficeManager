@@ -13,6 +13,7 @@
     { key: 'Fuel',        label: 'Fuel & Delivery', icon: 'IconGas' },
     { key: 'Supplies',    label: 'Bottling & Supplies', icon: 'IconStore' },
     { key: 'Salaries',    label: 'Salaries & Wages', icon: 'IconUsersGroup' },
+    { key: 'Training',    label: 'Training & Development', icon: 'IconUsersGroup' },
     { key: 'Maintenance', label: 'RO Maintenance',  icon: 'IconWrench' },
     { key: 'Utilities',   label: 'Electricity & Water', icon: 'IconBolt' },
     { key: 'Rent',        label: 'Depot Rent',      icon: 'IconHome' },

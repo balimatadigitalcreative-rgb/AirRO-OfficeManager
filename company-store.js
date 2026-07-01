@@ -154,6 +154,17 @@
   function updateCashbon(id, patch) { const list = loadCashbons().map((c) => c.id === id ? { ...c, ...patch } : c); saveCashbons(list); return list; }
   function removeCashbon(id) { const list = loadCashbons().filter((c) => c.id !== id); saveCashbons(list); return list; }
 
+  // ---- Training records — shared via /state ----
+  const TR_KEY = 'airro_training_v1';
+  function loadTrainings() { try { const r = localStorage.getItem(TR_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) return a; } } catch (e) {} return []; }
+  function saveTrainings(list) { try { localStorage.setItem(TR_KEY, JSON.stringify(Array.isArray(list) ? list : [])); } catch (e) {} }
+  const newTrainingId = () => 'tr' + Date.now().toString(36) + Math.floor(Math.random() * 1e3).toString(36);
+  function trainingsFor(staffId) { return loadTrainings().filter((t) => t.employeeId === staffId); }
+  function addTraining(t) { const list = loadTrainings(); list.push(t); saveTrainings(list); return list; }
+  function updateTraining(id, patch) { const list = loadTrainings().map((t) => t.id === id ? { ...t, ...patch } : t); saveTrainings(list); return list; }
+  function removeTraining(id) { const list = loadTrainings().filter((t) => t.id !== id); saveTrainings(list); return list; }
+
   window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId,
-    CB_KEY, loadCashbons, saveCashbons, newCashbonId, cashbonsFor, addCashbon, updateCashbon, removeCashbon };
+    CB_KEY, loadCashbons, saveCashbons, newCashbonId, cashbonsFor, addCashbon, updateCashbon, removeCashbon,
+    TR_KEY, loadTrainings, saveTrainings, newTrainingId, trainingsFor, addTraining, updateTraining, removeTraining };
 })();

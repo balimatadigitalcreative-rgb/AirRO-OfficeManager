@@ -64,6 +64,7 @@ function FApp() {
   const [transfers, setTransfers] = uSh(() => FS.loadTransfers());
   const [projects, setProjects] = uSh(() => CO.loadProjects());
   const [cashbons, setCashbons] = uSh(() => CO.loadCashbons());
+  const [trainings, setTrainings] = uSh(() => CO.loadTrainings());
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
@@ -81,6 +82,7 @@ function FApp() {
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
   uEh(() => { CO.saveProjects(projects); }, [projects]);
   uEh(() => { CO.saveCashbons(cashbons); }, [cashbons]);
+  uEh(() => { CO.saveTrainings(trainings); }, [trainings]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
@@ -94,7 +96,7 @@ function FApp() {
     setAccounts(FS.loadAccts()); setSetoran(FS.loadSetoran()); setFleet(FS.loadFleet());
     setTransfers(FS.loadTransfers());
     setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget());
-    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons());
+    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons()); setTrainings(CO.loadTrainings());
     setUsers(FS.loadUsers());
   };
 
@@ -128,6 +130,18 @@ function FApp() {
   }, [drawer]);
 
   const add = (e) => { setEntries((prev) => [e, ...prev]); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
+  // Training expenses already posted to the cash book (by training id) — prevents double posting.
+  const recordedTrainingIds = uMh(() => (entries || []).filter((e) => e.training).map((e) => e.training), [entries]);
+  // Record a completed training's cost as a cash-book expense (category Training). Confirmed in the UI, not automatic.
+  const recordTrainingExpense = (tng) => {
+    if (recordedTrainingIds.includes(tng.id) || !(+tng.cost > 0)) return;
+    const staffM = hrdStaff.find((s) => s.id === tng.employeeId);
+    const bank = accounts.find((a) => a.type === 'bank') || accounts[0] || {};
+    const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: 'Training', amount: +tng.cost || 0, acct: bank.id,
+      note: tr('co.trExpenseNote', { t: tng.title, n: staffM ? staffM.name : '' }), method: 'Transfer BCA', date: tng.endDate || tng.startDate || FIN.TODAY, time: '09:00', training: tng.id };
+    setEntries((prev) => [entry, ...prev]);
+    setToast(tr('toast.expenseSaved', { amt: FIN.fmt(entry.amount) }));
+  };
   const del = (id) => { if (!p.delete) { setToast(tr('toast.onlyOwnerDelete')); return; } const e = entries.find((x) => x.id === id); if (e && !confirm(tr('toast.deleteConfirm', { n: e.note || '', amt: FIN.fmt(e.amount || 0) }))) return; setEntries((prev) => prev.filter((x) => x.id !== id)); setToast(tr('toast.deleted')); };
   const saveEdit = (upd) => { setEntries((prev) => prev.map((x) => x.id === upd.id ? upd : x)); setEditing(null); setToast(tr('toast.updated')); };
   const resetData = () => { if (!p.reset) return; if (confirm('Reset all entries back to the demo data?')) { setEntries(FS.reset()); setToast(tr('toast.demoRestored')); } };
@@ -511,7 +525,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} trainings={trainings} setTrainings={setTrainings} onRecordTraining={recordTrainingExpense} recordedTrainings={recordedTrainingIds} canAddEntry={p.addEntry} />
       )}
     </div>
   );

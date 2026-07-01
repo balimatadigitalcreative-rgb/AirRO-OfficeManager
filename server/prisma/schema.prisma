@@ -170,7 +170,26 @@ model Employee {
   addressDomisili String?
   maritalStatus   String   @default("TK") // TK | K | Cerai
 
-  cashbons Cashbon[]
+  cashbons  Cashbon[]
+  trainings Training[]
+}
+
+// ── Employee training / development records ──────────────────────────────
+model Training {
+  id         String   @id @default(cuid())
+  employeeId String
+  title      String
+  provider   String   @default("")
+  startDate  String // YYYY-MM-DD
+  endDate    String?
+  cost       Int      @default(0)
+  status     String   @default("planned") // planned | ongoing | done
+  note       String   @default("")
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
 }
 
 // ── Kasbon (employee cash advance / loan → auto salary deduction) ─────────
