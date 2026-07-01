@@ -5,6 +5,16 @@ function IcH(name, props) { const C = window[name]; return C ? <C {...props} /> 
 const rp = (n) => FIN.fmt(n);
 const pctStr = (v) => (Math.round(v * 10000) / 100) + '%';
 
+// Allowance components: fk = staff/form field, ck = compute() result key, t = i18n label.
+const ALLOW_LIST = [
+  { fk: 'tjKinerja', ck: 'tjKinerja', t: 'hrd.tjKinerja' },
+  { fk: 'tjProfesi', ck: 'tjProfesi', t: 'hrd.tjProfesi' },
+  { fk: 'tjRumahDinas', ck: 'tjRumahDinas', t: 'hrd.tjRumahDinas' },
+  { fk: 'tjBpjsKes', ck: 'tjBpjsKes', t: 'hrd.tjBpjsKes' },
+  { fk: 'tjBpjsTk', ck: 'tjBpjsTk', t: 'hrd.tjBpjsTk' },
+  { fk: 'allowance', ck: 'allowOther', t: 'hrd.allowOther' },
+];
+
 function SBRow({ label, val, strong, neg, muted, note }) {
   return (
     <div className={`sb-row ${strong ? 'strong' : ''} ${muted ? 'muted' : ''}`}>
@@ -213,7 +223,9 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
   // ── Salary block (base / allowance / jp / risk / pph / deductions) ──
   const salaryBlock = (
     <div className="staff-salary-fields">
-      <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>{money(trH('hrd.basesal'), 'base')}{money(trH('hrd.allowance'), 'allowance')}</div>
+      <div style={{ marginTop: 4 }}>{money(trH('hrd.basesal'), 'base')}</div>
+      <div className="hrd-allow-title">{trH('hrd.allowances')}</div>
+      <div className="hrd-allow-grid">{ALLOW_LIST.map((a) => <React.Fragment key={a.fk}>{money(trH(a.t), a.fk)}</React.Fragment>)}</div>
       <label className="hrd-toggle">
         <input type="checkbox" checked={!!f.jp} onChange={(e) => set({ jp: e.target.checked })} />
         <span>{trH('hrd.enrollJp')}</span>
@@ -253,7 +265,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
       <div className="sb-head"><IconInvoice s={16} />{trH('hrd.live')}</div>
       <div className="sb-sec">{trH('hrd.earnings')}</div>
       <SBRow label={trH('hrd.baseShort')} val={c.base} />
-      <SBRow label={trH('hrd.allowShort')} val={c.allow} />
+      {ALLOW_LIST.map((a) => c[a.ck] > 0 && <SBRow key={a.ck} label={trH(a.t)} val={c[a.ck]} />)}
       <SBRow label={trH('hrd.gross')} val={c.gross} strong />
       <div className="sb-sec">{trH('hrd.deductFrom')} <em>{trH('hrd.deductFromEm')}</em></div>
       <SBRow label={`BPJS Kesehatan · ${pctStr(rates.kesEmployee)}`} val={c.kesEmployee} neg />
@@ -370,7 +382,7 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
           <div className="ps-col">
             <div className="ps-col-title">{trH('hrd.psEarnings')}</div>
             <Row label={trH('hrd.basesal')} value={calc.base} />
-            <Row label={trH('hrd.allowance')} value={calc.allow} />
+            {ALLOW_LIST.map((a) => calc[a.ck] > 0 && <Row key={a.ck} label={trH(a.t)} value={calc[a.ck]} />)}
             <Row label={trH('hrd.gross')} value={calc.gross} strong />
             <div className="ps-col-title" style={{ marginTop: 14 }}>{trH('hrd.psDeduct')}</div>
             <Row label={`BPJS Kesehatan (${pctStr(rates.kesEmployee)})`} value={calc.kesEmployee} neg />

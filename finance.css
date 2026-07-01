@@ -1142,3 +1142,8 @@ img, svg, canvas, video { max-width: 100%; }
 .staff-salary-wrap { display: grid; grid-template-columns: 1fr 300px; gap: 18px; margin-top: 8px; align-items: start; }
 @media (max-width: 720px) { .staff-salary-wrap { grid-template-columns: 1fr; } .staff-ident-modal { max-width: none; } }
 @media (max-width: 560px) { .emp-card-edit { opacity: 1; } .emp-add-btn { margin-left: 0; width: 100%; justify-content: center; } }
+
+/* ── Structured allowances (payroll form) ── */
+.hrd-allow-title { font-size: 11.5px; font-weight: 700; color: var(--text-mut); margin: 14px 0 2px; }
+.hrd-allow-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+@media (max-width: 560px) { .hrd-allow-grid { grid-template-columns: 1fr; } }

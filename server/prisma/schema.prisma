@@ -132,7 +132,15 @@ model Employee {
   name       String
   department String   @default("Staff")
   base       Int      @default(0) // base salary (IDR)
-  allowance  Int      @default(0)
+  allowance  Int      @default(0) // "Tunjangan lain" — legacy catch-all, still counted
+  // Structured monthly allowances (all add to gross earnings). tjBpjs* are cash
+  // allowances GIVEN to the employee — NOT the statutory BPJS iuran, which the
+  // payroll engine computes separately. See finance-hrd.js compute().
+  tjKinerja    Int    @default(0) // Tj. Kinerja
+  tjProfesi    Int    @default(0) // Tj. Profesi
+  tjRumahDinas Int    @default(0) // Tj. Rumah Dinas
+  tjBpjsKes    Int    @default(0) // Tj. BPJS Kesehatan (allowance to employee)
+  tjBpjsTk     Int    @default(0) // Tj. BPJS Ketenagakerjaan (allowance to employee)
   risk       String   @default("Low") // JKK occupational-risk class
   jp         Boolean  @default(true) // enrolled in JP (pension)
   religion   String   @default("Islam")

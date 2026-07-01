@@ -50,7 +50,8 @@
   function newStaff() {
     return {
       id: newStaffId(), name: '', pos: '', dept: DEPARTMENTS[0],
-      base: 0, allowance: 0, risk: 'Low', jp: true, religion: 'Islam', pph: 0, offDays: 0, deductions: [],
+      base: 0, allowance: 0, tjKinerja: 0, tjProfesi: 0, tjRumahDinas: 0, tjBpjsKes: 0, tjBpjsTk: 0,
+      risk: 'Low', jp: true, religion: 'Islam', pph: 0, offDays: 0, deductions: [],
       nip: '', office: 'AIRRO', status: 'Tetap', noSurat: '', joinedDate: '', contractStart: '', contractEnd: '',
       nik: '', noKk: '', noBpjsKes: '', noBpjsTk: '', birthPlace: '', birthDate: '',
       addressKtp: '', addressDomisili: '', maritalStatus: 'TK', bank: '', account: '', phone: '',
@@ -82,24 +83,38 @@
   // ---- the core calculation for one employee ----
   function compute(s, r) {
     const base = +s.base || 0;
-    const allow = +s.allowance || 0;
-    const gross = base + allow;
+    // ── Structured allowances (all add to gross earnings) ──
+    const tjKinerja = +s.tjKinerja || 0;
+    const tjProfesi = +s.tjProfesi || 0;
+    const tjRumahDinas = +s.tjRumahDinas || 0;
+    const tjBpjsKes = +s.tjBpjsKes || 0;   // cash allowance to employee (NOT the iuran)
+    const tjBpjsTk = +s.tjBpjsTk || 0;      // cash allowance to employee (NOT the iuran)
+    const allowOther = +s.allowance || 0;   // "Tunjangan lain" (legacy catch-all)
+    const allow = allowOther + tjKinerja + tjProfesi + tjRumahDinas + tjBpjsKes + tjBpjsTk; // total tunjangan
+    const gross = base + allow;             // full monthly earnings
 
-    const kesBaseRaw = gross;
-    const kesBase = Math.min(kesBaseRaw, r.kesCeiling);
+    // Statutory contribution base (upah dasar iuran). It EXCLUDES the BPJS-support
+    // allowances (tjBpjsKes/tjBpjsTk): those are cash given to the employee to help
+    // pay BPJS, so folding them back into the iuran base would make the allowance
+    // inflate the very contribution it offsets — a double count. Everything else
+    // (base + kinerja + profesi + rumah dinas + tunjangan lain) is regular wage and
+    // stays in the base. For legacy rows (all tj*=0) iuranBase === gross → identical.
+    const iuranBase = base + allowOther + tjKinerja + tjProfesi + tjRumahDinas;
+
+    const kesBase = Math.min(iuranBase, r.kesCeiling);
     const kesEmployer = kesBase * r.kesEmployer;
     const kesEmployee = kesBase * r.kesEmployee;
 
-    const jhtEmployer = gross * r.jhtEmployer;
-    const jhtEmployee = gross * r.jhtEmployee;
+    const jhtEmployer = iuranBase * r.jhtEmployer;
+    const jhtEmployee = iuranBase * r.jhtEmployee;
 
-    const jpBase = Math.min(gross, r.jpCeiling);
+    const jpBase = Math.min(iuranBase, r.jpCeiling);
     const jpEmployer = s.jp ? jpBase * r.jpEmployer : 0;
     const jpEmployee = s.jp ? jpBase * r.jpEmployee : 0;
 
     const jkkRate = r.jkk[s.risk] != null ? r.jkk[s.risk] : r.jkk['Low'];
-    const jkk = gross * jkkRate;
-    const jkm = gross * r.jkm;
+    const jkk = iuranBase * jkkRate;
+    const jkm = iuranBase * r.jkm;
 
     const pph = +s.pph || 0;
 
@@ -120,7 +135,8 @@
     // Real company cash outflow = full burden, less days not paid and amounts recovered, plus overtime
     const companyCost = gross + employerContrib - absenceDeduct - otherDeduct + otPay;
 
-    return { base, allow, gross, jkkRate,
+    return { base, allow, gross, jkkRate, iuranBase,
+      tjKinerja, tjProfesi, tjRumahDinas, tjBpjsKes, tjBpjsTk, allowOther,
       kesEmployer, kesEmployee, jhtEmployer, jhtEmployee, jpEmployer, jpEmployee, jkk, jkm, pph,
       dailyRate, offDays, absenceDeduct, deductions: dedList, otherDeduct, otPay,
       employeeDeduct, employerContrib, takeHome, companyCost };
@@ -140,7 +156,9 @@
 
   // ---- THR (Tunjangan Hari Raya) — prorated by length of service ----
   function thr(staff, joinedDate, refDate) {
-    const monthly = (+staff.base || 0) + (+staff.allowance || 0);
+    const monthly = (+staff.base || 0) + (+staff.allowance || 0)
+      + (+staff.tjKinerja || 0) + (+staff.tjProfesi || 0) + (+staff.tjRumahDinas || 0)
+      + (+staff.tjBpjsKes || 0) + (+staff.tjBpjsTk || 0);
     if (!joinedDate) return { monthly, months: 0, amount: 0, eligible: false, ratio: 0 };
     const j = new Date(joinedDate + 'T00:00'), r = new Date(refDate + 'T00:00');
     let months = (r.getFullYear() - j.getFullYear()) * 12 + (r.getMonth() - j.getMonth());

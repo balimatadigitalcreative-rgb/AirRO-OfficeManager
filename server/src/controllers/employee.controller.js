@@ -14,7 +14,12 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
   department: z.string().max(60).optional().default('Staff'),
   base: z.number().int().nonnegative().optional().default(0),
-  allowance: z.number().int().nonnegative().optional().default(0),
+  allowance: z.number().int().nonnegative().optional().default(0), // "Tunjangan lain"
+  tjKinerja: z.number().int().nonnegative().optional().default(0),
+  tjProfesi: z.number().int().nonnegative().optional().default(0),
+  tjRumahDinas: z.number().int().nonnegative().optional().default(0),
+  tjBpjsKes: z.number().int().nonnegative().optional().default(0),
+  tjBpjsTk: z.number().int().nonnegative().optional().default(0),
   risk: z.enum(RISK_LEVELS).optional().default('Low'),
   jp: z.boolean().optional().default(true),
   religion: z.enum(RELIGIONS).optional().default('Islam'),
