@@ -33,9 +33,17 @@ npx prisma generate
 echo "==> 5/6  Apply migrations (safe / non-destructive)..."
 npx prisma migrate deploy
 
-echo "==> 6/6  Restart backend..."
-pm2 restart airro-api --update-env
+echo "==> 6/6  Restart backend (single instance, free port 4000)..."
+cd "$APP_DIR"
+# Ensure exactly ONE listener on :4000 — a duplicate pm2 app or a stray
+# `node src/server.js` left running causes EADDRINUSE and a restart crash-loop.
+pm2 delete airro-api >/dev/null 2>&1 || true
+if command -v fuser >/dev/null 2>&1; then fuser -k 4000/tcp >/dev/null 2>&1 || true; fi
+sleep 1
+pm2 start deploy/ecosystem.config.js --update-env
+pm2 save >/dev/null 2>&1 || true
 
 echo ""
 echo "✅ Update selesai. Verifikasi:"
-echo "   curl -s -o /dev/null -w 'health: %{http_code}\n' https://airrooffice.com/api/v1/health"
+echo "   pm2 logs airro-api --lines 15    # harus: listening on http://127.0.0.1:4000 (tanpa EADDRINUSE)"
+echo "   curl -s -o /dev/null -w 'health: %{http_code}\n' http://127.0.0.1:4000/api/v1/health"
