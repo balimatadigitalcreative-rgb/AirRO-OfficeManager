@@ -48,9 +48,14 @@ async function getById(id) {
   if (!e) throw ApiError.notFound('Employee not found');
   return e;
 }
+// Keep `active` derived from `status` so they can never contradict.
+function syncActive(payload) {
+  if (payload.status != null) payload.active = payload.status === 'active';
+  return payload;
+}
 async function create(data) {
   // NIP is generated once at create, server-side, unless the caller supplied one.
-  const payload = { ...data };
+  const payload = syncActive({ ...data });
   if (!payload.nip) {
     payload.nip = await allocateNip({ office: payload.office, contractStart: payload.contractStart });
   }
@@ -60,7 +65,7 @@ async function update(id, data) {
   await getById(id);
   // Editing office/contract must NOT silently change the NIP — only the explicit
   // regenerate path does that. Ignore any `nip` slipped into a normal update.
-  const { nip, ...rest } = data;
+  const { nip, ...rest } = syncActive({ ...data });
   return prisma.employee.update({ where: { id }, data: rest });
 }
 // Explicit "Regenerasi NIP" — allocates a fresh NIP using current office/contract.

@@ -430,7 +430,9 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
   // Fold the current payroll cycle's kasbon total in as a deduction before computing.
   const cycleAnchor = HRD.payCycle().anchor;
   const aug = (s) => HRD.withCashbon(s, cashbons, cycleAnchor);
-  const t = HRD.totals(staff.map(aug), rates);
+  // Exclude staff who left before this payroll month; prorate the separation month.
+  const rows = staff.map((s) => ({ o: s, pr: HRD.prorateForMonth(s, monthKey, rates) })).filter((x) => x.pr.included);
+  const t = HRD.totals(rows.map((x) => aug(x.pr.staff)), rates);
 
   const saveStaff = (s) => {
     setStaff((prev) => { const ex = prev.find((x) => x.id === s.id); const clean = { ...s }; delete clean._isNew; return ex ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
@@ -468,20 +470,23 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
               </tr>
             </thead>
             <tbody>
-              {staff.map((s) => {
-                const c = HRD.compute(aug(s), rates);
+              {rows.map(({ o, pr }) => {
+                const sa = aug(pr.staff);
+                const c = HRD.compute(sa, rates);
                 const bpjsKes = c.kesEmployer + c.kesEmployee;
                 const bpjsTk = c.jhtEmployer + c.jhtEmployee + c.jpEmployer + c.jpEmployee + c.jkk + c.jkm;
+                const partial = pr.factor < 1;
                 return (
-                  <tr key={s.id}>
+                  <tr key={o.id}>
                     <td className="hcell-name">
                       <div className="hemp">
-                        <span className="hemp-av">{s.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
+                        <span className="hemp-av">{o.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
                         <div style={{ minWidth: 0 }}>
-                          <div className="hemp-name">{s.name}</div>
-                          <div className="hemp-pos">{s.pos || '—'} · <span style={{ color: 'var(--text-faint)' }}>{s.risk}</span></div>
-                          {(c.offDays > 0 || c.otherDeduct > 0) && (
+                          <div className="hemp-name">{o.name}</div>
+                          <div className="hemp-pos">{o.pos || '—'} · <span style={{ color: 'var(--text-faint)' }}>{o.risk}</span></div>
+                          {(partial || c.offDays > 0 || c.otherDeduct > 0) && (
                             <div className="hemp-badges">
+                              {partial && <span className="hbadge off" title={o.separationDate}>{trH('hrd.proratedBadge', { n: pr.daysWorked, w: pr.workDays })}</span>}
                               {c.offDays > 0 && <span className="hbadge off">{trH(c.offDays > 1 ? 'hrd.daysoff' : 'hrd.dayoff', { n: c.offDays })}</span>}
                               {c.deductions.filter((d) => +d.amount > 0).slice(0, 2).map((d, i) => <span key={i} className="hbadge other">{d.label || 'Deduction'}</span>)}
                               {c.deductions.filter((d) => +d.amount > 0).length > 2 && <span className="hbadge other">+{c.deductions.filter((d) => +d.amount > 0).length - 2}</span>}
@@ -498,9 +503,9 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
                     <td className="tnum strong">{rp(c.companyCost)}</td>
                     <td className="hcell-act">
                       <div className="hrow-actions">
-                        <button className="icon-btn" title="Payslip" onClick={() => setPayslip(aug(s))}><IconInvoice s={17} /></button>
-                        {canEdit && <button className="icon-btn" title="Edit" onClick={() => setEditStaff(s)}><IconPencil s={16} /></button>}
-                        {canEdit && <button className="icon-btn del" title="Remove" onClick={() => delStaff(s.id)}><IconClose s={16} /></button>}
+                        <button className="icon-btn" title="Payslip" onClick={() => setPayslip(sa)}><IconInvoice s={17} /></button>
+                        {canEdit && <button className="icon-btn" title="Edit" onClick={() => setEditStaff(o)}><IconPencil s={16} /></button>}
+                        {canEdit && <button className="icon-btn del" title="Remove" onClick={() => delStaff(o.id)}><IconClose s={16} /></button>}
                       </div>
                     </td>
                   </tr>
@@ -534,6 +539,36 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
 }
 
 /* ---------------- HR Settings screen (cost policies) ---------------- */
+// Configurable severance table (NOT statutory amounts — user fills per policy/UU).
+function SeverancePanel({ rates, onChange }) {
+  const rules = rates.severanceRules || {};
+  const set = (st, field, v) => onChange({ ...rates, severanceRules: { ...rules, [st]: { ...(rules[st] || {}), [field]: v } } });
+  const num = (e) => +e.target.value.replace(/[^\d.]/g, '') || 0;
+  return (
+    <div className="card rates-panel" style={{ marginTop: 16 }}>
+      <div className="rates-head">
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{trH('hrd.sevTitle')}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-mut)', marginTop: 2 }}>{trH('hrd.sevSub')}</div>
+        </div>
+      </div>
+      <div className="sev-disclaimer"><IconShield s={15} /> {trH('hrd.sevDisclaimer')}</div>
+      <div className="sev-table">
+        <div className="sev-hrow sev-head"><span>{trH('hrd.sevType')}</span><span>{trH('hrd.sevBase')}</span><span>{trH('hrd.sevPerYear')}</span><span>{trH('hrd.sevCap')}</span></div>
+        {HRD.SEP_STATUSES.map((st) => { const r = rules[st] || {}; return (
+          <div key={st} className="sev-hrow">
+            <span className="sev-name">{trH('co.sep_' + st)}</span>
+            <input inputMode="decimal" value={r.baseMonths || 0} onChange={(e) => set(st, 'baseMonths', num(e))} />
+            <input inputMode="decimal" value={r.perYearMonths || 0} onChange={(e) => set(st, 'perYearMonths', num(e))} />
+            <input inputMode="numeric" value={r.capMonths || 0} onChange={(e) => set(st, 'capMonths', num(e))} />
+          </div>
+        ); })}
+      </div>
+      <div className="rate-note">{trH('hrd.sevFormula')}</div>
+    </div>
+  );
+}
+
 function HrSettings({ rates, setRates }) {
   return (
     <div className="screen-enter">
@@ -546,6 +581,7 @@ function HrSettings({ rates, setRates }) {
       <div style={{ marginTop: 16 }}>
         <RatesPanel rates={rates} onChange={setRates} onReset={() => setRates(HRD.resetRates())} alwaysOpen />
       </div>
+      <SeverancePanel rates={rates} onChange={setRates} />
     </div>
   );
 }

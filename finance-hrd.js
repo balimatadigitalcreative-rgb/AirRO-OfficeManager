@@ -29,6 +29,17 @@
     // Kasbon (cash advance): ceiling = 50% of BASE per payroll cycle (16→15),
     // max 1×/week, weekly max = ceiling/4. Week window definition:
     cashbonWeekMode: 'cutoff', // 'cutoff' = 7 days from the 16th | 'calendar' = Mon–Sun
+    // Severance / separation compensation per exit type. NOT statutory amounts —
+    // the user configures these per UU Ketenagakerjaan/Cipta Kerja (see UI disclaimer).
+    // severance = monthly(base+allowances) × (baseMonths + perYearMonths × tenureYears), capped.
+    severanceRules: {
+      resigned:       { baseMonths: 0, perYearMonths: 0, capMonths: 0 },
+      terminated:     { baseMonths: 0, perYearMonths: 1, capMonths: 0 },
+      contract_ended: { baseMonths: 0, perYearMonths: 0, capMonths: 0 },
+      retired:        { baseMonths: 0, perYearMonths: 2, capMonths: 0 },
+      dishonorable:   { baseMonths: 0, perYearMonths: 0, capMonths: 0 },
+      absconded:      { baseMonths: 0, perYearMonths: 0, capMonths: 0 },
+    },
     // THR holiday dates per religion (Tunjangan Hari Raya keagamaan)
     holidayDates: { Islam: '2026-03-20', Kristen: '2026-12-25', Katolik: '2026-12-25', Hindu: '2026-03-19', Buddha: '2026-05-31' },
     // THR portion per religion (1 = full at one holiday; 0.5 = half, e.g. religions with 2 holidays/year)
@@ -58,6 +69,8 @@
       nip: '', office: 'AIRRO', status: 'Tetap', noSurat: '', joinedDate: '', contractStart: '', contractEnd: '',
       nik: '', noKk: '', noBpjsKes: '', noBpjsTk: '', birthPlace: '', birthDate: '',
       addressKtp: '', addressDomisili: '', maritalStatus: 'TK', bank: '', account: '', phone: '',
+      // offboarding (sepStatus, NOT `status` which is employment type Tetap/Kontrak)
+      sepStatus: 'active', separationDate: '', separationReason: '', separationNote: '', active: true,
       _isNew: true,
     };
   }
@@ -210,11 +223,69 @@
     return { ...staff, deductions: [...keep, { id: 'kasbon-cycle', label: 'Kasbon', amount: total, auto: true, kasbon: true }] };
   }
 
+  // ---- Offboarding / separation (Tahap 4) ----
+  const SEP_STATUSES = ['resigned', 'terminated', 'dishonorable', 'absconded', 'contract_ended', 'retired'];
+  function isActive(s) { return (s.sepStatus || 'active') === 'active'; }
+  function activeStaff(list) { return (list || []).filter(isActive); }
+  function tenureYears(staff, asOfIso) {
+    const j = staff.joinedDate || staff.contractStart; if (!j || !asOfIso) return 0;
+    const a = j.split('-').map(Number), b = asOfIso.split('-').map(Number);
+    let y = b[0] - a[0]; if (b[1] < a[1] || (b[1] === a[1] && b[2] < a[2])) y--; return Math.max(0, y);
+  }
+  function prorateStaff(s, f) {
+    const sc = (v) => Math.round((+v || 0) * f);
+    return { ...s, base: sc(s.base), allowance: sc(s.allowance), tjKinerja: sc(s.tjKinerja), tjProfesi: sc(s.tjProfesi), tjRumahDinas: sc(s.tjRumahDinas), tjBpjsKes: sc(s.tjBpjsKes), tjBpjsTk: sc(s.tjBpjsTk), _prorate: f };
+  }
+  // Payroll standing for a calendar month: excluded if gone before it, prorated in
+  // the separation month (base + all allowances × daysWorked/workDays), else full.
+  function prorateForMonth(s, monthKey, rates) {
+    const sep = s.separationDate;
+    if (!sep) return { included: true, factor: 1, staff: s };
+    const sepMonth = sep.slice(0, 7);
+    if (monthKey > sepMonth) return { included: false, factor: 0, staff: null };
+    if (monthKey < sepMonth) return { included: true, factor: 1, staff: s };
+    const wd = rates.workDays || 26;
+    const daysWorked = Math.min(+sep.slice(8, 10) || wd, wd);
+    const factor = daysWorked / wd;
+    return { included: true, factor, staff: prorateStaff(s, factor), daysWorked, workDays: wd };
+  }
+  // Active + prorated staff list for a payroll month (drops those gone before it).
+  function payrollStaff(list, monthKey, rates) {
+    return (list || []).map((s) => prorateForMonth(s, monthKey, rates)).filter((r) => r.included).map((r) => r.staff);
+  }
+  function severance(staff, rates) {
+    const rule = ((rates.severanceRules || {})[staff.sepStatus]) || { baseMonths: 0, perYearMonths: 0, capMonths: 0 };
+    const years = tenureYears(staff, staff.separationDate);
+    let months = (+rule.baseMonths || 0) + (+rule.perYearMonths || 0) * years;
+    if (+rule.capMonths > 0) months = Math.min(months, +rule.capMonths);
+    const monthly = (+staff.base || 0) + (+staff.allowance || 0) + (+staff.tjKinerja || 0) + (+staff.tjProfesi || 0) + (+staff.tjRumahDinas || 0) + (+staff.tjBpjsKes || 0) + (+staff.tjBpjsTk || 0);
+    return { amount: Math.round(monthly * months), months, years, monthly, rule };
+  }
+  // One-shot exit calc: prorated last-month NET (excl. kasbon) + severance
+  // − outstanding kasbon (all cycles) − other deductions. May be negative.
+  function finalSettlement(staff, rates, cashbons) {
+    const sep = staff.separationDate;
+    const sepMonth = sep ? sep.slice(0, 7) : '';
+    const pr = sep ? prorateForMonth(staff, sepMonth, rates) : { factor: 1, staff, daysWorked: rates.workDays || 26, workDays: rates.workDays || 26 };
+    const prStaff = { ...pr.staff, deductions: (pr.staff.deductions || []).filter((d) => !d.kasbon) };
+    const c = compute(prStaff, rates);
+    const sev = severance(staff, rates);
+    const kasbon = cashbonOutstanding(staff.id, cashbons);
+    const finalPay = c.takeHome + sev.amount - kasbon;
+    return {
+      sepMonth, factor: pr.factor, daysWorked: pr.daysWorked, workDays: pr.workDays,
+      proratedGross: c.gross, proratedNet: c.takeHome, employeeDeduct: c.employeeDeduct, otherDeduct: c.otherDeduct,
+      severance: sev.amount, severanceMonths: sev.months, tenureYears: sev.years, monthly: sev.monthly,
+      kasbonOutstanding: kasbon, finalPay,
+    };
+  }
+
   window.HRD = {
     RATES_KEY, STAFF_KEY, JKK, DEFAULT_RATES, DEFAULT_STAFF, DEPARTMENTS, DEFAULT_BUDGET,
     loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newStaff, newDedId,
     loadBudget, saveBudget, affordability, simulateHire, thr,
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
     payCycle, cashbonCeiling, cashbonWeeklyMax, cashbonsInCycle, cashbonCycleTotal, cashbonOutstanding, withCashbon,
+    SEP_STATUSES, isActive, activeStaff, tenureYears, prorateForMonth, payrollStaff, severance, finalSettlement,
   };
 })();

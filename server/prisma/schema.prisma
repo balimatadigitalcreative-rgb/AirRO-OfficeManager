@@ -145,6 +145,13 @@ model Employee {
   jp         Boolean  @default(true) // enrolled in JP (pension)
   religion   String   @default("Islam")
   joinedDate String? // YYYY-MM-DD, for THR proration
+  // Offboarding. `active` is DERIVED: active = (status === "active"). Keep both in
+  // sync (never contradictory). Non-active statuses exclude the employee from
+  // active payroll/headcount but keep the record for history.
+  status           String  @default("active") // active | resigned | terminated | dishonorable | absconded | contract_ended | retired
+  separationDate   String? // YYYY-MM-DD, last working day (effective date)
+  separationReason String?
+  separationNote   String?
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
 

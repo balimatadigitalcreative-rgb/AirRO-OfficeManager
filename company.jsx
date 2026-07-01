@@ -31,13 +31,14 @@ function BudgetRing({ aff }) {
 
 /* ---------- Headcount Affordability (with what-if) ---------- */
 function HeadcountAffordability({ staff, rates, budget, setBudget, canEdit }) {
-  const aff = uMc(() => HRD.affordability(staff, rates, budget), [staff, rates, budget]);
+  const activeS = uMc(() => HRD.activeStaff(staff), [staff]);   // headcount = active only
+  const aff = uMc(() => HRD.affordability(activeS, rates, budget), [activeS, rates, budget]);
   const [base, setBase] = uSc(3000000);
   const [allow, setAllow] = uSc(400000);
   const [risk, setRisk] = uSc('Low');
   const [jp, setJp] = uSc(true);
   const [editBudget, setEditBudget] = uSc(false);
-  const sim = uMc(() => HRD.simulateHire(staff, rates, budget, { base, allowance: allow, risk, jp }), [staff, rates, budget, base, allow, risk, jp]);
+  const sim = uMc(() => HRD.simulateHire(activeS, rates, budget, { base, allowance: allow, risk, jp }), [activeS, rates, budget, base, allow, risk, jp]);
   const over = aff.remaining < 0;
 
   return (
@@ -372,12 +373,102 @@ function CashbonModal({ staff, onSave, onClose }) {
   );
 }
 
+/* ---------- Offboarding modal (mark leaving, with impact preview) ---------- */
+function OffboardModal({ staff, rates, cashbons, onSave, onClose }) {
+  const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
+  const [sepStatus, setSepStatus] = uSc('resigned');
+  const [date, setDate] = uSc(today);
+  const [reason, setReason] = uSc('');
+  const [note, setNote] = uSc('');
+  uEc(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const minDate = staff.joinedDate || staff.contractStart || '';
+  const dateErr = !!(minDate && date && date < minDate);
+  const preview = uMc(() => HRD.finalSettlement({ ...staff, sepStatus, separationDate: date }, rates, cashbons), [sepStatus, date, staff, rates, cashbons]);
+  const valid = date && !dateErr;
+  const opts = HRD.SEP_STATUSES.map((v) => ({ value: v, label: trC('co.sep_' + v) }));
+  const submit = () => {
+    if (!valid) return;
+    const neg = preview.finalPay < 0;
+    const msg = trC('co.sepConfirm', { name: staff.name, type: trC('co.sep_' + sepStatus), d: date, pay: rpC(preview.finalPay) }) + (neg ? '\n\n⚠ ' + trC('co.sepFinalNeg') : '');
+    if (!confirm(msg)) return;
+    onSave({ ...staff, sepStatus, separationDate: date, separationReason: reason.trim(), separationNote: note.trim(), active: false });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{trC('co.offboardT', { name: staff.name })}</div><button className="icon-btn" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="ed-acc-form" style={{ padding: '4px 2px' }}>
+          <label className="ed-af"><span>{trC('co.sepStatus')}</span><UI.Dropdown value={sepStatus} options={opts} onChange={setSepStatus} /></label>
+          <label className="ed-af"><span>{trC('co.sepDate')}</span><DP.DateField value={date} max={today} onChange={setDate} /></label>
+          <label className="ed-af ed-af-wide"><span>{trC('co.sepReason')}</span><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="—" /></label>
+          <label className="ed-af ed-af-wide"><span>{trC('co.sepNote')}</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="—" /></label>
+        </div>
+        {dateErr && <div className="kb-hint over">⚠ {trC('co.sepDateErr')}</div>}
+        <div className="sep-impact">
+          <div className="sep-impact-t">{trC('co.sepImpact')} · {trC('co.sepTenure')} {trC('co.sepYears', { n: preview.tenureYears })}</div>
+          <div className="sep-row"><span>{trC('co.sepProrated')} ({preview.daysWorked}/{preview.workDays})</span><b className="tnum">{rpC(preview.proratedNet)}</b></div>
+          <div className="sep-row"><span>{trC('co.sepSeverance')} ({preview.severanceMonths}× {rpC(preview.monthly)})</span><b className="tnum amt-pos">+{rpC(preview.severance)}</b></div>
+          {preview.kasbonOutstanding > 0 && <div className="sep-row"><span>{trC('co.kasbonOutstanding')}</span><b className="tnum amt-neg">−{rpC(preview.kasbonOutstanding)}</b></div>}
+          <div className="sep-row total"><span>{trC('co.sepFinal')}</span><b className={`tnum ${preview.finalPay < 0 ? 'amt-neg' : 'amt-pos'}`}>{preview.finalPay < 0 ? '− ' : ''}{rpC(preview.finalPay)}</b></div>
+          {preview.finalPay < 0 && <div className="sep-neg">⚠ {trC('co.sepFinalNeg')}</div>}
+        </div>
+        <div className="kb-hint">{trC('co.sepDisclaimer')}</div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trC('common.cancel')}</button>
+          <button className="btn btn-primary" style={{ background: 'var(--neg)' }} disabled={!valid} onClick={submit}>{trC('co.offboard')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Final-settlement slip (printable) ---------- */
+function SettlementSlip({ staff, rates, cashbons, onClose }) {
+  const s = HRD.finalSettlement(staff, rates, cashbons);
+  uEc(() => { document.body.classList.add('payslip-open'); const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => { document.body.classList.remove('payslip-open'); window.removeEventListener('keydown', o); }; }, []);
+  const Row = ({ label, value, neg, pos, strong }) => (<div className={`ps-row ${strong ? 'strong' : ''}`}><span>{label}</span><span className={`tnum ${neg ? 'amt-neg' : pos ? 'amt-pos' : ''}`}>{neg ? '− ' : pos ? '+ ' : ''}{rpC(value)}</span></div>);
+  return (
+    <div className="modal-scrim payslip-overlay" onClick={onClose}>
+      <div className="payslip-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="ps-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><Logo s={34} /><div><div style={{ fontFamily: 'Poppins', fontSize: 17, fontWeight: 800 }}>AirRO Reverse Osmosis</div><div style={{ fontSize: 12, color: 'var(--text-mut)' }}>{trC('co.settlementSlip')} · {staff.separationDate}</div></div></div>
+          <div className="ps-actions"><button className="btn btn-ghost" onClick={() => window.print()}><IconDownload s={16} />{trC('hrd.print')}</button><button className="jp-icon no-print" onClick={onClose}><IconClose s={18} /></button></div>
+        </div>
+        <div className="ps-emp">
+          <div><div className="ps-emp-name">{staff.name}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{staff.pos || '—'} · {staff.dept}</div></div>
+          <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-mut)' }}>{trC('co.sep_' + staff.sepStatus)}<br />{trC('co.sepTenure')}: <b>{trC('co.sepYears', { n: s.tenureYears })}</b></div>
+        </div>
+        <div className="ps-cols" style={{ gridTemplateColumns: '1fr' }}>
+          <div className="ps-col">
+            <div className="ps-col-title">{trC('co.settlement')}</div>
+            <Row label={`${trC('co.sepProrated')} (${s.daysWorked}/${s.workDays} ${trC('co.sepDaysUnit')})`} value={s.proratedNet} />
+            <Row label={`${trC('co.sepSeverance')} · ${s.severanceMonths}× ${rpC(s.monthly)}`} value={s.severance} pos />
+            {s.kasbonOutstanding > 0 && <Row label={trC('co.kasbonOutstanding')} value={s.kasbonOutstanding} neg />}
+          </div>
+        </div>
+        <div className="ps-thp" style={s.finalPay < 0 ? { background: 'var(--neg)' } : null}><span>{trC('co.sepFinal')}</span><span className="tnum">{s.finalPay < 0 ? '− ' : ''}{rpC(s.finalPay)}</span></div>
+        {s.finalPay < 0 && <div className="sep-neg" style={{ margin: '8px 0 0' }}>⚠ {trC('co.sepFinalNeg')}</div>}
+        <div className="ps-foot">{trC('co.sepDisclaimer')}</div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Employee Detail ---------- */
 function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, setCashbons }) {
   const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
   const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
   const acc = uMc(() => CO.accountInfo(staffProp), [staffProp]);   // legacy fallback for fields not yet on the staff object
   const [identEdit, setIdentEdit] = uSc(false);
+  const [offboard, setOffboard] = uSc(false);
+  const [settle, setSettle] = uSc(false);
+  const separated = !HRD.isActive(staff);
+  const doOffboard = (u) => { setStaffLocal(u); if (onSaveStaff) onSaveStaff(u); setOffboard(false); };
+  const doReactivate = () => {
+    const r = prompt(trC('co.reactivateReason')); if (r == null) return;
+    const u = { ...staff, sepStatus: 'active', active: true, separationDate: '', separationReason: '', separationNote: (staff.separationNote ? staff.separationNote + ' | ' : '') + 'Reactivated: ' + r };
+    setStaffLocal(u); if (onSaveStaff) onSaveStaff(u);
+  };
   // Identity value: prefer the staff object (single source of truth); fall back to legacy account-map.
   const g = (k) => (staff[k] != null && staff[k] !== '') ? staff[k] : (acc[k] != null ? acc[k] : '');
   const joined = staff.joinedDate || acc.joined || '';
@@ -419,11 +510,23 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
             <div className="ed-name">{staff.name}</div>
             <div className="ed-pos">{staff.pos || '—'} · {staff.dept}</div>
           </div>
-          {canEdit && onSaveStaff && <button className="btn btn-lime ed-editbtn" onClick={() => setIdentEdit(true)}><IconPencil s={15} />{trC('co.editData')}</button>}
+          {canEdit && onSaveStaff && !separated && <button className="btn btn-lime ed-editbtn" onClick={() => setIdentEdit(true)}><IconPencil s={15} />{trC('co.editData')}</button>}
+          {canEdit && onSaveStaff && !separated && <button className="ed-editbtn ed-offbtn" onClick={() => setOffboard(true)} title={trC('co.offboard')}><IconLogout s={15} />{trC('co.offboard')}</button>}
+          {separated && <button className="ed-editbtn" style={{ background: 'rgba(255,255,255,.16)', color: '#fff' }} onClick={() => setSettle(true)}><IconInvoice s={15} />{trC('co.settlement')}</button>}
+          {canEdit && onSaveStaff && separated && <button className="btn btn-lime ed-editbtn" onClick={doReactivate}><IconCheck s={15} />{trC('co.reactivate')}</button>}
           <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
         </div>
 
         <div className="ed-body scroll-y">
+          {separated && (
+            <div className="sep-banner">
+              <IconShield s={16} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <b>{trC('co.sepBannerT')} · {trC('co.sep_' + staff.sepStatus)}</b>
+                <span>{staff.separationDate}{staff.separationReason ? ` · ${staff.separationReason}` : ''}</span>
+              </div>
+            </div>
+          )}
           <div className="ed-section-t">{trC('att.title')} · {att.workdays} {trC('att.workdays')}{canEditAtt && <span className="ed-edit-hint">{trC('att.fullMonth')}</span>}</div>
           <div className="ed-att-grid">
             <div className="ed-att-stat"><b className="tnum" style={{ color: 'var(--green-700)' }}>{att.present}</b><span>{trC('att.present')}</span></div>
@@ -554,6 +657,8 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
           </div>
           {identEdit && <PAYROLL.StaffModal staff={staff} rates={rates} variant="identity" onSave={saveIdentity} onClose={() => setIdentEdit(false)} />}
           {kbAdd && <CashbonModal staff={staff} onSave={saveCashbon} onClose={() => setKbAdd(false)} />}
+          {offboard && <OffboardModal staff={staff} rates={rates} cashbons={cashbons} onSave={doOffboard} onClose={() => setOffboard(false)} />}
+          {settle && <SettlementSlip staff={staff} rates={rates} cashbons={cashbons} onClose={() => setSettle(false)} />}
         </div>
       </div>
     </div>
@@ -565,6 +670,7 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
   const [q, setQ] = uSc('');
   const [dept, setDept] = uSc('All');
   const [editing, setEditing] = uSc(null);
+  const [showArchive, setShowArchive] = uSc(false);
   const depts = ['All', ...HRD.DEPARTMENTS];
   // Writes to the SAME hrdStaff array → instantly visible in Payroll too.
   const saveStaff = (s) => {
@@ -572,7 +678,8 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
     setEditing(null);
   };
   const addStaff = () => setEditing(HRD.newStaff());
-  let rows = staff;
+  const archivedCount = staff.filter((s) => !HRD.isActive(s)).length;
+  let rows = showArchive ? staff : HRD.activeStaff(staff);   // default hides former employees
   if (dept !== 'All') rows = rows.filter((s) => s.dept === dept);
   if (q) rows = rows.filter((s) => (s.name + (s.pos || '') + (s.dept || '')).toLowerCase().includes(q.toLowerCase()));
   const groups = {};
@@ -588,6 +695,7 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
         <div className="dept-chips">
           {depts.map((d) => <button key={d} className={`dept-chip ${dept === d ? 'on' : ''}`} onClick={() => setDept(d)}>{d === 'All' ? trC('co.allDepts') : d}</button>)}
         </div>
+        {archivedCount > 0 && <button className={`dept-chip ${showArchive ? 'on' : ''}`} onClick={() => setShowArchive((v) => !v)} title={trC('co.archiveToggle')}>{trC('co.archive')} · {archivedCount}</button>}
         {canEdit && setStaff && <button className="btn btn-primary emp-add-btn" onClick={addStaff}><IconPlus s={16} />{trC('hrd.addEmp')}</button>}
       </div>
       {order.length === 0 && <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}>{trC('entries.none')}</div>}
@@ -597,19 +705,22 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
           <div className="emp-cards">
             {groups[d].map((s) => {
               const c = HRD.compute(s, rates);
+              const sep = !HRD.isActive(s);
               return (
-                <div key={s.id} className="emp-card" onClick={() => onOpen(s)} style={{ cursor: 'pointer' }}>
+                <div key={s.id} className={`emp-card ${sep ? 'archived' : ''}`} onClick={() => onOpen(s)} style={{ cursor: 'pointer' }}>
                   <span className="emp-av" style={{ background: 'var(--mint-100)', color: 'var(--green-800)' }}>{s.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="emp-name">{s.name}</div>
                     <div className="emp-pos">{s.nip ? <span className="emp-nip">{s.nip}</span> : null}{s.nip ? ' · ' : ''}{s.pos || '—'}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    {(+s.base > 0)
-                      ? <><div className="tnum emp-thp">{rpC(c.takeHome)}</div><div className="emp-thp-l">{trC('hrd.cTakehome')}</div></>
-                      : <div className="emp-thp-unset">{trC('co.salaryNotSet')}</div>}
+                    {sep
+                      ? <span className="emp-sep-badge">{trC('co.sep_' + s.sepStatus)}{s.separationDate ? ` · ${s.separationDate}` : ''}</span>
+                      : (+s.base > 0)
+                        ? <><div className="tnum emp-thp">{rpC(c.takeHome)}</div><div className="emp-thp-l">{trC('hrd.cTakehome')}</div></>
+                        : <div className="emp-thp-unset">{trC('co.salaryNotSet')}</div>}
                   </div>
-                  {canEdit && setStaff && <button className="emp-card-edit" title={trC('co.editData')} onClick={(e) => { e.stopPropagation(); setEditing(s); }}><IconPencil s={15} /></button>}
+                  {canEdit && setStaff && !sep && <button className="emp-card-edit" title={trC('co.editData')} onClick={(e) => { e.stopPropagation(); setEditing(s); }}><IconPencil s={15} /></button>}
                 </div>
               );
             })}

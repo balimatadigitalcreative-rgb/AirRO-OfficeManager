@@ -24,7 +24,11 @@ const createSchema = z.object({
   jp: z.boolean().optional().default(true),
   religion: z.enum(RELIGIONS).optional().default('Islam'),
   joinedDate: DATE.optional(),
-  active: z.boolean().optional().default(true),
+  status: z.enum(['active', 'resigned', 'terminated', 'dishonorable', 'absconded', 'contract_ended', 'retired']).optional().default('active'),
+  separationDate: DATE_OPT,
+  separationReason: STR(120),
+  separationNote: STR(500),
+  active: z.boolean().optional(),
   // ── extended HR profile ──
   nip: STR(40), // normally server-generated; accepted for imports
   noSurat: STR(60),

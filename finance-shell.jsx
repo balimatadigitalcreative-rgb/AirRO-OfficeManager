@@ -233,7 +233,9 @@ function FApp() {
     const m = cats.expense.find((c) => /salar|gaji|wage|payroll/i.test(c.label));
     return (m && m.key) || (cats.expense[0] && cats.expense[0].key) || 'Salaries';
   }, [cats]);
-  const hrdTotals = uMh(() => HRD.totals(hrdStaff, hrdRates), [hrdStaff, hrdRates]);
+  // Payroll totals for the current month: exclude separated staff, prorate the
+  // separation month, and fold in the running cycle's kasbon — matches PayrollScreen.
+  const hrdTotals = uMh(() => HRD.totals(HRD.payrollStaff(hrdStaff, curMonthKey, hrdRates).map((s) => HRD.withCashbon(s, cashbons, HRD.payCycle().anchor)), hrdRates), [hrdStaff, hrdRates, cashbons, curMonthKey]);
   const payrollPosted = uMh(() => entries.find((e) => e.payroll === curMonthKey) || null, [entries, curMonthKey]);
   const postPayroll = (amount, label) => {
     if (!p.payroll || !amount) return;
