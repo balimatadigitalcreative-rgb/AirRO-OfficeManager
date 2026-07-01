@@ -69,6 +69,7 @@ function FApp() {
   const [calEvents, setCalEvents] = uSh(() => CO.loadEvents());
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
+  const [syncStatus, setSyncStatus] = uSh('saved');   // 'saving' | 'saved' | 'error' from the cloud adapter
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
 
   uEh(() => { FS.save(entries); }, [entries]);
@@ -120,10 +121,13 @@ function FApp() {
   }, []);
 
   // Auto-refresh: when the cloud poll detects remote changes, re-read slices.
+  // (The poll never overwrites a key with an unsynced local edit, so re-reading
+  // here can't clobber a pending local change.)
   uEh(() => {
     if (!window.CLOUD) return;
     window.CLOUD.onSync = () => refreshAllSlices();
-    return () => { if (window.CLOUD) window.CLOUD.onSync = null; };
+    window.CLOUD.onStatus = (s) => setSyncStatus(s);
+    return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; } };
   }, []);
 
   // Lock the page scroll behind the mobile drawer while it's open.
@@ -425,6 +429,11 @@ function FApp() {
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
               {(screen === 'overview' || screen === 'entries') && periodBar}
+              {window.CLOUD && window.CLOUD.active && (
+                <span className={`sync-pill ${syncStatus}`} title={tr('sync.' + syncStatus)}>
+                  <span className="sync-dot" /><span className="sync-txt">{tr('sync.' + syncStatus)}</span>
+                </span>
+              )}
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
               {p.seeMoney && <ALERTS.AlertBell alerts={alerts} />}
               <div className="avatar" title={user.name} style={{ background: user.color, color: '#fff' }}>{FS.initials(user.name)}</div>

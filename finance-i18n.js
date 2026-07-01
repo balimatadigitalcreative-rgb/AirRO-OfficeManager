@@ -4,6 +4,7 @@
   const DICT = {
     en: {
       'lang.en': 'EN', 'lang.id': 'ID',
+      'sync.saving': 'Saving…', 'sync.saved': 'Saved', 'sync.error': 'Sync failed',
       // nav
       'navgrp.overview': 'Overview', 'navgrp.finance': 'Finance', 'navgrp.hr': 'Human Resources', 'navgrp.admin': 'Administration',
       'nav.cashbook': 'Dashboard', 'nav.overview': 'Cash Flow', 'nav.entries': 'All Entries',
@@ -221,6 +222,7 @@
     },
     id: {
       'lang.en': 'EN', 'lang.id': 'ID',
+      'sync.saving': 'Menyimpan…', 'sync.saved': 'Tersimpan', 'sync.error': 'Gagal sinkron',
       'nav.cashbook': 'Dashboard', 'nav.overview': 'Arus Kas', 'nav.entries': 'Semua Catatan',
       'navgrp.overview': 'Ringkasan', 'navgrp.finance': 'Keuangan', 'navgrp.hr': 'SDM / HRD', 'navgrp.admin': 'Administrasi',
       'nav.company': 'Perusahaan', 'nav.employees': 'Karyawan', 'nav.hrcalendar': 'Kalender HRD', 'nav.approvals': 'Persetujuan', 'nav.rollcall': 'Absensi', 'nav.hrsettings': 'Pengaturan HR', 'nav.hrreport': 'Laporan HR', 'nav.moneyspots': 'Kas & Bank', 'nav.setoran': 'Setoran', 'nav.thr': 'THR / Hari Raya',
