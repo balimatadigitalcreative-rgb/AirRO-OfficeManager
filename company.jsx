@@ -454,40 +454,97 @@ function SettlementSlip({ staff, rates, cashbons, onClose }) {
   );
 }
 
-/* ---------- Training add/edit modal ---------- */
-function TrainingModal({ staff, training, onSave, onClose }) {
-  const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
-  const [f, setF] = uSc(training || { id: CO.newTrainingId(), employeeId: staff.id, title: '', provider: '', startDate: today, endDate: '', cost: 0, status: 'planned', note: '', createdAt: Date.now() });
-  uEc(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  const set = (p) => setF({ ...f, ...p });
-  const valid = (f.title || '').trim() && f.startDate;
-  const opts = [{ value: 'planned', label: trC('co.trPlanned') }, { value: 'ongoing', label: trC('co.trOngoing') }, { value: 'done', label: trC('co.trDone') }];
+/* ---------- Orientation wage slip (lump sum, printable) ---------- */
+function OrientationSlip({ staff, onClose }) {
+  const o = staff.orientation || {};
+  const days = HRD.orientationDaysServed(staff);
+  const total = HRD.orientationTotal(staff);
+  const end = HRD.orientationEnd(staff);
+  uEc(() => { document.body.classList.add('payslip-open'); const h = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', h); return () => { document.body.classList.remove('payslip-open'); window.removeEventListener('keydown', h); }; }, []);
+  const Row = ({ label, value }) => (<div className="ps-row"><span>{label}</span><span className="tnum">{value}</span></div>);
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
-        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{training ? trC('co.trEdit') : trC('co.trAdd')} · {staff.name}</div><button className="icon-btn" onClick={onClose}><IconClose s={18} /></button></div>
-        <div className="ed-acc-form" style={{ padding: '4px 2px' }}>
-          <label className="ed-af ed-af-wide"><span>{trC('co.trTitle')}</span><input value={f.title} onChange={(e) => set({ title: e.target.value })} placeholder="e.g. Pelatihan K3" /></label>
-          <label className="ed-af"><span>{trC('co.trProvider')}</span><input value={f.provider} onChange={(e) => set({ provider: e.target.value })} placeholder="—" /></label>
-          <label className="ed-af"><span>{trC('co.trStatus')}</span><UI.Dropdown value={f.status} options={opts} onChange={(v) => set({ status: v })} /></label>
-          <label className="ed-af"><span>{trC('co.trStart')}</span><DP.DateField value={f.startDate} allowFuture onChange={(v) => set({ startDate: v })} /></label>
-          <label className="ed-af"><span>{trC('co.trEnd')}</span><DP.DateField value={f.endDate || ''} allowFuture onChange={(v) => set({ endDate: v })} /></label>
-          <label className="ed-af ed-af-wide"><span>{trC('co.trCost')}</span>
-            <div className="amt-input" style={{ padding: '8px 13px' }}><span className="amt-rp" style={{ fontSize: 14 }}>Rp</span><input inputMode="numeric" style={{ fontSize: 16 }} value={f.cost ? (+f.cost).toLocaleString('id-ID') : ''} onChange={(e) => set({ cost: +e.target.value.replace(/\D/g, '') || 0 })} /></div>
-          </label>
-          <label className="ed-af ed-af-wide"><span>{trC('co.trNote')}</span><input value={f.note} onChange={(e) => set({ note: e.target.value })} placeholder="—" /></label>
+    <div className="modal-scrim payslip-overlay" onClick={onClose}>
+      <div className="payslip-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="ps-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><Logo s={34} /><div><div style={{ fontFamily: 'Poppins', fontSize: 17, fontWeight: 800 }}>AirRO Reverse Osmosis</div><div style={{ fontSize: 12, color: 'var(--text-mut)' }}>{trC('ori.slipTitle')}{o.paidAt ? ' · ' + o.paidAt : ''}</div></div></div>
+          <div className="ps-actions"><button className="btn btn-ghost" onClick={() => window.print()}><IconDownload s={16} />{trC('hrd.print')}</button><button className="jp-icon no-print" onClick={onClose}><IconClose s={18} /></button></div>
         </div>
-        <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose}>{trC('common.cancel')}</button>
-          <button className="btn btn-primary" disabled={!valid} onClick={() => onSave({ ...f, cost: +f.cost || 0 })}>{trC('co.trSave')}</button>
+        <div className="ps-emp">
+          <div><div className="ps-emp-name">{staff.name}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{staff.pos || '—'} · {staff.dept}</div></div>
+          <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-mut)' }}>{trC('ori.outcome')}: <b>{trC('ori.out_' + (o.outcome || 'pending'))}</b></div>
         </div>
+        <div className="ps-cols" style={{ gridTemplateColumns: '1fr' }}>
+          <div className="ps-col">
+            <div className="ps-col-title">{trC('ori.slipTitle')}</div>
+            <Row label={trC('ori.period')} value={`${o.startDate || '—'} → ${end || '—'}`} />
+            <Row label={trC('ori.dailyWage')} value={rpC(o.dailyWage || 0)} />
+            <Row label={trC('ori.daysServed')} value={`${days} / ${o.durationDays || 7} ${trC('co.sepDaysUnit')}`} />
+          </div>
+        </div>
+        <div className="ps-thp"><span>{trC('ori.total')}</span><span className="tnum">{rpC(total)}</span></div>
+        <div className="ps-foot">{trC('ori.slipFoot')}</div>
       </div>
     </div>
   );
 }
 
+/* ---------- Orientation screen (new hires) ---------- */
+function OrientationScreen({ staff, setStaff, today, canEdit, canAddEntry, onGraduate, onFail, onPay, orientationPaidIds, onOpen }) {
+  const [slip, setSlip] = uSc(null);
+  const orient = (staff || []).filter((s) => HRD.stageOf(s) === 'orientation');
+  const active = orient.filter((s) => (s.orientation || {}).outcome !== 'failed' || !(s.orientation || {}).paid);
+  const pay = (s) => { const rec = canAddEntry && confirm(trC('ori.payConfirm', { amt: rpC(HRD.orientationTotal(s)) })); onPay(s, !!rec); };
+  return (
+    <div className="screen-enter">
+      <div className="settings-intro card"><div><div style={{ fontSize: 16, fontWeight: 700 }}>{trC('nav.orientation')}</div><div style={{ fontSize: 13, color: 'var(--text-mut)', marginTop: 3 }}>{trC('ori.intro')}</div></div></div>
+      {active.length === 0 ? (
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)', marginTop: 16 }}>{trC('ori.none')}</div>
+      ) : (
+        <div className="ori-list" style={{ marginTop: 16 }}>
+          {active.map((s) => {
+            const o = s.orientation || {};
+            const days = HRD.orientationDaysServed(s);
+            const remain = HRD.orientationRemaining(s, today);
+            const total = HRD.orientationTotal(s);
+            const decided = o.outcome !== 'pending';
+            return (
+              <div key={s.id} className="card ori-card">
+                <div className="ori-top" onClick={() => onOpen && onOpen(s)} style={{ cursor: onOpen ? 'pointer' : 'default' }}>
+                  <span className="emp-av" style={{ background: 'var(--mint-100)', color: 'var(--green-800)' }}>{s.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="emp-name">{s.name}</div>
+                    <div className="emp-pos">{s.pos || '—'} · {s.dept}</div>
+                  </div>
+                  <span className={`ori-badge ${o.outcome}`}>{trC('ori.out_' + (o.outcome || 'pending'))}</span>
+                </div>
+                <div className="ori-facts">
+                  <div><span>{trC('ori.start')}</span><b>{o.startDate || '—'}</b></div>
+                  <div><span>{trC('ori.end')}</span><b>{HRD.orientationEnd(s) || '—'}</b></div>
+                  <div><span>{trC('ori.remaining')}</span><b>{decided ? '—' : `${remain} ${trC('co.sepDaysUnit')}`}</b></div>
+                  <div><span>{trC('ori.dailyWage')}</span><b className="tnum">{rpC(o.dailyWage || 0)}</b></div>
+                  <div><span>{trC('ori.estTotal')}</span><b className="tnum">{rpC(total)}</b></div>
+                  <div><span>{trC('ori.paidQ')}</span><b>{o.paid ? `✓ ${o.paidAt || ''}` : trC('ori.unpaid')}</b></div>
+                </div>
+                {canEdit && (
+                  <div className="ori-actions">
+                    {!decided && <button className="btn btn-primary" onClick={() => { if (confirm(trC('ori.gradConfirm', { n: s.name }))) onGraduate(s); }}><IconCheck s={15} />{trC('ori.graduate')}</button>}
+                    {!decided && <button className="btn btn-ghost" style={{ color: 'var(--neg)' }} onClick={() => { if (confirm(trC('ori.failConfirm', { n: s.name }))) onFail(s); }}><IconClose s={15} />{trC('ori.fail')}</button>}
+                    {!o.paid && total > 0 && <button className="btn btn-lime" onClick={() => pay(s)}><IconWallet s={15} />{trC('ori.pay')}</button>}
+                    <button className="btn btn-ghost" onClick={() => setSlip(s)}><IconInvoice s={15} />{trC('ori.slip')}</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {slip && <OrientationSlip staff={slip} onClose={() => setSlip(null)} />}
+    </div>
+  );
+}
+
 /* ---------- Employee Detail ---------- */
-function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, setCashbons, trainings, setTrainings, onRecordTraining, recordedTrainings, canAddEntry }) {
+function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, setCashbons, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
   const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
   const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
   const acc = uMc(() => CO.accountInfo(staffProp), [staffProp]);   // legacy fallback for fields not yet on the staff object
@@ -519,12 +576,10 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
   const kbCut = cycleTotal > 0; // deducted in full at this cycle's cutoff
   const saveCashbon = (cb) => { CO.addCashbon(cb); if (setCashbons) setCashbons(CO.loadCashbons()); setKbAdd(false); };
   const cancelCashbon = (id) => { if (confirm(trC('co.kasbonCancelConfirm'))) { CO.updateCashbon(id, { status: 'cancelled' }); if (setCashbons) setCashbons(CO.loadCashbons()); } };
-  // training records
-  const [trEdit, setTrEdit] = uSc(null); // null | 'new' | training object
-  const myTrainings = uMc(() => (trainings || []).filter((t) => t.employeeId === staff.id), [trainings, staff.id]);
-  const trTotalCost = myTrainings.reduce((a, t) => a + (+t.cost || 0), 0);
-  const saveTraining = (t) => { const exists = (trainings || []).some((x) => x.id === t.id); if (exists) CO.updateTraining(t.id, t); else CO.addTraining(t); if (setTrainings) setTrainings(CO.loadTrainings()); setTrEdit(null); };
-  const removeTraining = (id) => { if (confirm(trC('co.trRemoveConfirm'))) { CO.removeTraining(id); if (setTrainings) setTrainings(CO.loadTrainings()); } };
+  // orientation (new hire)
+  const [oriSlip, setOriSlip] = uSc(false);
+  const inOrientation = HRD.stageOf(staff) === 'orientation';
+  const ori = staff.orientation || {};
   // staff with auto late-penalty + overtime + this cycle's kasbon merged in
   const augStaff = uMc(() => {
     const manual = (staff.deductions || []).filter((d) => !d.auto);
@@ -661,32 +716,36 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
             </>
           )}
 
-          <div className="ed-section-t">{trC('co.training')}{myTrainings.length > 0 && <span className="ed-edit-hint">{myTrainings.length}{seeMoney && trTotalCost > 0 ? ` · ${rpC(trTotalCost)}` : ''}</span>}{canEdit && <button className="ed-acc-edit" onClick={() => setTrEdit('new')}><IconPlus s={12} />{trC('co.trAdd')}</button>}</div>
-          {myTrainings.length === 0 ? (
-            <div className="ed-empty">{trC('co.trNone')}</div>
-          ) : (
-            <div className="kb-list">
-              {myTrainings.map((t) => {
-                const recorded = (recordedTrainings || []).includes(t.id);
-                const stCls = t.status === 'done' ? 'tr-st-done' : t.status === 'ongoing' ? 'tr-st-ongoing' : 'tr-st-planned';
-                return (
-                  <div className="kb-row" key={t.id}>
-                    <div className="kb-main">
-                      <div className="kb-amt" style={{ fontSize: 13.5 }}>{t.title} <span className={`tr-status ${stCls}`}>{trC('co.tr' + t.status.charAt(0).toUpperCase() + t.status.slice(1))}</span></div>
-                      <div className="kb-sub">{t.provider ? t.provider + ' · ' : ''}{t.startDate}{t.endDate ? ' → ' + t.endDate : ''}{seeMoney && +t.cost > 0 ? ' · ' + rpC(t.cost) : ''}</div>
-                    </div>
-                    <div className="kb-right">
-                      {seeMoney && +t.cost > 0 && t.status === 'done' && (recorded
-                        ? <span className="kb-paid">{trC('co.trRecorded')}</span>
-                        : canAddEntry && onRecordTraining && <button className="tr-rec-btn" onClick={() => { if (confirm(trC('co.trRecordConfirm', { amt: rpC(t.cost) }))) onRecordTraining(t); }}>{trC('co.trRecord')}</button>)}
-                    </div>
-                    {canEdit && <button className="icon-btn" title={trC('co.editData')} onClick={() => setTrEdit(t)}><IconPencil s={14} /></button>}
-                    {canEdit && <button className="icon-btn del" title={trC('co.trRemove')} onClick={() => removeTraining(t.id)}><IconClose s={15} /></button>}
+          {inOrientation && (() => {
+            const end = HRD.orientationEnd(staff);
+            const served = HRD.orientationDaysServed(staff);
+            const remaining = HRD.orientationRemaining(staff, today);
+            const total = HRD.orientationTotal(staff);
+            const oc = ori.outcome || 'pending';
+            const ocCls = oc === 'passed' ? 'passed' : oc === 'failed' ? 'failed' : 'pending';
+            return (
+              <div>
+                <div className="ed-section-t">{trC('ori.section')}<span className={`ori-badge ${ocCls}`}>{trC('ori.out_' + oc)}</span></div>
+                <div className="ori-facts">
+                  <div><span>{trC('ori.start')}</span><b>{ori.startDate || '—'}</b></div>
+                  <div><span>{trC('ori.end')}</span><b>{end || '—'}</b></div>
+                  <div><span>{trC('ori.remaining')}</span><b>{remaining} {trC('ori.days')}</b></div>
+                  {seeMoney && <div><span>{trC('ori.dailyWage')}</span><b>{rpC(+ori.dailyWage || 0)}</b></div>}
+                  {seeMoney && <div><span>{trC('ori.daysServed')}</span><b>{served} {trC('ori.days')}</b></div>}
+                  {seeMoney && <div><span>{trC('ori.estTotal')}</span><b>{rpC(total)}</b></div>}
+                  <div><span>{trC('ori.paidQ')}</span><b>{ori.paid ? trC('ori.paidYes') + (ori.paidAt ? ' · ' + ori.paidAt : '') : trC('ori.unpaid')}</b></div>
+                </div>
+                {canEdit && (
+                  <div className="ori-actions">
+                    {oc === 'pending' && onGraduate && <button className="btn btn-primary" onClick={() => { if (confirm(trC('ori.gradConfirm', { n: staff.name }))) onGraduate(staff); }}>{trC('ori.graduate')}</button>}
+                    {oc === 'pending' && onFailOrientation && <button className="btn btn-danger" onClick={() => { if (confirm(trC('ori.failConfirm', { n: staff.name }))) onFailOrientation(staff); }}>{trC('ori.fail')}</button>}
+                    {!ori.paid && onPayOrientation && total > 0 && <button className="btn" onClick={() => { const rec = canAddEntry && confirm(trC('ori.payExpenseQ', { amt: rpC(total) })); onPayOrientation(staff, rec); }}>{trC('ori.pay')}</button>}
+                    <button className="btn" onClick={() => setOriSlip(true)}>{trC('ori.slip')}</button>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
 
           <div className="ed-section-t">{trC('co.account')}{canEdit && onSaveStaff && <button className="ed-acc-edit" onClick={() => setIdentEdit(true)}><IconPencil s={12} />{trC('co.editData')}</button>}</div>
           <div className="ed-acc-grid">
@@ -724,7 +783,7 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
           {kbAdd && <CashbonModal staff={staff} onSave={saveCashbon} onClose={() => setKbAdd(false)} />}
           {offboard && <OffboardModal staff={staff} rates={rates} cashbons={cashbons} onSave={doOffboard} onClose={() => setOffboard(false)} />}
           {settle && <SettlementSlip staff={staff} rates={rates} cashbons={cashbons} onClose={() => setSettle(false)} />}
-          {trEdit && <TrainingModal staff={staff} training={trEdit === 'new' ? null : trEdit} onSave={saveTraining} onClose={() => setTrEdit(null)} />}
+          {oriSlip && <OrientationSlip staff={staff} onClose={() => setOriSlip(false)} />}
         </div>
       </div>
     </div>
@@ -1285,7 +1344,7 @@ function HrCalendar({ staff, rates, events, setEvents, today, canEdit }) {
   );
 }
 
-window.COMPANY = { CompanyDashboard, HeadcountAffordability, ApprovalsCard, EmployeeDirectory, EmployeeDetail, RollCall, HRReport, ThrScreen, ProjectsScreen, HrCalendar };
+window.COMPANY = { CompanyDashboard, HeadcountAffordability, ApprovalsCard, EmployeeDirectory, EmployeeDetail, RollCall, HRReport, ThrScreen, ProjectsScreen, HrCalendar, OrientationScreen, OrientationSlip };
 
 function projDueInfo(p) {
   if (p.status === 'done' || !p.due) return null;

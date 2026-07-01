@@ -148,10 +148,14 @@ model Employee {
   // Offboarding. `active` is DERIVED: active = (status === "active"). Keep both in
   // sync (never contradictory). Non-active statuses exclude the employee from
   // active payroll/headcount but keep the record for history.
-  status           String  @default("active") // active | resigned | terminated | dishonorable | absconded | contract_ended | retired
+  status           String  @default("active") // active | resigned | terminated | dishonorable | absconded | contract_ended | retired | orientation_failed
   separationDate   String? // YYYY-MM-DD, last working day (effective date)
   separationReason String?
   separationNote   String?
+  // Employment-lifecycle stage — SEPARATE from `status` (which is still-working /
+  // how-they-left). New hires start in orientation and are excluded from monthly
+  // payroll (paid a lump sum instead) until promoted to probation/permanent.
+  stage      String   @default("orientation") // orientation | probation | permanent
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
 
@@ -173,6 +177,24 @@ model Employee {
   cashbons       Cashbon[]
   trainings      Training[]
   calendarEvents CalendarEvent[]
+  orientation    Orientation?
+}
+
+// ── New-hire orientation (paid daily, lump-sum at the end; separate from payroll) ──
+model Orientation {
+  id           String   @id @default(cuid())
+  employeeId   String   @unique
+  startDate    String // YYYY-MM-DD
+  durationDays Int      @default(7)
+  dailyWage    Int      @default(0)
+  endDate      String? // derived = startDate + durationDays
+  outcome      String   @default("pending") // pending | passed | failed
+  paid         Boolean  @default(false)
+  paidAt       String?
+  note         String   @default("")
+  createdAt    DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
 }
 
 // ── Unified HR calendar (holidays, leave, permits) ───────────────────────

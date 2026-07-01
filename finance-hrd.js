@@ -71,6 +71,10 @@
       addressKtp: '', addressDomisili: '', maritalStatus: 'TK', bank: '', account: '', phone: '',
       // offboarding (sepStatus, NOT `status` which is employment type Tetap/Kontrak)
       sepStatus: 'active', separationDate: '', separationReason: '', separationNote: '', active: true,
+      // lifecycle: new hires start in orientation (paid a daily lump sum, excluded
+      // from monthly payroll until promoted). Orientation data embedded 1:1.
+      stage: 'orientation',
+      orientation: { startDate: '', durationDays: 7, dailyWage: 0, outcome: 'pending', paid: false, paidAt: '', note: '' },
       _isNew: true,
     };
   }
@@ -224,7 +228,7 @@
   }
 
   // ---- Offboarding / separation (Tahap 4) ----
-  const SEP_STATUSES = ['resigned', 'terminated', 'dishonorable', 'absconded', 'contract_ended', 'retired'];
+  const SEP_STATUSES = ['resigned', 'terminated', 'dishonorable', 'absconded', 'contract_ended', 'retired', 'orientation_failed'];
   function isActive(s) { return (s.sepStatus || 'active') === 'active'; }
   function activeStaff(list) { return (list || []).filter(isActive); }
   function tenureYears(staff, asOfIso) {
@@ -249,9 +253,30 @@
     const factor = daysWorked / wd;
     return { included: true, factor, staff: prorateStaff(s, factor), daysWorked, workDays: wd };
   }
-  // Active + prorated staff list for a payroll month (drops those gone before it).
+  // ---- Lifecycle stage + new-hire orientation ----
+  const stageOf = (s) => s.stage || 'permanent';   // legacy rows (no stage) → permanent
+  function addDaysISO(iso, n) { const a = iso.split('-').map(Number); const dt = new Date(Date.UTC(a[0], a[1] - 1, a[2]) + n * 86400000); return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`; }
+  function daysBetweenISO(a, b) { const x = a.split('-').map(Number), y = b.split('-').map(Number); return Math.round((Date.UTC(y[0], y[1] - 1, y[2]) - Date.UTC(x[0], x[1] - 1, x[2])) / 86400000); }
+  // Orientation ends the day AFTER the last worked day (probation starts here).
+  function orientationEnd(staff) { const o = staff.orientation || {}; return o.startDate ? addDaysISO(o.startDate, +o.durationDays || 7) : ''; }
+  // Days actually served: full duration, unless failed & left early → up to exit day.
+  function orientationDaysServed(staff) {
+    const o = staff.orientation || {}; const dur = +o.durationDays || 7;
+    if (!o.startDate) return 0;
+    const end = addDaysISO(o.startDate, dur);
+    if (o.outcome === 'failed' && staff.separationDate && staff.separationDate < end) {
+      return Math.max(1, Math.min(daysBetweenISO(o.startDate, staff.separationDate) + 1, dur));
+    }
+    return dur;
+  }
+  function orientationTotal(staff) { return (+((staff.orientation || {}).dailyWage) || 0) * orientationDaysServed(staff); }
+  function orientationRemaining(staff, today) { const o = staff.orientation || {}; if (!o.startDate || !today) return 0; return Math.max(0, daysBetweenISO(today, addDaysISO(o.startDate, +o.durationDays || 7))); }
+
+  // Active + prorated staff list for a payroll month. EXCLUDES orientation-stage
+  // staff (they are paid via the orientation lump sum, never monthly payroll — no
+  // double pay) and those who left before this month; prorates the separation month.
   function payrollStaff(list, monthKey, rates) {
-    return (list || []).map((s) => prorateForMonth(s, monthKey, rates)).filter((r) => r.included).map((r) => r.staff);
+    return (list || []).filter((s) => stageOf(s) !== 'orientation').map((s) => prorateForMonth(s, monthKey, rates)).filter((r) => r.included).map((r) => r.staff);
   }
   function severance(staff, rates) {
     const rule = ((rates.severanceRules || {})[staff.sepStatus]) || { baseMonths: 0, perYearMonths: 0, capMonths: 0 };
@@ -287,5 +312,6 @@
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
     payCycle, cashbonCeiling, cashbonWeeklyMax, cashbonsInCycle, cashbonCycleTotal, cashbonOutstanding, withCashbon,
     SEP_STATUSES, isActive, activeStaff, tenureYears, prorateForMonth, payrollStaff, severance, finalSettlement,
+    stageOf, orientationEnd, orientationDaysServed, orientationTotal, orientationRemaining, addDaysISO,
   };
 })();

@@ -304,6 +304,34 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
     </div>
   );
 
+  // ── Orientation block (new hires start in orientation → paid a daily lump sum,
+  //    excluded from monthly payroll until passed to probation) ──
+  const oo = f.orientation || {};
+  const setOri = (patch) => set({ orientation: { ...(f.orientation || {}), ...patch } });
+  const oriDays = +oo.durationDays || 7;
+  const oriTotal = oriDays * (+oo.dailyWage || 0);
+  const orientationBlock = HRD.stageOf(f) === 'orientation' ? (
+    <div className="ori-newhire">
+      <div className="ed-grp-t">{trH('ori.section')}</div>
+      <div className="ori-nh-hint">{trH('ori.newHireHint')}</div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label className="ed-af"><span>{trH('ori.start')}</span><DP.DateField value={oo.startDate || ''} allowFuture onChange={(v) => setOri({ startDate: v })} /></label>
+        <div style={{ width: 120 }}>
+          <label className="fld-label" style={{ marginTop: 0 }}>{trH('ori.durationDays')}</label>
+          <input className="fld" inputMode="numeric" value={oriDays} onChange={(e) => setOri({ durationDays: Math.max(1, +e.target.value.replace(/\D/g, '') || 7) })} />
+        </div>
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <label className="fld-label" style={{ marginTop: 0 }}>{trH('ori.dailyWage')}</label>
+          <div className="amt-input" style={{ padding: '8px 13px' }}>
+            <span className="amt-rp" style={{ fontSize: 14 }}>Rp</span>
+            <input inputMode="numeric" style={{ fontSize: 16 }} value={oo.dailyWage ? (+oo.dailyWage).toLocaleString('id-ID') : ''} onChange={(e) => setOri({ dailyWage: +e.target.value.replace(/\D/g, '') || 0 })} />
+          </div>
+        </div>
+      </div>
+      <div className="ori-nh-total">{trH('ori.estTotal')}: <b>{rp(oriTotal)}</b> <span>({rp(+oo.dailyWage || 0)} × {oriDays} {trH('ori.days')})</span></div>
+    </div>
+  ) : null;
+
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div className={`modal-card wide ${ident ? 'staff-ident-modal' : ''}`} onClick={(e) => e.stopPropagation()}>
@@ -316,6 +344,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
           /* IDENTITY-first: profile fields prominent, salary optional/collapsed */
           <div className="staff-form-single">
             {nameField}
+            {orientationBlock}
             {identityBlock}
             <div className="staff-salary-toggle">
               <button type="button" onClick={() => setShowSalary((v) => !v)}>
@@ -331,6 +360,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
             <div className="staff-edit-grid">
               <div className="staff-form">
                 {nameField}
+                {orientationBlock}
                 {salaryBlock}
               </div>
               {breakdown}

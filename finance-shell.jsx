@@ -14,6 +14,7 @@ function navForRole(p) {
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
   if (p.employees) items.push({ id: 'employees', label: tr('nav.employees'), icon: 'IconCustomers', grp: 'hr' });
   if (p.employees) items.push({ id: 'hrcalendar', label: tr('nav.hrcalendar'), icon: 'IconCalendar', grp: 'hr' });
+  if (p.payroll) items.push({ id: 'orientation', label: tr('nav.orientation'), icon: 'IconUserCircle', grp: 'hr' });
   if (p.payroll && p.attendance) items.push({ id: 'headcount', label: tr('nav.headcount'), icon: 'IconUsersGroup', grp: 'hr' });
   if (p.payroll) items.push({ id: 'payroll', label: tr('nav.payroll'), icon: 'IconUsersGroup', grp: 'hr' });
   if (p.payroll) items.push({ id: 'thr', label: tr('nav.thr'), icon: 'IconCoinIn', grp: 'hr' });
@@ -65,7 +66,6 @@ function FApp() {
   const [transfers, setTransfers] = uSh(() => FS.loadTransfers());
   const [projects, setProjects] = uSh(() => CO.loadProjects());
   const [cashbons, setCashbons] = uSh(() => CO.loadCashbons());
-  const [trainings, setTrainings] = uSh(() => CO.loadTrainings());
   const [calEvents, setCalEvents] = uSh(() => CO.loadEvents());
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
@@ -85,7 +85,6 @@ function FApp() {
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
   uEh(() => { CO.saveProjects(projects); }, [projects]);
   uEh(() => { CO.saveCashbons(cashbons); }, [cashbons]);
-  uEh(() => { CO.saveTrainings(trainings); }, [trainings]);
   uEh(() => { CO.saveEvents(calEvents); }, [calEvents]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
@@ -100,7 +99,7 @@ function FApp() {
     setAccounts(FS.loadAccts()); setSetoran(FS.loadSetoran()); setFleet(FS.loadFleet());
     setTransfers(FS.loadTransfers());
     setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget());
-    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons()); setTrainings(CO.loadTrainings()); setCalEvents(CO.loadEvents());
+    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons()); setCalEvents(CO.loadEvents());
     setUsers(FS.loadUsers());
   };
 
@@ -137,17 +136,23 @@ function FApp() {
   }, [drawer]);
 
   const add = (e) => { setEntries((prev) => [e, ...prev]); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
-  // Training expenses already posted to the cash book (by training id) — prevents double posting.
-  const recordedTrainingIds = uMh(() => (entries || []).filter((e) => e.training).map((e) => e.training), [entries]);
-  // Record a completed training's cost as a cash-book expense (category Training). Confirmed in the UI, not automatic.
-  const recordTrainingExpense = (tng) => {
-    if (recordedTrainingIds.includes(tng.id) || !(+tng.cost > 0)) return;
-    const staffM = hrdStaff.find((s) => s.id === tng.employeeId);
-    const bank = accounts.find((a) => a.type === 'bank') || accounts[0] || {};
-    const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: 'Training', amount: +tng.cost || 0, acct: bank.id,
-      note: tr('co.trExpenseNote', { t: tng.title, n: staffM ? staffM.name : '' }), method: 'Transfer BCA', date: tng.endDate || tng.startDate || FIN.TODAY, time: '09:00', training: tng.id };
-    setEntries((prev) => [entry, ...prev]);
-    setToast(tr('toast.expenseSaved', { amt: FIN.fmt(entry.amount) }));
+  // Upsert one staff into the roster (used by orientation actions + detail edits).
+  const upsertStaff = (s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
+  // ---- Orientation actions (new-hire lifecycle) ----
+  const graduateOrientation = (s) => { upsertStaff({ ...s, stage: 'probation', orientation: { ...(s.orientation || {}), outcome: 'passed', endDate: HRD.orientationEnd(s) } }); setToast(tr('ori.toastPassed', { n: s.name })); };
+  const failOrientation = (s) => { upsertStaff({ ...s, orientation: { ...(s.orientation || {}), outcome: 'failed' }, sepStatus: 'orientation_failed', active: false, separationDate: FIN.TODAY, separationReason: tr('ori.failReason') }); setToast(tr('ori.toastFailed', { n: s.name })); };
+  // Orientation lump sum already posted to the cash book (by staff id) — no double post.
+  const orientationPaidIds = uMh(() => (entries || []).filter((e) => e.orientation).map((e) => e.orientation), [entries]);
+  const payOrientation = (s, alsoRecordExpense) => {
+    const total = HRD.orientationTotal(s);
+    upsertStaff({ ...s, orientation: { ...(s.orientation || {}), paid: true, paidAt: FIN.TODAY } });
+    if (alsoRecordExpense && total > 0 && !orientationPaidIds.includes(s.id)) {
+      const bank = accounts.find((a) => a.type === 'bank') || accounts[0] || {};
+      const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: 'Orientation', amount: total, acct: bank.id,
+        note: tr('ori.expenseNote', { n: s.name }), method: 'Transfer BCA', date: FIN.TODAY, time: '09:00', orientation: s.id };
+      setEntries((prev) => [entry, ...prev]);
+    }
+    setToast(tr('ori.toastPaid', { amt: FIN.fmt(total) }));
   };
   const del = (id) => { if (!p.delete) { setToast(tr('toast.onlyOwnerDelete')); return; } const e = entries.find((x) => x.id === id); if (e && !confirm(tr('toast.deleteConfirm', { n: e.note || '', amt: FIN.fmt(e.amount || 0) }))) return; setEntries((prev) => prev.filter((x) => x.id !== id)); setToast(tr('toast.deleted')); };
   const saveEdit = (upd) => { setEntries((prev) => prev.map((x) => x.id === upd.id ? upd : x)); setEditing(null); setToast(tr('toast.updated')); };
@@ -501,6 +506,10 @@ function FApp() {
             <COMPANY.HrCalendar staff={hrdStaff} rates={hrdRates} events={calEvents} setEvents={setCalEvents} today={FIN.TODAY} canEdit={p.attendance || p.payroll} />
           )}
 
+          {screen === 'orientation' && p.payroll && (
+            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={setHrdStaff} today={FIN.TODAY} canEdit={p.payroll} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
+          )}
+
           {screen === 'approvals' && p.approvals && (
             <div className="screen-enter"><COMPANY.ApprovalsCard approvals={approvals} setApprovals={setApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} /></div>
           )}
@@ -544,7 +553,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} trainings={trainings} setTrainings={setTrainings} onRecordTraining={recordTrainingExpense} recordedTrainings={recordedTrainingIds} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );

@@ -1204,6 +1204,25 @@ img, svg, canvas, video { max-width: 100%; }
 .tr-rec-btn { font-size: 11px; font-weight: 700; color: var(--green-700); background: var(--mint-100); padding: 4px 9px; border-radius: 8px; white-space: nowrap; }
 .tr-rec-btn:hover { background: var(--mint-200); }
 
+/* ── Orientation (new hires) ── */
+.ori-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.ori-card { padding: 15px 16px; }
+.ori-top { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+.ori-badge { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+.ori-badge.pending { color: var(--blue-700); background: #E3F2FB; }
+.ori-badge.passed { color: var(--green-700); background: var(--mint-100); }
+.ori-badge.failed { color: var(--neg); background: #FDEBEC; }
+.ori-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
+.ori-facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--border-soft); }
+.ori-facts > div span { color: var(--text-mut); }
+.ori-facts > div b { font-weight: 700; }
+.ori-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ori-newhire { margin: 6px 0 4px; padding: 12px 13px; border-radius: 12px; background: var(--card-soft); border: 1px solid var(--border-soft); }
+.ori-nh-hint { font-size: 12px; color: var(--text-mut); margin-bottom: 10px; line-height: 1.45; }
+.ori-nh-total { font-size: 13px; margin-top: 10px; }
+.ori-nh-total b { font-weight: 800; color: var(--green-700); }
+.ori-nh-total span { color: var(--text-mut); font-size: 12px; }
+
 /* ── HR Calendar ── */
 .hrcal-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
 .hrcal-month { font-family: 'Poppins'; font-size: 16px; font-weight: 700; min-width: 120px; text-align: center; }
