@@ -458,7 +458,7 @@ function FApp() {
           )}
 
           {screen === 'employees' && p.employees && (
-            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.payroll} seeMoney={p.seeMoney} />
+            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.payroll} seeMoney={p.seeMoney} setStaff={setHrdStaff} />
           )}
 
           {screen === 'approvals' && p.approvals && (
@@ -504,7 +504,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} />
       )}
     </div>
   );

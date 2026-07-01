@@ -300,10 +300,14 @@ function CompanyDashboard({ fin, staff, rates, budget, approvals, setApprovals, 
 }
 
 /* ---------- Employee Detail ---------- */
-function EmployeeDetail({ staff, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct }) {
-  const [att, setAtt] = uSc(() => CO.attendance(staff, monthKey, today));
-  const [acc, setAcc] = uSc(() => CO.accountInfo(staff));
-  const [accEdit, setAccEdit] = uSc(false);
+function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff }) {
+  const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
+  const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
+  const acc = uMc(() => CO.accountInfo(staffProp), [staffProp]);   // legacy fallback for fields not yet on the staff object
+  const [identEdit, setIdentEdit] = uSc(false);
+  // Identity value: prefer the staff object (single source of truth); fall back to legacy account-map.
+  const g = (k) => (staff[k] != null && staff[k] !== '') ? staff[k] : (acc[k] != null ? acc[k] : '');
+  const joined = staff.joinedDate || acc.joined || '';
   const STATUS = { present: { l: trC('att.present'), c: 'var(--green-700)', bg: 'var(--pos-bg)' }, late: { l: trC('att.late'), c: 'var(--warn)', bg: 'var(--sand-soft)' }, absent: { l: trC('att.absent'), c: 'var(--neg)', bg: 'var(--neg-bg)' }, leave: { l: trC('att.leave'), c: 'var(--blue-700)', bg: '#E3F2FB' }, off: { l: trC('att.off'), c: 'var(--text-mut)', bg: 'var(--card-soft)' }, none: { l: trC('att.none'), c: 'var(--text-faint)', bg: 'var(--card-soft)' } };
   const STATUS_OPTS = ['present', 'late', 'absent', 'leave', 'off'].map((v) => ({ value: v, label: STATUS[v].l }));
   // late penalty (auto, from attendance + rate policy)
@@ -319,20 +323,8 @@ function EmployeeDetail({ staff, rates, monthKey, today, seeMoney, canEdit, canE
   // keep the roster in sync so payroll/payslip reflect late penalty + overtime
   uEc(() => { if (onSyncDeduct) onSyncDeduct(staff.id, late.amount, trC('co.lateDeduct'), ot.amount); }, [late.amount, ot.amount]);
   const setDay = (date, status, patch) => { CO.setAttDay(staff.id, monthKey, date, status, patch); setAtt(CO.attendance(staff, monthKey, today)); };
-  const setAccField = (k, v) => { const next = { ...acc, [k]: v }; setAcc(next); CO.saveAccount(staff.id, { [k]: v }); };
-  // NIP is allocated server-side (race-safe & unique). Generated once; only the
-  // explicit button re-allocates — editing office/contract never changes it.
-  const [nipBusy, setNipBusy] = uSc(false);
-  const genNip = async () => {
-    if (nipBusy || !(window.API && window.API.employees)) { if (!window.API) alert(trC('co.nipOffline')); return; }
-    setNipBusy(true);
-    try {
-      const r = await window.API.employees.nip({ office: acc.office || 'AIRRO', contractStart: acc.contractStart || undefined });
-      if (r && r.data && r.data.nip) setAccField('nip', r.data.nip);
-      else alert(trC('co.nipOffline'));
-    } catch (e) { alert(trC('co.nipOffline')); }
-    finally { setNipBusy(false); }
-  };
+  // Identity edits go through the SHARED StaffModal → same hrdStaff array (single source of truth).
+  const saveIdentity = (s) => { setStaffLocal(s); if (onSaveStaff) onSaveStaff(s); setIdentEdit(false); };
   const deds = (staff.deductions || []).filter((d) => +d.amount > 0 && !d.auto);
   return (
     <div className="modal-scrim" onClick={onClose}>
@@ -343,7 +335,7 @@ function EmployeeDetail({ staff, rates, monthKey, today, seeMoney, canEdit, canE
             <div className="ed-name">{staff.name}</div>
             <div className="ed-pos">{staff.pos || '—'} · {staff.dept}</div>
           </div>
-          {canEdit && <button className="btn btn-lime ed-editbtn" onClick={onEdit}><IconPencil s={15} />{trC('co.editData')}</button>}
+          {canEdit && onSaveStaff && <button className="btn btn-lime ed-editbtn" onClick={() => setIdentEdit(true)}><IconPencil s={15} />{trC('co.editData')}</button>}
           <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
         </div>
 
@@ -401,88 +393,51 @@ function EmployeeDetail({ staff, rates, monthKey, today, seeMoney, canEdit, canE
 
           {seeMoney && (
             <>
-              <div className="ed-section-t">{trC('co.payrollSnap')}</div>
-              <div className="ed-pay-grid">
-                <div className="ed-pay"><span>{trC('hrd.gross')}</span><b className="tnum">{rpC(c.gross)}</b></div>
-                <div className="ed-pay"><span>{trC('hrd.cDeduct')}</span><b className="tnum amt-neg">−{rpC(c.employeeDeduct)}</b></div>
-                <div className="ed-pay hl"><span>{trC('hrd.cTakehome')}</span><b className="tnum amt-pos">{rpC(c.takeHome)}</b></div>
-                <div className="ed-pay"><span>{trC('hrd.cCost')}</span><b className="tnum">{rpC(c.companyCost)}</b></div>
-              </div>
+              <div className="ed-section-t">{trC('co.payrollSnap')}{canEdit && <button className="ed-acc-edit" onClick={onEdit}><IconCoinOut s={13} />{trC('co.setSalary')}</button>}</div>
+              {(+staff.base > 0) ? (
+                <div className="ed-pay-grid">
+                  <div className="ed-pay"><span>{trC('hrd.gross')}</span><b className="tnum">{rpC(c.gross)}</b></div>
+                  <div className="ed-pay"><span>{trC('hrd.cDeduct')}</span><b className="tnum amt-neg">−{rpC(c.employeeDeduct)}</b></div>
+                  <div className="ed-pay hl"><span>{trC('hrd.cTakehome')}</span><b className="tnum amt-pos">{rpC(c.takeHome)}</b></div>
+                  <div className="ed-pay"><span>{trC('hrd.cCost')}</span><b className="tnum">{rpC(c.companyCost)}</b></div>
+                </div>
+              ) : <div className="ed-empty">{trC('co.salaryNotSet')}</div>}
             </>
           )}
 
-          <div className="ed-section-t">{trC('co.account')}{canEditAtt && <button className="ed-acc-edit" onClick={() => setAccEdit(!accEdit)}>{accEdit ? <><IconCheck s={13} />{trC('co.done')}</> : <><IconPencil s={12} />{trC('co.editData')}</>}</button>}</div>
-          {accEdit ? (
-            <div className="ed-acc-form">
-              {/* ── Identitas ── */}
-              <div className="ed-grp-t">{trC('co.grpIdentity')}</div>
-              <label className="ed-af ed-af-wide"><span>{trC('co.nip')}</span>
-                <div className="ed-nip-row">
-                  <input value={acc.nip || ''} readOnly placeholder="—" />
-                  <button type="button" className="ed-nip-btn" disabled={nipBusy} onClick={genNip}>{nipBusy ? trC('co.nipBusy') : (acc.nip ? trC('co.regenNip') : trC('co.genNip'))}</button>
-                </div>
-              </label>
-              <label className="ed-af"><span>{trC('co.office')}</span><UI.Dropdown value={acc.office || 'AIRRO'} options={['AIRRO', 'NSN', 'MFG']} onChange={(v) => setAccField('office', v)} /></label>
-              <label className="ed-af"><span>{trC('co.maritalStatus')}</span><UI.Dropdown value={acc.maritalStatus || 'TK'} options={[{ value: 'TK', label: trC('co.mTK') }, { value: 'K', label: trC('co.mK') }, { value: 'Cerai', label: trC('co.mCerai') }]} onChange={(v) => setAccField('maritalStatus', v)} /></label>
-              <label className="ed-af"><span>NIK</span><input value={acc.nik} inputMode="numeric" onChange={(e) => setAccField('nik', e.target.value.replace(/\D/g, ''))} /></label>
-              <label className="ed-af"><span>{trC('co.noKk')}</span><input value={acc.noKk || ''} inputMode="numeric" onChange={(e) => setAccField('noKk', e.target.value.replace(/\D/g, ''))} /></label>
-              <label className="ed-af"><span>{trC('co.birthPlace')}</span><input value={acc.birthPlace || ''} onChange={(e) => setAccField('birthPlace', e.target.value)} /></label>
-              <label className="ed-af"><span>{trC('co.birthDate')}</span><DP.DateField value={acc.birthDate || ''} max={today} onChange={(v) => setAccField('birthDate', v)} /></label>
+          <div className="ed-section-t">{trC('co.account')}{canEdit && onSaveStaff && <button className="ed-acc-edit" onClick={() => setIdentEdit(true)}><IconPencil s={12} />{trC('co.editData')}</button>}</div>
+          <div className="ed-acc-grid">
+            {/* ── Identitas ── */}
+            <div className="ed-grp-t">{trC('co.grpIdentity')}</div>
+            <div className="ed-acc"><span>{trC('co.nip')}</span><b className="tnum">{g('nip') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.office')}</span><b>{g('office') || 'AIRRO'}</b></div>
+            <div className="ed-acc"><span>{trC('co.maritalStatus')}</span><b>{trC('co.m' + (g('maritalStatus') || 'TK'))}</b></div>
+            <div className="ed-acc"><span>NIK</span><b className="tnum">{g('nik') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.noKk')}</span><b className="tnum">{g('noKk') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.ttl')}</span><b>{g('birthPlace') || '—'}{g('birthDate') ? `, ${g('birthDate')}` : ''}</b></div>
 
-              {/* ── Kontrak ── */}
-              <div className="ed-grp-t">{trC('co.grpContract')}</div>
-              <label className="ed-af"><span>{trC('co.empStatus')}</span><UI.Dropdown value={acc.status} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => setAccField('status', v)} /></label>
-              <label className="ed-af"><span>{trC('co.noSurat')}</span><input value={acc.noSurat || ''} onChange={(e) => setAccField('noSurat', e.target.value)} /></label>
-              <label className="ed-af"><span>{trC('co.joined')}</span><DP.DateField value={acc.joined} max={today} onChange={(v) => setAccField('joined', v)} /></label>
-              <label className="ed-af"><span>{trC('co.contractStart')}</span><DP.DateField value={acc.contractStart || ''} allowFuture onChange={(v) => setAccField('contractStart', v)} /></label>
-              <label className="ed-af"><span>{trC('co.contractEnd')}</span><DP.DateField value={acc.contractEnd || ''} allowFuture onChange={(v) => setAccField('contractEnd', v)} /></label>
+            {/* ── Kontrak ── */}
+            <div className="ed-grp-t">{trC('co.grpContract')}</div>
+            <div className="ed-acc"><span>{trC('co.empStatus')}</span><b>{(g('status') || '—')} · {staff.jp ? 'JP' : trC('hrd.notenroll')}</b></div>
+            <div className="ed-acc"><span>{trC('co.noSurat')}</span><b>{g('noSurat') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.joined')}</span><b className="tnum">{joined || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.contractStart')}</span><b className="tnum">{g('contractStart') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.contractEnd')}</span><b className="tnum">{g('contractEnd') || '—'}</b></div>
+            <div className="ed-acc"><span>JKK</span><b>{staff.risk}</b></div>
 
-              {/* ── Alamat ── */}
-              <div className="ed-grp-t">{trC('co.grpAddress')}</div>
-              <label className="ed-af ed-af-wide"><span>{trC('co.addressKtp')}</span><input value={acc.addressKtp || ''} onChange={(e) => setAccField('addressKtp', e.target.value)} /></label>
-              <label className="ed-af ed-af-wide"><span>{trC('co.addressDomisili')}</span><input value={acc.addressDomisili || ''} onChange={(e) => setAccField('addressDomisili', e.target.value)} /></label>
-              <label className="ed-af"><span>{trC('co.phone')}</span><input value={acc.phone} inputMode="numeric" onChange={(e) => setAccField('phone', e.target.value.replace(/[^\d]/g, ''))} /></label>
+            {/* ── Alamat ── */}
+            <div className="ed-grp-t">{trC('co.grpAddress')}</div>
+            <div className="ed-acc ed-acc-wide"><span>{trC('co.addressKtp')}</span><b>{g('addressKtp') || '—'}</b></div>
+            <div className="ed-acc ed-acc-wide"><span>{trC('co.addressDomisili')}</span><b>{g('addressDomisili') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.phone')}</span><b className="tnum">{g('phone') || '—'}</b></div>
 
-              {/* ── BPJS & Bank ── */}
-              <div className="ed-grp-t">{trC('co.grpBpjs')}</div>
-              <label className="ed-af"><span>{trC('co.noBpjsKes')}</span><input value={acc.noBpjsKes || ''} inputMode="numeric" onChange={(e) => setAccField('noBpjsKes', e.target.value.replace(/\D/g, ''))} /></label>
-              <label className="ed-af"><span>{trC('co.noBpjsTk')}</span><input value={acc.noBpjsTk || ''} inputMode="numeric" onChange={(e) => setAccField('noBpjsTk', e.target.value.replace(/\D/g, ''))} /></label>
-              <label className="ed-af"><span>{trC('co.bank')}</span><UI.Dropdown value={acc.bank} options={['BCA', 'BRI', 'Mandiri', 'BNI', 'BSI', 'CIMB']} onChange={(v) => setAccField('bank', v)} /></label>
-              <label className="ed-af"><span>{trC('co.accNo')}</span><input value={acc.account} inputMode="numeric" onChange={(e) => setAccField('account', e.target.value.replace(/\D/g, ''))} /></label>
-            </div>
-          ) : (
-            <div className="ed-acc-grid">
-              {/* ── Identitas ── */}
-              <div className="ed-grp-t">{trC('co.grpIdentity')}</div>
-              <div className="ed-acc"><span>{trC('co.nip')}</span><b className="tnum">{acc.nip || '—'}</b></div>
-              <div className="ed-acc"><span>{trC('co.office')}</span><b>{acc.office || 'AIRRO'}</b></div>
-              <div className="ed-acc"><span>{trC('co.maritalStatus')}</span><b>{trC('co.m' + (acc.maritalStatus || 'TK'))}</b></div>
-              <div className="ed-acc"><span>NIK</span><b className="tnum">{acc.nik}</b></div>
-              <div className="ed-acc"><span>{trC('co.noKk')}</span><b className="tnum">{acc.noKk || '—'}</b></div>
-              <div className="ed-acc"><span>{trC('co.ttl')}</span><b>{acc.birthPlace || '—'}{acc.birthDate ? `, ${acc.birthDate}` : ''}</b></div>
-
-              {/* ── Kontrak ── */}
-              <div className="ed-grp-t">{trC('co.grpContract')}</div>
-              <div className="ed-acc"><span>{trC('co.empStatus')}</span><b>{acc.status} · {staff.jp ? 'JP' : trC('hrd.notenroll')}</b></div>
-              <div className="ed-acc"><span>{trC('co.noSurat')}</span><b>{acc.noSurat || '—'}</b></div>
-              <div className="ed-acc"><span>{trC('co.joined')}</span><b className="tnum">{acc.joined}</b></div>
-              <div className="ed-acc"><span>{trC('co.contractStart')}</span><b className="tnum">{acc.contractStart || '—'}</b></div>
-              <div className="ed-acc"><span>{trC('co.contractEnd')}</span><b className="tnum">{acc.contractEnd || '—'}</b></div>
-              <div className="ed-acc"><span>JKK</span><b>{staff.risk}</b></div>
-
-              {/* ── Alamat ── */}
-              <div className="ed-grp-t">{trC('co.grpAddress')}</div>
-              <div className="ed-acc ed-acc-wide"><span>{trC('co.addressKtp')}</span><b>{acc.addressKtp || '—'}</b></div>
-              <div className="ed-acc ed-acc-wide"><span>{trC('co.addressDomisili')}</span><b>{acc.addressDomisili || '—'}</b></div>
-              <div className="ed-acc"><span>{trC('co.phone')}</span><b className="tnum">{acc.phone}</b></div>
-
-              {/* ── BPJS & Bank ── */}
-              <div className="ed-grp-t">{trC('co.grpBpjs')}</div>
-              <div className="ed-acc"><span>{trC('co.noBpjsKes')}</span><b className="tnum">{acc.noBpjsKes || '—'}</b></div>
-              <div className="ed-acc"><span>{trC('co.noBpjsTk')}</span><b className="tnum">{acc.noBpjsTk || '—'}</b></div>
-              <div className="ed-acc"><span>{trC('co.bank')}</span><b>{acc.bank} · {acc.account}</b></div>
-            </div>
-          )}
+            {/* ── BPJS & Bank ── */}
+            <div className="ed-grp-t">{trC('co.grpBpjs')}</div>
+            <div className="ed-acc"><span>{trC('co.noBpjsKes')}</span><b className="tnum">{g('noBpjsKes') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.noBpjsTk')}</span><b className="tnum">{g('noBpjsTk') || '—'}</b></div>
+            <div className="ed-acc"><span>{trC('co.bank')}</span><b>{(g('bank') || '—')}{g('account') ? ` · ${g('account')}` : ''}</b></div>
+          </div>
+          {identEdit && <PAYROLL.StaffModal staff={staff} rates={rates} variant="identity" onSave={saveIdentity} onClose={() => setIdentEdit(false)} />}
         </div>
       </div>
     </div>
@@ -490,10 +445,17 @@ function EmployeeDetail({ staff, rates, monthKey, today, seeMoney, canEdit, canE
 }
 
 /* ---------- Employee Directory ---------- */
-function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canEdit, seeMoney }) {
+function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canEdit, seeMoney, setStaff }) {
   const [q, setQ] = uSc('');
   const [dept, setDept] = uSc('All');
+  const [editing, setEditing] = uSc(null);
   const depts = ['All', ...HRD.DEPARTMENTS];
+  // Writes to the SAME hrdStaff array → instantly visible in Payroll too.
+  const saveStaff = (s) => {
+    setStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
+    setEditing(null);
+  };
+  const addStaff = () => setEditing(HRD.newStaff());
   let rows = staff;
   if (dept !== 'All') rows = rows.filter((s) => s.dept === dept);
   if (q) rows = rows.filter((s) => (s.name + (s.pos || '') + (s.dept || '')).toLowerCase().includes(q.toLowerCase()));
@@ -510,6 +472,7 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
         <div className="dept-chips">
           {depts.map((d) => <button key={d} className={`dept-chip ${dept === d ? 'on' : ''}`} onClick={() => setDept(d)}>{d === 'All' ? trC('co.allDepts') : d}</button>)}
         </div>
+        {canEdit && setStaff && <button className="btn btn-primary emp-add-btn" onClick={addStaff}><IconPlus s={16} />{trC('hrd.addEmp')}</button>}
       </div>
       {order.length === 0 && <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}>{trC('entries.none')}</div>}
       {order.map((d) => (
@@ -523,18 +486,21 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
                   <span className="emp-av" style={{ background: 'var(--mint-100)', color: 'var(--green-800)' }}>{s.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="emp-name">{s.name}</div>
-                    <div className="emp-pos">{s.pos || '—'}</div>
+                    <div className="emp-pos">{s.nip ? <span className="emp-nip">{s.nip}</span> : null}{s.nip ? ' · ' : ''}{s.pos || '—'}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div className="tnum emp-thp">{rpC(c.takeHome)}</div>
-                    <div className="emp-thp-l">{trC('hrd.cTakehome')}</div>
+                    {(+s.base > 0)
+                      ? <><div className="tnum emp-thp">{rpC(c.takeHome)}</div><div className="emp-thp-l">{trC('hrd.cTakehome')}</div></>
+                      : <div className="emp-thp-unset">{trC('co.salaryNotSet')}</div>}
                   </div>
+                  {canEdit && setStaff && <button className="emp-card-edit" title={trC('co.editData')} onClick={(e) => { e.stopPropagation(); setEditing(s); }}><IconPencil s={15} /></button>}
                 </div>
               );
             })}
           </div>
         </div>
       ))}
+      {editing && <PAYROLL.StaffModal staff={editing} rates={rates} variant="identity" onSave={saveStaff} onClose={() => setEditing(null)} />}
     </div>
   );
 }
@@ -632,7 +598,7 @@ function HRReport({ staff, rates, budget, monthKey, today, approvals, gran, anch
   // workforce composition
   const comp = uMc(() => {
     const status = {}, risk = {};
-    staff.forEach((s) => { const ac = CO.accountInfo(s); status[ac.status] = (status[ac.status] || 0) + 1; risk[s.risk] = (risk[s.risk] || 0) + 1; });
+    staff.forEach((s) => { const ac = CO.accountInfo(s); const st = s.status || ac.status; status[st] = (status[st] || 0) + 1; risk[s.risk] = (risk[s.risk] || 0) + 1; });
     return { status, risk };
   }, [staff]);
   // 6-month attendance-rate trend
@@ -782,8 +748,9 @@ function HRReport({ staff, rates, budget, monthKey, today, approvals, gran, anch
 /* ---------- THR slip (printable) ---------- */
 function ThrSlip({ row, onClose }) {
   const { s, acc, thr } = row;
+  const joined = row.joined || acc.joined;
   uEc(() => { document.body.classList.add('payslip-open'); const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => { document.body.classList.remove('payslip-open'); window.removeEventListener('keydown', o); }; }, []);
-  const niceHol = (() => { const d = new Date((thr.holiday || acc.joined) + 'T00:00'); return `${d.getDate()} ${PERIOD.mon(d.getMonth())} ${d.getFullYear()}`; })();
+  const niceHol = (() => { const d = new Date((thr.holiday || joined) + 'T00:00'); return `${d.getDate()} ${PERIOD.mon(d.getMonth())} ${d.getFullYear()}`; })();
   return (
     <div className="modal-scrim payslip-overlay" onClick={onClose}>
       <div className="payslip-sheet" onClick={(e) => e.stopPropagation()}>
@@ -796,7 +763,7 @@ function ThrSlip({ row, onClose }) {
         </div>
         <div className="ps-emp">
           <div><div className="ps-emp-name">{s.name}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{s.pos || '—'} · {s.dept}</div></div>
-          <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-mut)' }}>{trC('hrd.religion')}: <b>{s.religion || 'Islam'}</b><br />{trC('thr.joined')}: <b>{acc.joined}</b></div>
+          <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-mut)' }}>{trC('hrd.religion')}: <b>{s.religion || 'Islam'}</b><br />{trC('thr.joined')}: <b>{joined}</b></div>
         </div>
         <div className="ps-cols" style={{ gridTemplateColumns: '1fr' }}>
           <div className="ps-col">
@@ -823,7 +790,7 @@ function ThrScreen({ staff, rates, setRates, today, posted, onPost, canPost, can
   const setHoliday = (rel, iso) => { if (setRates) setRates({ ...rates, holidayDates: { ...holidays, [rel]: iso } }); };
   const setShare = (rel, v) => { if (setRates) setRates({ ...rates, holidayShare: { ...shares, [rel]: v } }); };
   const refFor = (s) => holidays[s.religion || 'Islam'] || today;
-  const rows = staff.map((s) => { const acc = CO.accountInfo(s); const ref = refFor(s); const t = HRD.thr(s, acc.joined, ref); const sh = shareOf(s.religion || 'Islam'); t.holiday = ref; t.share = sh; t.fullAmount = t.amount; t.amount = Math.round(t.amount * sh); return { s, acc, thr: t }; });
+  const rows = staff.map((s) => { const acc = CO.accountInfo(s); const joined = s.joinedDate || acc.joined; const ref = refFor(s); const t = HRD.thr(s, joined, ref); const sh = shareOf(s.religion || 'Islam'); t.holiday = ref; t.share = sh; t.fullAmount = t.amount; t.amount = Math.round(t.amount * sh); return { s, acc, joined, thr: t }; });
   const total = rows.reduce((a, r) => a + r.thr.amount, 0);
   const eligible = rows.filter((r) => r.thr.eligible).length;
   const fullMo = rows.filter((r) => r.thr.months >= 12).length;
@@ -837,7 +804,7 @@ function ThrScreen({ staff, rates, setRates, today, posted, onPost, canPost, can
     const head = ['Employee', 'Department', 'Religion', 'Holiday date', 'Portion', 'Joined', 'Months of service', 'Eligibility', 'Monthly (base+allowance)', 'THR amount'];
     const esc = (v) => '"' + String(v).replace(/"/g, '""') + '"';
     const lines = [head.join(',')];
-    rows.forEach((r) => lines.push([esc(r.s.name), esc(r.s.dept), r.s.religion || 'Islam', r.thr.holiday, Math.round(r.thr.share * 100) + '%', r.acc.joined, r.thr.months, r.thr.months >= 12 ? 'Full (1x)' : r.thr.eligible ? 'Prorated' : 'Not eligible', r.thr.monthly, r.thr.amount].join(',')));
+    rows.forEach((r) => lines.push([esc(r.s.name), esc(r.s.dept), r.s.religion || 'Islam', r.thr.holiday, Math.round(r.thr.share * 100) + '%', r.joined, r.thr.months, r.thr.months >= 12 ? 'Full (1x)' : r.thr.eligible ? 'Prorated' : 'Not eligible', r.thr.monthly, r.thr.amount].join(',')));
     lines.push(['TOTAL', '', '', '', '', '', '', '', '', total].join(','));
     const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a');

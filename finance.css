@@ -1121,3 +1121,24 @@ img, svg, canvas, video { max-width: 100%; }
   /* label & sub sit right under the number */
   .stat-box > div:nth-child(n+3) { margin-top: 0 !important; line-height: 1.2; }
 }
+
+/* ── Employee Directory: add button, per-card edit, salary-unset ── */
+.emp-toolbar { flex-wrap: wrap; }
+.emp-add-btn { margin-left: auto; }
+.emp-card { position: relative; }
+.emp-card-edit { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--text-faint); background: transparent; opacity: 0; transition: opacity .14s, background .14s, color .14s; }
+.emp-card:hover .emp-card-edit { opacity: 1; }
+.emp-card-edit:hover { background: var(--mint-100); color: var(--green-700); }
+.emp-nip { font-family: 'Inter'; font-weight: 700; color: var(--green-700); letter-spacing: .02em; }
+.emp-thp-unset { display: inline-block; font-size: 11.5px; font-weight: 700; color: var(--warn); background: var(--sand-soft); padding: 4px 9px; border-radius: 8px; white-space: nowrap; }
+
+/* ── Shared StaffModal: identity variant + salary toggle ── */
+.staff-ident-modal { max-width: 640px; }
+.staff-form-single { padding: 2px 2px 0; }
+.staff-salary-toggle { margin: 14px 0 4px; }
+.staff-salary-toggle button { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700; color: var(--green-700); padding: 8px 13px; border-radius: 10px; background: var(--mint-100); transition: background .14s; }
+.staff-salary-toggle button:hover { background: var(--mint-200); }
+.salary-unset-badge { margin-left: 2px; font-size: 10.5px; font-weight: 700; color: var(--warn); background: var(--sand-soft); padding: 2px 7px; border-radius: 999px; }
+.staff-salary-wrap { display: grid; grid-template-columns: 1fr 300px; gap: 18px; margin-top: 8px; align-items: start; }
+@media (max-width: 720px) { .staff-salary-wrap { grid-template-columns: 1fr; } .staff-ident-modal { max-width: none; } }
+@media (max-width: 560px) { .emp-card-edit { opacity: 1; } .emp-add-btn { margin-left: 0; width: 100%; justify-content: center; } }

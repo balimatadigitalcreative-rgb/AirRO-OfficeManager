@@ -44,6 +44,19 @@
   function saveStaff(s) { try { localStorage.setItem(STAFF_KEY, JSON.stringify(s)); } catch (e) {} }
   function resetStaff() { const seed = JSON.parse(JSON.stringify(DEFAULT_STAFF)); saveStaff(seed); return seed; }
   const newStaffId = () => 's' + Date.now().toString(36) + Math.floor(Math.random() * 1e3).toString(36);
+  // Canonical blank staff object — the SINGLE shape used by both the Payroll form
+  // and the Employee Directory form, so fields never drift apart. Salary fields
+  // default to 0 ("gaji belum diatur"); identity fields default blank.
+  function newStaff() {
+    return {
+      id: newStaffId(), name: '', pos: '', dept: DEPARTMENTS[0],
+      base: 0, allowance: 0, risk: 'Low', jp: true, religion: 'Islam', pph: 0, offDays: 0, deductions: [],
+      nip: '', office: 'AIRRO', status: 'Tetap', noSurat: '', joinedDate: '', contractStart: '', contractEnd: '',
+      nik: '', noKk: '', noBpjsKes: '', noBpjsTk: '', birthPlace: '', birthDate: '',
+      addressKtp: '', addressDomisili: '', maritalStatus: 'TK', bank: '', account: '', phone: '',
+      _isNew: true,
+    };
+  }
   const newDedId = () => 'd' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
 
   function loadBudget() { try { const b = localStorage.getItem(BUDGET_KEY); if (b != null) return +b || DEFAULT_BUDGET; } catch (e) {} return DEFAULT_BUDGET; }
@@ -142,7 +155,7 @@
 
   window.HRD = {
     RATES_KEY, STAFF_KEY, JKK, DEFAULT_RATES, DEFAULT_STAFF, DEPARTMENTS, DEFAULT_BUDGET,
-    loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newDedId,
+    loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newStaff, newDedId,
     loadBudget, saveBudget, affordability, simulateHire, thr,
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
   };

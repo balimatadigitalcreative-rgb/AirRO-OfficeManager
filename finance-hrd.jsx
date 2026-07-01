@@ -127,18 +127,39 @@ function RatesPanel({ rates, onChange, onReset }) {
 }
 
 /* ---------------- Staff edit modal ---------------- */
-function StaffModal({ staff, rates, onSave, onClose }) {
+// Shared add/edit form for an employee — used BOTH in Payroll (variant="payroll",
+// salary emphasized) and the Employee Directory / detail (variant="identity",
+// identity emphasized). Both write the SAME fields to one staff object so the
+// single hrdStaff array stays the only source of truth.
+function StaffModal({ staff, rates, onSave, onClose, variant }) {
+  const ident = variant === 'identity';
   const [f, setF] = uShr(staff);
+  const [showSalary, setShowSalary] = uShr(!ident);   // identity: salary collapsed
+  const [showIdent, setShowIdent] = uShr(true);        // payroll: identity shown below salary
+  const [nipBusy, setNipBusy] = uShr(false);
   uEhr(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const set = (patch) => setF({ ...f, ...patch });
+  const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
   const dedList = (Array.isArray(f.deductions) ? f.deductions : []).filter((d) => !d.auto);
   const autoDed = (Array.isArray(f.deductions) ? f.deductions : []).filter((d) => d.auto);
   const updDed = (i, patch) => { const l = dedList.slice(); l[i] = { ...l[i], ...patch }; set({ deductions: [...l, ...autoDed] }); };
   const addDed = () => set({ deductions: [...dedList, { id: HRD.newDedId(), label: '', amount: 0 }, ...autoDed] });
   const removeDed = (i) => { const l = dedList.slice(); l.splice(i, 1); set({ deductions: [...l, ...autoDed] }); };
-  const valid = f.name.trim() && f.base > 0;
+  const valid = (f.name || '').trim();   // name required; salary may be 0 ("belum diatur")
   const c = HRD.compute(f, rates);
   const dr = Math.round(c.dailyRate);
+  const salaryUnset = !(+f.base > 0);
+  // NIP is allocated server-side (race-safe & unique); never typed manually.
+  const genNip = async () => {
+    if (nipBusy) return;
+    if (!(window.API && window.API.employees)) { alert(trH('co.nipOffline')); return; }
+    setNipBusy(true);
+    try {
+      const r = await window.API.employees.nip({ office: f.office || 'AIRRO', contractStart: f.contractStart || undefined });
+      if (r && r.data && r.data.nip) set({ nip: r.data.nip }); else alert(trH('co.nipOffline'));
+    } catch (e) { alert(trH('co.nipOffline')); }
+    finally { setNipBusy(false); }
+  };
   const money = (label, key) => (
     <div style={{ flex: 1, minWidth: 0 }}>
       <label className="fld-label" style={{ marginTop: 0 }}>{label}</label>
@@ -148,86 +169,161 @@ function StaffModal({ staff, rates, onSave, onClose }) {
       </div>
     </div>
   );
+
+  // ── Identity block (grouped Identitas / Kepegawaian / Alamat / BPJS) ──
+  const identityBlock = (
+    <div className="ed-acc-form" style={{ marginTop: 6 }}>
+      <div className="ed-grp-t">{trH('co.grpIdentity')}</div>
+      <label className="ed-af ed-af-wide"><span>{trH('co.nip')}</span>
+        <div className="ed-nip-row">
+          <input value={f.nip || ''} readOnly placeholder="—" />
+          <button type="button" className="ed-nip-btn" disabled={nipBusy} onClick={genNip}>{nipBusy ? trH('co.nipBusy') : (f.nip ? trH('co.regenNip') : trH('co.genNip'))}</button>
+        </div>
+      </label>
+      <label className="ed-af"><span>{trH('co.office')}</span><UI.Dropdown value={f.office || 'AIRRO'} options={['AIRRO', 'NSN', 'MFG']} onChange={(v) => set({ office: v })} /></label>
+      <label className="ed-af"><span>{trH('co.maritalStatus')}</span><UI.Dropdown value={f.maritalStatus || 'TK'} options={[{ value: 'TK', label: trH('co.mTK') }, { value: 'K', label: trH('co.mK') }, { value: 'Cerai', label: trH('co.mCerai') }]} onChange={(v) => set({ maritalStatus: v })} /></label>
+      <label className="ed-af"><span>NIK</span><input value={f.nik || ''} inputMode="numeric" onChange={(e) => set({ nik: e.target.value.replace(/\D/g, '') })} /></label>
+      <label className="ed-af"><span>{trH('co.noKk')}</span><input value={f.noKk || ''} inputMode="numeric" onChange={(e) => set({ noKk: e.target.value.replace(/\D/g, '') })} /></label>
+      <label className="ed-af"><span>{trH('co.birthPlace')}</span><input value={f.birthPlace || ''} onChange={(e) => set({ birthPlace: e.target.value })} /></label>
+      <label className="ed-af"><span>{trH('co.birthDate')}</span><DP.DateField value={f.birthDate || ''} max={today} onChange={(v) => set({ birthDate: v })} /></label>
+      <label className="ed-af"><span>{trH('hrd.religion')}</span><UI.Dropdown value={f.religion || 'Islam'} options={HRD.RELIGIONS} onChange={(v) => set({ religion: v })} /></label>
+
+      <div className="ed-grp-t">{trH('co.grpContract')}</div>
+      <label className="ed-af"><span>{trH('hrd.position')}</span><input value={f.pos || ''} placeholder="e.g. Sopir" onChange={(e) => set({ pos: e.target.value })} /></label>
+      <label className="ed-af"><span>{trH('hrd.dept')}</span><UI.Dropdown value={f.dept || HRD.DEPARTMENTS[0]} options={HRD.DEPARTMENTS} onChange={(v) => set({ dept: v })} /></label>
+      <label className="ed-af"><span>{trH('co.empStatus')}</span><UI.Dropdown value={f.status || 'Tetap'} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => set({ status: v })} /></label>
+      <label className="ed-af"><span>{trH('co.noSurat')}</span><input value={f.noSurat || ''} onChange={(e) => set({ noSurat: e.target.value })} /></label>
+      <label className="ed-af"><span>{trH('co.joined')}</span><DP.DateField value={f.joinedDate || ''} max={today} onChange={(v) => set({ joinedDate: v })} /></label>
+      <label className="ed-af"><span>{trH('co.contractStart')}</span><DP.DateField value={f.contractStart || ''} allowFuture onChange={(v) => set({ contractStart: v })} /></label>
+      <label className="ed-af"><span>{trH('co.contractEnd')}</span><DP.DateField value={f.contractEnd || ''} allowFuture onChange={(v) => set({ contractEnd: v })} /></label>
+
+      <div className="ed-grp-t">{trH('co.grpAddress')}</div>
+      <label className="ed-af ed-af-wide"><span>{trH('co.addressKtp')}</span><input value={f.addressKtp || ''} onChange={(e) => set({ addressKtp: e.target.value })} /></label>
+      <label className="ed-af ed-af-wide"><span>{trH('co.addressDomisili')}</span><input value={f.addressDomisili || ''} onChange={(e) => set({ addressDomisili: e.target.value })} /></label>
+      <label className="ed-af"><span>{trH('co.phone')}</span><input value={f.phone || ''} inputMode="numeric" onChange={(e) => set({ phone: e.target.value.replace(/[^\d]/g, '') })} /></label>
+
+      <div className="ed-grp-t">{trH('co.grpBpjs')}</div>
+      <label className="ed-af"><span>{trH('co.noBpjsKes')}</span><input value={f.noBpjsKes || ''} inputMode="numeric" onChange={(e) => set({ noBpjsKes: e.target.value.replace(/\D/g, '') })} /></label>
+      <label className="ed-af"><span>{trH('co.noBpjsTk')}</span><input value={f.noBpjsTk || ''} inputMode="numeric" onChange={(e) => set({ noBpjsTk: e.target.value.replace(/\D/g, '') })} /></label>
+      <label className="ed-af"><span>{trH('co.bank')}</span><UI.Dropdown value={f.bank || 'BCA'} options={['BCA', 'BRI', 'Mandiri', 'BNI', 'BSI', 'CIMB']} onChange={(v) => set({ bank: v })} /></label>
+      <label className="ed-af"><span>{trH('co.accNo')}</span><input value={f.account || ''} inputMode="numeric" onChange={(e) => set({ account: e.target.value.replace(/\D/g, '') })} /></label>
+    </div>
+  );
+
+  // ── Salary block (base / allowance / jp / risk / pph / deductions) ──
+  const salaryBlock = (
+    <div className="staff-salary-fields">
+      <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>{money(trH('hrd.basesal'), 'base')}{money(trH('hrd.allowance'), 'allowance')}</div>
+      <label className="hrd-toggle">
+        <input type="checkbox" checked={!!f.jp} onChange={(e) => set({ jp: e.target.checked })} />
+        <span>{trH('hrd.enrollJp')}</span>
+      </label>
+      <div style={{ display: 'flex', gap: 12, marginTop: 14, alignItems: 'flex-end' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <label className="fld-label" style={{ marginTop: 0 }}>{trH('hrd.riskClass')}</label>
+          <UI.Dropdown value={f.risk} options={HRD.RISK_LEVELS} onChange={(v) => set({ risk: v })} />
+        </div>
+        {money(trH('hrd.pph'), 'pph')}
+      </div>
+      <div className="hrd-deduct-block">
+        <div className="hrd-deduct-title">{trH('hrd.attendDeduct')}</div>
+        <label className="fld-label" style={{ marginTop: 0 }}>{trH('hrd.unpaiddays')}</label>
+        <input className="fld" style={{ maxWidth: 140 }} inputMode="numeric" value={f.offDays || 0} onChange={(e) => set({ offDays: Math.max(0, +e.target.value.replace(/\D/g, '') || 0) })} />
+        <div className="fld-hint">{f.offDays > 0 ? trH('hrd.dailyHintOff', { dr: rp(dr), wd: rates.workDays || 26, n: f.offDays, ded: rp(c.absenceDeduct) }) : trH('hrd.dailyHint', { dr: rp(dr), wd: rates.workDays || 26 })}</div>
+
+        <div className="ded-list-head">{trH('hrd.otherDeducts')} <span>{trH('hrd.otherHint')}</span></div>
+        {dedList.length === 0 && <div className="ded-empty">{trH('hrd.noDeducts')}</div>}
+        {dedList.map((d, i) => (
+          <div className="ded-row" key={d.id || i}>
+            <input className="fld ded-label" value={d.label} placeholder={trH('hrd.dedPh', { n: i + 1 })} onChange={(e) => updDed(i, { label: e.target.value })} />
+            <div className="amt-input ded-amt" style={{ padding: '8px 11px' }}>
+              <span className="amt-rp" style={{ fontSize: 13 }}>Rp</span>
+              <input inputMode="numeric" style={{ fontSize: 14 }} value={d.amount ? (+d.amount).toLocaleString('id-ID') : ''} onChange={(e) => updDed(i, { amount: +e.target.value.replace(/\D/g, '') || 0 })} />
+            </div>
+            <button className="icon-btn del" title="Remove" onClick={() => removeDed(i)}><IconClose s={15} /></button>
+          </div>
+        ))}
+        <button className="add-ded-btn" onClick={addDed}><IconPlus s={15} />{trH('hrd.addDeduct')}</button>
+      </div>
+    </div>
+  );
+
+  const breakdown = (
+    <div className="staff-breakdown">
+      <div className="sb-head"><IconInvoice s={16} />{trH('hrd.live')}</div>
+      <div className="sb-sec">{trH('hrd.earnings')}</div>
+      <SBRow label={trH('hrd.baseShort')} val={c.base} />
+      <SBRow label={trH('hrd.allowShort')} val={c.allow} />
+      <SBRow label={trH('hrd.gross')} val={c.gross} strong />
+      <div className="sb-sec">{trH('hrd.deductFrom')} <em>{trH('hrd.deductFromEm')}</em></div>
+      <SBRow label={`BPJS Kesehatan · ${pctStr(rates.kesEmployee)}`} val={c.kesEmployee} neg />
+      <SBRow label={`JHT · ${pctStr(rates.jhtEmployee)}`} val={c.jhtEmployee} neg />
+      {f.jp
+        ? <SBRow label={`JP · ${pctStr(rates.jpEmployee)}`} val={c.jpEmployee} neg />
+        : <SBRow label="JP" val={0} muted note={trH('hrd.notenroll')} />}
+      {c.pph > 0 && <SBRow label="PPh 21" val={c.pph} neg />}
+      {c.absenceDeduct > 0 && <SBRow label={trH('hrd.unpaidleave', { n: c.offDays, dr: rp(dr) })} val={c.absenceDeduct} neg />}
+      {c.deductions.filter((d) => +d.amount > 0).map((d, i) => <SBRow key={d.id || i} label={d.label || trH('hrd.dedPh', { n: i + 1 })} val={+d.amount} neg />)}
+      <SBRow label={trH('hrd.totaldeduct')} val={c.employeeDeduct} strong neg />
+      <div className="sb-thp"><span>{trH('hrd.thp')}</span><span className="tnum">{rp(c.takeHome)}</span></div>
+      <div className="sb-sec">{trH('hrd.employerTop')} <em>{trH('hrd.bpjsParen')}</em></div>
+      <SBRow label={`Kesehatan · ${pctStr(rates.kesEmployer)}`} val={c.kesEmployer} />
+      <SBRow label={`JHT · ${pctStr(rates.jhtEmployer)}`} val={c.jhtEmployer} />
+      {f.jp && <SBRow label={`JP · ${pctStr(rates.jpEmployer)}`} val={c.jpEmployer} />}
+      <SBRow label={`JKK · ${pctStr(c.jkkRate)} (${f.risk})`} val={c.jkk} />
+      <SBRow label={`JKM · ${pctStr(rates.jkm)}`} val={c.jkm} />
+      <SBRow label={trH('hrd.totalemployer')} val={c.employerContrib} strong />
+      <div className="sb-cost"><span>{trH('hrd.totalcompany')}</span><span className="tnum">{rp(c.companyCost)}</span></div>
+    </div>
+  );
+
+  const nameField = (
+    <div>
+      <label className="fld-label" style={{ marginTop: 0 }}>{trH('hrd.fullname')}</label>
+      <input className="fld" value={f.name} placeholder="e.g. Budi Santoso" onChange={(e) => set({ name: e.target.value })} />
+    </div>
+  );
+
   return (
     <div className="modal-scrim" onClick={onClose}>
-      <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal-card wide ${ident ? 'staff-ident-modal' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <div style={{ fontSize: 17, fontWeight: 700 }}>{staff._isNew ? trH('hrd.addEmpT') : trH('hrd.editEmpT')}</div>
+          <div style={{ fontSize: 17, fontWeight: 700 }}>{f._isNew ? trH('hrd.addEmpT') : trH('hrd.editEmpT')}</div>
           <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
         </div>
-        <div className="staff-edit-grid">
-          <div className="staff-form">
-            <label className="fld-label" style={{ marginTop: 0 }}>{trH('hrd.fullname')}</label>
-            <input className="fld" value={f.name} placeholder="e.g. Budi Santoso" onChange={(e) => set({ name: e.target.value })} />
-            <label className="fld-label">{trH('hrd.position')}</label>
-            <input className="fld" value={f.pos} placeholder="e.g. Sopir Pengiriman" onChange={(e) => set({ pos: e.target.value })} />
-            <label className="fld-label">{trH('hrd.dept')}</label>
-            <UI.Dropdown value={f.dept || HRD.DEPARTMENTS[0]} options={HRD.DEPARTMENTS} onChange={(v) => set({ dept: v })} />
-            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>{money(trH('hrd.basesal'), 'base')}{money(trH('hrd.allowance'), 'allowance')}</div>
-            <label className="hrd-toggle">
-              <input type="checkbox" checked={!!f.jp} onChange={(e) => set({ jp: e.target.checked })} />
-              <span>{trH('hrd.enrollJp')}</span>
-            </label>
-            <div style={{ display: 'flex', gap: 12, marginTop: 14, alignItems: 'flex-end' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <label className="fld-label" style={{ marginTop: 0 }}>{trH('hrd.riskClass')}</label>
-                <UI.Dropdown value={f.risk} options={HRD.RISK_LEVELS} onChange={(v) => set({ risk: v })} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <label className="fld-label" style={{ marginTop: 0 }}>{trH('hrd.religion')}</label>
-                <UI.Dropdown value={f.religion || 'Islam'} options={HRD.RELIGIONS} onChange={(v) => set({ religion: v })} />
-              </div>
-              {money(trH('hrd.pph'), 'pph')}
-            </div>
-            <div className="hrd-deduct-block">
-              <div className="hrd-deduct-title">{trH('hrd.attendDeduct')}</div>
-              <label className="fld-label" style={{ marginTop: 0 }}>{trH('hrd.unpaiddays')}</label>
-              <input className="fld" style={{ maxWidth: 140 }} inputMode="numeric" value={f.offDays || 0} onChange={(e) => set({ offDays: Math.max(0, +e.target.value.replace(/\D/g, '') || 0) })} />
-              <div className="fld-hint">{f.offDays > 0 ? trH('hrd.dailyHintOff', { dr: rp(dr), wd: rates.workDays || 26, n: f.offDays, ded: rp(c.absenceDeduct) }) : trH('hrd.dailyHint', { dr: rp(dr), wd: rates.workDays || 26 })}</div>
 
-              <div className="ded-list-head">{trH('hrd.otherDeducts')} <span>{trH('hrd.otherHint')}</span></div>
-              {dedList.length === 0 && <div className="ded-empty">{trH('hrd.noDeducts')}</div>}
-              {dedList.map((d, i) => (
-                <div className="ded-row" key={d.id || i}>
-                  <input className="fld ded-label" value={d.label} placeholder={trH('hrd.dedPh', { n: i + 1 })} onChange={(e) => updDed(i, { label: e.target.value })} />
-                  <div className="amt-input ded-amt" style={{ padding: '8px 11px' }}>
-                    <span className="amt-rp" style={{ fontSize: 13 }}>Rp</span>
-                    <input inputMode="numeric" style={{ fontSize: 14 }} value={d.amount ? (+d.amount).toLocaleString('id-ID') : ''} onChange={(e) => updDed(i, { amount: +e.target.value.replace(/\D/g, '') || 0 })} />
-                  </div>
-                  <button className="icon-btn del" title="Remove" onClick={() => removeDed(i)}><IconClose s={15} /></button>
-                </div>
-              ))}
-              <button className="add-ded-btn" onClick={addDed}><IconPlus s={15} />{trH('hrd.addDeduct')}</button>
+        {ident ? (
+          /* IDENTITY-first: profile fields prominent, salary optional/collapsed */
+          <div className="staff-form-single">
+            {nameField}
+            {identityBlock}
+            <div className="staff-salary-toggle">
+              <button type="button" onClick={() => setShowSalary((v) => !v)}>
+                <IconCoinOut s={15} />{showSalary ? trH('co.salaryHide') : trH('co.salaryOptional')}
+                {salaryUnset && !showSalary && <span className="salary-unset-badge">{trH('co.salaryNotSet')}</span>}
+              </button>
             </div>
+            {showSalary && <div className="staff-salary-wrap">{salaryBlock}{breakdown}</div>}
           </div>
+        ) : (
+          /* PAYROLL-first: salary + live breakdown prominent, identity below */
+          <>
+            <div className="staff-edit-grid">
+              <div className="staff-form">
+                {nameField}
+                {salaryBlock}
+              </div>
+              {breakdown}
+            </div>
+            <div className="staff-salary-toggle">
+              <button type="button" onClick={() => setShowIdent((v) => !v)}>
+                <IconUsersGroup s={15} />{showIdent ? trH('co.identityHide') : trH('co.identityShow')}
+              </button>
+            </div>
+            {showIdent && identityBlock}
+          </>
+        )}
 
-          <div className="staff-breakdown">
-            <div className="sb-head"><IconInvoice s={16} />{trH('hrd.live')}</div>
-            <div className="sb-sec">{trH('hrd.earnings')}</div>
-            <SBRow label={trH('hrd.baseShort')} val={c.base} />
-            <SBRow label={trH('hrd.allowShort')} val={c.allow} />
-            <SBRow label={trH('hrd.gross')} val={c.gross} strong />
-            <div className="sb-sec">{trH('hrd.deductFrom')} <em>{trH('hrd.deductFromEm')}</em></div>
-            <SBRow label={`BPJS Kesehatan · ${pctStr(rates.kesEmployee)}`} val={c.kesEmployee} neg />
-            <SBRow label={`JHT · ${pctStr(rates.jhtEmployee)}`} val={c.jhtEmployee} neg />
-            {f.jp
-              ? <SBRow label={`JP · ${pctStr(rates.jpEmployee)}`} val={c.jpEmployee} neg />
-              : <SBRow label="JP" val={0} muted note={trH('hrd.notenroll')} />}
-            {c.pph > 0 && <SBRow label="PPh 21" val={c.pph} neg />}
-            {c.absenceDeduct > 0 && <SBRow label={trH('hrd.unpaidleave', { n: c.offDays, dr: rp(dr) })} val={c.absenceDeduct} neg />}
-            {c.deductions.filter((d) => +d.amount > 0).map((d, i) => <SBRow key={d.id || i} label={d.label || trH('hrd.dedPh', { n: i + 1 })} val={+d.amount} neg />)}
-            <SBRow label={trH('hrd.totaldeduct')} val={c.employeeDeduct} strong neg />
-            <div className="sb-thp"><span>{trH('hrd.thp')}</span><span className="tnum">{rp(c.takeHome)}</span></div>
-            <div className="sb-sec">{trH('hrd.employerTop')} <em>{trH('hrd.bpjsParen')}</em></div>
-            <SBRow label={`Kesehatan · ${pctStr(rates.kesEmployer)}`} val={c.kesEmployer} />
-            <SBRow label={`JHT · ${pctStr(rates.jhtEmployer)}`} val={c.jhtEmployer} />
-            {f.jp && <SBRow label={`JP · ${pctStr(rates.jpEmployer)}`} val={c.jpEmployer} />}
-            <SBRow label={`JKK · ${pctStr(c.jkkRate)} (${f.risk})`} val={c.jkk} />
-            <SBRow label={`JKM · ${pctStr(rates.jkm)}`} val={c.jkm} />
-            <SBRow label={trH('hrd.totalemployer')} val={c.employerContrib} strong />
-            <div className="sb-cost"><span>{trH('hrd.totalcompany')}</span><span className="tnum">{rp(c.companyCost)}</span></div>
-          </div>
-        </div>
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose}>{trH('common.cancel')}</button>
           <button className="btn btn-primary" disabled={!valid} onClick={() => onSave(f)}>{trH('hrd.saveEmp')}</button>
@@ -318,7 +414,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
     setEditStaff(null);
   };
   const delStaff = (id) => { if (confirm(trH('hrd.removeConfirm'))) setStaff((prev) => prev.filter((x) => x.id !== id)); };
-  const addStaff = () => setEditStaff({ id: HRD.newStaffId(), name: '', pos: '', dept: HRD.DEPARTMENTS[0], base: 0, allowance: 0, risk: 'Low', jp: true, pph: 0, offDays: 0, deductions: [], _isNew: true });
+  const addStaff = () => setEditStaff(HRD.newStaff());
 
   return (
     <div className="screen-enter">
@@ -431,4 +527,4 @@ function HrSettings({ rates, setRates }) {
   );
 }
 
-window.PAYROLL = { PayrollScreen, HrSettings };
+window.PAYROLL = { PayrollScreen, HrSettings, StaffModal };
