@@ -9,7 +9,12 @@ const keyParams = z.object({ key: z.string().regex(/^airro_[a-zA-Z0-9_]+$/, 'inv
 const putSchema = z.object({ value: z.string().max(12 * 1024 * 1024) });
 
 const getAll = asyncHandler(async (req, res) => {
-  res.json({ data: await service.getAll() });
+  // Capture `now` BEFORE the query so a doc written mid-query is redelivered next
+  // poll (at-least-once) rather than missed. Client sends `now` back as `since`.
+  const now = new Date().toISOString();
+  const raw = typeof req.query.since === 'string' ? req.query.since : null;
+  const since = raw && !Number.isNaN(Date.parse(raw)) ? raw : null;
+  res.json({ data: await service.getAll(since), now });
 });
 
 const set = asyncHandler(async (req, res) => {

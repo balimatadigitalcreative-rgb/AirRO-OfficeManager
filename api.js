@@ -93,8 +93,10 @@
       post: (data) => req('POST', '/payroll/post', data),
     },
     // Shared app-state document store (mirrors localStorage across all accounts).
+    // all(since): pass the server `now` from the previous pull to fetch only keys
+    // changed since then (incremental poll); omit for a full snapshot (hydrate).
     state: {
-      all: () => req('GET', '/state'),
+      all: (since) => req('GET', '/state' + (since ? '?since=' + encodeURIComponent(since) : '')),
       set: (key, value) => req('PUT', '/state/' + key, { value }),
     },
   };

@@ -68,7 +68,9 @@
   }
   function schedulePush(key) {
     clearTimeout(timers[key]);
-    timers[key] = setTimeout(() => { delete timers[key]; pushNow(key); }, 500);
+    // Small debounce: one-click saves (setoran/entry) push almost immediately,
+    // while rapidly-typed inputs still collapse into a single push.
+    timers[key] = setTimeout(() => { delete timers[key]; pushNow(key); }, 250);
     emit();
   }
   localStorage.setItem = function (key, value) {
@@ -76,19 +78,24 @@
     if (state.active && shouldSync(key)) schedulePush(key);
   };
 
-  // ---- hydrate localStorage from the server (no echo back) ----
+  // Server timestamp of the last pull; sent back as `since` so each poll only
+  // fetches keys changed since then (incremental — cheap even at 3s).
+  let lastPollAt = null;
+
+  // ---- hydrate localStorage from the server (full snapshot, no echo back) ----
   async function hydrate() {
     const r = await API.state.all();
     const docs = (r && r.data) || {};
     Object.keys(docs).forEach((k) => { if (shouldSync(k)) { rawSet(k, docs[k]); confirmed[k] = docs[k]; } });
+    lastPollAt = (r && r.now) || lastPollAt;
   }
 
-  // ---- poll for remote changes (near real-time) ----
+  // ---- poll for remote changes (near real-time, incremental) ----
   let pollTimer = null;
   async function poll() {
     if (!state.active) return;
     try {
-      const r = await API.state.all();
+      const r = await API.state.all(lastPollAt);   // only keys changed since last pull
       const docs = (r && r.data) || {};
       let changed = false;
       Object.keys(docs).forEach((k) => {
@@ -98,10 +105,11 @@
         if (timers[k] || retries[k] || isDirty(k)) return;
         if (rawGet(k) !== docs[k]) { rawSet(k, docs[k]); confirmed[k] = docs[k]; changed = true; }
       });
+      if (r && r.now) lastPollAt = r.now;
       if (changed && typeof window.CLOUD.onSync === 'function') window.CLOUD.onSync();
     } catch (e) { /* transient — try again next tick */ }
   }
-  function startPoll() { if (!pollTimer) pollTimer = setInterval(poll, 10000); }
+  function startPoll() { if (!pollTimer) pollTimer = setInterval(poll, 3000); }
   function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
   // ---- session lifecycle ----

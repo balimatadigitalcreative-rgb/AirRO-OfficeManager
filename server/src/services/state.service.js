@@ -3,8 +3,11 @@ const prisma = require('../lib/prisma');
 
 // Shared app-state document store. Each key holds one JSON blob (the frontend's
 // localStorage value), shared by all users.
-async function getAll() {
-  const rows = await prisma.document.findMany();
+// `since` (ISO) → only documents changed after it (incremental poll). Omit for a
+// full snapshot (hydrate). Uses Document.updatedAt so a fast poll stays cheap.
+async function getAll(since) {
+  const where = since ? { updatedAt: { gt: new Date(since) } } : undefined;
+  const rows = await prisma.document.findMany({ where });
   const out = {};
   for (const r of rows) out[r.key] = r.value;
   return out;
