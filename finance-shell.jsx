@@ -246,6 +246,9 @@ function FApp() {
     const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: salaryCatKey, amount, acct: (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id,
       note: tr('hrd.payrollNote', { m: label, n: hrdStaff.length }), method: 'Transfer BCA', date, time: '09:00', payroll: curMonthKey };
     setEntries((prev) => [entry, ...prev.filter((e) => e.payroll !== curMonthKey)]);
+    // Kasbon of the payroll cycle just paid → mark settled ('paid') so they stop counting.
+    const anchor = HRD.payCycle().anchor;
+    setCashbons((prev) => prev.map((c) => (c.status === 'active' && (c.cycleAnchor || HRD.payCycle(c.date).anchor) === anchor) ? { ...c, status: 'paid' } : c));
     setToast(tr(existing ? 'toast.payrollUpdated' : 'toast.payrollPosted', { amt: FIN.fmt(amount) }));
   };
 

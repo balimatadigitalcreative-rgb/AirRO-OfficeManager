@@ -10,6 +10,11 @@ async function getAll() {
   return out;
 }
 
+async function get(key) {
+  const r = await prisma.document.findUnique({ where: { key } });
+  return r ? r.value : null;
+}
+
 async function set(key, value) {
   await prisma.document.upsert({
     where: { key },
@@ -19,4 +24,4 @@ async function set(key, value) {
   return { key };
 }
 
-module.exports = { getAll, set };
+module.exports = { getAll, get, set };

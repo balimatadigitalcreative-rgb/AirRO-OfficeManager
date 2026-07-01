@@ -133,7 +133,10 @@ function RatesPanel({ rates, onChange, onReset }) {
         </div>
         <div className="rate-group">
           <div className="rate-group-title">{trH('hrd.cashbon')}</div>
-          <RatePct label={trH('hrd.cashbonMax')} value={rates.cashbonMaxPct != null ? rates.cashbonMaxPct : 0.5} onChange={(v) => set({ cashbonMaxPct: v })} />
+          <div className="rate-item">
+            <label>{trH('hrd.cashbonWeek')}</label>
+            <UI.Dropdown compact value={rates.cashbonWeekMode || 'cutoff'} options={[{ value: 'cutoff', label: trH('hrd.cashbonWeekCutoff') }, { value: 'calendar', label: trH('hrd.cashbonWeekCal') }]} onChange={(v) => set({ cashbonWeekMode: v })} />
+          </div>
           <div className="rate-note">{trH('hrd.cashbonNote')}</div>
         </div>
       </div>
@@ -424,8 +427,9 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
   const [showRates, setShowRates] = uShr(false);
   const [editStaff, setEditStaff] = uShr(null);
   const [payslip, setPayslip] = uShr(null);
-  // Fold this month's kasbon installments in as auto deductions before computing.
-  const aug = (s) => HRD.withCashbon(s, cashbons, monthKey);
+  // Fold the current payroll cycle's kasbon total in as a deduction before computing.
+  const cycleAnchor = HRD.payCycle().anchor;
+  const aug = (s) => HRD.withCashbon(s, cashbons, cycleAnchor);
   const t = HRD.totals(staff.map(aug), rates);
 
   const saveStaff = (s) => {

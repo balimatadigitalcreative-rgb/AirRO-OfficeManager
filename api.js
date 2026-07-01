@@ -71,6 +71,12 @@
       nip: (data) => req('POST', '/employees/nip', data),
       regenerateNip: (id) => req('POST', '/employees/' + id + '/regenerate-nip'),
     }),
+    cashbon: Object.assign(collection('cashbon'), {
+      // Live kasbon limits for a cycle (authoritative, reads shared /state).
+      preview: (data) => req('POST', '/cashbon/preview', data),
+      // Validate + build a kasbon (server enforces cycle/weekly rules).
+      request: (data) => req('POST', '/cashbon/request', data),
+    }),
     users: collection('users'),
     settings: {
       all: () => req('GET', '/settings'),

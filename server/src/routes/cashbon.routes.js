@@ -8,6 +8,10 @@ const router = Router();
 // Kasbon is a payroll/HR concern — gate on the same capability as employees.
 router.use(requireAuth, requireCap('employees'));
 
+// Live path (validation reads /state): preview limits, then request (authoritative).
+router.post('/preview', validate({ body: ctrl.schemas.previewSchema }), ctrl.preview);
+router.post('/request', validate({ body: ctrl.schemas.requestSchema }), ctrl.request);
+
 router.get('/', validate({ query: ctrl.schemas.listQuery }), ctrl.list);
 router.get('/:id', validate({ params: ctrl.schemas.idParams }), ctrl.getOne);
 router.post('/', validate({ body: ctrl.schemas.createSchema }), ctrl.create);

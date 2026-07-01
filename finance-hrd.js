@@ -26,8 +26,9 @@
     lateStart: '08:00', latePerMin: 500, lateBasis: 'minute',
     // Overtime pay per hour
     otPerHour: 25000,
-    // Kasbon (employee cash advance): max new kasbon = this % of monthly gross
-    cashbonMaxPct: 0.5,
+    // Kasbon (cash advance): ceiling = 50% of BASE per payroll cycle (16→15),
+    // max 1×/week, weekly max = ceiling/4. Week window definition:
+    cashbonWeekMode: 'cutoff', // 'cutoff' = 7 days from the 16th | 'calendar' = Mon–Sun
     // THR holiday dates per religion (Tunjangan Hari Raya keagamaan)
     holidayDates: { Islam: '2026-03-20', Kristen: '2026-12-25', Katolik: '2026-12-25', Hindu: '2026-03-19', Buddha: '2026-05-31' },
     // THR portion per religion (1 = full at one holiday; 0.5 = half, e.g. religions with 2 holidays/year)
@@ -173,40 +174,40 @@
     return { monthly, months, amount, eligible, ratio };
   }
 
-  // ---- Kasbon (employee cash advance → automatic monthly salary deduction) ----
-  const MONTHKEY = (d) => (typeof d === 'string' ? d.slice(0, 7) : '');
-  function monthGap(fromMk, toMk) { // whole months from fromMk to toMk
-    if (!fromMk || !toMk) return 0;
-    const a = fromMk.split('-').map(Number), b = toMk.split('-').map(Number);
-    return (b[0] - a[0]) * 12 + (b[1] - a[1]);
+  // ---- Kasbon (cash advance) — payroll cycle 16→15 rules ----
+  // Ceiling per cycle = 50% of BASE (base only). Deducted in full at the cutoff
+  // (15th) of the cycle each kasbon belongs to. Authoritative validation is on
+  // the server (cashbon.rules.js); these mirror it for the live UI + payroll cut.
+  const pad2 = (n) => String(n).padStart(2, '0');
+  function payCycle(iso) {
+    if (!iso) iso = (window.FIN && window.FIN.TODAY) || '';
+    const [y, m, d] = iso.split('-').map(Number);
+    let sy = y, sm = m; if (d < 16) { sm = m - 1; if (sm < 1) { sm = 12; sy = y - 1; } }
+    let ey = sy, em = sm + 1; if (em > 12) { em = 1; ey = ey + 1; }
+    return { start: `${sy}-${pad2(sm)}-16`, end: `${ey}-${pad2(em)}-15`, anchor: `${ey}-${pad2(em)}-15` };
   }
-  function installmentAt(cb, idx, n) { const per = Math.round((+cb.amount || 0) / n); return idx === n - 1 ? (+cb.amount || 0) - per * (n - 1) : per; }
-  // Installment due in a given payroll month (0 outside the schedule / not active).
-  function cashbonInstallment(cb, monthKey) {
-    if (!cb || cb.status !== 'active') return 0;
-    const n = Math.max(1, +cb.installments || 1);
-    const idx = monthGap(MONTHKEY(cb.date), monthKey);
-    if (idx < 0 || idx >= n) return 0;
-    return installmentAt(cb, idx, n); // final installment absorbs rounding remainder
+  const cbAnchor = (c) => c.cycleAnchor || payCycle(c.date).anchor;
+  function cashbonCeiling(staff) { return Math.floor(0.5 * (+staff.base || 0)); }
+  function cashbonWeeklyMax(staff) { return Math.floor(cashbonCeiling(staff) / 4); }
+  // Active kasbon a staff has in a given cycle (deducted in full at that cutoff).
+  function cashbonsInCycle(staffId, cashbons, anchor) {
+    return (cashbons || []).filter((c) => c.employeeId === staffId && c.status !== 'cancelled' && cbAnchor(c) === anchor);
   }
-  // Outstanding balance still owed at the START of asOfMonthKey (before that month's cut).
-  function cashbonRemaining(cb, asOfMonthKey) {
-    if (!cb || cb.status === 'cancelled' || cb.status === 'paid') return 0;
-    const n = Math.max(1, +cb.installments || 1);
-    const passed = Math.max(0, Math.min(monthGap(MONTHKEY(cb.date), asOfMonthKey), n));
-    let paid = 0; for (let i = 0; i < passed; i++) paid += installmentAt(cb, i, n);
-    return Math.max(0, (+cb.amount || 0) - paid);
+  function cashbonCycleTotal(staffId, cashbons, anchor) {
+    return (cashbons || []).filter((c) => c.employeeId === staffId && c.status === 'active' && cbAnchor(c) === anchor).reduce((a, c) => a + (+c.amount || 0), 0);
   }
-  // Max new kasbon allowed for a staff = cashbonMaxPct × monthly gross.
-  function cashbonMax(staff, rates) { const g = compute(staff, rates).gross; return Math.round(g * (rates.cashbonMaxPct != null ? rates.cashbonMaxPct : 0.5)); }
-  // Return a staff clone whose deductions include this month's kasbon installments
-  // as auto rows (so compute()/payslip/breakdown pick them up automatically).
-  function withCashbon(staff, cashbons, monthKey) {
-    const extra = [];
-    (cashbons || []).forEach((c, i) => { if (c.employeeId !== staff.id) return; const amt = cashbonInstallment(c, monthKey); if (amt > 0) extra.push({ id: 'kasbon-' + (c.id || i), label: 'Kasbon' + (c.note ? ' · ' + c.note : ''), amount: amt, auto: true, kasbon: true }); });
-    if (!extra.length) return staff;
-    const keep = Array.isArray(staff.deductions) ? staff.deductions.filter((d) => !d.kasbon) : [];
-    return { ...staff, deductions: [...keep, ...extra] };
+  // All still-owed active kasbon (any cycle) — for termination / final settlement.
+  function cashbonOutstanding(staffId, cashbons) {
+    return (cashbons || []).filter((c) => c.employeeId === staffId && c.status === 'active').reduce((a, c) => a + (+c.amount || 0), 0);
+  }
+  // Fold a cycle's kasbon total into the staff's deductions as one auto "Kasbon"
+  // row so compute()/payslip/breakdown pick it up. Default cycle = today's.
+  function withCashbon(staff, cashbons, anchor) {
+    anchor = anchor || payCycle().anchor;
+    const total = cashbonCycleTotal(staff.id, cashbons, anchor);
+    const keep = Array.isArray(staff.deductions) ? staff.deductions.filter((d) => !d.kasbon) : (staff.deductions || []);
+    if (total <= 0) return { ...staff, deductions: keep };
+    return { ...staff, deductions: [...keep, { id: 'kasbon-cycle', label: 'Kasbon', amount: total, auto: true, kasbon: true }] };
   }
 
   window.HRD = {
@@ -214,6 +215,6 @@
     loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newStaff, newDedId,
     loadBudget, saveBudget, affordability, simulateHire, thr,
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
-    cashbonInstallment, cashbonRemaining, cashbonMax, withCashbon,
+    payCycle, cashbonCeiling, cashbonWeeklyMax, cashbonsInCycle, cashbonCycleTotal, cashbonOutstanding, withCashbon,
   };
 })();

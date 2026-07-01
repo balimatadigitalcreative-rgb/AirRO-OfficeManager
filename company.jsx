@@ -299,42 +299,73 @@ function CompanyDashboard({ fin, staff, rates, budget, approvals, setApprovals, 
   );
 }
 
-/* ---------- Kasbon add modal ---------- */
-function CashbonModal({ staff, rates, onSave, onClose }) {
+/* ---------- Kasbon request modal (server-validated: cycle 16→15 rules) ---------- */
+function CashbonModal({ staff, onSave, onClose }) {
   const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
   const [amount, setAmount] = uSc(0);
   const [date, setDate] = uSc(today);
-  const [installments, setInstallments] = uSc(1);
   const [note, setNote] = uSc('');
+  const [pv, setPv] = uSc(null);      // server preview: { base, summary, check }
+  const [err, setErr] = uSc('');
+  const [busy, setBusy] = uSc(false);
   uEc(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  const max = HRD.cashbonMax(staff, rates);
-  const per = installments > 0 ? Math.round(amount / installments) : amount;
-  const over = amount > max;
-  const valid = amount > 0 && installments >= 1 && !over;
-  const save = () => { if (!valid) return; onSave({ id: CO.newCashbonId(), employeeId: staff.id, amount: +amount, date, note: note.trim(), installments: +installments, status: 'active', createdAt: Date.now() }); };
+  // Live limits from the server (authoritative), debounced on amount/date.
+  uEc(() => {
+    let alive = true;
+    const h = setTimeout(async () => {
+      if (!(window.API && window.API.cashbon)) { setErr(trC('co.kasbonOffline')); return; }
+      try { const r = await window.API.cashbon.preview({ employeeId: staff.id, date, amount: +amount || 0 }); if (alive) { setPv(r.data); setErr(''); } }
+      catch (e) { if (alive) setErr(e && e.offline ? trC('co.kasbonOffline') : (e.message || '')); }
+    }, 250);
+    return () => { alive = false; clearTimeout(h); };
+  }, [amount, date, staff.id]);
+  const sum = pv && pv.summary;
+  const check = pv && pv.check;
+  const canSubmit = amount > 0 && check && check.ok && !busy;
+  const submit = async () => {
+    if (busy) return; setBusy(true); setErr('');
+    try {
+      const r = await window.API.cashbon.request({ employeeId: staff.id, amount: +amount, date, note: note.trim() });
+      onSave(r.data.cashbon);
+    } catch (e) { setErr(e && e.offline ? trC('co.kasbonOffline') : ((e.body && e.body.error && e.body.error.message) || e.message || trC('co.kasbonOffline'))); }
+    finally { setBusy(false); }
+  };
   return (
     <div className="modal-scrim" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 470 }}>
         <div className="modal-head">
           <div style={{ fontSize: 17, fontWeight: 700 }}>{trC('co.kasbonAdd')} · {staff.name}</div>
           <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
         </div>
+        {sum && (
+          <div className="kb-limits">
+            <div className="kb-lim"><span>{trC('co.kasbonCeiling')}</span><b className="tnum">{rpC(sum.ceiling)}</b></div>
+            <div className="kb-lim"><span>{trC('co.kasbonRemainingCycle')}</span><b className="tnum">{rpC(sum.remaining)}</b></div>
+            <div className="kb-lim"><span>{trC('co.kasbonWeeklyMax')}</span><b className="tnum">{rpC(sum.weeklyMax)}</b></div>
+            <div className="kb-lim full">{sum.thisWeekTaken
+              ? <span className="kb-week-x">{trC('co.kasbonWeekTaken', { d: sum.nextWeekDate })}</span>
+              : <span className="kb-week-ok">{trC('co.kasbonWeekOpen', { v: rpC(sum.weekLeft) })}</span>}
+              <em>· {trC('co.kasbonCycle', { a: sum.cycle.end })}</em>
+            </div>
+          </div>
+        )}
         <div className="ed-acc-form" style={{ padding: '4px 2px' }}>
           <label className="ed-af ed-af-wide"><span>{trC('co.kasbonAmount')}</span>
             <div className="amt-input" style={{ padding: '8px 13px' }}><span className="amt-rp" style={{ fontSize: 14 }}>Rp</span>
               <input inputMode="numeric" style={{ fontSize: 16 }} value={amount ? (+amount).toLocaleString('id-ID') : ''} onChange={(e) => setAmount(+e.target.value.replace(/\D/g, '') || 0)} /></div>
           </label>
-          <label className="ed-af"><span>{trC('co.kasbonInstall')}</span><input inputMode="numeric" value={installments} onChange={(e) => setInstallments(Math.max(1, +e.target.value.replace(/\D/g, '') || 1))} /></label>
           <label className="ed-af"><span>{trC('co.kasbonDate')}</span><DP.DateField value={date} max={today} onChange={setDate} /></label>
-          <label className="ed-af ed-af-wide"><span>{trC('co.kasbonNote')}</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="—" /></label>
+          <label className="ed-af"><span>{trC('co.kasbonNote')}</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="—" /></label>
         </div>
-        <div className={`kb-hint ${over ? 'over' : ''}`}>
-          {over ? `⚠ ${trC('co.kasbonOver')} — ` : ''}{trC('co.kasbonMax', { v: rpC(max) })} ({Math.round((rates.cashbonMaxPct != null ? rates.cashbonMaxPct : 0.5) * 100)}%).
-          {amount > 0 && installments > 0 && !over && ` ${trC('co.kasbonPreview', { per: rpC(per), n: installments })}`}
+        <div className={`kb-hint ${(err || (check && !check.ok && amount > 0)) ? 'over' : ''}`}>
+          {err ? `⚠ ${err}`
+            : (amount > 0 && check && !check.ok) ? `⚠ ${check.message}`
+            : (amount > 0 && check && check.ok) ? `✓ ${trC('co.kasbonCutAt', { d: sum ? sum.cycle.end : '' })} · ${trC('co.kasbonRemainingCycle')}: ${rpC(check.remainingAfter)}`
+            : trC('co.kasbonRule')}
         </div>
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose}>{trC('common.cancel')}</button>
-          <button className="btn btn-primary" disabled={!valid} onClick={save}>{trC('co.kasbonAdd')}</button>
+          <button className="btn btn-primary" disabled={!canSubmit} onClick={submit}>{busy ? '…' : trC('co.kasbonAdd')}</button>
         </div>
       </div>
     </div>
@@ -355,19 +386,23 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
   // late penalty (auto, from attendance + rate policy)
   const late = uMc(() => CO.lateInfo(staff, monthKey, today, rates), [staff, monthKey, today, rates, att]);
   const ot = uMc(() => CO.overtimeInfo(staff, monthKey, today, rates), [staff, monthKey, today, rates, att]);
-  // this employee's kasbon (loans) + this month's installment cuts
+  // this employee's kasbon (cash advances) for the CURRENT payroll cycle (16→15)
   const [kbAdd, setKbAdd] = uSc(false);
-  const myCashbons = uMc(() => (cashbons || []).filter((c) => c.employeeId === staff.id), [cashbons, staff.id]);
-  const kbExtras = uMc(() => myCashbons.map((c, i) => { const amt = HRD.cashbonInstallment(c, monthKey); return amt > 0 ? { id: 'kasbon-' + (c.id || i), label: 'Kasbon' + (c.note ? ' · ' + c.note : ''), amount: amt, auto: true, kasbon: true } : null; }).filter(Boolean), [myCashbons, monthKey]);
-  const kbRemaining = uMc(() => myCashbons.reduce((a, c) => a + HRD.cashbonRemaining(c, monthKey), 0), [myCashbons, monthKey]);
+  const cycleAnchor = HRD.payCycle(today).anchor;
+  const cycleCashbons = uMc(() => HRD.cashbonsInCycle(staff.id, cashbons, cycleAnchor), [cashbons, staff.id, cycleAnchor]);
+  const cycleTotal = uMc(() => HRD.cashbonCycleTotal(staff.id, cashbons, cycleAnchor), [cashbons, staff.id, cycleAnchor]);
+  const outstanding = uMc(() => HRD.cashbonOutstanding(staff.id, cashbons), [cashbons, staff.id]);   // all cycles (for termination)
+  const ceiling = HRD.cashbonCeiling(staff);
+  const kbCut = cycleTotal > 0; // deducted in full at this cycle's cutoff
   const saveCashbon = (cb) => { CO.addCashbon(cb); if (setCashbons) setCashbons(CO.loadCashbons()); setKbAdd(false); };
   const cancelCashbon = (id) => { if (confirm(trC('co.kasbonCancelConfirm'))) { CO.updateCashbon(id, { status: 'cancelled' }); if (setCashbons) setCashbons(CO.loadCashbons()); } };
-  // staff with auto late-penalty + overtime + kasbon merged in (for the live payroll snapshot)
+  // staff with auto late-penalty + overtime + this cycle's kasbon merged in
   const augStaff = uMc(() => {
     const manual = (staff.deductions || []).filter((d) => !d.auto);
     const extra = late.amount > 0 ? [{ id: 'auto-late', label: trC('co.lateDeduct'), amount: late.amount, auto: true }] : [];
-    return { ...staff, deductions: [...manual, ...extra, ...kbExtras], otPay: ot.amount };
-  }, [staff, late, ot, kbExtras]);
+    if (cycleTotal > 0) extra.push({ id: 'kasbon-cycle', label: 'Kasbon', amount: cycleTotal, auto: true, kasbon: true });
+    return { ...staff, deductions: [...manual, ...extra], otPay: ot.amount };
+  }, [staff, late, ot, cycleTotal]);
   const c = HRD.compute(augStaff, rates);
   // keep the roster in sync so payroll/payslip reflect late penalty + overtime
   uEc(() => { if (onSyncDeduct) onSyncDeduct(staff.id, late.amount, trC('co.lateDeduct'), ot.amount); }, [late.amount, ot.amount]);
@@ -437,8 +472,8 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
             {late.amount > 0 && <div className="ed-ded-row"><span><IconClock s={15} /> {trC('co.lateDeduct')} ({trC('co.lateMins', { n: late.minutes })})</span>{seeMoney && <b className="tnum amt-neg">−{rpC(late.amount)}</b>}</div>}
             {ot.amount > 0 && <div className="ed-ded-row"><span><IconTrendUp s={15} /> {trC('co.overtime')} ({trC('co.otHours', { n: ot.hours })})</span>{seeMoney && <b className="tnum amt-pos">+{rpC(ot.amount)}</b>}</div>}
             {deds.map((d) => <div className="ed-ded-row" key={d.id}><span><IconCoinOut s={15} /> {d.label}</span>{seeMoney && <b className="tnum amt-neg">−{rpC(+d.amount)}</b>}</div>)}
-            {kbExtras.map((d) => <div className="ed-ded-row" key={d.id}><span><IconWallet s={15} /> {d.label}</span>{seeMoney && <b className="tnum amt-neg">−{rpC(+d.amount)}</b>}</div>)}
-            {att.absent === 0 && late.amount === 0 && ot.amount === 0 && deds.length === 0 && kbExtras.length === 0 && <div className="ed-empty">{trC('co.noDeducts')}</div>}
+            {kbCut && <div className="ed-ded-row"><span><IconWallet s={15} /> {trC('co.kasbon')} ({trC('co.kasbonCutAt', { d: cycleAnchor })})</span>{seeMoney && <b className="tnum amt-neg">−{rpC(cycleTotal)}</b>}</div>}
+            {att.absent === 0 && late.amount === 0 && ot.amount === 0 && deds.length === 0 && !kbCut && <div className="ed-empty">{trC('co.noDeducts')}</div>}
           </div>
 
           {seeMoney && (
@@ -457,30 +492,29 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
 
           {seeMoney && (
             <>
-              <div className="ed-section-t">{trC('co.kasbon')}{canEdit && <button className="ed-acc-edit" onClick={() => setKbAdd(true)}><IconPlus s={12} />{trC('co.kasbonAdd')}</button>}</div>
-              {myCashbons.filter((cb) => cb.status !== 'cancelled').length === 0 ? (
+              <div className="ed-section-t">{trC('co.kasbon')} · {trC('co.kasbonCycle', { a: cycleAnchor })}{canEdit && <button className="ed-acc-edit" onClick={() => setKbAdd(true)}><IconPlus s={12} />{trC('co.kasbonAdd')}</button>}</div>
+              <div className="kb-limbar">
+                <span>{trC('co.kasbonCeiling')}: <b className="tnum">{rpC(ceiling)}</b></span>
+                <span>{trC('co.kasbonRemainingCycle')}: <b className="tnum">{rpC(Math.max(0, ceiling - cycleTotal))}</b></span>
+                {outstanding > cycleTotal && <span className="kb-outs">{trC('co.kasbonOutstanding')}: <b className="tnum">{rpC(outstanding)}</b></span>}
+              </div>
+              {cycleCashbons.length === 0 ? (
                 <div className="ed-empty">{trC('co.kasbonNone')}</div>
               ) : (
                 <div className="kb-list">
-                  {myCashbons.filter((cb) => cb.status !== 'cancelled').map((cb) => {
-                    const per = HRD.cashbonInstallment(cb, monthKey);
-                    const rem = HRD.cashbonRemaining(cb, monthKey);
-                    const perStd = Math.round(cb.amount / Math.max(1, cb.installments));
-                    return (
-                      <div className="kb-row" key={cb.id}>
-                        <div className="kb-main">
-                          <div className="kb-amt tnum">{rpC(cb.amount)}<span className="kb-inst"> · {cb.installments}× {rpC(perStd)}</span></div>
-                          <div className="kb-sub">{cb.date}{cb.note ? ' · ' + cb.note : ''}</div>
-                        </div>
-                        <div className="kb-right">
-                          {rem > 0 ? <div className="kb-rem">{trC('co.kasbonRemaining')}: <b className="tnum">{rpC(rem)}</b></div> : <span className="kb-paid">{trC('co.kasbonPaid')}</span>}
-                          {per > 0 && <div className="kb-cut">{trC('co.kasbonThisMonth')}: <b className="tnum amt-neg">−{rpC(per)}</b></div>}
-                        </div>
-                        {canEdit && <button className="icon-btn del" title={trC('co.kasbonCancel')} onClick={() => cancelCashbon(cb.id)}><IconClose s={15} /></button>}
+                  {cycleCashbons.map((cb) => (
+                    <div className="kb-row" key={cb.id}>
+                      <div className="kb-main">
+                        <div className="kb-amt tnum">{rpC(cb.amount)}</div>
+                        <div className="kb-sub">{cb.date}{cb.note ? ' · ' + cb.note : ''}</div>
                       </div>
-                    );
-                  })}
-                  {kbRemaining > 0 && <div className="kb-total"><span>{trC('co.kasbonTotalRem')}</span><b className="tnum">{rpC(kbRemaining)}</b></div>}
+                      <div className="kb-right">
+                        {cb.status === 'paid' ? <span className="kb-paid">{trC('co.kasbonPaid')}</span> : <span className="kb-week-ok">{trC('co.kasbonActive')}</span>}
+                      </div>
+                      {canEdit && cb.status === 'active' && <button className="icon-btn del" title={trC('co.kasbonCancel')} onClick={() => cancelCashbon(cb.id)}><IconClose s={15} /></button>}
+                    </div>
+                  ))}
+                  <div className="kb-total"><span>{trC('co.kasbonCycleTotal')} · {trC('co.kasbonCutAt', { d: cycleAnchor })}</span><b className="tnum amt-neg">−{rpC(cycleTotal)}</b></div>
                 </div>
               )}
             </>
@@ -519,7 +553,7 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
             <div className="ed-acc"><span>{trC('co.bank')}</span><b>{(g('bank') || '—')}{g('account') ? ` · ${g('account')}` : ''}</b></div>
           </div>
           {identEdit && <PAYROLL.StaffModal staff={staff} rates={rates} variant="identity" onSave={saveIdentity} onClose={() => setIdentEdit(false)} />}
-          {kbAdd && <CashbonModal staff={staff} rates={rates} onSave={saveCashbon} onClose={() => setKbAdd(false)} />}
+          {kbAdd && <CashbonModal staff={staff} onSave={saveCashbon} onClose={() => setKbAdd(false)} />}
         </div>
       </div>
     </div>
