@@ -104,6 +104,82 @@ pm2 start airro-api
 ```
 Tip: also copy backups off the VPS periodically (e.g. `scp` to your PC, or rclone to cloud storage).
 
+## Troubleshooting: "data doesn't persist on the server" (/state)
+
+Symptom: a save returns 200 but disappears, or the push gets 413/404/500. Work
+through these on the VPS in order — each command tells you where it breaks.
+
+**1. Is the LATEST backend actually running?** (not an old build without `/state`)
+```bash
+cd /var/www/airrooffice && bash deploy/update.sh      # git pull + npm i + migrate deploy + restart
+pm2 restart airro-api --update-env && pm2 logs airro-api --lines 40
+curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:4000/api/v1/health
+```
+
+**2. Run migrations on the PRODUCTION db and confirm the tables exist:**
+```bash
+cd /var/www/airrooffice/server
+unset DATABASE_URL                 # use .env (never a stray shell var)
+npx prisma migrate deploy          # applies pending migrations to prod.db
+npx prisma migrate status          # should say "up to date"
+# List tables (SQLite). prod.db lives next to the schema: server/prisma/prod.db
+sqlite3 prisma/prod.db '.tables'   # expect: Document, Employee, Cashbon, Training, CalendarEvent, EmployeeNip, User, ...
+sqlite3 prisma/prod.db 'SELECT COUNT(*) FROM Document;'
+```
+
+**3. Is the db file on PERSISTENT storage and writable by Node?**
+```bash
+cd /var/www/airrooffice/server
+grep DATABASE_URL .env                          # e.g. file:./prod.db  (relative → resolves to server/prisma/prod.db)
+ls -l prisma/prod.db && df -h .                 # file exists, on the main disk (not /tmp or a tmpfs)
+sudo -u $(pm2 jlist | grep -o '"username":"[^"]*"' | head -1 | cut -d'"' -f4) test -w prisma/prod.db && echo writable
+```
+Make it bullet-proof — **use an absolute path** so the CLI, the pm2 runtime, and
+backups can never disagree on which file to use:
+```bash
+# in server/.env
+DATABASE_URL="file:/var/www/airrooffice/server/prisma/prod.db"
+# then:
+cd /var/www/airrooffice/server && unset DATABASE_URL && npx prisma migrate deploy && pm2 restart airro-api --update-env
+```
+> `/var/www/...` is normal persistent disk; `git pull` won't touch `*.db`/`.env`
+> (both gitignored). Avoid pointing DATABASE_URL at `/tmp` or a container's
+> ephemeral layer.
+
+**4. Round-trip test against the live API** (token required — log in first):
+```bash
+DOMAIN=https://airrooffice.com
+TOKEN=$(curl -s -X POST $DOMAIN/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"owner","password":"YOUR_PASSWORD"}' | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+# write
+curl -s -X PUT $DOMAIN/api/v1/state/airro_test -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"value":"hi"}' ; echo
+# read back → must contain airro_test:"hi"
+curl -s $DOMAIN/api/v1/state -H "Authorization: Bearer $TOKEN" | grep -o 'airro_test":"[^"]*"'
+# restart, then read again → still there = truly persisted
+pm2 restart airro-api && sleep 2
+curl -s $DOMAIN/api/v1/state -H "Authorization: Bearer $TOKEN" | grep -o 'airro_test":"[^"]*"'
+```
+
+**5. Nginx: correct proxy + big-enough body limit.**
+- `/api/` must proxy to `http://127.0.0.1:4000` (no trailing slash, so the full
+  `/api/v1/...` path reaches Node). That's what `nginx-airro.conf` does.
+- Add **`client_max_body_size 20m;`** (Nginx default is **1MB** → large localStorage
+  blobs get a **413** and the save is silently lost). Edit your live site file:
+```bash
+sudo nano /etc/nginx/sites-available/airro     # add:  client_max_body_size 20m;  in the server { } block
+sudo nginx -t && sudo systemctl reload nginx
+```
+Confirm a big PUT isn't blocked:
+```bash
+python3 - <<'PY' > /tmp/big.json
+print('{"value":"' + 'x'*3000000 + '"}')       # ~3MB
+PY
+curl -s -o /dev/null -w '%{http_code}\n' -X PUT $DOMAIN/api/v1/state/airro_bigtest \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/big.json
+# 200 = OK. 413 = Nginx (raise client_max_body_size) or the app 12MB cap.
+```
+
 ## Notes
 - **PostgreSQL** is recommended over SQLite for a real business (safer backups,
   concurrent writes). Switch `provider` in `prisma/schema.prisma` to `postgresql`
