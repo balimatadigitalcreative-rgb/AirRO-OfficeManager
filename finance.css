@@ -323,6 +323,8 @@
 .pop-cal { width: 288px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 16px; }
 .pc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .pc-head > span { font-family: 'Poppins'; font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
+.pc-head-btn { font-family: 'Poppins'; font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); padding: 5px 12px; border-radius: 9px; transition: background .14s, color .14s; }
+.pc-head-btn:hover { background: var(--mint-100); color: var(--green-800); }
 .pc-nav { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--text-mut); transition: background .14s, color .14s; }
 .pc-nav:hover:not(:disabled) { background: var(--card-soft); color: var(--ink); }
 .pc-nav:disabled { opacity: .3; cursor: default; }
