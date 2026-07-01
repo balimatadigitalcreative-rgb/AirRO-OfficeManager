@@ -164,7 +164,23 @@
   function updateTraining(id, patch) { const list = loadTrainings().map((t) => t.id === id ? { ...t, ...patch } : t); saveTrainings(list); return list; }
   function removeTraining(id) { const list = loadTrainings().filter((t) => t.id !== id); saveTrainings(list); return list; }
 
+  // ---- HR calendar events (holiday | leave | permit) — shared via /state ----
+  const CAL_KEY = 'airro_calendar_v1';
+  function loadEvents() { try { const r = localStorage.getItem(CAL_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) return a; } } catch (e) {} return []; }
+  function saveEvents(list) { try { localStorage.setItem(CAL_KEY, JSON.stringify(Array.isArray(list) ? list : [])); } catch (e) {} }
+  const newEventId = () => 'ev' + Date.now().toString(36) + Math.floor(Math.random() * 1e3).toString(36);
+  function addEvent(ev) { const list = loadEvents(); list.push(ev); saveEvents(list); return list; }
+  function updateEvent(id, patch) { const list = loadEvents().map((e) => e.id === id ? { ...e, ...patch } : e); saveEvents(list); return list; }
+  function removeEvent(id) { const list = loadEvents().filter((e) => e.id !== id); saveEvents(list); return list; }
+  function hasEventForSource(sourceId) { return loadEvents().some((e) => e.sourceId && e.sourceId === sourceId); }
+  // Auto-create a calendar event from an approved request (dedupe by sourceId).
+  function addEventFromRequest(req, type) {
+    if (!req || hasEventForSource(req.id)) return loadEvents();
+    return addEvent({ id: newEventId(), type: type || 'leave', title: req.title || (type === 'permit' ? 'Ijin' : 'Cuti'), employeeId: req.staffId || null, startDate: req.from, endDate: req.to || req.from, note: req.detail || '', sourceId: req.id, createdAt: Date.now() });
+  }
+
   window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId,
     CB_KEY, loadCashbons, saveCashbons, newCashbonId, cashbonsFor, addCashbon, updateCashbon, removeCashbon,
-    TR_KEY, loadTrainings, saveTrainings, newTrainingId, trainingsFor, addTraining, updateTraining, removeTraining };
+    TR_KEY, loadTrainings, saveTrainings, newTrainingId, trainingsFor, addTraining, updateTraining, removeTraining,
+    CAL_KEY, loadEvents, saveEvents, newEventId, addEvent, updateEvent, removeEvent, hasEventForSource, addEventFromRequest };
 })();

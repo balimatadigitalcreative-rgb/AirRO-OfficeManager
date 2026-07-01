@@ -19,6 +19,7 @@ router.use('/fleet', require('./fleet.routes'));
 router.use('/employees', require('./employee.routes'));
 router.use('/cashbon', require('./cashbon.routes'));
 router.use('/training', require('./training.routes'));
+router.use('/calendar', require('./calendar.routes'));
 router.use('/payroll', require('./payroll.routes'));
 router.use('/settings', require('./settings.routes'));
 router.use('/reports', require('./report.routes'));

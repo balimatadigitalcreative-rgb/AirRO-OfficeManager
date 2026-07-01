@@ -13,6 +13,7 @@ function navForRole(p) {
   if (p.allEntries) items.push({ id: 'entries', label: tr('nav.entries'), icon: 'IconTx', grp: 'finance' });
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
   if (p.employees) items.push({ id: 'employees', label: tr('nav.employees'), icon: 'IconCustomers', grp: 'hr' });
+  if (p.employees) items.push({ id: 'hrcalendar', label: tr('nav.hrcalendar'), icon: 'IconCalendar', grp: 'hr' });
   if (p.payroll && p.attendance) items.push({ id: 'headcount', label: tr('nav.headcount'), icon: 'IconUsersGroup', grp: 'hr' });
   if (p.payroll) items.push({ id: 'payroll', label: tr('nav.payroll'), icon: 'IconUsersGroup', grp: 'hr' });
   if (p.payroll) items.push({ id: 'thr', label: tr('nav.thr'), icon: 'IconCoinIn', grp: 'hr' });
@@ -65,6 +66,7 @@ function FApp() {
   const [projects, setProjects] = uSh(() => CO.loadProjects());
   const [cashbons, setCashbons] = uSh(() => CO.loadCashbons());
   const [trainings, setTrainings] = uSh(() => CO.loadTrainings());
+  const [calEvents, setCalEvents] = uSh(() => CO.loadEvents());
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
@@ -83,6 +85,7 @@ function FApp() {
   uEh(() => { CO.saveProjects(projects); }, [projects]);
   uEh(() => { CO.saveCashbons(cashbons); }, [cashbons]);
   uEh(() => { CO.saveTrainings(trainings); }, [trainings]);
+  uEh(() => { CO.saveEvents(calEvents); }, [calEvents]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
@@ -96,7 +99,7 @@ function FApp() {
     setAccounts(FS.loadAccts()); setSetoran(FS.loadSetoran()); setFleet(FS.loadFleet());
     setTransfers(FS.loadTransfers());
     setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget());
-    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons()); setTrainings(CO.loadTrainings());
+    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons()); setTrainings(CO.loadTrainings()); setCalEvents(CO.loadEvents());
     setUsers(FS.loadUsers());
   };
 
@@ -216,7 +219,10 @@ function FApp() {
   const applyLeaveToAtt = (req) => {
     if (!req || req.type !== 'leave' || !req.from || !req.to) return;
     const mk = req.from.slice(0, 7);
-    CO.applyLeave(req.staffId || (hrdStaff.find((s) => s.name === req.who) || {}).id, mk, req.from, req.to);
+    const sid = req.staffId || (hrdStaff.find((s) => s.name === req.who) || {}).id;
+    CO.applyLeave(sid, mk, req.from, req.to);
+    // Mirror the approved leave onto the shared HR calendar (dedupe by request id).
+    if (!CO.hasEventForSource(req.id)) { CO.addEventFromRequest({ ...req, staffId: sid }, 'leave'); setCalEvents(CO.loadEvents()); }
   };
 
   // approved deduction request → add to that employee's payroll deductions
@@ -480,6 +486,10 @@ function FApp() {
 
           {screen === 'employees' && p.employees && (
             <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.payroll} seeMoney={p.seeMoney} setStaff={setHrdStaff} />
+          )}
+
+          {screen === 'hrcalendar' && p.employees && (
+            <COMPANY.HrCalendar staff={hrdStaff} rates={hrdRates} events={calEvents} setEvents={setCalEvents} today={FIN.TODAY} canEdit={p.attendance || p.payroll} />
           )}
 
           {screen === 'approvals' && p.approvals && (

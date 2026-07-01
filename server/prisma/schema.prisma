@@ -170,8 +170,27 @@ model Employee {
   addressDomisili String?
   maritalStatus   String   @default("TK") // TK | K | Cerai
 
-  cashbons  Cashbon[]
-  trainings Training[]
+  cashbons       Cashbon[]
+  trainings      Training[]
+  calendarEvents CalendarEvent[]
+}
+
+// ── Unified HR calendar (holidays, leave, permits) ───────────────────────
+model CalendarEvent {
+  id         String   @id @default(cuid())
+  type       String // holiday | leave | permit
+  title      String
+  employeeId String? // null for national / religious holidays
+  startDate  String // YYYY-MM-DD
+  endDate    String?
+  note       String   @default("")
+  sourceId   String? // originating approval request id (dedupe auto-created leave)
+  createdAt  DateTime @default(now())
+
+  employee Employee? @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@index([startDate])
 }
 
 // ── Employee training / development records ──────────────────────────────

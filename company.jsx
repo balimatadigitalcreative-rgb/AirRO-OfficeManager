@@ -1165,7 +1165,127 @@ function ThrScreen({ staff, rates, setRates, today, posted, onPost, canPost, can
   );
 }
 
-window.COMPANY = { CompanyDashboard, HeadcountAffordability, ApprovalsCard, EmployeeDirectory, EmployeeDetail, RollCall, HRReport, ThrScreen, ProjectsScreen };
+/* ---------- HR Calendar (holidays / leave / permits) ---------- */
+const CAL_COLORS = { holiday: 'var(--neg)', leave: 'var(--blue-700)', permit: 'var(--warn)' };
+const PAD2 = (n) => String(n).padStart(2, '0');
+
+function CalEventModal({ staff, today, onSave, onClose }) {
+  const [type, setType] = uSc('permit');
+  const [title, setTitle] = uSc('');
+  const [employeeId, setEmployeeId] = uSc(staff[0] ? staff[0].id : '');
+  const [startDate, setStart] = uSc(today);
+  const [endDate, setEnd] = uSc('');
+  const [note, setNote] = uSc('');
+  uEc(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const needEmp = type !== 'holiday';
+  const valid = (title || '').trim() && startDate;
+  const save = () => { if (!valid) return; onSave({ id: CO.newEventId(), type, title: title.trim(), employeeId: needEmp ? (employeeId || null) : null, startDate, endDate: endDate || '', note: note.trim(), createdAt: Date.now() }); };
+  const typeOpts = [{ value: 'holiday', label: trC('cal.holiday') }, { value: 'leave', label: trC('cal.leave') }, { value: 'permit', label: trC('cal.permit') }];
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{trC('cal.add')}</div><button className="icon-btn" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="ed-acc-form" style={{ padding: '4px 2px' }}>
+          <label className="ed-af"><span>{trC('cal.type')}</span><UI.Dropdown value={type} options={typeOpts} onChange={setType} /></label>
+          <label className="ed-af"><span>{trC('cal.evTitle')}</span><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="—" /></label>
+          {needEmp && <label className="ed-af ed-af-wide"><span>{trC('req.employee')}</span><UI.Dropdown value={employeeId} options={[{ value: '', label: '— ' + trC('cal.allEmp') + ' —' }, ...staff.map((s) => ({ value: s.id, label: s.name + ' · ' + s.dept }))]} onChange={setEmployeeId} /></label>}
+          <label className="ed-af"><span>{trC('cal.start')}</span><DP.DateField value={startDate} allowFuture onChange={setStart} /></label>
+          <label className="ed-af"><span>{trC('cal.end')}</span><DP.DateField value={endDate || ''} allowFuture onChange={setEnd} /></label>
+          <label className="ed-af ed-af-wide"><span>{trC('cal.note')}</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="—" /></label>
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trC('common.cancel')}</button>
+          <button className="btn btn-primary" disabled={!valid} onClick={save}>{trC('cal.save')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HrCalendar({ staff, rates, events, setEvents, today, canEdit }) {
+  const [view, setView] = uSc(() => { const d = new Date(today + 'T00:00'); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [addOpen, setAddOpen] = uSc(false);
+  const { y, m } = view;
+  const monKey = `${y}-${PAD2(m + 1)}`;
+  const iso = (d) => `${y}-${PAD2(m + 1)}-${PAD2(d)}`;
+  const step = (dir) => { let nm = m + dir, ny = y; if (nm < 0) { nm = 11; ny--; } if (nm > 11) { nm = 0; ny++; } setView({ y: ny, m: nm }); };
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const startOff = (new Date(y, m, 1).getDay() + 6) % 7; // Monday-first
+  const staffName = (id) => { const s = staff.find((x) => x.id === id); return s ? s.name : trC('cal.allEmp'); };
+  const WD = () => Array.from({ length: 7 }, (_, i) => (window.PERIOD ? PERIOD.dow(new Date(2024, 0, 1 + i)) : ''));
+  const monLabel = window.PERIOD ? `${PERIOD.mon(m)} ${y}` : monKey;
+
+  // National / religious holidays from HR rates → virtual events (not stored).
+  const holidays = rates.holidayDates || {};
+  const vHolidays = Object.entries(holidays).filter(([, d]) => d && d.slice(0, 7) === monKey).map(([rel, d]) => ({ id: 'h-' + rel, type: 'holiday', title: trC('cal.holidayFor', { r: rel }), startDate: d, endDate: d, _virtual: true }));
+  // Stored events overlapping this month.
+  const inMonth = (e) => { const s = e.startDate || '', en = e.endDate || e.startDate || ''; return s.slice(0, 7) === monKey || en.slice(0, 7) === monKey || (s <= `${monKey}-01` && en >= `${monKey}-31`); };
+  const stored = (events || []).filter(inMonth);
+  const monthEvents = [...vHolidays, ...stored].sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+
+  // date -> events map for the grid.
+  const dayMap = {};
+  const push = (date, ev) => { (dayMap[date] = dayMap[date] || []).push(ev); };
+  monthEvents.forEach((e) => { const s = e.startDate, en = e.endDate || e.startDate; for (let d = 1; d <= daysInMonth; d++) { const ds = iso(d); if (ds >= s && ds <= en) push(ds, e); } });
+
+  const cells = [];
+  for (let i = 0; i < startOff; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const removeEv = (id) => { if (confirm(trC('cal.removeConfirm'))) { CO.removeEvent(id); if (setEvents) setEvents(CO.loadEvents()); } };
+  const saveEv = (ev) => { CO.addEvent(ev); if (setEvents) setEvents(CO.loadEvents()); setAddOpen(false); };
+
+  return (
+    <div className="screen-enter">
+      <div className="hrcal-head">
+        <div className="month-nav period-nav">
+          <button className="mn-arrow" onClick={() => step(-1)}><IconCaret s={16} style={{ transform: 'rotate(90deg)' }} /></button>
+          <span className="hrcal-month">{monLabel}</span>
+          <button className="mn-arrow" onClick={() => step(1)}><IconCaret s={16} style={{ transform: 'rotate(-90deg)' }} /></button>
+        </div>
+        <div className="hrcal-legend">
+          {['holiday', 'leave', 'permit'].map((t) => <span key={t} className="hrcal-lg"><i style={{ background: CAL_COLORS[t] }} />{trC('cal.' + t)}</span>)}
+        </div>
+        {canEdit && <button className="btn btn-primary hrcal-add" onClick={() => setAddOpen(true)}><IconPlus s={16} />{trC('cal.add')}</button>}
+      </div>
+
+      <div className="card hrcal-card">
+        <div className="hrcal-wd">{WD().map((w, i) => <span key={i}>{w}</span>)}</div>
+        <div className="hrcal-grid">
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} className="hrcal-cell empty" />;
+            const evs = dayMap[iso(d)] || [];
+            const types = [...new Set(evs.map((e) => e.type))];
+            return (
+              <div key={i} className={`hrcal-cell ${iso(d) === today ? 'today' : ''} ${evs.length ? 'has-ev' : ''}`}>
+                <span className="hrcal-dnum">{d}</span>
+                <div className="hrcal-dots">{types.map((t) => <span key={t} className="hrcal-dot" style={{ background: CAL_COLORS[t] }} />)}</div>
+                {evs[0] && <span className="hrcal-ev-mini" style={{ color: CAL_COLORS[evs[0].type] }}>{evs[0].employeeId ? staffName(evs[0].employeeId).split(' ')[0] : evs[0].title}{evs.length > 1 ? ` +${evs.length - 1}` : ''}</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card hrcal-list">
+        <div className="hrcal-list-t">{trC('cal.eventsIn', { m: monLabel })} · {monthEvents.length}</div>
+        {monthEvents.length === 0 ? <div className="ed-empty">{trC('cal.none')}</div> : monthEvents.map((e) => (
+          <div key={e.id} className="hrcal-ev">
+            <span className="hrcal-ev-dot" style={{ background: CAL_COLORS[e.type] }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="hrcal-ev-t">{e.title}{e.employeeId ? <span className="hrcal-ev-emp"> · {staffName(e.employeeId)}</span> : ''}</div>
+              <div className="hrcal-ev-s">{trC('cal.' + e.type)} · {e.startDate}{e.endDate && e.endDate !== e.startDate ? ` → ${e.endDate}` : ''}{e.sourceId ? ` · ${trC('cal.fromApproval')}` : ''}{e.note ? ` · ${e.note}` : ''}</div>
+            </div>
+            {canEdit && !e._virtual && <button className="icon-btn del" title={trC('cal.remove')} onClick={() => removeEv(e.id)}><IconClose s={15} /></button>}
+          </div>
+        ))}
+      </div>
+
+      {addOpen && <CalEventModal staff={staff} today={today} onSave={saveEv} onClose={() => setAddOpen(false)} />}
+    </div>
+  );
+}
+
+window.COMPANY = { CompanyDashboard, HeadcountAffordability, ApprovalsCard, EmployeeDirectory, EmployeeDetail, RollCall, HRReport, ThrScreen, ProjectsScreen, HrCalendar };
 
 function projDueInfo(p) {
   if (p.status === 'done' || !p.due) return null;
