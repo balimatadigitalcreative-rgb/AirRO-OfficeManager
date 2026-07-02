@@ -373,6 +373,95 @@ function CashbonModal({ staff, onSave, onClose }) {
   );
 }
 
+/* ---------- Kasbon screen (request + approval workflow) ---------- */
+const KB_STATUS = { pending: { l: 'kb.stPending', c: 'var(--warn)', bg: 'var(--sand-soft)' }, approved: { l: 'kb.stApproved', c: 'var(--green-700)', bg: 'var(--mint-100)' }, rejected: { l: 'kb.stRejected', c: 'var(--neg)', bg: '#FDEBEC' }, active: { l: 'kb.stApproved', c: 'var(--green-700)', bg: 'var(--mint-100)' }, cancelled: { l: 'kb.stRejected', c: 'var(--text-mut)', bg: 'var(--card-soft)' } };
+const kbStat = (s) => KB_STATUS[s || 'pending'] || KB_STATUS.pending;
+
+function KasbonPicker({ staff, onPick, onClose }) {
+  const [id, setId] = uSc('');
+  uEc(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const opts = (staff || []).map((s) => ({ value: s.id, label: `${s.name} · ${s.dept || ''}` }));
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{trC('kb.pickEmp')}</div><button className="icon-btn" onClick={onClose}><IconClose s={18} /></button></div>
+        <div style={{ padding: '4px 2px 10px' }}>
+          <label className="fld-label" style={{ marginTop: 0 }}>{trC('req.employee')}</label>
+          <UI.Dropdown value={id} options={[{ value: '', label: '— ' + trC('kb.pickEmp') + ' —' }, ...opts]} onChange={setId} />
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trC('common.cancel')}</button>
+          <button className="btn btn-primary" disabled={!id} onClick={() => onPick((staff || []).find((s) => s.id === id))}>{trC('kb.continue')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KasbonScreen({ staff, cashbons, setCashbons, canApprove, today, userName }) {
+  const [pick, setPick] = uSc(false);        // employee-picker open
+  const [reqStaff, setReqStaff] = uSc(null); // staff chosen → CashbonModal
+  const [fEmp, setFEmp] = uSc('all');
+  const [fStatus, setFStatus] = uSc('all');
+  const active = HRD.activeStaff(staff || []);
+  const nameOf = (idv) => ((staff || []).find((s) => s.id === idv) || {}).name || '—';
+  const rows = uMc(() => (cashbons || [])
+    .filter((c) => (fEmp === 'all' || c.employeeId === fEmp) && (fStatus === 'all' || (c.status || 'pending') === fStatus))
+    .slice().sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : (b.createdAt || 0) - (a.createdAt || 0))), [cashbons, fEmp, fStatus]);
+  const save = (cb) => { CO.addCashbon({ ...cb, status: cb.status || 'pending' }); if (setCashbons) setCashbons(CO.loadCashbons()); setReqStaff(null); setPick(false); };
+  const decide = (id, status) => {
+    if (!canApprove) return;
+    let patch = { status, approvedBy: userName || '', decidedAt: Date.now() };
+    if (status === 'rejected') { const r = prompt(trC('kb.rejectReason')); if (r == null) return; patch.rejectReason = r; }
+    CO.updateCashbon(id, patch); if (setCashbons) setCashbons(CO.loadCashbons());
+  };
+  const pending = rows.filter((c) => (c.status || 'pending') === 'pending').length;
+  return (
+    <div className="screen-enter">
+      <div className="settings-intro card">
+        <div><div style={{ fontSize: 16, fontWeight: 700 }}>{trC('nav.kasbon')}</div><div style={{ fontSize: 13, color: 'var(--text-mut)', marginTop: 3 }}>{trC('kb.intro')}</div></div>
+        <button className="btn btn-primary" onClick={() => setPick(true)}><IconPlus s={16} />{trC('kb.request')}</button>
+      </div>
+      <div className="kb-toolbar">
+        <UI.Dropdown compact value={fEmp} options={[{ value: 'all', label: trC('kb.allEmp') }, ...active.map((s) => ({ value: s.id, label: s.name }))]} onChange={setFEmp} />
+        <UI.Dropdown compact value={fStatus} options={[{ value: 'all', label: trC('kb.allStatus') }, { value: 'pending', label: trC('kb.stPending') }, { value: 'approved', label: trC('kb.stApproved') }, { value: 'rejected', label: trC('kb.stRejected') }]} onChange={setFStatus} />
+        {pending > 0 && <span className="kb-pending-chip">{trC('kb.pendingN', { n: pending })}</span>}
+      </div>
+      {rows.length === 0 ? (
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)', marginTop: 14 }}>{trC('kb.none')}</div>
+      ) : (
+        <div className="kb-cards">
+          {rows.map((c) => { const st = kbStat(c.status); const dec = (c.status || 'pending') !== 'pending'; return (
+            <div className="card kb-card" key={c.id}>
+              <div className="kb-card-top">
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="kb-card-name">{nameOf(c.employeeId)}</div>
+                  <div className="kb-card-sub">{c.date} · {trC('co.kasbonCycle', { a: c.cycleAnchor || '—' })}</div>
+                </div>
+                <div className="kb-card-amt tnum">{rpC(c.amount)}</div>
+                <span className="kb-badge" style={{ background: st.bg, color: st.c }}>{trC(st.l)}</span>
+              </div>
+              {c.note && <div className="kb-card-note">{c.note}</div>}
+              <div className="kb-card-trail">
+                {c.requestedBy && <span>{trC('kb.requestedBy', { n: c.requestedBy })}</span>}
+                {dec && c.approvedBy && <span>{(c.status === 'rejected' ? trC('kb.rejectedBy', { n: c.approvedBy }) : trC('kb.approvedBy', { n: c.approvedBy }))}{c.rejectReason ? ` · ${c.rejectReason}` : ''}</span>}
+              </div>
+              {canApprove && (c.status || 'pending') === 'pending' && (
+                <div className="kb-card-actions">
+                  <button className="btn btn-lime btn-sm" onClick={() => decide(c.id, 'approved')}><IconCheck s={15} />{trC('kb.approve')}</button>
+                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--neg)' }} onClick={() => decide(c.id, 'rejected')}><IconClose s={15} />{trC('kb.reject')}</button>
+                </div>
+              )}
+            </div>
+          ); })}
+        </div>
+      )}
+      {pick && <KasbonPicker staff={active} onPick={(s) => { setReqStaff(s); setPick(false); }} onClose={() => setPick(false)} />}
+      {reqStaff && <CashbonModal staff={reqStaff} onSave={save} onClose={() => setReqStaff(null)} />}
+    </div>
+  );
+}
+
 /* ---------- Offboarding modal (mark leaving, with impact preview) ---------- */
 function OffboardModal({ staff, rates, cashbons, onSave, onClose }) {
   const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
@@ -1446,7 +1535,7 @@ function HrCalendar({ staff, rates, events, setEvents, today, canEdit }) {
   );
 }
 
-window.COMPANY = { CompanyDashboard, HeadcountAffordability, ApprovalsCard, EmployeeDirectory, EmployeeDetail, RollCall, HRReport, ThrScreen, ProjectsScreen, HrCalendar, OrientationScreen, OrientationSlip };
+window.COMPANY = { CompanyDashboard, HeadcountAffordability, ApprovalsCard, EmployeeDirectory, EmployeeDetail, RollCall, HRReport, ThrScreen, ProjectsScreen, HrCalendar, OrientationScreen, OrientationSlip, KasbonScreen };
 
 function projDueInfo(p) {
   if (p.status === 'done' || !p.due) return null;

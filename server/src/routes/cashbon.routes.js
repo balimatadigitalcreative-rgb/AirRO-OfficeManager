@@ -5,17 +5,21 @@ const validate = require('../middleware/validate');
 const { requireAuth, requireCap } = require('../middleware/auth');
 
 const router = Router();
-// Kasbon is a payroll/HR concern — gate on the same capability as employees.
-router.use(requireAuth, requireCap('employees'));
+router.use(requireAuth);
 
-// Live path (validation reads /state): preview limits, then request (authoritative).
-router.post('/preview', validate({ body: ctrl.schemas.previewSchema }), ctrl.preview);
-router.post('/request', validate({ body: ctrl.schemas.requestSchema }), ctrl.request);
+// ── Requesting / viewing kasbon → 'kasbon' capability ──
+// Live path (validation reads /state): preview limits, then request (authoritative,
+// enforces the 16→15 cycle rules). A request lands as 'pending'.
+router.post('/preview', requireCap('kasbon'), validate({ body: ctrl.schemas.previewSchema }), ctrl.preview);
+router.post('/request', requireCap('kasbon'), validate({ body: ctrl.schemas.requestSchema }), ctrl.request);
+router.get('/', requireCap('kasbon'), validate({ query: ctrl.schemas.listQuery }), ctrl.list);
+router.get('/:id', requireCap('kasbon'), validate({ params: ctrl.schemas.idParams }), ctrl.getOne);
+router.post('/', requireCap('kasbon'), validate({ body: ctrl.schemas.createSchema }), ctrl.create);
 
-router.get('/', validate({ query: ctrl.schemas.listQuery }), ctrl.list);
-router.get('/:id', validate({ params: ctrl.schemas.idParams }), ctrl.getOne);
-router.post('/', validate({ body: ctrl.schemas.createSchema }), ctrl.create);
-router.patch('/:id', validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.updateSchema }), ctrl.update);
-router.delete('/:id', validate({ params: ctrl.schemas.idParams }), ctrl.remove);
+// ── Approving / rejecting / editing → 'kasbonApprove' capability ──
+router.post('/:id/approve', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams }), ctrl.approve);
+router.post('/:id/reject', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.rejectSchema }), ctrl.reject);
+router.patch('/:id', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.updateSchema }), ctrl.update);
+router.delete('/:id', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams }), ctrl.remove);
 
 module.exports = router;

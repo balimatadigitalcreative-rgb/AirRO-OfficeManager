@@ -285,16 +285,19 @@
   const cbAnchor = (c) => c.cycleAnchor || payCycle(c.date).anchor;
   function cashbonCeiling(staff) { return Math.floor(0.5 * (+staff.base || 0)); }
   function cashbonWeeklyMax(staff) { return Math.floor(cashbonCeiling(staff) / 4); }
-  // Active kasbon a staff has in a given cycle (deducted in full at that cutoff).
+  // Only APPROVED kasbon is deducted (legacy 'active' rows count as approved).
+  // 'pending'/'rejected'/'cancelled' never deduct from payroll.
+  const cbApproved = (c) => c.status === 'approved' || c.status === 'active';
+  // Kasbon shown for a cycle (pending + approved; hide rejected/cancelled).
   function cashbonsInCycle(staffId, cashbons, anchor) {
-    return (cashbons || []).filter((c) => c.employeeId === staffId && c.status !== 'cancelled' && cbAnchor(c) === anchor);
+    return (cashbons || []).filter((c) => c.employeeId === staffId && c.status !== 'cancelled' && c.status !== 'rejected' && cbAnchor(c) === anchor);
   }
   function cashbonCycleTotal(staffId, cashbons, anchor) {
-    return (cashbons || []).filter((c) => c.employeeId === staffId && c.status === 'active' && cbAnchor(c) === anchor).reduce((a, c) => a + (+c.amount || 0), 0);
+    return (cashbons || []).filter((c) => c.employeeId === staffId && cbApproved(c) && cbAnchor(c) === anchor).reduce((a, c) => a + (+c.amount || 0), 0);
   }
-  // All still-owed active kasbon (any cycle) — for termination / final settlement.
+  // All still-owed approved kasbon (any cycle) — for termination / final settlement.
   function cashbonOutstanding(staffId, cashbons) {
-    return (cashbons || []).filter((c) => c.employeeId === staffId && c.status === 'active').reduce((a, c) => a + (+c.amount || 0), 0);
+    return (cashbons || []).filter((c) => c.employeeId === staffId && cbApproved(c)).reduce((a, c) => a + (+c.amount || 0), 0);
   }
   // Fold a cycle's kasbon total into the staff's deductions as one auto "Kasbon"
   // row so compute()/payslip/breakdown pick it up. Default cycle = today's.

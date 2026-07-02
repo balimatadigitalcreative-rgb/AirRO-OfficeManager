@@ -17,6 +17,7 @@ function navForRole(p) {
   if (p.payroll) items.push({ id: 'orientation', label: tr('nav.orientation'), icon: 'IconUserCircle', grp: 'hr' });
   if (p.payroll && p.attendance) items.push({ id: 'headcount', label: tr('nav.headcount'), icon: 'IconUsersGroup', grp: 'hr' });
   if (p.payroll) items.push({ id: 'payroll', label: tr('nav.payroll'), icon: 'IconUsersGroup', grp: 'hr' });
+  if (p.kasbon) items.push({ id: 'kasbon', label: tr('nav.kasbon'), icon: 'IconWallet', grp: 'hr' });
   if (p.payroll) items.push({ id: 'thr', label: tr('nav.thr'), icon: 'IconCoinIn', grp: 'hr' });
   if (p.employees && p.attendance) items.push({ id: 'hrreport', label: tr('nav.hrreport'), icon: 'IconReport', grp: 'hr' });
   if (p.payroll && p.attendance) items.push({ id: 'hrsettings', label: tr('nav.hrsettings'), icon: 'IconSettings', grp: 'hr' });
@@ -459,6 +460,7 @@ function FApp() {
     entries: { t: tr('t.entries'), s: tr('s.entries') },
     reports: { t: tr('t.reports'), s: tr('s.reports') },
     payroll: { t: tr('t.payroll'), s: tr('s.payroll') },
+    kasbon: { t: tr('nav.kasbon'), s: tr('kb.intro') },
     settings: { t: tr('t.settings'), s: tr('s.settings') },
     users: { t: tr('t.users'), s: tr('s.users') },
   }[screen] || { t: '', s: '' };
@@ -571,6 +573,10 @@ function FApp() {
 
           {screen === 'orientation' && p.payroll && (
             <COMPANY.OrientationScreen staff={hrdStaff} setStaff={setHrdStaff} rates={hrdRates} today={FIN.TODAY} syncTick={syncTick} canEdit={p.payroll} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
+          )}
+
+          {screen === 'kasbon' && p.kasbon && (
+            <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} setCashbons={setCashbons} canApprove={p.kasbonApprove} today={FIN.TODAY} userName={user.name} />
           )}
 
           {screen === 'approvals' && p.approvals && (

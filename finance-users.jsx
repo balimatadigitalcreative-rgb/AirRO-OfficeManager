@@ -26,6 +26,8 @@ const CAP_GROUPS = [
     ['empDetail', 'Detail Karyawan'],
     ['attendance', 'Absensi'],
     ['payroll', 'Penggajian'],
+    ['kasbon', 'Kasbon (ajukan)'],
+    ['kasbonApprove', 'Setujui Kasbon'],
   ] },
   { title: 'Perusahaan & Admin', caps: [
     ['company', 'Dashboard Perusahaan'],

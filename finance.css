@@ -1291,6 +1291,19 @@ img, svg, canvas, video { max-width: 100%; }
 .ori-att-sum > b { font-size: 14px; color: var(--green-700); }
 .ori-empty { padding: 10px 0; color: var(--text-mut); font-size: 12.5px; text-align: center; }
 .btn.btn-sm { padding: 6px 11px; font-size: 12.5px; }
+/* Kasbon screen */
+.kb-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 14px 0 4px; }
+.kb-pending-chip { font-size: 12px; font-weight: 700; color: #8a5a00; background: var(--sand-soft); padding: 5px 11px; border-radius: 999px; }
+.kb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+.kb-card { padding: 14px 16px; }
+.kb-card-top { display: flex; align-items: center; gap: 10px; }
+.kb-card-name { font-size: 14.5px; font-weight: 700; }
+.kb-card-sub { font-size: 12px; color: var(--text-mut); margin-top: 1px; }
+.kb-card-amt { font-size: 15px; font-weight: 800; white-space: nowrap; }
+.kb-badge { font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.kb-card-note { font-size: 12.5px; color: var(--text-mut); margin-top: 8px; }
+.kb-card-trail { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
+.kb-card-actions { display: flex; gap: 8px; margin-top: 12px; }
 /* Department manager */
 .dept-mgr { padding: 16px 18px; }
 .dept-list { display: flex; flex-direction: column; gap: 2px; }

@@ -124,18 +124,18 @@
   const ROLE_COLORS = { owner: '#065489', gm: '#0B7EB1', hrd: '#138FB3', finance: '#22A7A1', adminfin: '#3FB8B2' };
   const ROLES = {
     owner:   { label: 'Owner',           blurb: 'Executive read-only overview', readonly: true,
-      perms: { company: true,  cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: true,  advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false } },
+      perms: { company: true,  cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: true,  advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, kasbon: false, kasbonApprove: false } },
     gm:      { label: 'General Manager', blurb: 'Full access to everything',
-      perms: { company: true,  cashflow: true,  employees: true,  empDetail: true,  attendance: true,  addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: true } },
+      perms: { company: true,  cashflow: true,  employees: true,  empDetail: true,  attendance: true,  addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: true, kasbon: true, kasbonApprove: true } },
     hrd:     { label: 'HRD',             blurb: 'People, payroll & attendance',
-      perms: { company: false, cashflow: false, employees: true,  empDetail: true,  attendance: true,  addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: false, advisor: false, payroll: true,  approvals: true,  delete: false, settings: false, reset: false } },
+      perms: { company: false, cashflow: false, employees: true,  empDetail: true,  attendance: true,  addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: false, advisor: false, payroll: true,  approvals: true,  delete: false, settings: false, reset: false, kasbon: true, kasbonApprove: true } },
     finance: { label: 'Finance',         blurb: 'Cash book, reports & payroll posting',
-      perms: { company: false, cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: false, setoran: true } },
+      perms: { company: false, cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: false, setoran: true, kasbon: true, kasbonApprove: false } },
     adminfin:{ label: 'Admin Finance',    blurb: 'Daily delivery setoran input',
-      perms: { company: false, cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: true,  reports: false, advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, setoran: true, setoranOnly: true } },
+      perms: { company: false, cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: true,  reports: false, advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, setoran: true, setoranOnly: true, kasbon: false, kasbonApprove: false } },
   };
   const perms = (role) => (ROLES[role] || ROLES.finance).perms;
-  const landingScreen = (role) => { const p = perms(role); return p.setoranOnly ? 'setoran' : p.company ? 'company' : p.cashflow ? 'overview' : p.employees ? 'employees' : p.payroll ? 'payroll' : 'overview'; };
+  const landingScreen = (role) => { const p = perms(role); return p.setoranOnly ? 'setoran' : p.company ? 'company' : p.cashflow ? 'overview' : p.employees ? 'employees' : p.payroll ? 'payroll' : p.kasbon ? 'kasbon' : 'overview'; };
   const initials = (name) => name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   function loadSession() { try { const id = localStorage.getItem(SESSION_KEY); return loadUsers().find((u) => u.id === id) || null; } catch (e) { return null; } }
   function setSession(id) { try { id ? localStorage.setItem(SESSION_KEY, id) : localStorage.removeItem(SESSION_KEY); } catch (e) {} }

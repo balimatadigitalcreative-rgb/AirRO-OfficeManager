@@ -16,7 +16,10 @@ async function cycleContext(employeeId) {
   const staff = Array.isArray(staffArr) ? staffArr.find((s) => s.id === employeeId) : null;
   const base = staff ? (+staff.base || 0) : 0;
   const all = parseDoc(await state.get(CB_DOC), []);
-  const existing = (Array.isArray(all) ? all : []).filter((c) => c.employeeId === employeeId);
+  // Count only requests that still consume the cycle allowance: pending + approved
+  // (+ legacy 'active'). Rejected/cancelled requests free the allowance back up.
+  const CONSUMES = { pending: 1, approved: 1, active: 1 };
+  const existing = (Array.isArray(all) ? all : []).filter((c) => c.employeeId === employeeId && CONSUMES[c.status || 'pending']);
   const r = parseDoc(await state.get(RATES_DOC), {});
   const mode = r && r.cashbonWeekMode === 'calendar' ? 'calendar' : 'cutoff';
   return { staff, base, existing, mode };
@@ -32,17 +35,28 @@ async function preview({ employeeId, date, amount }) {
 
 // Authoritative validation. On success returns the ready-to-store kasbon object
 // (with cycleAnchor); the frontend appends it to the shared /state store.
-async function request({ employeeId, amount, date, note }) {
+async function request({ employeeId, amount, date, note }, user) {
   const { base, existing, mode } = await cycleContext(employeeId);
   const v = rules.validate({ base, date, amount, existing, mode });
   if (!v.ok) throw ApiError.badRequest(v.message, v);
   const cashbon = {
     id: 'kb' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
     employeeId, amount: +amount, date, note: (note || '').trim(),
-    installments: 1, status: 'active', cycleAnchor: v.cycleAnchor, createdAt: Date.now(),
+    installments: 1, status: 'pending', cycleAnchor: v.cycleAnchor, createdAt: Date.now(),
+    // approval trail
+    requestedBy: (user && (user.username || user.id)) || '', requestedAt: Date.now(),
+    approvedBy: '', decidedAt: null, rejectReason: '',
   };
   const summary = rules.summarize(base, existing.concat(cashbon), date, mode);
   return { cashbon, info: { base, mode, ceiling: v.ceiling, weeklyMax: v.weeklyMax, remainingAfter: v.remainingAfter, summary } };
+}
+
+// Approve/reject a kasbon in the REST table (the frontend mirrors the same decision
+// into the shared /state store, which is the live source for payroll deduction).
+async function decide(id, status, user, reason) {
+  await getById(id);
+  const r = await prisma.cashbon.update({ where: { id }, data: { status } });
+  return { ...withCalc(r), approvedBy: (user && (user.username || user.id)) || '', decidedAt: Date.now(), rejectReason: reason || '' };
 }
 
 // Monthly installment = amount / installments (rounded).
@@ -83,4 +97,4 @@ async function remove(id) {
   await prisma.cashbon.delete({ where: { id } });
 }
 
-module.exports = { list, getById, create, update, remove, preview, request };
+module.exports = { list, getById, create, update, remove, preview, request, decide };
