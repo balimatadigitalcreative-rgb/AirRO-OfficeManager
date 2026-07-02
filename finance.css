@@ -1205,18 +1205,25 @@ img, svg, canvas, video { max-width: 100%; }
 .tr-rec-btn:hover { background: var(--mint-200); }
 
 /* ── Orientation (new hires) ── */
-.ori-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-.ori-card { padding: 15px 16px; }
+/* Cards hold a 6-column daily-attendance table, so they need real width. min(540px,
+   100%) => full-width single column on phones/tablets (never overflows the page),
+   two columns only when the viewport is wide enough to fit them comfortably. */
+.ori-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(540px, 100%), 1fr)); gap: 14px; align-items: start; }
+.ori-card { padding: 15px 16px; min-width: 0; }
+.ori-card .emp-pos { white-space: normal; }   /* let "Supervisor Distribution …" wrap instead of clipping */
 .ori-top { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
 .ori-badge { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
 .ori-badge.pending { color: var(--blue-700); background: #E3F2FB; }
 .ori-badge.passed { color: var(--green-700); background: var(--mint-100); }
 .ori-badge.failed { color: var(--neg); background: #FDEBEC; }
-.ori-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
-.ori-facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--border-soft); }
+.ori-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px 18px; }
+.ori-facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--border-soft); min-width: 0; }
+.ori-facts > div b { white-space: nowrap; }
 .ori-facts > div span { color: var(--text-mut); }
 .ori-facts > div b { font-weight: 700; }
 .ori-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ori-actions .btn { white-space: nowrap; }   /* Luluskan / Tidak lanjut / Bayar / Slip never clip */
+@media (max-width: 520px) { .ori-card { padding: 13px 12px; } .ori-att-sum { font-size: 11.5px; } }
 .ori-newhire { margin: 6px 0 4px; padding: 12px 13px; border-radius: 12px; background: var(--card-soft); border: 1px solid var(--border-soft); }
 .ori-nh-hint { font-size: 12px; color: var(--text-mut); margin-bottom: 10px; line-height: 1.45; }
 .ori-nh-total { font-size: 13px; margin-top: 10px; }
@@ -1230,20 +1237,33 @@ img, svg, canvas, video { max-width: 100%; }
 /* Orientation attendance table */
 .ori-att { margin-top: 12px; border-top: 1px solid var(--border-soft); padding-top: 10px; }
 .ori-att-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--green-700); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
-.ori-att-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.ori-att-tbl th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); }
-.ori-att-tbl td { padding: 5px 6px; border-bottom: 1px dashed var(--border-soft); vertical-align: middle; }
+/* Only the TABLE scrolls sideways on a narrow card — never the whole page. */
+.ori-att-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -2px; }
+.ori-att-tbl { width: 100%; min-width: 480px; border-collapse: collapse; font-size: 12.5px; }
+.ori-att-tbl th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; padding: 5px 8px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+.ori-att-tbl td { padding: 6px 8px; border-bottom: 1px dashed var(--border-soft); vertical-align: middle; white-space: nowrap; }
+/* Proportional, aligned columns: date / check-in / status(+absent) / OT / pay / delete */
+.ori-att-tbl th:nth-child(1), .ori-att-tbl td:nth-child(1) { min-width: 92px; }
+.ori-att-tbl th:nth-child(2), .ori-att-tbl td:nth-child(2) { min-width: 96px; }
+.ori-att-tbl th:nth-child(3), .ori-att-tbl td:nth-child(3) { min-width: 132px; }
+.ori-att-tbl th:nth-child(4), .ori-att-tbl td:nth-child(4) { min-width: 62px; }
+.ori-att-tbl th:nth-child(5), .ori-att-tbl td:nth-child(5) { min-width: 96px; }
+.ori-att-tbl td:last-child { width: 34px; text-align: center; }
 .ori-att-tbl .tr, .ori-slip-tbl .tr { text-align: right; }
 .ori-att-tbl th.tr { text-align: right; }
-.ori-ot-in { width: 52px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; font-size: 12.5px; text-align: center; }
-.ori-abs { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-mut); margin-left: 8px; cursor: pointer; }
+.ori-att-tbl .tnum { white-space: nowrap; }   /* Rp values never wrap/clip */
+.ori-ot-in { width: 54px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; font-size: 12.5px; text-align: center; }
+.ori-abs { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-mut); margin-left: 8px; cursor: pointer; white-space: nowrap; }
 .ori-abs input { margin: 0; }
 .ori-mut { color: var(--text-faint); }
-.ori-st { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.ori-st { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
 .ori-st.present { color: var(--green-700); background: var(--mint-100); }
 .ori-st.late { color: #8a5a00; background: #FCF0D6; }
 .ori-st.absent { color: var(--neg); background: #FDEBEC; }
-.ori-att-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+/* "Add day" row: fields align on their bottom edge; wrap tidily on a narrow card. */
+.ori-att-add { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 12px; }
+.ori-att-add > * { flex: 0 0 auto; }
+.ori-att-add .ori-ot-in { width: 90px; align-self: stretch; height: 38px; }
 .ori-att-sum { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-soft); font-size: 12px; }
 .ori-att-sum > span { color: var(--text-mut); }
 .ori-att-sum > b { font-size: 14px; color: var(--green-700); }

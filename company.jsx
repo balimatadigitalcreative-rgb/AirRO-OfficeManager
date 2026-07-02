@@ -543,6 +543,7 @@ function OriCard({ s, rates, today, syncTick, canEdit, canAddEntry, onGraduate, 
       <div className="ori-att">
         <div className="ori-att-head"><IconClock s={14} /> {trC('ori.attendance')}</div>
         {wage.rows.length === 0 ? <div className="ori-empty">{trC('ori.noDays')}</div> : (
+          <div className="ori-att-wrap">
           <table className="ori-att-tbl">
             <thead><tr><th>{trC('ori.colDate')}</th><th>{trC('ori.colIn')}</th><th>{trC('ori.colStatus')}</th><th>{trC('ori.colOt')}</th><th className="tr">{trC('ori.colPay')}</th>{canEdit && <th></th>}</tr></thead>
             <tbody>
@@ -561,6 +562,7 @@ function OriCard({ s, rates, today, syncTick, canEdit, canAddEntry, onGraduate, 
               ); })}
             </tbody>
           </table>
+          </div>
         )}
         {canEdit && !decided && (
           <div className="ori-att-add">
