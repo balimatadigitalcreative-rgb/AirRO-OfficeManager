@@ -58,6 +58,7 @@ function FApp() {
   const changeLang = (l) => { window.I18N.setLang(l); setLang(l); };
   const [hrdRates, setHrdRates] = uSh(() => HRD.loadRates());
   const [hrdStaff, setHrdStaff] = uSh(() => HRD.loadStaff());
+  const [departments, setDepartments] = uSh(() => HRD.loadDepartments());
   const [hrBudget, setHrBudget] = uSh(() => HRD.loadBudget());
   const [approvals, setApprovals] = uSh(() => CO.load());
   const [accounts, setAccounts] = uSh(() => FS.loadAccts());
@@ -77,6 +78,7 @@ function FApp() {
   uEh(() => { FS.saveSettings(settings); }, [settings]);
   uEh(() => { HRD.saveRates(hrdRates); }, [hrdRates]);
   uEh(() => { HRD.saveStaff(hrdStaff); }, [hrdStaff]);
+  uEh(() => { HRD.saveDepartments(departments); }, [departments]);
   uEh(() => { HRD.saveBudget(hrBudget); }, [hrBudget]);
   uEh(() => { CO.save(approvals); }, [approvals]);
   uEh(() => { FS.saveAccts(accounts); }, [accounts]);
@@ -98,7 +100,7 @@ function FApp() {
     setEntries(FS.load()); setCats(FS.loadCats()); setSettings(FS.loadSettings());
     setAccounts(FS.loadAccts()); setSetoran(FS.loadSetoran()); setFleet(FS.loadFleet());
     setTransfers(FS.loadTransfers());
-    setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget());
+    setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget()); setDepartments(HRD.loadDepartments());
     setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons()); setCalEvents(CO.loadEvents());
     setUsers(FS.loadUsers());
   };
@@ -494,14 +496,14 @@ function FApp() {
           )}
 
           {screen === 'hrreport' && p.employees && (
-            <COMPANY.HRReport staff={hrdStaff} rates={hrdRates} budget={hrBudget} monthKey={monthKey} today={FIN.TODAY} approvals={approvals} gran={gran} anchor={anchor} setAnchor={setAnchor} range={range} periodLbl={periodLbl} setGran={setGran} />
+            <COMPANY.HRReport staff={hrdStaff} rates={hrdRates} departments={departments} budget={hrBudget} monthKey={monthKey} today={FIN.TODAY} approvals={approvals} gran={gran} anchor={anchor} setAnchor={setAnchor} range={range} periodLbl={periodLbl} setGran={setGran} />
           )}
 
-          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={setHrdRates} />
+          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={setHrdRates} departments={departments} setDepartments={setDepartments} staff={hrdStaff} setStaff={setHrdStaff} canEditDept={p.payroll} />
           )}
 
           {screen === 'employees' && p.employees && (
-            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.payroll} seeMoney={p.seeMoney} setStaff={setHrdStaff} />
+            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.payroll} seeMoney={p.seeMoney} setStaff={setHrdStaff} />
           )}
 
           {screen === 'hrcalendar' && p.employees && (

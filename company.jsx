@@ -854,12 +854,13 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, ca
 }
 
 /* ---------- Employee Directory ---------- */
-function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canEdit, seeMoney, setStaff }) {
+function EmployeeDirectory({ staff, rates, departments, monthKey, today, onEdit, onOpen, canEdit, seeMoney, setStaff }) {
   const [q, setQ] = uSc('');
   const [dept, setDept] = uSc('All');
   const [editing, setEditing] = uSc(null);
   const [showArchive, setShowArchive] = uSc(false);
-  const depts = ['All', ...HRD.DEPARTMENTS];
+  const deptList = (departments && departments.length ? departments : HRD.loadDepartments());
+  const depts = ['All', ...deptList];
   // Writes to the SAME hrdStaff array → instantly visible in Payroll too.
   const saveStaff = (s) => {
     setStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
@@ -875,7 +876,7 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
   if (q) rows = rows.filter((s) => (s.name + (s.pos || '') + (s.dept || '')).toLowerCase().includes(q.toLowerCase()));
   const groups = {};
   rows.forEach((s) => { (groups[s.dept || 'Other'] = groups[s.dept || 'Other'] || []).push(s); });
-  const order = [...HRD.DEPARTMENTS.filter((d) => groups[d]), ...Object.keys(groups).filter((d) => !HRD.DEPARTMENTS.includes(d))];
+  const order = [...deptList.filter((d) => groups[d]), ...Object.keys(groups).filter((d) => !deptList.includes(d))];
   return (
     <div className="screen-enter">
       <div className="emp-toolbar">
@@ -918,7 +919,7 @@ function EmployeeDirectory({ staff, rates, monthKey, today, onEdit, onOpen, canE
           </div>
         </div>
       ))}
-      {editing && <PAYROLL.StaffModal staff={editing} rates={rates} variant="identity" onSave={saveStaff} onClose={() => setEditing(null)} />}
+      {editing && <PAYROLL.StaffModal staff={editing} rates={rates} departments={departments} variant="identity" onSave={saveStaff} onClose={() => setEditing(null)} />}
     </div>
   );
 }
@@ -970,7 +971,7 @@ function RollCall({ staff, monthKey, today }) {
 }
 
 /* ---------- HR Report (KPIs & analytics) ---------- */
-function HRReport({ staff, rates, budget, monthKey, today, approvals, gran, anchor, setAnchor, range, periodLbl, setGran }) {
+function HRReport({ staff, rates, departments, budget, monthKey, today, approvals, gran, anchor, setAnchor, range, periodLbl, setGran }) {
   const t = HRD.totals(staff, rates);
   const aff = HRD.affordability(staff, rates, budget);
   const MN = (window.PERIOD ? PERIOD.mon : (i) => i + 1);
@@ -1009,9 +1010,12 @@ function HRReport({ staff, rates, budget, monthKey, today, approvals, gran, anch
   // department detail
   const byDept = uMc(() => {
     const m = {};
-    perEmp.forEach(({ s, a, c }) => { const d = (m[s.dept] = m[s.dept] || { count: 0, cost: 0, present: 0, wd: 0 }); d.count++; d.cost += c.companyCost; d.present += a.present + a.late; d.wd += a.workdays; });
-    return HRD.DEPARTMENTS.filter((d) => m[d]).map((d) => ({ dept: d, ...m[d], rate: m[d].wd ? Math.round((m[d].present / m[d].wd) * 100) : 100 }));
-  }, [perEmp]);
+    perEmp.forEach(({ s, a, c }) => { const k = s.dept || 'Other'; const d = (m[k] = m[k] || { count: 0, cost: 0, present: 0, wd: 0 }); d.count++; d.cost += c.companyCost; d.present += a.present + a.late; d.wd += a.workdays; });
+    const dl = (departments && departments.length ? departments : HRD.loadDepartments());
+    // Known departments first (managed order), then any legacy dept still on staff.
+    const order = [...dl.filter((d) => m[d]), ...Object.keys(m).filter((d) => dl.indexOf(d) < 0)];
+    return order.map((d) => ({ dept: d, ...m[d], rate: m[d].wd ? Math.round((m[d].present / m[d].wd) * 100) : 100 }));
+  }, [perEmp, departments]);
   const maxDept = Math.max(1, ...byDept.map((d) => d.cost));
   // workforce composition
   const comp = uMc(() => {

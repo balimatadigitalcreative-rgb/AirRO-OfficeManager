@@ -153,8 +153,11 @@ function RatesPanel({ rates, onChange, onReset }) {
 // salary emphasized) and the Employee Directory / detail (variant="identity",
 // identity emphasized). Both write the SAME fields to one staff object so the
 // single hrdStaff array stays the only source of truth.
-function StaffModal({ staff, rates, onSave, onClose, variant }) {
+function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
   const ident = variant === 'identity';
+  // Dept options come from the HRD-managed list; include the staff's current dept
+  // even if it was removed (legacy) so the dropdown never loses their value.
+  const deptList = (() => { const base = (departments && departments.length ? departments : HRD.loadDepartments()).slice(); if (staff && staff.dept && base.indexOf(staff.dept) < 0) base.push(staff.dept); return base; })();
   const [f, setF] = uShr(staff);
   const [showSalary, setShowSalary] = uShr(!ident);   // identity: salary collapsed
   const [showIdent, setShowIdent] = uShr(true);        // payroll: identity shown below salary
@@ -212,7 +215,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant }) {
 
       <div className="ed-grp-t">{trH('co.grpContract')}</div>
       <label className="ed-af"><span>{trH('hrd.position')}</span><input value={f.pos || ''} placeholder="e.g. Sopir" onChange={(e) => set({ pos: e.target.value })} /></label>
-      <label className="ed-af"><span>{trH('hrd.dept')}</span><UI.Dropdown value={f.dept || HRD.DEPARTMENTS[0]} options={HRD.DEPARTMENTS} onChange={(v) => set({ dept: v })} /></label>
+      <label className="ed-af"><span>{trH('hrd.dept')}</span><UI.Dropdown value={f.dept || deptList[0]} options={deptList} onChange={(v) => set({ dept: v })} /></label>
       <label className="ed-af"><span>{trH('co.empStatus')}</span><UI.Dropdown value={f.status || 'Tetap'} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => set({ status: v })} /></label>
       <label className="ed-af"><span>{trH('co.noSurat')}</span><input value={f.noSurat || ''} onChange={(e) => set({ noSurat: e.target.value })} /></label>
       <label className="ed-af"><span>{trH('co.joined')}</span><DP.DateField value={f.joinedDate || ''} max={today} onChange={(v) => set({ joinedDate: v })} /></label>
@@ -608,7 +611,113 @@ function SeverancePanel({ rates, onChange }) {
   );
 }
 
-function HrSettings({ rates, setRates }) {
+/* ---------------- Department manager (HRD-managed list) ---------------- */
+function DeptManager({ departments, setDepartments, staff, setStaff, canEdit }) {
+  const list = departments && departments.length ? departments : HRD.loadDepartments();
+  const [newName, setNewName] = uShr('');
+  const [editIdx, setEditIdx] = uShr(-1);
+  const [editVal, setEditVal] = uShr('');
+  const [reassign, setReassign] = uShr(null);   // { name, idx, target }
+  const usage = (name) => (staff || []).filter((s) => s.dept === name).length;
+  const dup = (name, exceptIdx) => list.some((d, i) => i !== exceptIdx && d.trim().toLowerCase() === name.trim().toLowerCase());
+
+  const add = () => {
+    const nn = newName.trim();
+    if (!nn) return;
+    if (dup(nn, -1)) { alert(trH('dept.dup')); return; }
+    setDepartments([...list, nn]); setNewName('');
+  };
+  const startEdit = (i) => { setEditIdx(i); setEditVal(list[i]); };
+  const saveEdit = () => {
+    const nn = editVal.trim(); const oldName = list[editIdx];
+    if (!nn) { alert(trH('dept.emptyName')); return; }
+    if (dup(nn, editIdx)) { alert(trH('dept.dup')); return; }
+    setDepartments(list.map((d, i) => (i === editIdx ? nn : d)));
+    // Rename cascade → keep every employee's dept pointing at the renamed label.
+    if (oldName !== nn && setStaff) setStaff((prev) => prev.map((s) => (s.dept === oldName ? { ...s, dept: nn } : s)));
+    setEditIdx(-1); setEditVal('');
+  };
+  const move = (i, dir) => { const j = i + dir; if (j < 0 || j >= list.length) return; const next = list.slice(); const t = next[i]; next[i] = next[j]; next[j] = t; setDepartments(next); };
+  const remove = (i) => {
+    const name = list[i]; const used = usage(name);
+    if (used > 0) {
+      const others = list.filter((_, k) => k !== i);
+      if (!others.length) { alert(trH('dept.cantDeleteLast')); return; }
+      setReassign({ name, idx: i, target: others[0] });
+      return;
+    }
+    if (!confirm(trH('dept.confirmDelete', { name }))) return;
+    setDepartments(list.filter((_, k) => k !== i));
+  };
+  const doReassign = () => {
+    if (!reassign) return;
+    if (setStaff) setStaff((prev) => prev.map((s) => (s.dept === reassign.name ? { ...s, dept: reassign.target } : s)));
+    setDepartments(list.filter((_, k) => k !== reassign.idx));
+    setReassign(null);
+  };
+
+  return (
+    <div className="card dept-mgr">
+      <div className="rate-group-title" style={{ marginBottom: 4 }}>{trH('dept.title')}</div>
+      <div className="rate-note" style={{ marginTop: 0, marginBottom: 12 }}>{trH('dept.intro')}</div>
+      <div className="dept-list">
+        {list.map((d, i) => (
+          <div className="dept-row" key={d + i}>
+            {canEdit && (
+              <span className="dept-move">
+                <button className="icon-btn" disabled={i === 0} title={trH('dept.moveUp')} onClick={() => move(i, -1)}><IconArrowUp s={14} /></button>
+                <button className="icon-btn" disabled={i === list.length - 1} title={trH('dept.moveDown')} onClick={() => move(i, 1)}><IconArrowDown s={14} /></button>
+              </span>
+            )}
+            {editIdx === i ? (
+              <input className="fld dept-edit" autoFocus value={editVal} onChange={(e) => setEditVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditIdx(-1); }} />
+            ) : (
+              <span className="dept-name">{d}</span>
+            )}
+            <span className="dept-count">{trH('dept.count', { n: usage(d) })}</span>
+            {canEdit && (editIdx === i ? (
+              <React.Fragment>
+                <button className="icon-btn ok" title={trH('dept.save')} onClick={saveEdit}><IconCheck s={15} /></button>
+                <button className="icon-btn" title={trH('common.cancel')} onClick={() => setEditIdx(-1)}><IconClose s={15} /></button>
+              </React.Fragment>
+            ) : (
+              <React.Fragment>
+                <button className="icon-btn" title={trH('dept.rename')} onClick={() => startEdit(i)}><IconPencil s={14} /></button>
+                <button className="icon-btn del" title={trH('dept.remove')} onClick={() => remove(i)}><IconClose s={15} /></button>
+              </React.Fragment>
+            ))}
+          </div>
+        ))}
+        {list.length === 0 && <div className="ori-empty">{trH('dept.none')}</div>}
+      </div>
+      {canEdit && (
+        <div className="dept-add">
+          <input className="fld" placeholder={trH('dept.addPh')} value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+          <button className="btn btn-primary btn-sm" onClick={add}><IconPlus s={15} />{trH('dept.add')}</button>
+        </div>
+      )}
+
+      {reassign && (
+        <div className="modal-scrim" onClick={() => setReassign(null)}>
+          <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 700 }}>{trH('dept.reassignTitle')}</div><button className="icon-btn" onClick={() => setReassign(null)}><IconClose s={18} /></button></div>
+            <div style={{ padding: '4px 2px 8px' }}>
+              <div style={{ fontSize: 13.5, color: 'var(--text-mut)', marginBottom: 12 }}>{trH('dept.reassignBody', { n: usage(reassign.name), name: reassign.name })}</div>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trH('dept.reassignTo')}</label>
+              <UI.Dropdown value={reassign.target} options={list.filter((d) => d !== reassign.name)} onChange={(v) => setReassign({ ...reassign, target: v })} />
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-ghost" onClick={() => setReassign(null)}>{trH('common.cancel')}</button>
+              <button className="btn btn-primary" onClick={doReassign}>{trH('dept.reassignBtn')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HrSettings({ rates, setRates, departments, setDepartments, staff, setStaff, canEditDept }) {
   return (
     <div className="screen-enter">
       <div className="settings-intro card">
@@ -621,8 +730,11 @@ function HrSettings({ rates, setRates }) {
         <RatesPanel rates={rates} onChange={setRates} onReset={() => setRates(HRD.resetRates())} alwaysOpen />
       </div>
       <SeverancePanel rates={rates} onChange={setRates} />
+      <div style={{ marginTop: 16 }}>
+        <DeptManager departments={departments} setDepartments={setDepartments} staff={staff} setStaff={setStaff} canEdit={canEditDept !== false} />
+      </div>
     </div>
   );
 }
 
-window.PAYROLL = { PayrollScreen, HrSettings, StaffModal };
+window.PAYROLL = { PayrollScreen, HrSettings, StaffModal, DeptManager };

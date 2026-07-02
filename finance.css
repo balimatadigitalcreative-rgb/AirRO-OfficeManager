@@ -1249,6 +1249,18 @@ img, svg, canvas, video { max-width: 100%; }
 .ori-att-sum > b { font-size: 14px; color: var(--green-700); }
 .ori-empty { padding: 10px 0; color: var(--text-mut); font-size: 12.5px; text-align: center; }
 .btn.btn-sm { padding: 6px 11px; font-size: 12.5px; }
+/* Department manager */
+.dept-mgr { padding: 16px 18px; }
+.dept-list { display: flex; flex-direction: column; gap: 2px; }
+.dept-row { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px dashed var(--border-soft); }
+.dept-move { display: inline-flex; flex-direction: column; gap: 1px; }
+.dept-move .icon-btn { padding: 1px; height: 17px; }
+.dept-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; }
+.dept-edit { flex: 1; min-width: 0; max-width: 320px; }
+.dept-count { font-size: 11.5px; color: var(--text-mut); background: var(--card-soft); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.icon-btn.ok { color: var(--green-700); }
+.dept-add { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.dept-add .fld { flex: 1; min-width: 0; max-width: 340px; }
 /* Orientation slip breakdown */
 .ori-slip-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
 .ori-slip-tbl th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; padding: 5px 7px; border-bottom: 1.5px solid var(--border); }

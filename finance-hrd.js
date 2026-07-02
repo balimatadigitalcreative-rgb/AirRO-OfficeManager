@@ -5,7 +5,17 @@
   const STAFF_KEY = 'airro_hrd_staff_v7';   // trial: empty roster
   const BUDGET_KEY = 'airro_hr_budget_v1';
   const DEFAULT_BUDGET = 30000000;
-  const DEPARTMENTS = ['Supervisor Distribution', 'Finance', 'Driver', 'Helper', 'Staff Storage'];
+  // Departments are HRD-managed DATA (add / rename / delete / reorder), not a
+  // constant. Stored as an ordered list of names in its own shared key; the
+  // array below is only the initial seed used until HRD edits the list.
+  const DEPT_KEY = 'airro_departments_v1';
+  const DEFAULT_DEPARTMENTS = ['Supervisor Distribution', 'Finance', 'Driver', 'Helper', 'Staff Storage'];
+  const DEPARTMENTS = DEFAULT_DEPARTMENTS;   // back-compat alias (seed / fallback)
+  function loadDepartments() {
+    try { const r = localStorage.getItem(DEPT_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) { const clean = a.filter((x) => typeof x === 'string' && x.trim()); if (clean.length) return clean; } } } catch (e) {}
+    return DEFAULT_DEPARTMENTS.slice();
+  }
+  function saveDepartments(list) { try { localStorage.setItem(DEPT_KEY, JSON.stringify((list || []).filter((x) => typeof x === 'string' && x.trim()))); } catch (e) {} }
 
   // JKK (work-accident) employer rate by occupational risk class
   const JKK = { 'Very Low': 0.0024, 'Low': 0.0054, 'Medium': 0.0089, 'High': 0.0127, 'Very High': 0.0174 };
@@ -65,7 +75,7 @@
   // default to 0 ("gaji belum diatur"); identity fields default blank.
   function newStaff() {
     return {
-      id: newStaffId(), name: '', pos: '', dept: DEPARTMENTS[0],
+      id: newStaffId(), name: '', pos: '', dept: (loadDepartments()[0] || 'Staff'),
       base: 0, allowance: 0, tjKinerja: 0, tjProfesi: 0, tjRumahDinas: 0, tjBpjsKes: 0, tjBpjsTk: 0,
       risk: 'Low', jp: true, religion: 'Islam', pph: 0, offDays: 0, deductions: [],
       nip: '', office: 'AIRRO', status: 'Tetap', noSurat: '', joinedDate: '', contractStart: '', contractEnd: '',
@@ -355,6 +365,7 @@
 
   window.HRD = {
     RATES_KEY, STAFF_KEY, JKK, DEFAULT_RATES, DEFAULT_STAFF, DEPARTMENTS, DEFAULT_BUDGET,
+    DEPT_KEY, DEFAULT_DEPARTMENTS, loadDepartments, saveDepartments,
     loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newStaff, newDedId,
     loadBudget, saveBudget, affordability, simulateHire, thr,
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
