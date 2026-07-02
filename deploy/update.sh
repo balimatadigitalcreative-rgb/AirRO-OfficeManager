@@ -33,14 +33,20 @@ npx prisma generate
 echo "==> 5/6  Apply migrations (safe / non-destructive)..."
 npx prisma migrate deploy
 
-echo "==> 6/6  Restart backend (single instance, free port 4000)..."
+echo "==> 6/6  Restart backend (single instance, zero-downtime)..."
 cd "$APP_DIR"
-# Ensure exactly ONE listener on :4000 — a duplicate pm2 app or a stray
-# `node src/server.js` left running causes EADDRINUSE and a restart crash-loop.
-pm2 delete airro-api >/dev/null 2>&1 || true
-if command -v fuser >/dev/null 2>&1; then fuser -k 4000/tcp >/dev/null 2>&1 || true; fi
-sleep 1
-pm2 start deploy/ecosystem.config.js --update-env
+# Only when pm2 is NOT already managing airro-api: if a stray `node src/server.js`
+# still holds :4000, free it so the first start doesn't hit EADDRINUSE. When pm2
+# already runs it we leave the port alone — startOrReload reloads it gracefully.
+if ! pm2 describe airro-api >/dev/null 2>&1; then
+  if command -v fuser >/dev/null 2>&1; then fuser -k 4000/tcp >/dev/null 2>&1 || true; sleep 1; fi
+fi
+# startOrReload: not running → start, already running → reload (no warning, no
+# downtime). Replaces the old delete+start, which briefly dropped the API and
+# printed "[PM2][WARN] ... not running, starting...".
+pm2 startOrReload deploy/ecosystem.config.js --update-env
+# Persist the process list so it comes back automatically after a server reboot.
+# (Run `pm2 startup` once on the server to install the boot hook.)
 pm2 save >/dev/null 2>&1 || true
 
 echo ""
