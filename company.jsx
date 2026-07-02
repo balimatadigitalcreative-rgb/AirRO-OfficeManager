@@ -677,6 +677,18 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
   // keep the roster in sync so payroll/payslip reflect late penalty + overtime
   uEc(() => { if (onSyncDeduct) onSyncDeduct(staff.id, late.amount, trC('co.lateDeduct'), ot.amount); }, [late.amount, ot.amount]);
   const setDay = (date, status, patch) => { CO.setAttDay(staff.id, monthKey, date, status, patch); setAtt(CO.attendance(staff, monthKey, today)); };
+  // A working day shows the clock (present/late, or a still-'none' row that displays
+  // as "Hadir"); only absent/leave/off hide it.
+  const isTimedStatus = (s) => s !== 'absent' && s !== 'leave' && s !== 'off';
+  const hmMin = (t) => { const p = String(t || '').split(':'); return (+p[0] || 0) * 60 + (+p[1] || 0); };
+  // Status to PERSIST when a timed row's clock is edited: keep an explicit
+  // present/late choice; a not-yet-set ('none') row becomes present — or late when
+  // the check-in is past the standard start time — so it never stays 'none'.
+  const timedStatus = (r, nextIn) => {
+    if (r.status === 'present' || r.status === 'late') return r.status;
+    const inT = nextIn || r.in || '08:00';
+    return hmMin(inT) > hmMin((rates && rates.lateStart) || '08:00') ? 'late' : 'present';
+  };
   // Identity edits go through the SHARED StaffModal → same hrdStaff array (single source of truth).
   const saveIdentity = (s) => { setStaffLocal(s); if (onSaveStaff) onSaveStaff(s); setIdentEdit(false); };
   const deds = (staff.deductions || []).filter((d) => +d.amount > 0 && !d.auto);
@@ -717,7 +729,7 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
           <div className="ed-att-log scroll-y">
             {att.log.map((r) => {
               const st = STATUS[r.status] || STATUS.none;
-              const timed = r.status === 'present' || r.status === 'late';
+              const timed = isTimedStatus(r.status);   // present / late / none(→Hadir) show the clock
               const isToday = r.date === today;
               if (!canEditAtt) {
                 return (
@@ -736,10 +748,10 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
                     onChange={(v) => setDay(r.date, v, { in: r.in, out: r.out })} />
                   {timed ? (
                     <div className="ed-inline-times">
-                      <UI.TimePicker compact value={r.in || '08:00'} onChange={(v) => setDay(r.date, r.status, { in: v, out: r.out })} />
+                      <UI.TimePicker compact value={r.in || '08:00'} onChange={(v) => setDay(r.date, timedStatus(r, v), { in: v, out: r.out || '17:00' })} />
                       <span className="ed-time-dash">–</span>
-                      <UI.TimePicker compact value={r.out || '17:00'} onChange={(v) => setDay(r.date, r.status, { in: r.in, out: v })} />
-                      <input className="ed-ot-input" inputMode="numeric" title={trC('att.otHours')} placeholder="0" value={r.ot || ''} onChange={(e) => setDay(r.date, r.status, { ot: +e.target.value.replace(/\D/g, '') || 0 })} />
+                      <UI.TimePicker compact value={r.out || '17:00'} onChange={(v) => setDay(r.date, timedStatus(r), { in: r.in || '08:00', out: v })} />
+                      <input className="ed-ot-input" inputMode="numeric" title={trC('att.otHours')} placeholder="0" value={r.ot || ''} onChange={(e) => setDay(r.date, timedStatus(r), { in: r.in || '08:00', out: r.out || '17:00', ot: +e.target.value.replace(/\D/g, '') || 0 })} />
                       <span className="ed-ot-lbl">{trC('att.ot')}</span>
                     </div>
                   ) : <span className="ed-log-time tnum">—</span>}
