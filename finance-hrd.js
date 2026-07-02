@@ -29,6 +29,11 @@
     jpEmployer: 0.02, jpEmployee: 0.01, jpCeiling: 10547400,
     // JKM (death) 0.30% employer
     jkm: 0.003,
+    // How the BPJS iuran is treated in the month an employee is first enrolled
+    // (start date falls inside the 16→15 payroll period): 'full' = charge a whole
+    // month, 'prorate' = charge by days enrolled ÷ period days, 'next' = charge
+    // nothing this period and start full next period. Applies to Kes & TK alike.
+    bpjsProrationMode: 'prorate',
     jkk: JKK,
     // Payroll basis: working days per month (for unpaid day-off proration)
     workDays: 26,
@@ -80,6 +85,11 @@
       risk: 'Low', jp: true, religion: 'Islam', pph: 0, offDays: 0, deductions: [],
       nip: '', office: 'AIRRO', status: 'Tetap', noSurat: '', joinedDate: '', contractStart: '', contractEnd: '',
       nik: '', noKk: '', noBpjsKes: '', noBpjsTk: '', birthPlace: '', birthDate: '',
+      // BPJS iuran ENROLLMENT (separate from the noBpjs* identity numbers and from
+      // the tjBpjs* cash allowances). New hires start NOT enrolled → no iuran until
+      // HRD sets the enrollment date. Legacy rows lack these fields → treated as
+      // enrolled-full by compute() so their payroll is unchanged.
+      bpjsKesEnrolled: false, bpjsKesStart: '', bpjsTkEnrolled: false, bpjsTkStart: '',
       addressKtp: '', addressDomisili: '', maritalStatus: 'TK', bank: '', account: '', phone: '',
       // offboarding (sepStatus, NOT `status` which is employment type Tetap/Kontrak)
       sepStatus: 'active', separationDate: '', separationReason: '', separationNote: '', active: true,
@@ -113,7 +123,39 @@
   }
 
   // ---- the core calculation for one employee ----
-  function compute(s, r) {
+  // A 16→15 payroll period as { start, end, days } — used by the BPJS enrollment
+  // logic. payPeriod(monthKey) = the cycle whose cutoff (the 15th) is in that month;
+  // currentPeriod() = the cycle containing today.
+  function payPeriod(monthKey) {
+    const mk = monthKey || ((window.FIN && FIN.TODAY) ? FIN.TODAY.slice(0, 7) : '');
+    const pc = payCycle(mk + '-15');
+    return { start: pc.start, end: pc.end, days: daysBetweenISO(pc.start, pc.end) + 1 };
+  }
+  function currentPeriod() { const pc = payCycle(); return { start: pc.start, end: pc.end, days: daysBetweenISO(pc.start, pc.end) + 1 }; }
+
+  // Fraction (0..1) of a BPJS iuran to charge for a payroll `period`, given the
+  // enrollment flag + start date and the registration-month treatment `mode`.
+  //   not enrolled                → 0
+  //   enrolled, start after period → 0 (not registered yet in this period)
+  //   enrolled, start before period→ 1 (full, as usual)
+  //   start falls inside period    → mode: full=1 | next=0 | prorate=daysEnrolled/periodDays
+  // No period context (legacy callers) or enrolled with no start → 1 (full if enrolled).
+  function bpjsFactor(enrolled, startIso, period, mode) {
+    if (!enrolled) return 0;
+    if (!period || !period.end || !startIso) return 1;
+    if (startIso > period.end) return 0;
+    if (startIso < period.start) return 1;
+    if (mode === 'full') return 1;
+    if (mode === 'next') return 0;
+    const total = period.days || (daysBetweenISO(period.start, period.end) + 1);
+    const served = daysBetweenISO(startIso, period.end) + 1;   // inclusive of start & cutoff
+    return Math.max(0, Math.min(1, served / total));
+  }
+
+  // `period` (optional) = the 16→15 cycle being computed. When given, BPJS iuran is
+  // gated/prorated by each employee's enrollment date; when omitted, an enrolled
+  // employee is charged in full (legacy behaviour).
+  function compute(s, r, period) {
     const base = +s.base || 0;
     // ── Structured allowances (all add to gross earnings) ──
     const tjKinerja = +s.tjKinerja || 0;
@@ -133,20 +175,29 @@
     // stays in the base. For legacy rows (all tj*=0) iuranBase === gross → identical.
     const iuranBase = base + allowOther + tjKinerja + tjProfesi + tjRumahDinas;
 
-    const kesBase = Math.min(iuranBase, r.kesCeiling);
-    const kesEmployer = kesBase * r.kesEmployer;
-    const kesEmployee = kesBase * r.kesEmployee;
+    // BPJS enrollment gating. Kesehatan (kes*) follows bpjsKesEnrolled/Start;
+    // Ketenagakerjaan (JHT/JP/JKK/JKM) follows bpjsTkEnrolled/Start. Legacy rows
+    // (field undefined) default to enrolled so existing payroll is unchanged.
+    const mode = r.bpjsProrationMode || 'prorate';
+    const kesEnrolled = s.bpjsKesEnrolled === undefined ? true : !!s.bpjsKesEnrolled;
+    const tkEnrolled = s.bpjsTkEnrolled === undefined ? true : !!s.bpjsTkEnrolled;
+    const kesFactor = bpjsFactor(kesEnrolled, s.bpjsKesStart || '', period, mode);
+    const tkFactor = bpjsFactor(tkEnrolled, s.bpjsTkStart || '', period, mode);
 
-    const jhtEmployer = iuranBase * r.jhtEmployer;
-    const jhtEmployee = iuranBase * r.jhtEmployee;
+    const kesBase = Math.min(iuranBase, r.kesCeiling);
+    const kesEmployer = kesBase * r.kesEmployer * kesFactor;
+    const kesEmployee = kesBase * r.kesEmployee * kesFactor;
+
+    const jhtEmployer = iuranBase * r.jhtEmployer * tkFactor;
+    const jhtEmployee = iuranBase * r.jhtEmployee * tkFactor;
 
     const jpBase = Math.min(iuranBase, r.jpCeiling);
-    const jpEmployer = s.jp ? jpBase * r.jpEmployer : 0;
-    const jpEmployee = s.jp ? jpBase * r.jpEmployee : 0;
+    const jpEmployer = s.jp ? jpBase * r.jpEmployer * tkFactor : 0;
+    const jpEmployee = s.jp ? jpBase * r.jpEmployee * tkFactor : 0;
 
     const jkkRate = r.jkk[s.risk] != null ? r.jkk[s.risk] : r.jkk['Low'];
-    const jkk = iuranBase * jkkRate;
-    const jkm = iuranBase * r.jkm;
+    const jkk = iuranBase * jkkRate * tkFactor;
+    const jkm = iuranBase * r.jkm * tkFactor;
 
     const pph = +s.pph || 0;
 
@@ -170,14 +221,16 @@
     return { base, allow, gross, jkkRate, iuranBase,
       tjKinerja, tjProfesi, tjRumahDinas, tjBpjsKes, tjBpjsTk, allowOther,
       kesEmployer, kesEmployee, jhtEmployer, jhtEmployee, jpEmployer, jpEmployee, jkk, jkm, pph,
+      // BPJS enrollment state for the payslip (which rows to show + prorate note)
+      kesEnrolled, tkEnrolled, kesFactor, tkFactor, bpjsKesStart: s.bpjsKesStart || '', bpjsTkStart: s.bpjsTkStart || '', bpjsMode: mode,
       dailyRate, offDays, absenceDeduct, deductions: dedList, otherDeduct, otPay,
       employeeDeduct, employerContrib, takeHome, companyCost };
   }
 
-  function totals(staff, r) {
+  function totals(staff, r, period) {
     const acc = { gross: 0, takeHome: 0, employeeDeduct: 0, employerContrib: 0, companyCost: 0, bpjsKes: 0, bpjsTk: 0, count: staff.length };
     staff.forEach((s) => {
-      const c = compute(s, r);
+      const c = compute(s, r, period);
       acc.gross += c.gross; acc.takeHome += c.takeHome; acc.employeeDeduct += c.employeeDeduct;
       acc.employerContrib += c.employerContrib; acc.companyCost += c.companyCost;
       acc.bpjsKes += c.kesEmployer + c.kesEmployee;
@@ -369,6 +422,7 @@
     loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newStaff, newDedId,
     loadBudget, saveBudget, affordability, simulateHire, thr,
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,
+    payPeriod, currentPeriod, bpjsFactor,
     payCycle, cashbonCeiling, cashbonWeeklyMax, cashbonsInCycle, cashbonCycleTotal, cashbonOutstanding, withCashbon,
     SEP_STATUSES, isActive, activeStaff, tenureYears, prorateForMonth, payrollStaff, severance, finalSettlement,
     stageOf, ORI_STAGES, isOrientationStage, orientationEnd, orientationDaysServed, orientationTotal, orientationRemaining, addDaysISO,

@@ -169,8 +169,15 @@ model Employee {
   nip             String?  @unique // auto-generated <OFFICE>-YY-NNN, see employee.service
   noSurat         String? // No Surat (assignment/decree letter no.)
   noKk            String? // No KK (family card)
-  noBpjsKes       String? // BPJS Kesehatan no.
-  noBpjsTk        String? // BPJS Ketenagakerjaan no.
+  noBpjsKes       String? // BPJS Kesehatan no. (identity — separate from enrollment)
+  noBpjsTk        String? // BPJS Ketenagakerjaan no. (identity — separate from enrollment)
+  // BPJS iuran ENROLLMENT — iuran (kes/jht/jp/jkk/jkm) is deducted only once enrolled,
+  // from the start date. Separate from the noBpjs* numbers and the tjBpjs* cash
+  // allowances. Legacy rows (null) are treated as enrolled-full by the payroll engine.
+  bpjsKesEnrolled Boolean @default(false)
+  bpjsKesStart    String? // YYYY-MM-DD
+  bpjsTkEnrolled  Boolean @default(false)
+  bpjsTkStart     String? // YYYY-MM-DD
   office          String   @default("AIRRO") // posisi kantor: AIRRO | NSN | MFG
   contractStart   String? // YYYY-MM-DD
   contractEnd     String? // YYYY-MM-DD (for contract-expiry alerts later)

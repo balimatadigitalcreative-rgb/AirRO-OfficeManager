@@ -658,7 +658,7 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
     if (cycleTotal > 0) extra.push({ id: 'kasbon-cycle', label: 'Kasbon', amount: cycleTotal, auto: true, kasbon: true });
     return { ...staff, deductions: [...manual, ...extra], otPay: ot.amount };
   }, [staff, late, ot, cycleTotal]);
-  const c = HRD.compute(augStaff, rates);
+  const c = HRD.compute(augStaff, rates, HRD.payPeriod(monthKey));
   // keep the roster in sync so payroll/payslip reflect late penalty + overtime
   uEc(() => { if (onSyncDeduct) onSyncDeduct(staff.id, late.amount, trC('co.lateDeduct'), ot.amount); }, [late.amount, ot.amount]);
   const setDay = (date, status, patch) => { CO.setAttDay(staff.id, monthKey, date, status, patch); setAtt(CO.attendance(staff, monthKey, today)); };
@@ -901,7 +901,7 @@ function EmployeeDirectory({ staff, rates, departments, monthKey, today, onEdit,
           <div className="emp-dept-head"><span>{d}</span><span className="emp-dept-count">{groups[d].length}</span></div>
           <div className="emp-cards">
             {groups[d].map((s) => {
-              const c = HRD.compute(s, rates);
+              const c = HRD.compute(s, rates, HRD.payPeriod(monthKey));
               const sep = !HRD.isActive(s);
               return (
                 <div key={s.id} className={`emp-card ${sep ? 'archived' : ''}`} onClick={() => onOpen(s)} style={{ cursor: 'pointer' }}>
@@ -1003,7 +1003,7 @@ function HRReport({ staff, rates, departments, budget, monthKey, today, approval
       const rate = workdays ? Math.round(((present + late) / workdays) * 100) : 100;
       const lateAmt = basis === 'hour' ? Math.round((lateMin / 60) * perMin) : Math.round(lateMin * perMin);
       const a = { present, late, absent, leave, workdays, rate, lateMin, lateAmt, otHrs, otAmt: Math.round(otHrs * otPer) };
-      return { s, a, c: HRD.compute(s, rates) };
+      return { s, a, c: HRD.compute(s, rates, HRD.payPeriod(monthKey)) };
     });
   }, [staff, rates, range.start, range.end, today]);
   const agg = uMc(() => {

@@ -108,6 +108,14 @@ function RatesPanel({ rates, onChange, onReset }) {
           <div className="rate-note">{trH('hrd.jkkNote', { a: pctStr(rates.jkk['Very Low']), b: pctStr(rates.jkk['Very High']) })}</div>
         </div>
         <div className="rate-group">
+          <div className="rate-group-title">{trH('hrd.bpjsEnrollTitle')}</div>
+          <div className="rate-item">
+            <label>{trH('hrd.bpjsMode')}</label>
+            <UI.Dropdown compact value={rates.bpjsProrationMode || 'prorate'} options={[{ value: 'prorate', label: trH('hrd.bpjsModeProrate') }, { value: 'full', label: trH('hrd.bpjsModeFull') }, { value: 'next', label: trH('hrd.bpjsModeNext') }]} onChange={(v) => set({ bpjsProrationMode: v })} />
+          </div>
+          <div className="rate-note">{trH('hrd.bpjsModeNote')}</div>
+        </div>
+        <div className="rate-group">
           <div className="rate-group-title">{trH('hrd.latePenalty')}</div>
           <div className="rate-item">
             <label>{trH('hrd.lateStart')}</label>
@@ -171,7 +179,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
   const addDed = () => set({ deductions: [...dedList, { id: HRD.newDedId(), label: '', amount: 0 }, ...autoDed] });
   const removeDed = (i) => { const l = dedList.slice(); l.splice(i, 1); set({ deductions: [...l, ...autoDed] }); };
   const valid = (f.name || '').trim();   // name required; salary may be 0 ("belum diatur")
-  const c = HRD.compute(f, rates);
+  const c = HRD.compute(f, rates, HRD.currentPeriod());   // preview against the current 16→15 period
   const dr = Math.round(c.dailyRate);
   const salaryUnset = !(+f.base > 0);
   // NIP is allocated server-side (race-safe & unique); never typed manually.
@@ -230,6 +238,14 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
       <div className="ed-grp-t">{trH('co.grpBpjs')}</div>
       <label className="ed-af"><span>{trH('co.noBpjsKes')}</span><input value={f.noBpjsKes || ''} inputMode="numeric" onChange={(e) => set({ noBpjsKes: e.target.value.replace(/\D/g, '') })} /></label>
       <label className="ed-af"><span>{trH('co.noBpjsTk')}</span><input value={f.noBpjsTk || ''} inputMode="numeric" onChange={(e) => set({ noBpjsTk: e.target.value.replace(/\D/g, '') })} /></label>
+      <label className="ed-af"><span>{trH('co.bpjsKesEnroll')}</span>
+        <label className="bpjs-toggle"><input type="checkbox" checked={f.bpjsKesEnrolled !== false} onChange={(e) => set({ bpjsKesEnrolled: e.target.checked })} /><span>{f.bpjsKesEnrolled !== false ? trH('co.enrolledYes') : trH('co.enrolledNo')}</span></label>
+      </label>
+      {f.bpjsKesEnrolled !== false && <label className="ed-af"><span>{trH('co.bpjsKesStart')}</span><DP.DateField value={f.bpjsKesStart || ''} allowFuture onChange={(v) => set({ bpjsKesStart: v })} /></label>}
+      <label className="ed-af"><span>{trH('co.bpjsTkEnroll')}</span>
+        <label className="bpjs-toggle"><input type="checkbox" checked={f.bpjsTkEnrolled !== false} onChange={(e) => set({ bpjsTkEnrolled: e.target.checked })} /><span>{f.bpjsTkEnrolled !== false ? trH('co.enrolledYes') : trH('co.enrolledNo')}</span></label>
+      </label>
+      {f.bpjsTkEnrolled !== false && <label className="ed-af"><span>{trH('co.bpjsTkStart')}</span><DP.DateField value={f.bpjsTkStart || ''} allowFuture onChange={(v) => set({ bpjsTkStart: v })} /></label>}
       <label className="ed-af"><span>{trH('co.bank')}</span><UI.Dropdown value={f.bank || 'BCA'} options={['BCA', 'BRI', 'Mandiri', 'BNI', 'BSI', 'CIMB']} onChange={(v) => set({ bank: v })} /></label>
       <label className="ed-af"><span>{trH('co.accNo')}</span><input value={f.account || ''} inputMode="numeric" onChange={(e) => set({ account: e.target.value.replace(/\D/g, '') })} /></label>
     </div>
@@ -283,22 +299,23 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
       {ALLOW_LIST.map((a) => c[a.ck] > 0 && <SBRow key={a.ck} label={trH(a.t)} val={c[a.ck]} />)}
       <SBRow label={trH('hrd.gross')} val={c.gross} strong />
       <div className="sb-sec">{trH('hrd.deductFrom')} <em>{trH('hrd.deductFromEm')}</em></div>
-      <SBRow label={`BPJS Kesehatan · ${pctStr(rates.kesEmployee)}`} val={c.kesEmployee} neg />
-      <SBRow label={`JHT · ${pctStr(rates.jhtEmployee)}`} val={c.jhtEmployee} neg />
-      {f.jp
+      {c.kesEnrolled && c.kesFactor > 0 && <SBRow label={`BPJS Kesehatan · ${pctStr(rates.kesEmployee)}`} val={c.kesEmployee} neg note={c.kesFactor < 1 ? trH('hrd.prorataSince', { d: c.bpjsKesStart }) : null} />}
+      {c.tkEnrolled && c.tkFactor > 0 && <SBRow label={`JHT · ${pctStr(rates.jhtEmployee)}`} val={c.jhtEmployee} neg note={c.tkFactor < 1 ? trH('hrd.prorataSince', { d: c.bpjsTkStart }) : null} />}
+      {c.tkEnrolled && c.tkFactor > 0 && (f.jp
         ? <SBRow label={`JP · ${pctStr(rates.jpEmployee)}`} val={c.jpEmployee} neg />
-        : <SBRow label="JP" val={0} muted note={trH('hrd.notenroll')} />}
+        : <SBRow label="JP" val={0} muted note={trH('hrd.notenroll')} />)}
       {c.pph > 0 && <SBRow label="PPh 21" val={c.pph} neg />}
       {c.absenceDeduct > 0 && <SBRow label={trH('hrd.unpaidleave', { n: c.offDays, dr: rp(dr) })} val={c.absenceDeduct} neg />}
       {c.deductions.filter((d) => +d.amount > 0).map((d, i) => <SBRow key={d.id || i} label={d.label || trH('hrd.dedPh', { n: i + 1 })} val={+d.amount} neg />)}
       <SBRow label={trH('hrd.totaldeduct')} val={c.employeeDeduct} strong neg />
       <div className="sb-thp"><span>{trH('hrd.thp')}</span><span className="tnum">{rp(c.takeHome)}</span></div>
       <div className="sb-sec">{trH('hrd.employerTop')} <em>{trH('hrd.bpjsParen')}</em></div>
-      <SBRow label={`Kesehatan · ${pctStr(rates.kesEmployer)}`} val={c.kesEmployer} />
-      <SBRow label={`JHT · ${pctStr(rates.jhtEmployer)}`} val={c.jhtEmployer} />
-      {f.jp && <SBRow label={`JP · ${pctStr(rates.jpEmployer)}`} val={c.jpEmployer} />}
-      <SBRow label={`JKK · ${pctStr(c.jkkRate)} (${f.risk})`} val={c.jkk} />
-      <SBRow label={`JKM · ${pctStr(rates.jkm)}`} val={c.jkm} />
+      {c.kesEnrolled && c.kesFactor > 0 && <SBRow label={`Kesehatan · ${pctStr(rates.kesEmployer)}`} val={c.kesEmployer} note={c.kesFactor < 1 ? trH('hrd.prorataSince', { d: c.bpjsKesStart }) : null} />}
+      {c.tkEnrolled && c.tkFactor > 0 && <SBRow label={`JHT · ${pctStr(rates.jhtEmployer)}`} val={c.jhtEmployer} />}
+      {c.tkEnrolled && c.tkFactor > 0 && f.jp && <SBRow label={`JP · ${pctStr(rates.jpEmployer)}`} val={c.jpEmployer} />}
+      {c.tkEnrolled && c.tkFactor > 0 && <SBRow label={`JKK · ${pctStr(c.jkkRate)} (${f.risk})`} val={c.jkk} />}
+      {c.tkEnrolled && c.tkFactor > 0 && <SBRow label={`JKM · ${pctStr(rates.jkm)}`} val={c.jkm} />}
+      {(!c.kesEnrolled || c.kesFactor === 0) && (!c.tkEnrolled || c.tkFactor === 0) && <SBRow label={trH('hrd.bpjsNone')} val={0} muted />}
       <SBRow label={trH('hrd.totalemployer')} val={c.employerContrib} strong />
       <div className="sb-cost"><span>{trH('hrd.totalcompany')}</span><span className="tnum">{rp(c.companyCost)}</span></div>
     </div>
@@ -402,11 +419,14 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
     window.addEventListener('keydown', o);
     return () => { document.body.classList.remove('payslip-open'); window.removeEventListener('keydown', o); };
   }, []);
-  const Row = ({ label, value, strong, neg }) => (
+  const Row = ({ label, value, strong, neg, note }) => (
     <div className={`ps-row ${strong ? 'strong' : ''}`}>
-      <span>{label}</span><span className={`tnum ${neg ? 'amt-neg' : ''}`}>{neg ? '− ' : ''}{rp(value)}</span>
+      <span>{label}{note ? <em style={{ fontStyle: 'normal', color: 'var(--text-faint)', fontSize: 11, marginLeft: 5 }}>{note}</em> : null}</span><span className={`tnum ${neg ? 'amt-neg' : ''}`}>{neg ? '− ' : ''}{rp(value)}</span>
     </div>
   );
+  const kesShow = calc.kesEnrolled && calc.kesFactor > 0, tkShow = calc.tkEnrolled && calc.tkFactor > 0;
+  const kesNote = kesShow && calc.kesFactor < 1 ? trH('hrd.prorataSince', { d: calc.bpjsKesStart }) : null;
+  const tkNote = tkShow && calc.tkFactor < 1 ? trH('hrd.prorataSince', { d: calc.bpjsTkStart }) : null;
   return (
     <div className="modal-scrim payslip-overlay" onClick={onClose}>
       <div className="payslip-sheet" onClick={(e) => e.stopPropagation()}>
@@ -434,9 +454,9 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
             {ALLOW_LIST.map((a) => calc[a.ck] > 0 && <Row key={a.ck} label={trH(a.t)} value={calc[a.ck]} />)}
             <Row label={trH('hrd.gross')} value={calc.gross} strong />
             <div className="ps-col-title" style={{ marginTop: 14 }}>{trH('hrd.psDeduct')}</div>
-            <Row label={`BPJS Kesehatan (${pctStr(rates.kesEmployee)})`} value={calc.kesEmployee} neg />
-            <Row label={`JHT (${pctStr(rates.jhtEmployee)})`} value={calc.jhtEmployee} neg />
-            {staff.jp && <Row label={`JP (${pctStr(rates.jpEmployee)})`} value={calc.jpEmployee} neg />}
+            {kesShow && <Row label={`BPJS Kesehatan (${pctStr(rates.kesEmployee)})`} value={calc.kesEmployee} neg note={kesNote} />}
+            {tkShow && <Row label={`JHT (${pctStr(rates.jhtEmployee)})`} value={calc.jhtEmployee} neg note={tkNote} />}
+            {tkShow && staff.jp && <Row label={`JP (${pctStr(rates.jpEmployee)})`} value={calc.jpEmployee} neg />}
             {calc.pph > 0 && <Row label="PPh 21" value={calc.pph} neg />}
             {calc.absenceDeduct > 0 && <Row label={trH('hrd.unpaidleave', { n: calc.offDays, dr: rp(Math.round(calc.dailyRate)) })} value={calc.absenceDeduct} neg />}
             {calc.deductions.filter((d) => +d.amount > 0).map((d, i) => <Row key={d.id || i} label={d.label || trH('hrd.dedPh', { n: i + 1 })} value={+d.amount} neg />)}
@@ -444,11 +464,12 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
           </div>
           <div className="ps-col">
             <div className="ps-col-title">{trH('hrd.psEmployer')}</div>
-            <Row label={`Kesehatan (${pctStr(rates.kesEmployer)})`} value={calc.kesEmployer} />
-            <Row label={`JHT (${pctStr(rates.jhtEmployer)})`} value={calc.jhtEmployer} />
-            {staff.jp && <Row label={`JP (${pctStr(rates.jpEmployer)})`} value={calc.jpEmployer} />}
-            <Row label={`JKK (${pctStr(calc.jkkRate)})`} value={calc.jkk} />
-            <Row label={`JKM (${pctStr(rates.jkm)})`} value={calc.jkm} />
+            {kesShow && <Row label={`Kesehatan (${pctStr(rates.kesEmployer)})`} value={calc.kesEmployer} note={kesNote} />}
+            {tkShow && <Row label={`JHT (${pctStr(rates.jhtEmployer)})`} value={calc.jhtEmployer} />}
+            {tkShow && staff.jp && <Row label={`JP (${pctStr(rates.jpEmployer)})`} value={calc.jpEmployer} />}
+            {tkShow && <Row label={`JKK (${pctStr(calc.jkkRate)})`} value={calc.jkk} />}
+            {tkShow && <Row label={`JKM (${pctStr(rates.jkm)})`} value={calc.jkm} />}
+            {!kesShow && !tkShow && <Row label={trH('hrd.bpjsNone')} value={0} />}
             <Row label={trH('hrd.totalemployer')} value={calc.employerContrib} strong />
             <div className="ps-cost">{trH('hrd.psCostFor')}<br /><b className="tnum">{rp(calc.companyCost)}</b></div>
           </div>
@@ -473,8 +494,9 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
   const aug = (s) => HRD.withCashbon(s, cashbons, cycleAnchor);
   // Exclude the orientation/DW bucket (paid via daily lump sum, never monthly payroll)
   // and staff who left before this payroll month; prorate the separation month.
+  const period = HRD.payPeriod(monthKey);   // 16→15 cycle → BPJS enrollment gating/proration
   const rows = staff.filter((s) => !HRD.isOrientationStage(s)).map((s) => ({ o: s, pr: HRD.prorateForMonth(s, monthKey, rates) })).filter((x) => x.pr.included);
-  const t = HRD.totals(rows.map((x) => aug(x.pr.staff)), rates);
+  const t = HRD.totals(rows.map((x) => aug(x.pr.staff)), rates, period);
 
   const saveStaff = (s) => {
     setStaff((prev) => { const ex = prev.find((x) => x.id === s.id); const clean = { ...s }; delete clean._isNew; return ex ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
@@ -514,7 +536,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
             <tbody>
               {rows.map(({ o, pr }) => {
                 const sa = aug(pr.staff);
-                const c = HRD.compute(sa, rates);
+                const c = HRD.compute(sa, rates, period);
                 const bpjsKes = c.kesEmployer + c.kesEmployee;
                 const bpjsTk = c.jhtEmployer + c.jhtEmployee + c.jpEmployer + c.jpEmployee + c.jkk + c.jkm;
                 const partial = pr.factor < 1;
@@ -575,7 +597,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
       </div>
 
       {editStaff && <StaffModal staff={editStaff} rates={rates} onSave={saveStaff} onClose={() => setEditStaff(null)} />}
-      {payslip && <PayslipModal staff={payslip} calc={HRD.compute(payslip, rates)} rates={rates} monLabel={monLabel} onClose={() => setPayslip(null)} />}
+      {payslip && <PayslipModal staff={payslip} calc={HRD.compute(payslip, rates, period)} rates={rates} monLabel={monLabel} onClose={() => setPayslip(null)} />}
     </div>
   );
 }
