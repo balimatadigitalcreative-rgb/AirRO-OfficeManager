@@ -141,7 +141,39 @@ function RatesPanel({ rates, onChange, onReset }) {
             <label>{trH('hrd.otOrientation')}</label>
             <div className="rate-input wide"><span className="rm-rp">Rp</span><input inputMode="numeric" value={(rates.otOrientation || 0).toLocaleString('id-ID')} onChange={(e) => set({ otOrientation: +e.target.value.replace(/\D/g, '') || 0 })} /></div>
           </div>
+          <div className="rate-item">
+            <label>{trH('hrd.workEnd')}</label>
+            <UI.TimePicker compact value={rates.workEnd || '17:00'} onChange={(v) => set({ workEnd: v })} />
+          </div>
+          <div className="rate-item">
+            <label>{trH('hrd.otMinHours')}</label>
+            <div className="rate-input"><input inputMode="decimal" value={rates.otMinHours != null ? rates.otMinHours : 1} onChange={(e) => set({ otMinHours: Math.max(0, +e.target.value.replace(/[^\d.]/g, '') || 0) })} /><span>h</span></div>
+          </div>
+          <div className="rate-item">
+            <label>{trH('hrd.otRounding')}</label>
+            <UI.Dropdown compact value={rates.otRounding || 'down-hour'} options={[{ value: 'down-hour', label: trH('hrd.otRoundDown') }, { value: 'per-30min', label: trH('hrd.otRound30') }, { value: 'exact', label: trH('hrd.otRoundExact') }]} onChange={(v) => set({ otRounding: v })} />
+          </div>
           <div className="rate-note">{trH('hrd.otOrientationNote')}</div>
+        </div>
+        <div className="rate-group">
+          <div className="rate-group-title">{trH('hrd.sundayTitle')}</div>
+          <div className="rate-item">
+            <label>{trH('hrd.sundayMode')}</label>
+            <UI.Dropdown compact value={rates.sundayMode || 'off'} options={[{ value: 'off', label: trH('hrd.sunOff') }, { value: 'rate', label: trH('hrd.sunRate') }, { value: 'allHours', label: trH('hrd.sunAll') }, { value: 'allHoursRate', label: trH('hrd.sunAllRate') }]} onChange={(v) => set({ sundayMode: v })} />
+          </div>
+          {(rates.sundayMode === 'rate' || rates.sundayMode === 'allHoursRate') && (
+            <React.Fragment>
+              <div className="rate-item">
+                <label>{trH('hrd.sundayMult')}</label>
+                <div className="rate-input"><input inputMode="decimal" value={rates.sundayMultiplier != null ? rates.sundayMultiplier : 2} onChange={(e) => set({ sundayMultiplier: Math.max(0, +e.target.value.replace(/[^\d.]/g, '') || 0) })} /><span>×</span></div>
+              </div>
+              <div className="rate-item">
+                <label>{trH('hrd.otSundayPerHour')}</label>
+                <div className="rate-input wide"><span className="rm-rp">Rp</span><input inputMode="numeric" value={(rates.otSundayPerHour || 0).toLocaleString('id-ID')} onChange={(e) => set({ otSundayPerHour: +e.target.value.replace(/\D/g, '') || 0 })} /></div>
+              </div>
+            </React.Fragment>
+          )}
+          <div className="rate-note">{trH('hrd.sundayNote')}</div>
         </div>
         <div className="rate-group">
           <div className="rate-group-title">{trH('hrd.cashbon')}</div>

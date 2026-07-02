@@ -43,6 +43,18 @@
     otPerHour: 25000,
     // Optional orientation-specific overtime rate; 0 = reuse otPerHour above.
     otOrientation: 0,
+    // ── Overtime calculation (orientation/DW attendance) — all configurable ──
+    workEnd: '17:00',        // normal end of day; OT on weekdays = hours worked past this
+    workHoursPerDay: 8,      // informational fallback basis
+    breakMinutes: 0,         // unpaid break subtracted when counting whole-day hours (Sunday allHours)
+    otMinHours: 1,           // overtime below this (after rounding) is not paid
+    otRounding: 'down-hour', // 'down-hour' | 'per-30min' | 'exact' — how raw OT duration is rounded
+    // Sunday treatment: 'off' = like a weekday; 'rate' = OT paid at the Sunday rate;
+    // 'allHours' = every hour worked counts as OT (normal rate); 'allHoursRate' = every
+    // hour as OT at the Sunday rate.
+    sundayMode: 'off',
+    sundayMultiplier: 2,     // Sunday rate = base OT rate × this (used when otSundayPerHour = 0)
+    otSundayPerHour: 0,      // explicit Sunday OT rate; 0 = use base OT rate × sundayMultiplier
     // Kasbon (cash advance): ceiling = 50% of BASE per payroll cycle (16→15),
     // max 1×/week, weekly max = ceiling/4. Week window definition:
     cashbonWeekMode: 'cutoff', // 'cutoff' = 7 days from the 16th | 'calendar' = Mon–Sun
@@ -337,12 +349,42 @@
     const mins = oriLateMinutes(checkIn, rates);
     return { status: mins > 0 ? 'late' : 'present', lateMinutes: mins };
   }
-  // Wage for a single attendance day, using the SAME config as monthly payroll:
-  //   base           = (status != 'absent') ? dailyWage : 0
-  //   lateDeduct     = lateBasis 'minute' → lateMinutes × latePerMin
-  //                    lateBasis 'hour'   → ceil(lateMinutes/60) × latePerMin (per-hour value)
-  //   otPay          = overtimeHours × (otOrientation || otPerHour)
-  //   pay            = max(0, base − lateDeduct + otPay)
+  // Day-of-week for an ISO date, tz-safe (0 = Sunday).
+  function isoDow(iso) { if (!iso) return -1; const a = iso.split('-').map(Number); return new Date(Date.UTC(a[0], a[1] - 1, a[2])).getUTCDay(); }
+  function roundOtHours(h, mode) {
+    if (h <= 0) return 0;
+    if (mode === 'exact') return h;
+    if (mode === 'per-30min') return Math.floor(h * 2) / 2;   // down to nearest 0.5h
+    return Math.floor(h);                                      // 'down-hour' (default)
+  }
+  // Overtime for one attendance day — ALL thresholds/rates from rates (nothing hardcoded).
+  //   raw hours: weekday / Sunday 'off'|'rate' → checkOut − workEnd; Sunday
+  //              'allHours'|'allHoursRate' → whole worked day (checkOut − checkIn − break).
+  //   → round by otRounding → drop if < otMinHours → rate (Sunday rate for 'rate'/'allHoursRate').
+  //   Manual `overtimeHours` is used as an OVERRIDE only when there is no checkOut.
+  function orientationOvertime(day, rates) {
+    const r = rates || {};
+    if ((day.status || 'present') === 'absent') return { isSunday: false, rawHours: 0, otHours: 0, rate: 0, otPay: 0, sundayMode: 'off', sundayApplied: false };
+    const isSunday = isoDow(day.date) === 0;
+    const mode = isSunday ? (r.sundayMode || 'off') : 'off';
+    const wholeDay = mode === 'allHours' || mode === 'allHoursRate';
+    const sundayRated = mode === 'rate' || mode === 'allHoursRate';
+    const baseRate = (+r.otOrientation > 0) ? +r.otOrientation : (+r.otPerHour || 0);
+    const rate = sundayRated ? ((+r.otSundayPerHour > 0) ? +r.otSundayPerHour : baseRate * (+r.sundayMultiplier || 1)) : baseRate;
+
+    let rawHours;
+    if (day.checkOut) {
+      const out = hmMin(day.checkOut);
+      if (wholeDay) { rawHours = Math.max(0, (out - hmMin(day.checkIn || '00:00') - (+r.breakMinutes || 0)) / 60); }
+      else { rawHours = Math.max(0, (out - hmMin(r.workEnd || '17:00')) / 60); }
+    } else {
+      rawHours = +day.overtimeHours || 0;   // manual override (no clock-out recorded)
+    }
+    let otHours = roundOtHours(rawHours, r.otRounding || 'down-hour');
+    if (otHours < (+r.otMinHours || 0)) otHours = 0;
+    return { isSunday, rawHours: Math.round(rawHours * 100) / 100, otHours, rate, otPay: Math.round(otHours * rate), sundayMode: mode, sundayApplied: sundayRated && otHours > 0 };
+  }
+  // Wage for a single attendance day (base − late deduction + overtime).
   function orientationDayPay(day, rates, dailyWage) {
     const r = rates || {}, dw = +dailyWage || 0;
     const status = day.status || 'present';
@@ -351,10 +393,11 @@
     const basis = r.lateBasis === 'hour' ? 'hour' : 'minute';
     const per = +r.latePerMin || 0;
     const lateDeduct = base === 0 ? 0 : (basis === 'hour' ? Math.ceil(lateMin / 60) * per : lateMin * per);
-    const otRate = (+r.otOrientation > 0) ? +r.otOrientation : (+r.otPerHour || 0);
-    const otPay = Math.round((+day.overtimeHours || 0) * otRate);
-    const pay = Math.max(0, base - lateDeduct + otPay);
-    return { date: day.date, status, base, lateMinutes: lateMin, lateDeduct, overtimeHours: +day.overtimeHours || 0, otRate, otPay, pay };
+    const ot = orientationOvertime(day, r);
+    const pay = Math.max(0, base - lateDeduct + ot.otPay);
+    return { date: day.date, status, base, lateMinutes: lateMin, lateDeduct,
+      overtimeHours: ot.otHours, otRawHours: ot.rawHours, otRate: ot.rate, otPay: ot.otPay,
+      isSunday: ot.isSunday, sundayMode: ot.sundayMode, sundayApplied: ot.sundayApplied, checkOut: day.checkOut || '', pay };
   }
   // Aggregate wage over all attendance days → per-day rows + subtotals.
   function orientationWage(days, rates, dailyWage) {
@@ -428,6 +471,6 @@
     payCycle, cashbonCeiling, cashbonWeeklyMax, cashbonsInCycle, cashbonCycleTotal, cashbonOutstanding, withCashbon,
     SEP_STATUSES, isActive, activeStaff, tenureYears, prorateForMonth, payrollStaff, severance, finalSettlement,
     stageOf, ORI_STAGES, isOrientationStage, orientationEnd, orientationDaysServed, orientationTotal, orientationRemaining, addDaysISO,
-    oriLateMinutes, orientationClassify, orientationDayPay, orientationWage,
+    oriLateMinutes, orientationClassify, orientationDayPay, orientationWage, orientationOvertime, isoDow,
   };
 })();

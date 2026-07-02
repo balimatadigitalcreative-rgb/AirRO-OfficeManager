@@ -1208,7 +1208,7 @@ img, svg, canvas, video { max-width: 100%; }
 /* Cards hold a 6-column daily-attendance table, so they need real width. min(540px,
    100%) => full-width single column on phones/tablets (never overflows the page),
    two columns only when the viewport is wide enough to fit them comfortably. */
-.ori-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(540px, 100%), 1fr)); gap: 14px; align-items: start; }
+.ori-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(680px, 100%), 1fr)); gap: 14px; align-items: start; }
 .ori-card { padding: 15px 16px; min-width: 0; }
 .ori-card .emp-pos { white-space: normal; }   /* let "Supervisor Distribution …" wrap instead of clipping */
 .ori-top { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
@@ -1239,16 +1239,21 @@ img, svg, canvas, video { max-width: 100%; }
 .ori-att-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--green-700); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
 /* Only the TABLE scrolls sideways on a narrow card — never the whole page. */
 .ori-att-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -2px; }
-.ori-att-tbl { width: 100%; min-width: 480px; border-collapse: collapse; font-size: 12.5px; }
+.ori-att-tbl { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 12.5px; }
 .ori-att-tbl th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; padding: 5px 8px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
 .ori-att-tbl td { padding: 6px 8px; border-bottom: 1px dashed var(--border-soft); vertical-align: middle; white-space: nowrap; }
-/* Proportional, aligned columns: date / check-in / status(+absent) / OT / pay / delete */
-.ori-att-tbl th:nth-child(1), .ori-att-tbl td:nth-child(1) { min-width: 92px; }
-.ori-att-tbl th:nth-child(2), .ori-att-tbl td:nth-child(2) { min-width: 96px; }
-.ori-att-tbl th:nth-child(3), .ori-att-tbl td:nth-child(3) { min-width: 132px; }
-.ori-att-tbl th:nth-child(4), .ori-att-tbl td:nth-child(4) { min-width: 62px; }
-.ori-att-tbl th:nth-child(5), .ori-att-tbl td:nth-child(5) { min-width: 96px; }
+/* Proportional columns: date / check-in / check-out / status(+absent) / OT / pay / delete */
+.ori-att-tbl th:nth-child(1), .ori-att-tbl td:nth-child(1) { min-width: 96px; }
+.ori-att-tbl th:nth-child(2), .ori-att-tbl td:nth-child(2) { min-width: 92px; }
+.ori-att-tbl th:nth-child(3), .ori-att-tbl td:nth-child(3) { min-width: 92px; }
+.ori-att-tbl th:nth-child(4), .ori-att-tbl td:nth-child(4) { min-width: 132px; }
+.ori-att-tbl th:nth-child(5), .ori-att-tbl td:nth-child(5) { min-width: 92px; }
 .ori-att-tbl td:last-child { width: 34px; text-align: center; }
+.ori-sun { display: inline-block; margin-left: 5px; font-size: 10px; font-weight: 700; color: #8a5a00; }
+.ori-ot-calc { font-weight: 600; }
+.ori-ot-rate { display: inline-block; margin-left: 5px; font-size: 10.5px; font-weight: 600; color: var(--text-mut); }
+.ori-add-fld { display: inline-flex; flex-direction: column; gap: 2px; }
+.ori-add-fld > span { font-size: 10px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; }
 .ori-att-tbl .tr, .ori-slip-tbl .tr { text-align: right; }
 .ori-att-tbl th.tr { text-align: right; }
 .ori-att-tbl .tnum { white-space: nowrap; }   /* Rp values never wrap/clip */

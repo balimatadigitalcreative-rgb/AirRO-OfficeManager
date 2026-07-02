@@ -482,12 +482,12 @@ function OrientationSlip({ staff, rates, onClose }) {
             <tbody>
               {wage.rows.map((r) => (
                 <tr key={r.date}>
-                  <td>{r.date}</td>
-                  <td>{r.status === 'absent' ? '—' : (rawFor(r.date).checkIn || '—')}</td>
+                  <td>{r.date}{r.isSunday ? <span className="ori-sun">{trC('ori.sun')}</span> : null}</td>
+                  <td>{r.status === 'absent' ? '—' : ((rawFor(r.date).checkIn || '—') + (rawFor(r.date).checkOut ? '–' + rawFor(r.date).checkOut : ''))}</td>
                   <td><span className={`ori-st ${r.status}`}>{trC('ori.st_' + r.status)}{r.status === 'late' && r.lateMinutes ? ` ${r.lateMinutes}m` : ''}</span></td>
                   <td className="tr tnum">{rpC(r.base)}</td>
                   <td className="tr tnum">{r.lateDeduct ? '−' + rpC(r.lateDeduct) : '—'}</td>
-                  <td className="tr tnum">{r.otPay ? '+' + rpC(r.otPay) : '—'}</td>
+                  <td className="tr tnum">{r.otPay ? '+' + rpC(r.otPay) + (r.sundayApplied ? ' ' + trC('ori.sun') : '') : '—'}</td>
                   <td className="tr tnum">{rpC(r.pay)}</td>
                 </tr>
               ))}
@@ -513,14 +513,21 @@ function OriCard({ s, rates, today, syncTick, canEdit, canAddEntry, onGraduate, 
   const wage = uMc(() => HRD.orientationWage(days, rates || {}, o.dailyWage), [days, rates, o.dailyWage]);
   const decided = o.outcome !== 'pending';
   const [target, setTarget] = uSc(HRD.stageOf(s) === 'dw' ? 'permanent' : 'permanent');
-  const [nd, setNd] = uSc({ date: today, checkIn: '08:00', absent: false, ot: 0 });
+  const [nd, setNd] = uSc({ date: today, checkIn: '08:00', checkOut: '', absent: false, ot: 0 });
   const rawFor = (date) => days.find((d) => d.date === date) || {};
-  const writeDay = (date, { checkIn, absent, overtimeHours, note }) => {
-    const cls = HRD.orientationClassify(absent ? null : checkIn, rates, absent);
-    CO.setOriAttDay(s.id, date, { checkIn: absent ? null : checkIn, status: cls.status, lateMinutes: cls.lateMinutes, overtimeHours: overtimeHours || 0, note: note || '' });
+  // Patch one day; unspecified fields keep their stored value (so editing check-out
+  // doesn't wipe check-in, etc.). checkOut auto-computes OT via the engine.
+  const writeDay = (date, patch) => {
+    const prev = rawFor(date);
+    const absent = patch.absent != null ? patch.absent : prev.status === 'absent';
+    const checkIn = absent ? null : (patch.checkIn != null ? patch.checkIn : prev.checkIn);
+    const checkOut = absent ? null : (patch.checkOut != null ? patch.checkOut : prev.checkOut);
+    const overtimeHours = patch.overtimeHours != null ? patch.overtimeHours : (+prev.overtimeHours || 0);
+    const cls = HRD.orientationClassify(checkIn, rates, absent);
+    CO.setOriAttDay(s.id, date, { checkIn, checkOut, status: cls.status, lateMinutes: cls.lateMinutes, overtimeHours, note: prev.note || '' });
     bump();
   };
-  const addDay = () => { if (!nd.date) return; writeDay(nd.date, { checkIn: nd.checkIn, absent: nd.absent, overtimeHours: +nd.ot || 0 }); setNd({ date: today, checkIn: '08:00', absent: false, ot: 0 }); };
+  const addDay = () => { if (!nd.date) return; writeDay(nd.date, { checkIn: nd.checkIn, checkOut: nd.checkOut || null, absent: nd.absent, overtimeHours: +nd.ot || 0 }); setNd({ date: today, checkIn: '08:00', checkOut: '', absent: false, ot: 0 }); };
   const pay = () => { const rec = canAddEntry && confirm(trC('ori.payConfirm', { amt: rpC(wage.total) })); onPay(s, !!rec); };
   return (
     <div className="card ori-card">
@@ -545,17 +552,22 @@ function OriCard({ s, rates, today, syncTick, canEdit, canAddEntry, onGraduate, 
         {wage.rows.length === 0 ? <div className="ori-empty">{trC('ori.noDays')}</div> : (
           <div className="ori-att-wrap">
           <table className="ori-att-tbl">
-            <thead><tr><th>{trC('ori.colDate')}</th><th>{trC('ori.colIn')}</th><th>{trC('ori.colStatus')}</th><th>{trC('ori.colOt')}</th><th className="tr">{trC('ori.colPay')}</th>{canEdit && <th></th>}</tr></thead>
+            <thead><tr><th>{trC('ori.colDate')}</th><th>{trC('ori.colIn')}</th><th>{trC('ori.colOut')}</th><th>{trC('ori.colStatus')}</th><th>{trC('ori.colOt')}</th><th className="tr">{trC('ori.colPay')}</th>{canEdit && <th></th>}</tr></thead>
             <tbody>
               {wage.rows.map((r) => { const raw = rawFor(r.date); const absent = r.status === 'absent'; return (
                 <tr key={r.date}>
-                  <td>{r.date}</td>
-                  <td>{absent ? <span className="ori-mut">—</span> : (canEdit ? <UI.TimePicker compact value={raw.checkIn || '08:00'} onChange={(v) => writeDay(r.date, { checkIn: v, absent: false, overtimeHours: r.overtimeHours })} /> : (raw.checkIn || '—'))}</td>
+                  <td>{r.date}{r.isSunday ? <span className="ori-sun">{trC('ori.sun')}</span> : null}</td>
+                  <td>{absent ? <span className="ori-mut">—</span> : (canEdit ? <UI.TimePicker compact value={raw.checkIn || '08:00'} onChange={(v) => writeDay(r.date, { checkIn: v })} /> : (raw.checkIn || '—'))}</td>
+                  <td>{absent ? <span className="ori-mut">—</span> : (canEdit ? <UI.TimePicker compact value={raw.checkOut || ''} placeholder="—" onChange={(v) => writeDay(r.date, { checkOut: v })} /> : (raw.checkOut || '—'))}</td>
                   <td>
                     <span className={`ori-st ${r.status}`}>{trC('ori.st_' + r.status)}{r.status === 'late' && r.lateMinutes ? ` ${r.lateMinutes}m` : ''}</span>
-                    {canEdit && <label className="ori-abs"><input type="checkbox" checked={absent} onChange={(e) => writeDay(r.date, { checkIn: raw.checkIn || '08:00', absent: e.target.checked, overtimeHours: r.overtimeHours })} />{trC('ori.absent')}</label>}
+                    {canEdit && <label className="ori-abs"><input type="checkbox" checked={absent} onChange={(e) => writeDay(r.date, { absent: e.target.checked })} />{trC('ori.absent')}</label>}
                   </td>
-                  <td>{canEdit ? <input className="ori-ot-in" inputMode="decimal" value={r.overtimeHours || ''} placeholder="0" onChange={(e) => writeDay(r.date, { checkIn: raw.checkIn, absent, overtimeHours: +e.target.value.replace(/[^\d.]/g, '') || 0 })} /> : (r.overtimeHours || 0)}</td>
+                  <td>
+                    {raw.checkOut
+                      ? <span className="ori-ot-calc">{r.overtimeHours || 0}{trC('ori.hUnit')}{r.otPay > 0 ? <span className="ori-ot-rate">@{rpC(r.otRate)}{r.sundayApplied ? ` ${trC('ori.sun')}` : ''}</span> : null}</span>
+                      : (canEdit ? <input className="ori-ot-in" inputMode="decimal" value={raw.overtimeHours || ''} placeholder={trC('ori.otManual')} title={trC('ori.otManualHint')} onChange={(e) => writeDay(r.date, { overtimeHours: +e.target.value.replace(/[^\d.]/g, '') || 0 })} /> : `${r.overtimeHours || 0}`)}
+                  </td>
                   <td className="tr tnum">{rpC(r.pay)}</td>
                   {canEdit && <td><button className="icon-btn del" title={trC('ori.removeDay')} onClick={() => { CO.removeOriAttDay(s.id, r.date); bump(); }}><IconClose s={14} /></button></td>}
                 </tr>
@@ -567,9 +579,10 @@ function OriCard({ s, rates, today, syncTick, canEdit, canAddEntry, onGraduate, 
         {canEdit && !decided && (
           <div className="ori-att-add">
             <DP.DateField value={nd.date} max={today} onChange={(v) => setNd({ ...nd, date: v })} />
-            {!nd.absent && <UI.TimePicker compact value={nd.checkIn} onChange={(v) => setNd({ ...nd, checkIn: v })} />}
+            {!nd.absent && <label className="ori-add-fld"><span>{trC('ori.colIn')}</span><UI.TimePicker compact value={nd.checkIn} onChange={(v) => setNd({ ...nd, checkIn: v })} /></label>}
+            {!nd.absent && <label className="ori-add-fld"><span>{trC('ori.colOut')}</span><UI.TimePicker compact value={nd.checkOut} placeholder="—" onChange={(v) => setNd({ ...nd, checkOut: v })} /></label>}
             <label className="ori-abs"><input type="checkbox" checked={nd.absent} onChange={(e) => setNd({ ...nd, absent: e.target.checked })} />{trC('ori.absent')}</label>
-            <input className="ori-ot-in" inputMode="decimal" placeholder={trC('ori.otH')} value={nd.ot || ''} onChange={(e) => setNd({ ...nd, ot: +e.target.value.replace(/[^\d.]/g, '') || 0 })} />
+            {!nd.absent && !nd.checkOut && <input className="ori-ot-in" inputMode="decimal" placeholder={trC('ori.otH')} title={trC('ori.otManualHint')} value={nd.ot || ''} onChange={(e) => setNd({ ...nd, ot: +e.target.value.replace(/[^\d.]/g, '') || 0 })} />}
             <button className="btn btn-sm btn-primary" onClick={addDay}><IconPlus s={14} />{trC('ori.addDay')}</button>
           </div>
         )}

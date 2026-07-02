@@ -165,7 +165,8 @@
   function removeTraining(id) { const list = loadTrainings().filter((t) => t.id !== id); saveTrainings(list); return list; }
 
   // ---- Orientation/DW daily attendance — shared via /state ----
-  // Map: { [staffId]: { [date]: { checkIn, status, lateMinutes, overtimeHours, note } } }
+  // Map: { [staffId]: { [date]: { checkIn, checkOut, status, lateMinutes, overtimeHours, note } } }
+  // overtimeHours = manual OT override (used only when checkOut is empty).
   const ORIATT_KEY = 'airro_oriatt_v1';
   function loadOriAtt() { try { const r = localStorage.getItem(ORIATT_KEY); if (r) { const o = JSON.parse(r); if (o && typeof o === 'object') return o; } } catch (e) {} return {}; }
   function saveOriAtt(m) { try { localStorage.setItem(ORIATT_KEY, JSON.stringify(m || {})); } catch (e) {} }
@@ -175,7 +176,7 @@
   }
   function setOriAttDay(staffId, date, rec) {
     const m = loadOriAtt(); m[staffId] = m[staffId] || {};
-    m[staffId][date] = { checkIn: rec.checkIn || null, status: rec.status || 'present', lateMinutes: +rec.lateMinutes || 0, overtimeHours: +rec.overtimeHours || 0, note: rec.note || '' };
+    m[staffId][date] = { checkIn: rec.checkIn || null, checkOut: rec.checkOut || null, status: rec.status || 'present', lateMinutes: +rec.lateMinutes || 0, overtimeHours: +rec.overtimeHours || 0, note: rec.note || '' };
     saveOriAtt(m);
   }
   function removeOriAttDay(staffId, date) { const m = loadOriAtt(); if (m[staffId]) { delete m[staffId][date]; saveOriAtt(m); } }
