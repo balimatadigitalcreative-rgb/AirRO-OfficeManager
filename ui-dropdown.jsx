@@ -45,13 +45,16 @@ function TimePicker({ value, onChange, compact, color, menuColor, placeholder })
   // DateField pop-cal, so it never grows/covers the card layout.
   const place = () => {
     const el = btnRef.current; if (!el) return;
+    // Compensate for desktop-scale.css `html { zoom }`: getBoundingClientRect is in
+    // visual px, but a fixed element's left/top get re-scaled by the zoom.
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
     const r = el.getBoundingClientRect();
-    const W = 268, H = 300, pad = 8;
-    const vw = window.innerWidth, vh = window.innerHeight;
+    const W = 268 * zoom, H = 300 * zoom, pad = 8;
+    const vw = window.innerWidth * zoom, vh = window.innerHeight * zoom;
     let left = Math.min(r.left, vw - W - pad); left = Math.max(pad, left);
     let top = r.bottom + 6;
     if (top + H > vh - pad) top = Math.max(pad, r.top - 6 - H);   // flip up
-    setPos({ left, top });
+    setPos({ left: left / zoom, top: top / zoom });
   };
   uEd(() => {
     if (!open) { setPos(null); return; }

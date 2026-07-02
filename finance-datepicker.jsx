@@ -149,49 +149,53 @@ function PeriodNav({ gran, anchor, onAnchor, label, today }) {
    the period navigator uses, so every date field looks identical. */
 function DateField({ value, onChange, min, max, allowFuture, placeholder }) {
   const [open, setOpen] = uSdp(false);
-  const [pos, setPos] = uSdp(null);
   const btnRef = uRdp(null);
-  const realToday = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
-  // Upper bound is SEPARATE from the anchor: allowFuture → no cap; otherwise `max`
-  // (or today). The anchor never falls back to a far-future placeholder.
-  const maxBound = allowFuture ? (max || null) : (max || realToday);
-  let anchor = value || (min || realToday);
-  if (min && anchor < min) anchor = min;
-  if (maxBound && anchor > maxBound) anchor = maxBound;
-  // Float the calendar with position:fixed at coords computed from the button,
-  // clamped to the viewport and flipped up when space below is tight. Rendered in
-  // a portal on document.body so a transformed modal ancestor can't trap it (which
-  // used to inflate the modal and add a scrollbar).
-  const place = () => {
-    const el = btnRef.current; if (!el) return;
-    const r = el.getBoundingClientRect();
-    const W = 300, H = 372, pad = 8;
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let left = Math.min(r.left, vw - W - pad); left = Math.max(pad, left);
-    let top = r.bottom + 6;
-    if (top + H > vh - pad) top = Math.max(pad, r.top - 6 - H);   // flip up
-    setPos({ left, top });
-  };
+  const [pos, setPos] = uSdp(null);
+  // Anchor the popup to the button with position:fixed, coords from getBoundingClientRect,
+  // clamped to the viewport and flipped up when space below is tight — same for every
+  // field, never centered. Portaled to <body> so a transformed modal ancestor can't
+  // trap position:fixed (that both offset the popup AND used to inflate the modal).
   uEdp(() => {
     if (!open) { setPos(null); return; }
+    const place = () => {
+      const el = btnRef.current; if (!el) return;
+      // desktop-scale.css applies `html { zoom }`. getBoundingClientRect returns
+      // VISUAL px, but a fixed element's left/top are re-scaled by that zoom — so we
+      // work out the target in visual px, then divide by zoom to get the CSS value.
+      const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      const r = el.getBoundingClientRect();   // visual px
+      const M = 8;
+      const W = 288 * zoom, H = 340 * zoom;                 // popup's visual size
+      const vw = window.innerWidth * zoom, vh = window.innerHeight * zoom;   // visual viewport
+      let left = Math.max(M, Math.min(r.left, vw - W - M));
+      let top = r.bottom + 6;
+      if (top + H > vh - M) { const up = r.top - H - 6; top = up >= M ? up : Math.max(M, vh - H - M); }
+      setPos({ top: top / zoom, left: left / zoom });       // → CSS px for the fixed element
+    };
     place();
-    const on = () => place();
     const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('resize', on); window.addEventListener('scroll', on, true); window.addEventListener('keydown', esc);
-    return () => { window.removeEventListener('resize', on); window.removeEventListener('scroll', on, true); window.removeEventListener('keydown', esc); };
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.removeEventListener('keydown', esc); };
   }, [open]);
+  const realToday = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
+  const maxBound = max || (allowFuture ? '9999-12-31' : realToday);   // upper bound; NO 2030 fallback
+  let anchor = value || min || realToday;                              // sane starting month, not 2030
+  if (min && anchor < min) anchor = min;
   const niceDate = (s) => { const d = new Date(s + 'T00:00'); const M = (window.PERIOD ? PERIOD.mon(d.getMonth()) : d.getMonth() + 1); return `${d.getDate()} ${M} ${d.getFullYear()}`; };
   return (
     <div className={`ui-dd ${open ? 'open' : ''}`}>
-      <button type="button" ref={btnRef} className="ui-dd-control" onClick={() => setOpen((o) => !o)}>
+      <button ref={btnRef} type="button" className="ui-dd-control" onClick={() => setOpen((o) => !o)}>
         <IconCalendar s={15} style={{ color: 'var(--green-700)', flexShrink: 0 }} />
         <span className={`ui-dd-text ${value ? '' : 'ph'}`}>{value ? niceDate(value) : (placeholder || '—')}</span>
         <IconCaret s={15} style={{ flexShrink: 0, color: 'var(--text-mut)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
       {open && ReactDOM.createPortal(
         <React.Fragment>
+          {/* full-screen backdrop closes on outside click; the calendar (higher z) does not */}
           <div className="pop-cal-backdrop dd-back" onClick={() => setOpen(false)} />
-          <div className="pop-cal-wrap dd-cal" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
+          <div className="pop-cal-wrap dd-cal" style={pos ? { top: pos.top, left: pos.left } : { visibility: 'hidden' }}>
             <DayGrid gran="day" anchor={anchor} today={maxBound} min={min} todayIso={realToday} onPick={(iso) => { onChange(iso); setOpen(false); }} />
           </div>
         </React.Fragment>, document.body)}
