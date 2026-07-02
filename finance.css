@@ -318,9 +318,11 @@
 .pn-label:hover { background: var(--card-soft); }
 .pn-label.open { background: var(--mint-100); }
 .pop-cal-wrap { position: absolute; top: 46px; right: 0; z-index: 70; animation: jernihPop .18s ease both; }
-/* DateField popup = fixed floating sheet on EVERY size, so it never adds to the
-   height/width of the modal it sits in (that was what triggered modal scrollbars). */
-.pop-cal-wrap.dd-cal { position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%); z-index: 1210; animation: jernihSheet .2s ease both; }
+/* DateField popup = fixed floating popover, portaled to <body> and positioned from
+   the button rect (inline left/top). Being fixed + portaled, it never adds to the
+   height/width of the modal it sits in (that was what triggered modal scrollbars).
+   On phones the media query below re-centers it as a sheet. */
+.pop-cal-wrap.dd-cal { position: fixed; top: auto; left: auto; right: auto; bottom: auto; transform: none; z-index: 1210; animation: jernihPop .16s ease both; }
 .pop-cal-backdrop { display: none; } /* PeriodNav backdrop: mobile-only (media query <=560px) */
 .pop-cal-backdrop.dd-back { display: block; position: fixed; inset: 0; background: rgba(15, 23, 32, .38); z-index: 1200; animation: jernihFade .18s ease both; } /* DateField backdrop: always (tap to close) */
 .pop-cal { width: 288px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 16px; }
@@ -365,11 +367,11 @@
     background: rgba(15, 23, 32, .38);
     z-index: 1200; animation: jernihFade .18s ease both;
   }
-  /* !important agar mengalahkan posisi absolute base & .dd-cal */
+  /* !important agar mengalahkan posisi base & inline left/top .dd-cal */
   .pop-cal-wrap {
     position: fixed !important;
     top: 50% !important; left: 50% !important; right: auto !important; bottom: auto !important;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%) !important;
     width: min(360px, calc(100vw - 28px));
     z-index: 1210;
     animation: jernihSheet .2s ease both; /* ganti jernihPop agar transform centering tak ke-reset */
@@ -751,6 +753,10 @@ select.fld::-ms-expand { display: none; }
 .modal-card input, .modal-card select, .modal-card textarea, .modal-card .ui-dd, .modal-card .amt-input { max-width: 100%; }   /* no child wider than the modal */
 .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .modal-head > div:first-child { flex: 1; min-width: 0; }
+/* Keep the title + close (X) pinned while a tall form scrolls inside the card. The
+   negative margins + padding make the sticky bar span the card's padding and hide
+   content sliding behind it; nets to the same spacing for short (non-scrolling) modals. */
+.modal-card > .modal-head { position: sticky; top: -20px; z-index: 5; background: var(--surface); margin: -20px -20px 12px; padding: 20px 20px 10px; }
 .modal-head > div:first-child > div:first-child { white-space: nowrap; }
 .modal-foot { display: flex; gap: 10px; margin-top: 16px; }
 

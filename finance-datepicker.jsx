@@ -10,9 +10,10 @@ const ISO = (y, m, d) => `${y}-${PAD(m + 1)}-${PAD(d)}`;
 const WD_HEAD = () => Array.from({ length: 7 }, (_, i) => PERIOD.dow(new Date(2024, 0, 1 + i)));
 
 /* ---- day / week picker (month grid) with drill: day → month → year ----
-   `today` is the UPPER bound (max), `min` the lower bound; both are honored in
-   every mode. Month/year modes reuse the existing MonthGrid / YearGrid. */
-function DayGrid({ gran, anchor, today, min, onPick }) {
+   `today` is the UPPER bound (max) — null/'' means no upper cap; `min` the lower
+   bound; `todayIso` (optional) is the real date to highlight (defaults to `today`).
+   Both bounds are honored in every mode. */
+function DayGrid({ gran, anchor, today, min, onPick, todayIso }) {
   const [view, setView] = uSdp(() => { const d = new Date(anchor + 'T00:00'); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [mode, setMode] = uSdp('day');
   const [yearBase, setYearBase] = uSdp(() => Math.floor(new Date(anchor + 'T00:00').getFullYear() / 12) * 12);
@@ -45,10 +46,10 @@ function DayGrid({ gran, anchor, today, min, onPick }) {
         {cells.map((d, i) => {
           if (!d) return <span key={i} className="pc-cell empty" />;
           const iso = ISO(y, m, d);
-          const future = iso > today;
+          const future = today ? iso > today : false;   // no upper cap → nothing disabled above
           const tooEarly = min && iso < min;   // honor min (e.g. range end >= start)
           const inSel = iso >= sel.start && iso <= sel.end;
-          const isToday = iso === today;
+          const isToday = iso === (todayIso || today);
           return (
             <button key={i} disabled={future || tooEarly}
               className={`pc-cell ${inSel ? 'sel' : ''} ${gran === 'week' ? 'wk' : ''} ${isToday ? 'today' : ''}`}
@@ -148,32 +149,52 @@ function PeriodNav({ gran, anchor, onAnchor, label, today }) {
    the period navigator uses, so every date field looks identical. */
 function DateField({ value, onChange, min, max, allowFuture, placeholder }) {
   const [open, setOpen] = uSdp(false);
-  const ref = uRdp(null);
+  const [pos, setPos] = uSdp(null);
+  const btnRef = uRdp(null);
+  const realToday = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
+  // Upper bound is SEPARATE from the anchor: allowFuture → no cap; otherwise `max`
+  // (or today). The anchor never falls back to a far-future placeholder.
+  const maxBound = allowFuture ? (max || null) : (max || realToday);
+  let anchor = value || (min || realToday);
+  if (min && anchor < min) anchor = min;
+  if (maxBound && anchor > maxBound) anchor = maxBound;
+  // Float the calendar with position:fixed at coords computed from the button,
+  // clamped to the viewport and flipped up when space below is tight. Rendered in
+  // a portal on document.body so a transformed modal ancestor can't trap it (which
+  // used to inflate the modal and add a scrollbar).
+  const place = () => {
+    const el = btnRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const W = 300, H = 372, pad = 8;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = Math.min(r.left, vw - W - pad); left = Math.max(pad, left);
+    let top = r.bottom + 6;
+    if (top + H > vh - pad) top = Math.max(pad, r.top - 6 - H);   // flip up
+    setPos({ left, top });
+  };
   uEdp(() => {
-    if (!open) return;
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    if (!open) { setPos(null); return; }
+    place();
+    const on = () => place();
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('resize', on); window.addEventListener('scroll', on, true); window.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('resize', on); window.removeEventListener('scroll', on, true); window.removeEventListener('keydown', esc); };
   }, [open]);
-  const today = max || (allowFuture ? '2030-12-31' : ((window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA')));
-  let anchor = value || today;
-  if (min && anchor < min) anchor = min;   // open on a month within [min, max]
   const niceDate = (s) => { const d = new Date(s + 'T00:00'); const M = (window.PERIOD ? PERIOD.mon(d.getMonth()) : d.getMonth() + 1); return `${d.getDate()} ${M} ${d.getFullYear()}`; };
   return (
-    <div className={`ui-dd ${open ? 'open' : ''}`} ref={ref}>
-      <button type="button" className="ui-dd-control" onClick={() => setOpen((o) => !o)}>
+    <div className={`ui-dd ${open ? 'open' : ''}`}>
+      <button type="button" ref={btnRef} className="ui-dd-control" onClick={() => setOpen((o) => !o)}>
         <IconCalendar s={15} style={{ color: 'var(--green-700)', flexShrink: 0 }} />
         <span className={`ui-dd-text ${value ? '' : 'ph'}`}>{value ? niceDate(value) : (placeholder || '—')}</span>
         <IconCaret s={15} style={{ flexShrink: 0, color: 'var(--text-mut)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
-      {open && (
+      {open && ReactDOM.createPortal(
         <React.Fragment>
           <div className="pop-cal-backdrop dd-back" onClick={() => setOpen(false)} />
-          <div className="pop-cal-wrap dd-cal">
-            <DayGrid gran="day" anchor={anchor} today={today} min={min} onPick={(iso) => { onChange(iso); setOpen(false); }} />
+          <div className="pop-cal-wrap dd-cal" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
+            <DayGrid gran="day" anchor={anchor} today={maxBound} min={min} todayIso={realToday} onPick={(iso) => { onChange(iso); setOpen(false); }} />
           </div>
-        </React.Fragment>
-      )}
+        </React.Fragment>, document.body)}
     </div>
   );
 }
