@@ -126,7 +126,9 @@ function FApp() {
   uEh(() => {
     if (!p.setoran || !(window.API && window.API.setoran)) return;
     reloadSetoran();
-    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadSetoran(); }, 3000);
+    // SSE (CLOUD.onEvent → reloadSetoran) is the primary realtime path; this timer is
+    // just a slow backstop in case an event is missed while the stream is down.
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadSetoran(); }, 15000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadSetoran(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -182,7 +184,10 @@ function FApp() {
     if (!window.CLOUD) return;
     window.CLOUD.onSync = () => { refreshAllSlices(); setSyncTick((t) => t + 1); };
     window.CLOUD.onStatus = (s) => setSyncStatus(s);
-    return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; } };
+    // SSE notice for a non-/state REST entity (setoran) or a tab-focus resync →
+    // re-fetch that entity immediately. Near-0 latency; the 3s poll is now a backstop.
+    window.CLOUD.onEvent = (evt) => { if (evt && (evt.entity === 'setoran' || evt.entity === 'focus')) reloadSetoran(); };
+    return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
 
   // Lock the page scroll behind the mobile drawer while it's open.

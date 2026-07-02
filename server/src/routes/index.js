@@ -24,5 +24,6 @@ router.use('/payroll', require('./payroll.routes'));
 router.use('/settings', require('./settings.routes'));
 router.use('/reports', require('./report.routes'));
 router.use('/state', require('./state.routes'));   // shared app-state document store
+router.use('/events', require('./events.routes')); // SSE realtime change stream
 
 module.exports = router;

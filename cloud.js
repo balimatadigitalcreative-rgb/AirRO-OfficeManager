@@ -195,8 +195,53 @@
       if (changed && typeof window.CLOUD.onSync === 'function') window.CLOUD.onSync();
     } catch (e) { /* transient — try again next tick */ }
   }
-  function startPoll() { if (!pollTimer) pollTimer = setInterval(poll, 3000); }
+  // The poll is now a SAFETY NET behind SSE (below). With the event stream healthy,
+  // updates arrive in well under a second; the 5s poll only backfills anything an SSE
+  // hiccup might have missed. (Was 3s when poll was the primary channel.)
+  function startPoll() { if (!pollTimer) pollTimer = setInterval(poll, 5000); }
   function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+  // ---- SSE realtime: push change notices instead of waiting for the next poll ----
+  // The server broadcasts { entity, action, id } on every write. A 'state' notice
+  // triggers an immediate incremental poll (near-0 latency); any other entity is
+  // handed to the shell via CLOUD.onEvent so it can re-fetch that REST resource
+  // (e.g. setoran). EventSource auto-reconnects; on (re)connect and on tab-focus we
+  // run a full poll to close any gap while the stream was down.
+  let es = null;
+  function handleEvent(evt) {
+    if (!evt || !evt.entity) return;
+    if (evt.entity === 'state') { poll(); return; }
+    if (evt.entity === 'hello') return;
+    if (typeof window.CLOUD.onEvent === 'function') { try { window.CLOUD.onEvent(evt); } catch (e) {} }
+  }
+  function startEvents() {
+    if (es || typeof window.EventSource === 'undefined') return;
+    const base = (window.API && window.API.BASE) || '';
+    const tok = API.getToken && API.getToken();
+    if (!base || !tok) return;
+    try {
+      es = new EventSource(base + '/events?token=' + encodeURIComponent(tok));
+      es.onopen = () => {   // catch up on connect/reconnect: pull /state AND re-fetch REST entities
+        hadError = false; poll();
+        if (typeof window.CLOUD.onEvent === 'function') { try { window.CLOUD.onEvent({ entity: 'focus', action: 'reconnect', id: null }); } catch (e) {} }
+        emit();
+      };
+      es.onmessage = (m) => { let evt; try { evt = JSON.parse(m.data); } catch (e) { return; } handleEvent(evt); };
+      es.onerror = () => { /* browser auto-reconnects using our retry hint */ };
+    } catch (e) { es = null; }
+  }
+  function stopEvents() { if (es) { try { es.close(); } catch (e) {} es = null; } }
+
+  // When the tab regains focus, run one full sync (poll + let the shell refetch its
+  // REST entities) to cover events missed while the connection was asleep/offline.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || !state.active) return;
+      startEvents();   // reopen if the stream was dropped while hidden
+      poll();
+      if (typeof window.CLOUD.onEvent === 'function') { try { window.CLOUD.onEvent({ entity: 'focus', action: 'resync', id: null }); } catch (e) {} }
+    });
+  }
 
   // ---- session lifecycle ----
   async function login(username, password) {
@@ -227,6 +272,7 @@
     state.active = true;
     state.user = user;
     startPoll();
+    startEvents();
     emit();
     try {
       await hydrate();
@@ -249,7 +295,7 @@
 
   function logout() {
     try { API.logout(); } catch (e) {}
-    state.active = false; state.user = null; stopPoll();
+    state.active = false; state.user = null; stopPoll(); stopEvents();
     Object.keys(timers).forEach((k) => clearTimeout(timers[k]));
     Object.keys(retries).forEach((k) => clearTimeout(retries[k]));
   }
@@ -271,5 +317,6 @@
     login, logout, restore, activate, frontendUser,
     onSync: null,     // set by the app shell to re-read slices on remote change
     onStatus: null,   // set by the app shell to show a saving/saved/error indicator
+    onEvent: null,    // set by the app shell to react to a non-state SSE entity notice
   };
 })();

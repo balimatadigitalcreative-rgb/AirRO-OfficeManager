@@ -2,6 +2,7 @@
 const { z } = require('zod');
 const service = require('../services/setoran.service');
 const asyncHandler = require('../utils/asyncHandler');
+const bus = require('../lib/eventbus');
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
 
@@ -33,8 +34,8 @@ const idParams = z.object({ id: z.string().min(1) });
 
 const list = asyncHandler(async (req, res) => res.json(await service.list(req.query)));
 const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id) }));
-const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body, req.user?.id) }));
-const update = asyncHandler(async (req, res) => res.json({ data: await service.update(req.params.id, req.body) }));
-const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); res.status(204).send(); });
+const create = asyncHandler(async (req, res) => { const data = await service.create(req.body, req.user?.id); bus.broadcast({ entity: 'setoran', action: 'create', id: data.id }); res.status(201).json({ data }); });
+const update = asyncHandler(async (req, res) => { const data = await service.update(req.params.id, req.body); bus.broadcast({ entity: 'setoran', action: 'update', id: data.id }); res.json({ data }); });
+const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bus.broadcast({ entity: 'setoran', action: 'delete', id: req.params.id }); res.status(204).send(); });
 
 module.exports = { list, getOne, create, update, remove, schemas: { createSchema, updateSchema, listQuery, idParams } };

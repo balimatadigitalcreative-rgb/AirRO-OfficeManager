@@ -2,6 +2,7 @@
 const { z } = require('zod');
 const service = require('../services/state.service');
 const asyncHandler = require('../utils/asyncHandler');
+const bus = require('../lib/eventbus');
 
 // Only allow the app's own data keys (airro_*) to be stored.
 const keyParams = z.object({ key: z.string().regex(/^airro_[a-zA-Z0-9_]+$/, 'invalid state key') });
@@ -19,7 +20,10 @@ const getAll = asyncHandler(async (req, res) => {
 });
 
 const set = asyncHandler(async (req, res) => {
-  res.json({ data: await service.set(req.params.key, req.body.value) });
+  const data = await service.set(req.params.key, req.body.value);
+  // Push a realtime notice so other clients pull this key immediately (no 3s wait).
+  bus.broadcast({ entity: 'state', action: 'set', id: req.params.key });
+  res.json({ data });
 });
 
 module.exports = { getAll, set, schemas: { keyParams, putSchema } };
