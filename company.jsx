@@ -503,11 +503,13 @@ function OrientationSlip({ staff, rates, onClose }) {
 }
 
 /* ---------- One orientation/DW card with daily attendance editor ---------- */
-function OriCard({ s, rates, today, canEdit, canAddEntry, onGraduate, onFail, onPay, onOpen, onSlip }) {
+function OriCard({ s, rates, today, syncTick, canEdit, canAddEntry, onGraduate, onFail, onPay, onOpen, onSlip }) {
   const o = s.orientation || {};
   const [tick, setTick] = uSc(0);
   const bump = () => setTick((t) => t + 1);
-  const days = uMc(() => CO.oriAtt(s.id), [s.id, tick]);
+  // Re-read on local edits (tick) AND on remote sync (syncTick) so another user's
+  // attendance change shows up live without a refresh.
+  const days = uMc(() => CO.oriAtt(s.id), [s.id, tick, syncTick]);
   const wage = uMc(() => HRD.orientationWage(days, rates || {}, o.dailyWage), [days, rates, o.dailyWage]);
   const decided = o.outcome !== 'pending';
   const [target, setTarget] = uSc(HRD.stageOf(s) === 'dw' ? 'permanent' : 'permanent');
@@ -589,7 +591,7 @@ function OriCard({ s, rates, today, canEdit, canAddEntry, onGraduate, onFail, on
 }
 
 /* ---------- Orientation/DW screen (daily-paid new hires) ---------- */
-function OrientationScreen({ staff, setStaff, rates, today, canEdit, canAddEntry, onGraduate, onFail, onPay, orientationPaidIds, onOpen }) {
+function OrientationScreen({ staff, setStaff, rates, today, syncTick, canEdit, canAddEntry, onGraduate, onFail, onPay, orientationPaidIds, onOpen }) {
   const [slip, setSlip] = uSc(null);
   const bucket = (staff || []).filter((s) => HRD.isOrientationStage(s));
   const active = bucket.filter((s) => (s.orientation || {}).outcome !== 'failed' || !(s.orientation || {}).paid);
@@ -600,7 +602,7 @@ function OrientationScreen({ staff, setStaff, rates, today, canEdit, canAddEntry
         <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)', marginTop: 16 }}>{trC('ori.none')}</div>
       ) : (
         <div className="ori-list" style={{ marginTop: 16 }}>
-          {active.map((s) => <OriCard key={s.id} s={s} rates={rates} today={today} canEdit={canEdit} canAddEntry={canAddEntry} onGraduate={onGraduate} onFail={onFail} onPay={onPay} onOpen={onOpen} onSlip={() => setSlip(s)} />)}
+          {active.map((s) => <OriCard key={s.id} s={s} rates={rates} today={today} syncTick={syncTick} canEdit={canEdit} canAddEntry={canAddEntry} onGraduate={onGraduate} onFail={onFail} onPay={onPay} onOpen={onOpen} onSlip={() => setSlip(s)} />)}
         </div>
       )}
       {slip && <OrientationSlip staff={slip} rates={rates} onClose={() => setSlip(null)} />}
@@ -609,9 +611,12 @@ function OrientationScreen({ staff, setStaff, rates, today, canEdit, canAddEntry
 }
 
 /* ---------- Employee Detail ---------- */
-function EmployeeDetail({ staff: staffProp, rates, monthKey, today, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, setCashbons, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
+function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, setCashbons, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
   const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
   const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
+  // A remote sync (another user edited this employee's attendance) → re-read the
+  // month so the grid + late/OT totals update live without reopening the modal.
+  uEc(() => { setAtt(CO.attendance(staffProp, monthKey, today)); }, [syncTick, monthKey]);
   const acc = uMc(() => CO.accountInfo(staffProp), [staffProp]);   // legacy fallback for fields not yet on the staff object
   const [identEdit, setIdentEdit] = uSc(false);
   const [offboard, setOffboard] = uSc(false);

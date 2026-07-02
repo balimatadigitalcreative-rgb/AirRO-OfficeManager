@@ -1,5 +1,5 @@
 /* global React, ReactDOM, FS, FIN, AUTH, SETTINGS, ALERTS, REPORTS, EDIT, HRD, PAYROLL */
-const { useState: uSh, useEffect: uEh, useMemo: uMh } = React;
+const { useState: uSh, useEffect: uEh, useMemo: uMh, useRef: uRf } = React;
 const tr = (k, v) => window.t(k, v);
 function Ish(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
@@ -71,6 +71,7 @@ function FApp() {
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
   const [syncStatus, setSyncStatus] = uSh('saved');   // 'saving' | 'saved' | 'error' from the cloud adapter
+  const [syncTick, setSyncTick] = uSh(0);             // bumps on every applied remote change → forces on-demand readers (attendance / orientation) to re-read
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
 
   uEh(() => { FS.save(entries); }, [entries]);
@@ -95,14 +96,30 @@ function FApp() {
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // Re-read every data slice from the (server-hydrated) stores into React state.
+  // NOTE: this covers every slice held in shell state. On-demand stores read
+  // directly inside components (attendance `airro_attendance_v2`, orientation
+  // attendance `airro_oriatt_v1`) are refreshed via the `syncTick` prop instead.
   // Used after login and whenever the cloud poll pulls remote changes.
+  // Apply a slice into React state ONLY when its content actually changed. A poll
+  // that pulled (say) setoran must not also hand a brand-new-but-identical array to
+  // setEntries/setAccounts/etc — that needless setState would re-run the setoran →
+  // cash-flow derivation and re-persist those keys on a passive client, exactly the
+  // churn that used to make the poll treat them as "dirty". We compare against the
+  // last-applied JSON snapshot (a ref, so it's immune to closure staleness).
+  const appliedRef = uRf({});
+  const applySlice = (name, val, setter) => {
+    const s = JSON.stringify(val);
+    if (appliedRef.current[name] === s) return;
+    appliedRef.current[name] = s;
+    setter(val);
+  };
   const refreshAllSlices = () => {
-    setEntries(FS.load()); setCats(FS.loadCats()); setSettings(FS.loadSettings());
-    setAccounts(FS.loadAccts()); setSetoran(FS.loadSetoran()); setFleet(FS.loadFleet());
-    setTransfers(FS.loadTransfers());
-    setHrdStaff(HRD.loadStaff()); setHrdRates(HRD.loadRates()); setHrBudget(HRD.loadBudget()); setDepartments(HRD.loadDepartments());
-    setApprovals(CO.load()); setProjects(CO.loadProjects()); setCashbons(CO.loadCashbons()); setCalEvents(CO.loadEvents());
-    setUsers(FS.loadUsers());
+    applySlice('entries', FS.load(), setEntries); applySlice('cats', FS.loadCats(), setCats); applySlice('settings', FS.loadSettings(), setSettings);
+    applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('setoran', FS.loadSetoran(), setSetoran); applySlice('fleet', FS.loadFleet(), setFleet);
+    applySlice('transfers', FS.loadTransfers(), setTransfers);
+    applySlice('hrdStaff', HRD.loadStaff(), setHrdStaff); applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);
+    applySlice('approvals', CO.load(), setApprovals); applySlice('projects', CO.loadProjects(), setProjects); applySlice('cashbons', CO.loadCashbons(), setCashbons); applySlice('calEvents', CO.loadEvents(), setCalEvents);
+    applySlice('users', FS.loadUsers(), setUsers);
   };
 
   const login = (u) => {
@@ -126,7 +143,7 @@ function FApp() {
   // here can't clobber a pending local change.)
   uEh(() => {
     if (!window.CLOUD) return;
-    window.CLOUD.onSync = () => refreshAllSlices();
+    window.CLOUD.onSync = () => { refreshAllSlices(); setSyncTick((t) => t + 1); };
     window.CLOUD.onStatus = (s) => setSyncStatus(s);
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; } };
   }, []);
@@ -511,7 +528,7 @@ function FApp() {
           )}
 
           {screen === 'orientation' && p.payroll && (
-            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={setHrdStaff} rates={hrdRates} today={FIN.TODAY} canEdit={p.payroll} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
+            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={setHrdStaff} rates={hrdRates} today={FIN.TODAY} syncTick={syncTick} canEdit={p.payroll} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
           )}
 
           {screen === 'approvals' && p.approvals && (
@@ -557,7 +574,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );

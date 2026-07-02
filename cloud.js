@@ -2,14 +2,28 @@
    Makes ALL app data shared across accounts by mirroring the app's localStorage
    to the backend document store (/state). On login it hydrates localStorage
    from the server; every write is mirrored back (write-through, retried); and a
-   poll pulls remote changes every ~10s (near real-time). Auth goes through the
-   backend.
+   poll pulls remote changes every 3s (near real-time) for every logged-in user.
+   Auth goes through the backend.
+
+   The session is armed (active + poll + write-through) BEFORE the initial hydrate
+   and STAYS active even if that hydrate fails, so a transient server blip never
+   drops a user into a silent offline state. On activation every unconfirmed local
+   key is flushed up, so pending edits reach the server without a manual re-save.
 
    Data safety: each key tracks the last value CONFIRMED in sync with the server
    (from hydrate or a successful push). The poll never overwrites a key whose
    local value differs from that confirmed value (an unsynced local edit) — it
    waits until our own push is confirmed. Failed pushes retry with backoff, so a
    transient network blip can no longer revert a local edit.
+
+   A write only counts as a local edit when its CONTENT differs from `confirmed`.
+   Echo rewrites (re-persisting server data after the poll applied it) are equal to
+   confirmed, so they don't mark the key dirty and don't block the poll — otherwise
+   a passive client would keep skipping a remote change until a manual refresh. A
+   derived rewrite that genuinely differs (a passive client re-computing cash flow
+   from a freshly received setoran) is a real change and IS pushed, so every client
+   converges on it. The shell's refreshAllSlices additionally applies each slice
+   only when its content changed, so unrelated slices don't needlessly re-derive.
 
    When the backend is unreachable, the app falls back to plain localStorage and
    keeps retrying the push, so nothing is lost. */
@@ -101,12 +115,21 @@
   }
   localStorage.setItem = function (key, value) {
     rawSet(key, value);
-    if (shouldSync(key)) {
-      // Stamp the local write time even while offline, so a later hydrate can see
-      // this edit is newer than the server's stale value and must not be clobbered.
-      localMTime[key] = Date.now(); saveMeta();
-      if (state.active) schedulePush(key);
-    }
+    if (!shouldSync(key)) return;
+    // A synced write counts as a REAL local edit only when its content differs from
+    // the value last confirmed in sync with the server. An ECHO write — re-persisting
+    // server-received data (a React re-render / FS.save* after the poll applied it) —
+    // is content-equal to `confirmed`, so it must NOT stamp localMTime or push:
+    // otherwise the poll guard (timers/isDirty) would treat the key as busy and keep
+    // skipping genuine remote changes for it, which then surface only on a refresh.
+    // A DERIVED write that produces genuinely new data (differs from confirmed) is a
+    // real change and falls through below so it IS pushed — that's how a passive
+    // client's re-derived cash flow reaches the server and every other client.
+    if (sameJSON(value, confirmed[key])) return;
+    // Stamp the local write time even while offline, so a later hydrate can see
+    // this edit is newer than the server's stale value and must not be clobbered.
+    localMTime[key] = Date.now(); saveMeta();
+    if (state.active) schedulePush(key);
   };
 
   // Server timestamp of the last pull; sent back as `since` so each poll only
@@ -184,18 +207,37 @@
     }
   }
 
+  // Push every local key whose CONTENT isn't confirmed on the server yet (dirty or
+  // never-pushed), so all local edits go up the moment the session is active —
+  // without waiting for the next manual save or a refresh.
+  function flushDirty() {
+    if (!state.active) return;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && shouldSync(k) && isDirty(k)) schedulePush(k);
+    }
+  }
+
   async function activate(user) {
+    // Arm the session FULLY before hydrating so write-through has no dead window:
+    // any local save during/after hydrate is pushed, never dropped. Identical for
+    // every user, on login AND on restore/refresh.
+    state.active = true;
+    state.user = user;
+    startPoll();
+    emit();
     try {
       await hydrate();
-      state.active = true;
-      state.user = user;
-      startPoll();
-      emit();
-      return frontendUser(user);
     } catch (e) {
-      console.warn('[cloud] activate failed, staying offline:', e.message);
-      return null;
+      // Server briefly unreachable → DO NOT kill the session. Poll keeps pulling
+      // and the flush below queues local edits; both retry until the server is back.
+      hadError = true;
+      console.warn('[cloud] hydrate failed; session stays active, will retry:', e.message);
+      emit();
     }
+    flushDirty();
+    emit();
+    return frontendUser(user);
   }
 
   function frontendUser(u) {
