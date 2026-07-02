@@ -383,7 +383,7 @@ function KasbonPicker({ staff, onPick, onClose }) {
   const opts = (staff || []).map((s) => ({ value: s.id, label: `${s.name} · ${s.dept || ''}` }));
   return (
     <div className="modal-scrim" onClick={onClose}>
-      <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{trC('kb.pickEmp')}</div><button className="icon-btn" onClick={onClose}><IconClose s={18} /></button></div>
         <div style={{ padding: '4px 2px 10px' }}>
           <label className="fld-label" style={{ marginTop: 0 }}>{trC('req.employee')}</label>

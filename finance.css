@@ -430,6 +430,10 @@
 .ui-dd.compact .ui-dd-control { height: 30px; border-radius: 999px; padding: 0 8px 0 12px; font-family: 'Inter'; font-size: 12px; font-weight: 700; border-width: 1px; gap: 4px; }
 .ui-dd-menu { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 80; background: var(--card); border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow-lg); padding: 6px; max-height: 260px; overflow-y: auto; animation: jernihPop .16s ease both; }
 .ui-dd.compact .ui-dd-menu { right: auto; min-width: 150px; }
+/* Portaled/floating variant: fixed coords come from JS (getBoundingClientRect),
+   width matches the control; keeps its own max-height + internal scroll so a long
+   list never forces the surrounding modal to scroll. */
+.ui-dd-menu.ui-dd-menu-fixed { position: fixed; top: auto; left: auto; right: auto; bottom: auto; z-index: 1210; min-width: 140px; max-height: min(272px, 60vh); overscroll-behavior: contain; }
 .ui-dd-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 11px; border-radius: 9px; font-family: 'Inter'; font-size: 13.5px; font-weight: 500; color: var(--ink); text-align: left; transition: background .12s; }
 .ui-dd-item:hover { background: var(--card-soft); }
 .ui-dd-item.on { background: var(--mint-100); color: var(--green-800); font-weight: 700; }
@@ -1132,6 +1136,9 @@ img, svg, canvas, video { max-width: 100%; }
   .content { padding: 12px 10px 96px; }
   .modal-scrim { padding: 12px; }
   .modal-card { padding: 18px 16px; border-radius: 18px; }
+  /* Match the sticky header's bleed to the mobile card padding (18/16) so it
+     doesn't extend past the card edges and cause a sliver of horizontal overflow. */
+  .modal-card > .modal-head { top: -18px; margin: -18px -16px 10px; padding: 18px 16px 8px; }
   .topbar h1 { font-size: 18px; }
   .btn { padding: 0 12px; }
   .stat-box .tnum, .acct-card .tnum, .today-card .tnum { font-size: 20px !important; }

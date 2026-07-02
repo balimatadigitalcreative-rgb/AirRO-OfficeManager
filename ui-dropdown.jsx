@@ -5,34 +5,56 @@ function IcD(name, props) { const C = window[name]; return C ? <C {...props} /> 
 
 function Dropdown({ value, options, onChange, placeholder, compact, color, fluid, menuColor }) {
   const [open, setOpen] = uSd(false);
-  const ref = uRd(null);
-  uEd(() => {
-    if (!open) return;
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
+  const [pos, setPos] = uSd(null);   // fixed coords {left, top, width} from the control
+  const btnRef = uRd(null);
   const norm = (options || []).map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
   const sel = norm.find((o) => o.value === value);
+  // Float the menu with position:fixed anchored to the control (portaled to <body>),
+  // so it's never clipped by a modal's overflow — same pattern as the calendar/time
+  // picker. The menu keeps its own max-height + internal scroll for long lists.
+  uEd(() => {
+    if (!open) { setPos(null); return; }
+    const place = () => {
+      const el = btnRef.current; if (!el) return;
+      // desktop-scale.css sets html{zoom}; rect is visual px, fixed left/top get
+      // re-scaled by zoom → work in visual px then divide back.
+      const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      const r = el.getBoundingClientRect();
+      const M = 8;
+      const hCss = Math.min(norm.length * 38 + 10, 272);   // menu height estimate (CSS px)
+      const H = hCss * zoom, vw = window.innerWidth * zoom, vh = window.innerHeight * zoom;
+      let left = Math.max(M, Math.min(r.left, vw - r.width - M));
+      let top = r.bottom + 4;
+      if (top + H > vh - M) { const up = r.top - 4 - H; top = up >= M ? up : Math.max(M, vh - H - M); }
+      setPos({ left: left / zoom, top: top / zoom, width: r.width / zoom });
+    };
+    place();
+    const on = () => place();
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('resize', on); window.addEventListener('scroll', on, true); window.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('resize', on); window.removeEventListener('scroll', on, true); window.removeEventListener('keydown', esc); };
+  }, [open]);
   return (
-    <div className={`ui-dd ${open ? 'open' : ''} ${compact ? 'compact' : ''} ${fluid ? 'fluid' : ''}`} ref={ref}>
-      <button type="button" className="ui-dd-control" onClick={() => setOpen((o) => !o)}
+    <div className={`ui-dd ${open ? 'open' : ''} ${compact ? 'compact' : ''} ${fluid ? 'fluid' : ''}`}>
+      <button type="button" ref={btnRef} className="ui-dd-control" onClick={() => setOpen((o) => !o)}
         style={color ? { color, background: menuColor || 'transparent' } : null}>
         <span className={`ui-dd-text ${sel ? '' : 'ph'}`}>{sel ? sel.label : (placeholder || '')}</span>
         <IconCaret s={compact ? 13 : 15} style={{ flexShrink: 0, color: color || 'var(--text-mut)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
-      {open && (
-        <div className="ui-dd-menu scroll-y">
-          {norm.map((o) => (
-            <button type="button" key={o.value} className={`ui-dd-item ${o.value === value ? 'on' : ''}`}
-              onClick={() => { onChange(o.value); setOpen(false); }}>
-              {o.icon ? <span className="ui-dd-ic">{IcD(o.icon, { s: 16 })}</span> : null}
-              <span style={{ flex: 1, minWidth: 0 }}>{o.label}</span>
-              {o.value === value && <IconCheck s={15} />}
-            </button>
-          ))}
-        </div>
-      )}
+      {open && ReactDOM.createPortal(
+        <React.Fragment>
+          <div className="pop-cal-backdrop dd-back" onClick={() => setOpen(false)} />
+          <div className="ui-dd-menu ui-dd-menu-fixed scroll-y" style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { visibility: 'hidden' }}>
+            {norm.map((o) => (
+              <button type="button" key={o.value} className={`ui-dd-item ${o.value === value ? 'on' : ''}`}
+                onClick={() => { onChange(o.value); setOpen(false); }}>
+                {o.icon ? <span className="ui-dd-ic">{IcD(o.icon, { s: 16 })}</span> : null}
+                <span style={{ flex: 1, minWidth: 0 }}>{o.label}</span>
+                {o.value === value && <IconCheck s={15} />}
+              </button>
+            ))}
+          </div>
+        </React.Fragment>, document.body)}
     </div>
   );
 }
