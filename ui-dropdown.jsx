@@ -53,15 +53,17 @@ function TimePicker({ value, onChange, compact, color, menuColor, placeholder })
     const vw = window.innerWidth * zoom, vh = window.innerHeight * zoom;
     let left = Math.min(r.left, vw - W - pad); left = Math.max(pad, left);
     let top = r.bottom + 6;
-    if (top + H > vh - pad) top = Math.max(pad, r.top - 6 - H);   // flip up
+    if (top + H > vh - pad) top = r.top - 6 - H;              // flip above the button
+    top = Math.max(pad, Math.min(top, vh - H - pad));         // always keep fully on-screen
     setPos({ left: left / zoom, top: top / zoom });
   };
   uEd(() => {
     if (!open) { setPos(null); return; }
     place();
     const on = () => place();
-    window.addEventListener('resize', on); window.addEventListener('scroll', on, true);
-    return () => { window.removeEventListener('resize', on); window.removeEventListener('scroll', on, true); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('resize', on); window.addEventListener('scroll', on, true); window.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('resize', on); window.removeEventListener('scroll', on, true); window.removeEventListener('keydown', esc); };
   }, [open]);
   const v = value || '';
   const [hh, mm] = (v || '08:00').split(':');
@@ -76,8 +78,10 @@ function TimePicker({ value, onChange, compact, color, menuColor, placeholder })
         <span className={`ui-dd-text tnum ${v ? '' : 'ph'}`}>{v || placeholder || '—'}</span>
         <IconCaret s={compact ? 13 : 15} style={{ flexShrink: 0, color: color || 'var(--text-mut)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
-      {open && (
+      {open && ReactDOM.createPortal(
         <React.Fragment>
+          {/* Portaled to <body> so the fixed popup can't be clipped by a modal's
+              overflow:hidden or trapped by a transformed ancestor. Backdrop closes. */}
           <div className="pop-cal-backdrop dd-back" onClick={() => setOpen(false)} />
           <div className="ui-tp-pop" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
             <div className="ui-tp-grp">
@@ -93,8 +97,7 @@ function TimePicker({ value, onChange, compact, color, menuColor, placeholder })
               </div>
             </div>
           </div>
-        </React.Fragment>
-      )}
+        </React.Fragment>, document.body)}
     </div>
   );
 }
