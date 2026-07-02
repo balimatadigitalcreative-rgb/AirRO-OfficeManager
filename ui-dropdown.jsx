@@ -36,38 +36,61 @@ function Dropdown({ value, options, onChange, placeholder, compact, color, fluid
     </div>
   );
 }
-function TimePicker({ value, onChange, compact, color, menuColor }) {
+function TimePicker({ value, onChange, compact, color, menuColor, placeholder }) {
   const [open, setOpen] = uSd(false);
-  const ref = uRd(null);
+  const [pos, setPos] = uSd(null);   // { left, top } fixed coords computed from the button
+  const btnRef = uRd(null);
+  // Float the menu with position:fixed anchored to the button, clamped to the
+  // viewport and flipped above when the space below is tight — same idea as the
+  // DateField pop-cal, so it never grows/covers the card layout.
+  const place = () => {
+    const el = btnRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const W = 268, H = 300, pad = 8;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = Math.min(r.left, vw - W - pad); left = Math.max(pad, left);
+    let top = r.bottom + 6;
+    if (top + H > vh - pad) top = Math.max(pad, r.top - 6 - H);   // flip up
+    setPos({ left, top });
+  };
   uEd(() => {
-    if (!open) return;
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    if (!open) { setPos(null); return; }
+    place();
+    const on = () => place();
+    window.addEventListener('resize', on); window.addEventListener('scroll', on, true);
+    return () => { window.removeEventListener('resize', on); window.removeEventListener('scroll', on, true); };
   }, [open]);
-  const v = value || '08:00';
-  const [hh, mm] = v.split(':');
+  const v = value || '';
+  const [hh, mm] = (v || '08:00').split(':');
   const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
   const mins = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
   const setH = (h) => onChange(`${h}:${mm}`);
   const setM = (m) => { onChange(`${hh}:${m}`); setOpen(false); };
   return (
-    <div className={`ui-dd ui-tp ${open ? 'open' : ''} ${compact ? 'compact' : ''}`} ref={ref}>
-      <button type="button" className="ui-dd-control" onClick={() => setOpen((o) => !o)} style={color ? { color, background: menuColor || 'transparent' } : null}>
+    <div className={`ui-dd ui-tp ${open ? 'open' : ''} ${compact ? 'compact' : ''}`}>
+      <button type="button" ref={btnRef} className="ui-dd-control" onClick={() => setOpen((o) => !o)} style={color ? { color, background: menuColor || 'transparent' } : null}>
         <IconClock s={compact ? 14 : 15} style={{ flexShrink: 0, color: color || 'var(--green-700)' }} />
-        <span className="ui-dd-text tnum">{v}</span>
+        <span className={`ui-dd-text tnum ${v ? '' : 'ph'}`}>{v || placeholder || '—'}</span>
         <IconCaret s={compact ? 13 : 15} style={{ flexShrink: 0, color: color || 'var(--text-mut)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
       {open && (
-        <div className="ui-tp-menu">
-          <div className="ui-tp-col scroll-y">
-            {hours.map((h) => <button type="button" key={h} className={`ui-tp-cell tnum ${h === hh ? 'on' : ''}`} onClick={() => setH(h)}>{h}</button>)}
+        <React.Fragment>
+          <div className="pop-cal-backdrop dd-back" onClick={() => setOpen(false)} />
+          <div className="ui-tp-pop" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
+            <div className="ui-tp-grp">
+              <div className="ui-tp-h">{window.t ? window.t('tp.hour') : 'Jam'}</div>
+              <div className="ui-tp-grid ui-tp-hours">
+                {hours.map((h) => <button type="button" key={h} className={`ui-tp-cell tnum ${h === hh ? 'on' : ''}`} onClick={() => setH(h)}>{h}</button>)}
+              </div>
+            </div>
+            <div className="ui-tp-grp">
+              <div className="ui-tp-h">{window.t ? window.t('tp.minute') : 'Menit'}</div>
+              <div className="ui-tp-grid ui-tp-mins">
+                {mins.map((m) => <button type="button" key={m} className={`ui-tp-cell tnum ${m === mm ? 'on' : ''}`} onClick={() => setM(m)}>{m}</button>)}
+              </div>
+            </div>
           </div>
-          <div className="ui-tp-sep">:</div>
-          <div className="ui-tp-col scroll-y">
-            {mins.map((m) => <button type="button" key={m} className={`ui-tp-cell tnum ${m === mm ? 'on' : ''}`} onClick={() => setM(m)}>{m}</button>)}
-          </div>
-        </div>
+        </React.Fragment>
       )}
     </div>
   );

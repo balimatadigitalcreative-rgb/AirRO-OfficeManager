@@ -434,13 +434,24 @@
 .ui-dd-item svg { flex-shrink: 0; color: var(--green-700); }
 .ui-dd-ic { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--card-soft); color: var(--green-700); flex-shrink: 0; }
 .ui-tp .ui-dd-text { flex: 1; text-align: left; font-weight: 600; }
-.ui-tp-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 80; display: flex; background: var(--card); border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow-lg); padding: 6px; animation: jernihPop .16s ease both; }
-.ui-tp.compact .ui-tp-menu { left: auto; right: 0; }
-.ui-tp-col { display: flex; flex-direction: column; gap: 2px; max-height: 184px; overflow-y: auto; padding: 0 2px; }
-.ui-tp-sep { display: grid; place-items: center; font-weight: 800; color: var(--text-faint); padding: 0 2px; }
-.ui-tp-cell { min-width: 44px; height: 32px; border-radius: 8px; font-size: 13.5px; font-weight: 600; color: var(--ink); display: grid; place-items: center; transition: background .12s; }
-.ui-tp-cell:hover { background: var(--card-soft); }
+/* Floating time picker: fixed-position grid, no scrollbars (see UI.TimePicker).
+   Coordinates are set inline from the button rect; the .dd-back backdrop closes it. */
+.ui-tp-pop { position: fixed; z-index: 1210; width: 268px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 11px 12px; animation: jernihPop .16s ease both; }
+.ui-tp-grp + .ui-tp-grp { margin-top: 11px; }
+.ui-tp-h { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-mut); margin-bottom: 6px; }
+.ui-tp-grid { display: grid; gap: 5px; }
+.ui-tp-hours { grid-template-columns: repeat(6, 1fr); }
+.ui-tp-mins { grid-template-columns: repeat(6, 1fr); }
+.ui-tp-cell { height: 34px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--ink); background: var(--card-soft); display: grid; place-items: center; transition: background .12s, color .12s; }
+.ui-tp-cell:hover { background: var(--mint-100); }
 .ui-tp-cell.on { background: var(--green-700); color: #fff; }
+/* On phones: center the popup as a sheet (like the DateField calendar), always
+   tappable. Use a fade-only animation here so it doesn't animate (and reset) the
+   centering transform the way jernihPop would. */
+@media (max-width: 560px) {
+  .ui-tp-pop { left: 50% !important; top: 50% !important; transform: translate(-50%, -50%); width: min(300px, calc(100vw - 32px)); animation: jernihFade .16s ease both; }
+  .ui-tp-cell { height: 40px; }
+}
 
 /* Unified custom-caret styling for every native dropdown (no browser default arrow) */
 select.fld, .ed-af select, .wif-field select, select.fld:disabled {
