@@ -328,6 +328,29 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
     </div>
   );
 
+  // ── New-hire path (only when adding). Drives `stage`, which in turn decides the
+  //    bucket: orientation/dw → Data Orientasi/DW (daily wage, no monthly payroll);
+  //    probation/contract/permanent → Data Karyawan (monthly payroll). ──
+  const stageNow = HRD.stageOf(f);
+  const hirePath = HRD.isOrientationStage(f) ? 'orientation' : (stageNow === 'probation' ? 'probation' : 'contract');
+  const setHirePath = (pth) => set({ stage: pth === 'orientation' ? 'orientation' : pth === 'probation' ? 'probation' : 'permanent' });
+  const pathSelector = f._isNew ? (
+    <div className="hire-path">
+      <div className="ed-grp-t" style={{ borderTop: 'none', paddingTop: 0, marginTop: 0 }}>{trH('hrd.newHirePath')}</div>
+      <div className="hire-path-seg">
+        {[['orientation', 'hrd.pathOri'], ['probation', 'hrd.pathProb'], ['contract', 'hrd.pathContract']].map(([pth, k]) => (
+          <button key={pth} type="button" className={`hire-path-btn ${hirePath === pth ? 'on' : ''}`} onClick={() => setHirePath(pth)}>{trH(k)}</button>
+        ))}
+      </div>
+      <div className="hire-path-hint">{trH('hrd.pathHint_' + hirePath)}</div>
+      {hirePath === 'contract' && (
+        <label className="ed-af" style={{ marginTop: 8 }}><span>{trH('hrd.contractType')}</span>
+          <UI.Dropdown value={stageNow === 'contract' ? 'contract' : 'permanent'} options={[{ value: 'permanent', label: trH('stage.permanent') }, { value: 'contract', label: trH('stage.contract') }]} onChange={(v) => set({ stage: v })} />
+        </label>
+      )}
+    </div>
+  ) : null;
+
   // ── Orientation/DW block (new hires start in orientation OR daily-worker (DW) →
   //    paid a daily wage via attendance, excluded from monthly payroll until
   //    graduated to a payroll stage) ──
@@ -372,6 +395,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
           /* IDENTITY-first: profile fields prominent, salary optional/collapsed */
           <div className="staff-form-single">
             {nameField}
+            {pathSelector}
             {orientationBlock}
             {identityBlock}
             <div className="staff-salary-toggle">
@@ -388,6 +412,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
             <div className="staff-edit-grid">
               <div className="staff-form">
                 {nameField}
+                {pathSelector}
                 {orientationBlock}
                 {salaryBlock}
               </div>

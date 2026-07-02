@@ -93,9 +93,11 @@
       addressKtp: '', addressDomisili: '', maritalStatus: 'TK', bank: '', account: '', phone: '',
       // offboarding (sepStatus, NOT `status` which is employment type Tetap/Kontrak)
       sepStatus: 'active', separationDate: '', separationReason: '', separationNote: '', active: true,
-      // lifecycle: new hires start in orientation (paid a daily lump sum, excluded
-      // from monthly payroll until promoted). Orientation data embedded 1:1.
-      stage: 'orientation',
+      // Lifecycle stage is chosen by the "new-hire path" selector in the add form —
+      // NOT hardcoded here. Neutral default 'permanent' (straight to monthly payroll);
+      // picking the Orientation/DW path switches it to 'orientation'/'dw'. Orientation
+      // data is pre-seeded so that path works the moment it's selected.
+      stage: 'permanent',
       orientation: { startDate: '', durationDays: 7, dailyWage: 0, outcome: 'pending', paid: false, paidAt: '', note: '' },
       _isNew: true,
     };
