@@ -15,16 +15,19 @@ async function list(q) {
     if (q.dateTo) where.date.lte = q.dateTo;
   }
   if (q.fleetId) where.fleetId = q.fleetId;
+  if (q.since) where.updatedAt = { gte: new Date(q.since) };
 
   const page = q.page || 1;
-  const limit = q.limit || 50;
+  const limit = q.limit || 1000;
   const [rows, total] = await Promise.all([
     prisma.setoran.findMany({ where, include: { fleet: true }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], skip: (page - 1) * limit, take: limit }),
     prisma.setoran.count({ where }),
   ]);
   const data = rows.map(withDeposit);
   const totalDeposit = data.reduce((a, r) => a + r.deposit, 0);
-  return { data, summary: { totalDeposit, count: total }, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 } };
+  // `now` lets the client run an incremental (?since=) poll next time; `total` is the
+  // authoritative current count for the migration's before/after verification.
+  return { data, now: new Date().toISOString(), summary: { totalDeposit, count: total }, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 } };
 }
 
 async function getById(id) {

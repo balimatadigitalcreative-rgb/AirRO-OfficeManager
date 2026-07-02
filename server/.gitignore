@@ -2,7 +2,9 @@ node_modules/
 .env
 *.db
 *.db-journal
+*.db.bak*
 prisma/dev.db
 prisma/test.db
+prisma/*.db.bak*
 coverage/
 npm-debug.log*

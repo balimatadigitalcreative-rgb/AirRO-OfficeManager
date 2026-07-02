@@ -65,7 +65,7 @@ function SetoranModal({ row, fleet, accounts, depositAcct, onDepositAcctChange, 
   );
 }
 
-function SetoranScreen({ setoran, setSetoran, fleet, setFleet, accounts, canEdit, postedDays, onPost, autoSynced, costPerGalon, onCostChange, depositAcct, onDepositAcctChange, payments, onAddPayment, onDelPayment }) {
+function SetoranScreen({ setoran, onAdd, onEdit, onRemove, fleet, setFleet, accounts, canEdit, postedDays, onPost, autoSynced, costPerGalon, onCostChange, depositAcct, onDepositAcctChange, payments, onAddPayment, onDelPayment }) {
   const costPer = +costPerGalon || 0;
   const [fleetMgr, setFleetMgr] = uSt(false);
   const [payModal, setPayModal] = uSt(false);
@@ -87,9 +87,9 @@ function SetoranScreen({ setoran, setSetoran, fleet, setFleet, accounts, canEdit
   const dates = Object.keys(byDate).sort().reverse();
 
   const save = (r, remove) => {
-    if (remove) { setSetoran((p) => p.filter((x) => x.id !== r.id)); setEdit(null); return; }
-    const clean = { ...r }; delete clean._new;
-    setSetoran((p) => p.find((x) => x.id === r.id) ? p.map((x) => x.id === r.id ? clean : x) : [clean, ...p]);
+    if (remove) { onRemove(r.id); setEdit(null); return; }
+    const clean = { ...r }; const isNew = clean._new; delete clean._new;
+    if (isNew || !setoran.find((x) => x.id === r.id)) onAdd(clean); else onEdit(clean);
     setEdit(null);
   };
   const addNew = () => setEdit({ id: FS.newSetoranId(), date: FIN.TODAY, armada: fleet[0], galon: 0, cash: 0, bon: 0, bonPay: 0, expense: 0, note: '', _new: true });

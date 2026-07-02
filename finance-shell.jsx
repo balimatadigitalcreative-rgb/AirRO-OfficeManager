@@ -62,7 +62,11 @@ function FApp() {
   const [hrBudget, setHrBudget] = uSh(() => HRD.loadBudget());
   const [approvals, setApprovals] = uSh(() => CO.load());
   const [accounts, setAccounts] = uSh(() => FS.loadAccts());
-  const [setoran, setSetoran] = uSh(() => FS.loadSetoran());
+  // Setoran now lives in the REST table (per-record), NOT the /state blob — so
+  // concurrent edits by different users never overwrite each other. We seed from a
+  // local read-cache (SKIP-listed, not mirrored) just for instant paint on reload;
+  // the authoritative list is (re)loaded from GET /setoran.
+  const [setoran, setSetoran] = uSh(() => { try { const c = localStorage.getItem('airro_setoran_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [fleet, setFleet] = uSh(() => FS.loadFleet());
   const [transfers, setTransfers] = uSh(() => FS.loadTransfers());
   const [projects, setProjects] = uSh(() => CO.loadProjects());
@@ -83,7 +87,6 @@ function FApp() {
   uEh(() => { HRD.saveBudget(hrBudget); }, [hrBudget]);
   uEh(() => { CO.save(approvals); }, [approvals]);
   uEh(() => { FS.saveAccts(accounts); }, [accounts]);
-  uEh(() => { FS.saveSetoran(setoran); }, [setoran]);
   uEh(() => { FS.saveFleet(fleet); }, [fleet]);
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
   uEh(() => { CO.saveProjects(projects); }, [projects]);
@@ -94,6 +97,40 @@ function FApp() {
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
   const p = (user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier');
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
+
+  // ── Setoran: REST per-record (create/update/delete one record at a time) ──
+  // The old model mirrored the whole array to /state, so two users saving at once
+  // clobbered each other (last-write-wins on the blob). Now each row is its own
+  // REST record; a light 3s poll of GET /setoran keeps everyone current.
+  const setoranToApi = (r) => ({ id: r.id, date: r.date, armada: r.armada || '', galon: +r.galon || 0, cash: +r.cash || 0, bon: +r.bon || 0, bonPay: +r.bonPay || 0, expense: +r.expense || 0, note: r.note || '', proof: r.proof || null });
+  const reloadSetoran = () => {
+    if (!(window.API && window.API.setoran)) return Promise.resolve();
+    return window.API.setoran.list('limit=2000').then((r) => {
+      if (r && Array.isArray(r.data)) { setSetoran(r.data); try { localStorage.setItem('airro_setoran_cache_v1', JSON.stringify(r.data)); } catch (e) {} }
+    }).catch(() => {});
+  };
+  const addSetoran = (rec) => {
+    setSetoran((prev) => [{ ...rec }, ...prev.filter((x) => x.id !== rec.id)]);   // optimistic
+    window.API.setoran.create(setoranToApi(rec)).then(reloadSetoran).catch(() => { setToast(tr('st.syncErr')); reloadSetoran(); });
+  };
+  const editSetoran = (rec) => {
+    setSetoran((prev) => prev.map((x) => (x.id === rec.id ? { ...x, ...rec } : x)));   // optimistic
+    window.API.setoran.update(rec.id, setoranToApi(rec)).then(reloadSetoran).catch(() => { setToast(tr('st.syncErr')); reloadSetoran(); });
+  };
+  const removeSetoran = (id) => {
+    setSetoran((prev) => prev.filter((x) => x.id !== id));   // optimistic
+    window.API.setoran.remove(id).then(reloadSetoran).catch(() => { setToast(tr('st.syncErr')); reloadSetoran(); });
+  };
+  // Initial load + light realtime poll (only for users with setoran access). Poll
+  // pauses while the tab is hidden and refreshes immediately when it regains focus.
+  uEh(() => {
+    if (!p.setoran || !(window.API && window.API.setoran)) return;
+    reloadSetoran();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadSetoran(); }, 3000);
+    const onVis = () => { if (document.visibilityState === 'visible') reloadSetoran(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [p.setoran]);
 
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
@@ -115,7 +152,7 @@ function FApp() {
   };
   const refreshAllSlices = () => {
     applySlice('entries', FS.load(), setEntries); applySlice('cats', FS.loadCats(), setCats); applySlice('settings', FS.loadSettings(), setSettings);
-    applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('setoran', FS.loadSetoran(), setSetoran); applySlice('fleet', FS.loadFleet(), setFleet);
+    applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('fleet', FS.loadFleet(), setFleet);   // setoran is REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
     applySlice('hrdStaff', HRD.loadStaff(), setHrdStaff); applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);
     applySlice('approvals', CO.load(), setApprovals); applySlice('projects', CO.loadProjects(), setProjects); applySlice('cashbons', CO.loadCashbons(), setCashbons); applySlice('calEvents', CO.loadEvents(), setCalEvents);
@@ -467,7 +504,7 @@ function FApp() {
           </header>
 
           {screen === 'setoran' && p.setoran && (
-            <SETORAN.SetoranScreen setoran={setoran} setSetoran={setSetoran} fleet={fleet} setFleet={p.setoran ? setFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => setSettings({ ...settings, costPerGalon: v })} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => setSettings({ ...settings, setoranAcct: v })} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
+            <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? setFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => setSettings({ ...settings, costPerGalon: v })} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => setSettings({ ...settings, setoranAcct: v })} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
           )}
 
           {screen === 'moneyspots' && p.cashflow && (

@@ -112,11 +112,16 @@ model Fleet {
 model Setoran {
   id        String   @id @default(cuid())
   date      String // YYYY-MM-DD
+  armada    String   @default("") // fleet plate string (the frontend's per-armada key)
+  galon     Int      @default(0) // gallons sold that day (drives manufacturing cost)
   cash      Int      @default(0)
+  bon       Int      @default(0) // credit/receivable sales booked (not yet collected)
   bonPay    Int      @default(0) // receivable payments collected in the field
   expense   Int      @default(0) // field expenses paid from cash
   note      String   @default("")
+  proof     String? // attached proof image (data URL / path)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt // bumped on every change (supports incremental sync)
 
   fleet     Fleet?  @relation(fields: [fleetId], references: [id])
   fleetId   String?
@@ -124,6 +129,7 @@ model Setoran {
   createdById String?
 
   @@index([date])
+  @@index([updatedAt])
 }
 
 // ── HRD / payroll ────────────────────────────────────────────────────────
