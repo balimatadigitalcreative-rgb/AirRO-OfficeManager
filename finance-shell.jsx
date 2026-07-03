@@ -81,7 +81,10 @@ function FApp() {
   const [fleet, setFleet] = uSh(() => FS.loadFleet());
   const [transfers, setTransfers] = uSh(() => FS.loadTransfers());
   const [projects, setProjects] = uSh(() => CO.loadProjects());
-  const [cashbons, setCashbons] = uSh(() => CO.loadCashbons());
+  // Kasbon now lives in the REST per-record Cashbon table (like setoran/entries/
+  // staff), NOT the /state blob — submit/approve by different users no longer clobber
+  // each other. Seed from a SKIP-listed cache; GET /cashbon is authoritative.
+  const [cashbons, setCashbons] = uSh(() => { try { const c = localStorage.getItem('airro_cashbon_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [calEvents, setCalEvents] = uSh(() => CO.loadEvents());
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
@@ -99,7 +102,6 @@ function FApp() {
   uEh(() => { FS.saveFleet(fleet); }, [fleet]);
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
   uEh(() => { CO.saveProjects(projects); }, [projects]);
-  uEh(() => { CO.saveCashbons(cashbons); }, [cashbons]);
   uEh(() => { CO.saveEvents(calEvents); }, [calEvents]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
@@ -283,6 +285,34 @@ function FApp() {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, [canViewRoster]);
 
+  // ── Kasbon: REST per-record (submit via /request persists as pending; approve/
+  // reject via /:id/approve|reject) — gated on the `kasbon` capability. ──
+  const reloadCashbons = () => {
+    if (!p.kasbon || !(window.API && window.API.cashbon)) return Promise.resolve();
+    return window.API.cashbon.list().then((r) => {
+      if (r && Array.isArray(r.data)) { setCashbons(r.data); try { localStorage.setItem('airro_cashbon_cache_v1', JSON.stringify(r.data)); } catch (e) {} }
+    }).catch(() => {});
+  };
+  // A kasbon returned by API.cashbon.request is ALREADY persisted → just merge + reload.
+  const onAddCashbon = (cb) => { setCashbons((prev) => [cb, ...(prev || []).filter((x) => x.id !== cb.id)]); reloadCashbons(); };
+  const onDecideCashbon = (id, status, reason) => {
+    setCashbons((prev) => prev.map((c) => (c.id === id ? { ...c, status, ...(status === 'rejected' ? { rejectReason: reason || '' } : {}) } : c)));   // optimistic
+    const call = status === 'approved' ? window.API.cashbon.approve(id) : window.API.cashbon.reject(id, { reason: reason || '' });
+    call.then(reloadCashbons).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadCashbons(); });
+  };
+  const onUpdateCashbon = (id, patch) => {
+    setCashbons((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));   // optimistic
+    if (window.API && window.API.cashbon) window.API.cashbon.update(id, patch).then(reloadCashbons).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadCashbons(); });
+  };
+  uEh(() => {
+    if (!p.kasbon || !(window.API && window.API.cashbon)) return;
+    reloadCashbons();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadCashbons(); }, 20000);
+    const onVis = () => { if (document.visibilityState === 'visible') reloadCashbons(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [p.kasbon]);
+
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
   // directly inside components (attendance `airro_attendance_v2`, orientation
@@ -306,7 +336,7 @@ function FApp() {
     applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('fleet', FS.loadFleet(), setFleet);   // setoran is REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
     applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);   // hrdStaff is REST-loaded (reloadStaff), not from the blob
-    applySlice('approvals', CO.load(), setApprovals); applySlice('projects', CO.loadProjects(), setProjects); applySlice('cashbons', CO.loadCashbons(), setCashbons); applySlice('calEvents', CO.loadEvents(), setCalEvents);
+    applySlice('approvals', CO.load(), setApprovals); applySlice('projects', CO.loadProjects(), setProjects); applySlice('calEvents', CO.loadEvents(), setCalEvents);   // cashbons are REST-loaded (reloadCashbons), not from the blob
     applySlice('users', FS.loadUsers(), setUsers);
   };
 
@@ -315,7 +345,7 @@ function FApp() {
     // Backend session active → the cloud adapter hydrated localStorage from the
     // server; re-pull ALL slices so the UI shows the shared data. Entries & setoran
     // live in REST tables (not the blob), so pull them explicitly too.
-    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); }
+    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -341,6 +371,7 @@ function FApp() {
       if (evt.entity === 'setoran' || evt.entity === 'focus') reloadSetoran();
       if (evt.entity === 'entry' || evt.entity === 'focus') reloadEntries();
       if (evt.entity === 'employee' || evt.entity === 'focus') reloadStaff();
+      if (evt.entity === 'cashbon' || evt.entity === 'focus') reloadCashbons();
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
@@ -498,9 +529,10 @@ function FApp() {
       note: tr('hrd.payrollNote', { m: label, n: hrdStaff.length }), method: 'Transfer BCA', date, time: '09:00', payroll: curMonthKey };
     realEntries.filter((e) => e.payroll === curMonthKey).forEach((e) => removeEntry(e.id));   // drop the previous month's posting
     addEntry(entry);
-    // Kasbon of the payroll cycle just paid → mark settled ('paid') so they stop counting.
+    // Kasbon of the payroll cycle just paid → mark settled ('paid') so they stop
+    // counting. Per-record PATCH (approved/active → paid); optimistic + reload.
     const anchor = HRD.payCycle().anchor;
-    setCashbons((prev) => prev.map((c) => (c.status === 'active' && (c.cycleAnchor || HRD.payCycle(c.date).anchor) === anchor) ? { ...c, status: 'paid' } : c));
+    (cashbons || []).forEach((c) => { if ((c.status === 'active' || c.status === 'approved') && (c.cycleAnchor || HRD.payCycle(c.date).anchor) === anchor) onUpdateCashbon(c.id, { status: 'paid' }); });
     setToast(tr(existing ? 'toast.payrollUpdated' : 'toast.payrollPosted', { amt: FIN.fmt(amount) }));
   };
 
@@ -709,7 +741,7 @@ function FApp() {
           )}
 
           {screen === 'kasbon' && p.kasbon && (
-            <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} setCashbons={setCashbons} canApprove={p.kasbonApprove} today={FIN.TODAY} userName={user.name} />
+            <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onDecideCashbon={onDecideCashbon} canApprove={p.kasbonApprove} today={FIN.TODAY} userName={user.name} />
           )}
 
           {screen === 'approvals' && p.approvals && (
@@ -759,7 +791,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} setCashbons={setCashbons} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );

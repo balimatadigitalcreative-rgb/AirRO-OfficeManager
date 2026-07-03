@@ -398,7 +398,7 @@ function KasbonPicker({ staff, onPick, onClose }) {
   );
 }
 
-function KasbonScreen({ staff, cashbons, setCashbons, canApprove, today, userName }) {
+function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, canApprove, today, userName }) {
   const [pick, setPick] = uSc(false);        // employee-picker open
   const [reqStaff, setReqStaff] = uSc(null); // staff chosen → CashbonModal
   const [fEmp, setFEmp] = uSc('all');
@@ -408,12 +408,13 @@ function KasbonScreen({ staff, cashbons, setCashbons, canApprove, today, userNam
   const rows = uMc(() => (cashbons || [])
     .filter((c) => (fEmp === 'all' || c.employeeId === fEmp) && (fStatus === 'all' || (c.status || 'pending') === fStatus))
     .slice().sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : (b.createdAt || 0) - (a.createdAt || 0))), [cashbons, fEmp, fStatus]);
-  const save = (cb) => { CO.addCashbon({ ...cb, status: cb.status || 'pending' }); if (setCashbons) setCashbons(CO.loadCashbons()); setReqStaff(null); setPick(false); };
+  // The kasbon is already persisted by API.cashbon.request → just merge + reload.
+  const save = (cb) => { if (onAddCashbon) onAddCashbon(cb); setReqStaff(null); setPick(false); };
   const decide = (id, status) => {
     if (!canApprove) return;
-    let patch = { status, approvedBy: userName || '', decidedAt: Date.now() };
-    if (status === 'rejected') { const r = prompt(trC('kb.rejectReason')); if (r == null) return; patch.rejectReason = r; }
-    CO.updateCashbon(id, patch); if (setCashbons) setCashbons(CO.loadCashbons());
+    let reason = '';
+    if (status === 'rejected') { const r = prompt(trC('kb.rejectReason')); if (r == null) return; reason = r; }
+    if (onDecideCashbon) onDecideCashbon(id, status, reason);
   };
   const pending = rows.filter((c) => (c.status || 'pending') === 'pending').length;
   return (
@@ -715,7 +716,7 @@ function OrientationScreen({ staff, setStaff, rates, today, syncTick, canEdit, c
 }
 
 /* ---------- Employee Detail ---------- */
-function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, setCashbons, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
+function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, onAddCashbon, onUpdateCashbon, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
   const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
   const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
   // A remote sync (another user edited this employee's attendance) → re-read the
@@ -748,8 +749,8 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
   const outstanding = uMc(() => HRD.cashbonOutstanding(staff.id, cashbons), [cashbons, staff.id]);   // all cycles (for termination)
   const ceiling = HRD.cashbonCeiling(staff);
   const kbCut = cycleTotal > 0; // deducted in full at this cycle's cutoff
-  const saveCashbon = (cb) => { CO.addCashbon(cb); if (setCashbons) setCashbons(CO.loadCashbons()); setKbAdd(false); };
-  const cancelCashbon = (id) => { if (confirm(trC('co.kasbonCancelConfirm'))) { CO.updateCashbon(id, { status: 'cancelled' }); if (setCashbons) setCashbons(CO.loadCashbons()); } };
+  const saveCashbon = (cb) => { if (onAddCashbon) onAddCashbon(cb); setKbAdd(false); };
+  const cancelCashbon = (id) => { if (confirm(trC('co.kasbonCancelConfirm')) && onUpdateCashbon) onUpdateCashbon(id, { status: 'cancelled' }); };
   // orientation (new hire)
   const [oriSlip, setOriSlip] = uSc(false);
   const inOrientation = HRD.isOrientationStage(staff);

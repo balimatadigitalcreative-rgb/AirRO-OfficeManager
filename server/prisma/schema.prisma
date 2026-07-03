@@ -298,13 +298,17 @@ model Cashbon {
   date         String // YYYY-MM-DD pengajuan
   note         String   @default("")
   installments Int      @default(1) // dicicil berapa bulan (legacy; per-cycle rule deducts in full)
-  status       String   @default("active") // active | paid | cancelled
+  status       String   @default("pending") // pending | approved | rejected (legacy: active | paid | cancelled)
   cycleAnchor  String? // payroll cycle this kasbon belongs to (cutoff date YYYY-MM-15)
-  createdAt    DateTime @default(now())
+  // Approval trail (requestedBy/requestedAt/approvedBy/decidedAt/rejectReason), JSON.
+  data      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now()) // bumped on every change (incremental sync)
 
   employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
+  @@index([updatedAt])
 }
 
 // ── NIP allocation ledger ────────────────────────────────────────────────

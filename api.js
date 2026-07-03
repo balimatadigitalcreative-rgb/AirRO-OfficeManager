@@ -72,10 +72,13 @@
       regenerateNip: (id) => req('POST', '/employees/' + id + '/regenerate-nip'),
     }),
     cashbon: Object.assign(collection('cashbon'), {
-      // Live kasbon limits for a cycle (authoritative, reads shared /state).
+      // Live kasbon limits for a cycle (authoritative, reads the Employee table).
       preview: (data) => req('POST', '/cashbon/preview', data),
-      // Validate + build a kasbon (server enforces cycle/weekly rules).
+      // Validate + PERSIST a kasbon as 'pending' (server enforces cycle/weekly rules).
       request: (data) => req('POST', '/cashbon/request', data),
+      // Approve / reject a pending kasbon (requires kasbonApprove).
+      approve: (id) => req('POST', '/cashbon/' + id + '/approve'),
+      reject: (id, data) => req('POST', '/cashbon/' + id + '/reject', data),
     }),
     users: collection('users'),
     settings: {
