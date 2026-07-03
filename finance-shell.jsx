@@ -71,7 +71,10 @@ function FApp() {
   const [hrdStaff, setHrdStaff] = uSh(() => { try { const c = localStorage.getItem('airro_staff_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [departments, setDepartments] = uSh(() => HRD.loadDepartments());
   const [hrBudget, setHrBudget] = uSh(() => HRD.loadBudget());
-  const [approvals, setApprovals] = uSh(() => CO.load());
+  // Approvals now live in the REST per-record Approval table (like kasbon) — submit
+  // + approve by different users no longer clobber each other. Seed from a
+  // SKIP-listed cache; GET /approvals is authoritative.
+  const [approvals, setApprovals] = uSh(() => { try { const c = localStorage.getItem('airro_approvals_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [accounts, setAccounts] = uSh(() => FS.loadAccts());
   // Setoran now lives in the REST table (per-record), NOT the /state blob — so
   // concurrent edits by different users never overwrite each other. We seed from a
@@ -97,7 +100,6 @@ function FApp() {
   uEh(() => { HRD.saveRates(hrdRates); }, [hrdRates]);
   uEh(() => { HRD.saveDepartments(departments); }, [departments]);
   uEh(() => { HRD.saveBudget(hrBudget); }, [hrBudget]);
-  uEh(() => { CO.save(approvals); }, [approvals]);
   uEh(() => { FS.saveAccts(accounts); }, [accounts]);
   uEh(() => { FS.saveFleet(fleet); }, [fleet]);
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
@@ -313,6 +315,39 @@ function FApp() {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, [p.kasbon]);
 
+  // ── Approvals: REST per-record — gated on the `approvals` capability. ──
+  const apprRef = uRf(approvals);
+  uEh(() => { apprRef.current = approvals; }, [approvals]);
+  const cacheApprovals = (arr) => { try { localStorage.setItem('airro_approvals_cache_v1', JSON.stringify(arr)); } catch (e) {} };
+  const reloadApprovals = () => {
+    if (!p.approvals || !(window.API && window.API.approvals)) return Promise.resolve();
+    return window.API.approvals.list().then((r) => {
+      if (r && Array.isArray(r.data)) { apprRef.current = r.data; setApprovals(r.data); cacheApprovals(r.data); }
+    }).catch(() => {});
+  };
+  const apprErr = (e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadApprovals(); };
+  const apprSame = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; } };
+  // Diff each array transform (submit one / decide one / remove one) into per-record
+  // POST/PATCH/DELETE. Optimistic; reloadApprovals re-syncs (and reverts on 403).
+  const applyApprovals = (updater) => {
+    const prev = apprRef.current || [];
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    apprRef.current = next; setApprovals(next); cacheApprovals(next);
+    if (!p.approvals || !(window.API && window.API.approvals)) return;
+    const prevById = new Map(prev.map((a) => [a.id, a]));
+    const nextIds = new Set(next.map((a) => a.id));
+    next.forEach((a) => { const b = prevById.get(a.id); if (!b) window.API.approvals.create(a).then(reloadApprovals).catch(apprErr); else if (!apprSame(b, a)) window.API.approvals.update(a.id, a).then(reloadApprovals).catch(apprErr); });
+    prev.forEach((a) => { if (!nextIds.has(a.id)) window.API.approvals.remove(a.id).then(reloadApprovals).catch(apprErr); });
+  };
+  uEh(() => {
+    if (!p.approvals || !(window.API && window.API.approvals)) return;
+    reloadApprovals();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadApprovals(); }, 20000);
+    const onVis = () => { if (document.visibilityState === 'visible') reloadApprovals(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [p.approvals]);
+
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
   // directly inside components (attendance `airro_attendance_v2`, orientation
@@ -336,7 +371,7 @@ function FApp() {
     applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('fleet', FS.loadFleet(), setFleet);   // setoran is REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
     applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);   // hrdStaff is REST-loaded (reloadStaff), not from the blob
-    applySlice('approvals', CO.load(), setApprovals); applySlice('projects', CO.loadProjects(), setProjects); applySlice('calEvents', CO.loadEvents(), setCalEvents);   // cashbons are REST-loaded (reloadCashbons), not from the blob
+    applySlice('projects', CO.loadProjects(), setProjects); applySlice('calEvents', CO.loadEvents(), setCalEvents);   // approvals + cashbons are REST-loaded, not from the blob
     applySlice('users', FS.loadUsers(), setUsers);
   };
 
@@ -345,7 +380,7 @@ function FApp() {
     // Backend session active → the cloud adapter hydrated localStorage from the
     // server; re-pull ALL slices so the UI shows the shared data. Entries & setoran
     // live in REST tables (not the blob), so pull them explicitly too.
-    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); }
+    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -372,6 +407,7 @@ function FApp() {
       if (evt.entity === 'entry' || evt.entity === 'focus') reloadEntries();
       if (evt.entity === 'employee' || evt.entity === 'focus') reloadStaff();
       if (evt.entity === 'cashbon' || evt.entity === 'focus') reloadCashbons();
+      if (evt.entity === 'approval' || evt.entity === 'focus') reloadApprovals();
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
@@ -493,7 +529,7 @@ function FApp() {
       : s));
   };
 
-  const submitRequest = (req) => { setApprovals((prev) => [req, ...prev]); setToast(tr('req.submitted')); };
+  const submitRequest = (req) => { applyApprovals((prev) => [req, ...prev]); setToast(tr('req.submitted')); };
 
   // keep auto late-penalty deduction + overtime pay in sync on each staff record
   const syncLateDeduct = (staffId, amount, label, otAmount) => {
@@ -714,7 +750,7 @@ function FApp() {
             <COMPANY.ProjectsScreen projects={projects} setProjects={setProjects} canEdit={true} />
           )}
 
-          {screen === 'company' && p.company && (            <COMPANY.CompanyDashboard fin={stats} staff={hrdStaff} rates={hrdRates} budget={hrBudget} approvals={approvals} setApprovals={setApprovals} role={user.role} projects={projects} setoran={setoran} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} userName={user.name} />
+          {screen === 'company' && p.company && (            <COMPANY.CompanyDashboard fin={stats} staff={hrdStaff} rates={hrdRates} budget={hrBudget} approvals={approvals} setApprovals={applyApprovals} role={user.role} projects={projects} setoran={setoran} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} userName={user.name} />
           )}
 
           {screen === 'headcount' && p.payroll && p.attendance && (
@@ -745,7 +781,7 @@ function FApp() {
           )}
 
           {screen === 'approvals' && p.approvals && (
-            <div className="screen-enter"><COMPANY.ApprovalsCard approvals={approvals} setApprovals={setApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} /></div>
+            <div className="screen-enter"><COMPANY.ApprovalsCard approvals={approvals} setApprovals={applyApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} /></div>
           )}
 
           {screen === 'reports' && p.reports && (

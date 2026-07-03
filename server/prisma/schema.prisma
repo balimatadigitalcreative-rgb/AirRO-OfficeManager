@@ -311,6 +311,22 @@ model Cashbon {
   @@index([updatedAt])
 }
 
+// ── Approvals (leave / deduction / reimbursement / purchase / custom) ─────
+// Submitted by staff, decided by GM/Finance/HRD. Per-record so concurrent
+// submit/approve never clobber each other. The full frontend request object lives
+// in `data` (JSON); type/status are projected columns for filtering.
+model Approval {
+  id        String   @id @default(cuid())
+  type      String   @default("custom") // leave | deduction | reimburse | purchase | custom
+  status    String   @default("pending") // pending | approved | rejected
+  data      String? // full frontend approval object (verbatim)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now())
+
+  @@index([status])
+  @@index([updatedAt])
+}
+
 // ── NIP allocation ledger ────────────────────────────────────────────────
 // One row per issued NIP. The unique constraints make sequence allocation
 // race-safe (concurrent requests can't claim the same office+year+seq). This

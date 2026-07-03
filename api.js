@@ -65,6 +65,7 @@
     entries: collection('entries'),
     categories: collection('categories'),
     setoran: collection('setoran'),
+    approvals: collection('approvals'),
     fleet: collection('fleet'),
     employees: Object.assign(collection('employees'), {
       // Allocate a unique NIP server-side (race-safe). Body: { office, contractStart? }.
