@@ -4,6 +4,7 @@ const service = require('../services/account.service');
 const { replaceCollection } = require('../services/sync.service');
 const prisma = require('../lib/prisma');
 const asyncHandler = require('../utils/asyncHandler');
+const bus = require('../lib/eventbus');
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -30,6 +31,7 @@ const remove = asyncHandler(async (req, res) => { await service.remove(req.param
 const balance = asyncHandler(async (req, res) => res.json({ data: await service.balance(req.params.id) }));
 const sync = asyncHandler(async (req, res) => {
   const data = await replaceCollection(prisma.account, req.body.items);
+  bus.broadcast({ entity: 'config', action: 'accounts', id: null });
   res.json({ data });
 });
 

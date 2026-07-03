@@ -53,7 +53,10 @@ function FApp() {
   // and never persisted. We seed from a local read-cache (SKIP-listed) for instant
   // paint; GET /entries is authoritative.
   const [realEntries, setRealEntries] = uSh(() => { try { const c = localStorage.getItem('airro_cashbook_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
-  const [cats, setCats] = uSh(() => FS.loadCats());
+  // Categories now persist to the REST key-value store (/settings key 'airro_cats'),
+  // accounts to the /accounts table — both off the /state block-mirror. Seed from
+  // SKIP-listed caches for instant paint.
+  const [cats, setCats] = uSh(() => { try { const c = localStorage.getItem('airro_cats_cache_v1'); if (c) { const o = JSON.parse(c); if (o && Array.isArray(o.income) && Array.isArray(o.expense)) return o; } } catch (e) {} return FS.loadCats(); });
   const [settings, setSettings] = uSh(() => FS.loadSettings());
   const [screen, setScreen] = uSh('overview');
   const [gran, setGran] = uSh('month');
@@ -75,7 +78,7 @@ function FApp() {
   // + approve by different users no longer clobber each other. Seed from a
   // SKIP-listed cache; GET /approvals is authoritative.
   const [approvals, setApprovals] = uSh(() => { try { const c = localStorage.getItem('airro_approvals_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
-  const [accounts, setAccounts] = uSh(() => FS.loadAccts());
+  const [accounts, setAccounts] = uSh(() => { try { const c = localStorage.getItem('airro_accounts_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a) && a.length) return a; } } catch (e) {} return FS.loadAccts(); });
   // Setoran now lives in the REST table (per-record), NOT the /state blob — so
   // concurrent edits by different users never overwrite each other. We seed from a
   // local read-cache (SKIP-listed, not mirrored) just for instant paint on reload;
@@ -97,12 +100,10 @@ function FApp() {
   const [syncTick, setSyncTick] = uSh(0);             // bumps on every applied remote change → forces on-demand readers (attendance / orientation) to re-read
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
 
-  uEh(() => { FS.saveCats(cats); }, [cats]);
   uEh(() => { FS.saveSettings(settings); }, [settings]);
   uEh(() => { HRD.saveRates(hrdRates); }, [hrdRates]);
   uEh(() => { HRD.saveDepartments(departments); }, [departments]);
   uEh(() => { HRD.saveBudget(hrBudget); }, [hrBudget]);
-  uEh(() => { FS.saveAccts(accounts); }, [accounts]);
   uEh(() => { FS.saveFleet(fleet); }, [fleet]);
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
   uEh(() => { CO.saveProjects(projects); }, [projects]);
@@ -383,6 +384,49 @@ function FApp() {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, [canViewCal]);
 
+  // ── Config (accounts + categories): off the /state block-mirror. Accounts use the
+  // /accounts replace-collection sync (client ids preserved); categories persist as
+  // a /settings key. Low-conflict, so whole-object writes are fine; the win is
+  // escaping the 3s poll-revert. Writes require the `settings` cap. ──
+  const cacheAccounts = (arr) => { try { localStorage.setItem('airro_accounts_cache_v1', JSON.stringify(arr)); } catch (e) {} };
+  const cacheCats = (o) => { try { localStorage.setItem('airro_cats_cache_v1', JSON.stringify(o)); } catch (e) {} };
+  const reloadAccounts = () => {
+    if (!p.seeMoney || !(window.API && window.API.accounts)) return Promise.resolve();
+    return window.API.accounts.list().then((r) => {
+      if (r && Array.isArray(r.data) && r.data.length) { setAccounts(r.data); cacheAccounts(r.data); }
+    }).catch(() => {});
+  };
+  const reloadCats = () => {
+    if (!(window.API && window.API.settings)) return Promise.resolve();
+    return window.API.settings.get('airro_cats').then((r) => {
+      const v = r && r.data && r.data.value;
+      if (v && Array.isArray(v.income) && Array.isArray(v.expense)) { setCats(v); cacheCats(v); }
+    }).catch(() => {});
+  };
+  const applyAccounts = (updater) => {
+    setAccounts((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      cacheAccounts(next);
+      if (p.settings && window.API && window.API.accounts) window.API.accounts.sync(next).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadAccounts(); });
+      return next;
+    });
+  };
+  const applyCats = (updater) => {
+    setCats((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      cacheCats(next);
+      if (p.settings && window.API && window.API.settings) window.API.settings.set('airro_cats', next).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadCats(); });
+      return next;
+    });
+  };
+  uEh(() => {
+    if (!(window.API && window.API.accounts)) return;
+    reloadAccounts(); reloadCats();
+    const onVis = () => { if (document.visibilityState === 'visible') { reloadAccounts(); reloadCats(); } };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [p.seeMoney]);
+
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
   // directly inside components (attendance `airro_attendance_v2`, orientation
@@ -402,8 +446,8 @@ function FApp() {
     setter(val);
   };
   const refreshAllSlices = () => {
-    applySlice('cats', FS.loadCats(), setCats); applySlice('settings', FS.loadSettings(), setSettings);   // entries are REST-loaded (reloadEntries), not from the blob
-    applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('fleet', FS.loadFleet(), setFleet);   // setoran is REST-loaded, not from the blob
+    applySlice('settings', FS.loadSettings(), setSettings);   // entries/cats are REST-loaded, not from the blob
+    applySlice('fleet', FS.loadFleet(), setFleet);   // accounts/setoran are REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
     applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);   // hrdStaff is REST-loaded (reloadStaff), not from the blob
     applySlice('projects', CO.loadProjects(), setProjects);   // approvals + cashbons + calendar are REST-loaded, not from the blob
@@ -415,7 +459,7 @@ function FApp() {
     // Backend session active → the cloud adapter hydrated localStorage from the
     // server; re-pull ALL slices so the UI shows the shared data. Entries & setoran
     // live in REST tables (not the blob), so pull them explicitly too.
-    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); }
+    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); reloadAccounts(); reloadCats(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -444,6 +488,7 @@ function FApp() {
       if (evt.entity === 'cashbon' || evt.entity === 'focus') reloadCashbons();
       if (evt.entity === 'approval' || evt.entity === 'focus') reloadApprovals();
       if (evt.entity === 'calendar' || evt.entity === 'focus') reloadEvents();
+      if (evt.entity === 'config' || evt.entity === 'focus') { reloadAccounts(); reloadCats(); }
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
@@ -754,7 +799,7 @@ function FApp() {
           )}
 
           {screen === 'moneyspots' && p.cashflow && (
-            <FIN.MoneySpots accounts={accounts} setAccounts={setAccounts} entries={entries} transfers={transfers} setTransfers={setTransfers} canEdit={p.addEntry} />
+            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={setTransfers} canEdit={p.addEntry} />
           )}
 
           {screen === 'overview' && p.cashflow && (
@@ -835,7 +880,7 @@ function FApp() {
           )}
 
           {screen === 'settings' && p.settings && (
-            <SETTINGS.SettingsScreen cats={cats} onChange={setCats} canReset={p.reset} onResetData={resetData} settings={settings} onSettingsChange={setSettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
+            <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canReset={p.reset} onResetData={resetData} settings={settings} onSettingsChange={setSettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
           )}
 
           {screen === 'users' && p.reset && (
