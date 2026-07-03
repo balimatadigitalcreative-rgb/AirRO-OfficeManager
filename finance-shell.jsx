@@ -88,7 +88,9 @@ function FApp() {
   // staff), NOT the /state blob — submit/approve by different users no longer clobber
   // each other. Seed from a SKIP-listed cache; GET /cashbon is authoritative.
   const [cashbons, setCashbons] = uSh(() => { try { const c = localStorage.getItem('airro_cashbon_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
-  const [calEvents, setCalEvents] = uSh(() => CO.loadEvents());
+  // HR calendar events now live in the REST CalendarEvent table (per-record). Seed
+  // from a SKIP-listed cache; GET /calendar is authoritative.
+  const [calEvents, setCalEvents] = uSh(() => { try { const c = localStorage.getItem('airro_calendar_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [users, setUsers] = uSh(() => FS.loadUsers());
   const [empDetail, setEmpDetail] = uSh(null);
   const [syncStatus, setSyncStatus] = uSh('saved');   // 'saving' | 'saved' | 'error' from the cloud adapter
@@ -104,7 +106,6 @@ function FApp() {
   uEh(() => { FS.saveFleet(fleet); }, [fleet]);
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
   uEh(() => { CO.saveProjects(projects); }, [projects]);
-  uEh(() => { CO.saveEvents(calEvents); }, [calEvents]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
@@ -348,6 +349,40 @@ function FApp() {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, [p.approvals]);
 
+  // ── HR calendar: REST per-record. Read/write allowed for any HR/approval cap. ──
+  const canViewCal = !!(p.employees || p.payroll || p.attendance || p.approvals || p.company);
+  const calRef = uRf(calEvents);
+  uEh(() => { calRef.current = calEvents; }, [calEvents]);
+  const isVirtualEv = (id) => /^h-/.test(String(id || ''));   // computed holiday rows — never persisted
+  const cacheCal = (arr) => { try { localStorage.setItem('airro_calendar_cache_v1', JSON.stringify(arr)); } catch (e) {} };
+  const reloadEvents = () => {
+    if (!canViewCal || !(window.API && window.API.calendar)) return Promise.resolve();
+    return window.API.calendar.list().then((r) => {
+      if (r && Array.isArray(r.data)) { calRef.current = r.data; setCalEvents(r.data); cacheCal(r.data); }
+    }).catch(() => {});
+  };
+  const calErr = (e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadEvents(); };
+  const calSame = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; } };
+  const calToApi = (e) => ({ id: e.id, type: e.type, title: e.title, employeeId: e.employeeId || null, startDate: e.startDate, endDate: e.endDate || '', note: e.note || '', sourceId: e.sourceId || null });
+  const applyEvents = (updater) => {
+    const prev = calRef.current || [];
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    calRef.current = next; setCalEvents(next); cacheCal(next);
+    if (!(window.API && window.API.calendar)) return;
+    const prevById = new Map(prev.map((e) => [e.id, e]));
+    const nextIds = new Set(next.map((e) => e.id));
+    next.forEach((e) => { if (isVirtualEv(e.id)) return; const b = prevById.get(e.id); if (!b) window.API.calendar.create(calToApi(e)).then(reloadEvents).catch(calErr); else if (!calSame(b, e)) window.API.calendar.update(e.id, calToApi(e)).then(reloadEvents).catch(calErr); });
+    prev.forEach((e) => { if (!isVirtualEv(e.id) && !nextIds.has(e.id)) window.API.calendar.remove(e.id).then(reloadEvents).catch(calErr); });
+  };
+  uEh(() => {
+    if (!canViewCal || !(window.API && window.API.calendar)) return;
+    reloadEvents();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadEvents(); }, 20000);
+    const onVis = () => { if (document.visibilityState === 'visible') reloadEvents(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [canViewCal]);
+
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
   // directly inside components (attendance `airro_attendance_v2`, orientation
@@ -371,7 +406,7 @@ function FApp() {
     applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('fleet', FS.loadFleet(), setFleet);   // setoran is REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
     applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);   // hrdStaff is REST-loaded (reloadStaff), not from the blob
-    applySlice('projects', CO.loadProjects(), setProjects); applySlice('calEvents', CO.loadEvents(), setCalEvents);   // approvals + cashbons are REST-loaded, not from the blob
+    applySlice('projects', CO.loadProjects(), setProjects);   // approvals + cashbons + calendar are REST-loaded, not from the blob
     applySlice('users', FS.loadUsers(), setUsers);
   };
 
@@ -380,7 +415,7 @@ function FApp() {
     // Backend session active → the cloud adapter hydrated localStorage from the
     // server; re-pull ALL slices so the UI shows the shared data. Entries & setoran
     // live in REST tables (not the blob), so pull them explicitly too.
-    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); }
+    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -408,6 +443,7 @@ function FApp() {
       if (evt.entity === 'employee' || evt.entity === 'focus') reloadStaff();
       if (evt.entity === 'cashbon' || evt.entity === 'focus') reloadCashbons();
       if (evt.entity === 'approval' || evt.entity === 'focus') reloadApprovals();
+      if (evt.entity === 'calendar' || evt.entity === 'focus') reloadEvents();
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
@@ -517,8 +553,10 @@ function FApp() {
     const mk = req.from.slice(0, 7);
     const sid = req.staffId || (hrdStaff.find((s) => s.name === req.who) || {}).id;
     CO.applyLeave(sid, mk, req.from, req.to);
-    // Mirror the approved leave onto the shared HR calendar (dedupe by request id).
-    if (!CO.hasEventForSource(req.id)) { CO.addEventFromRequest({ ...req, staffId: sid }, 'leave'); setCalEvents(CO.loadEvents()); }
+    // Mirror the approved leave onto the shared HR calendar (dedupe by sourceId) —
+    // now a per-record POST /calendar instead of a blob append.
+    const already = (calRef.current || []).some((e) => e.sourceId && e.sourceId === req.id);
+    if (!already) applyEvents((prev) => [...prev, { id: CO.newEventId(), type: 'leave', title: req.title || 'Cuti', employeeId: sid || null, startDate: req.from, endDate: req.to || req.from, note: req.detail || '', sourceId: req.id }]);
   };
 
   // approved deduction request → add to that employee's payroll deductions
@@ -769,7 +807,7 @@ function FApp() {
           )}
 
           {screen === 'hrcalendar' && p.employees && (
-            <COMPANY.HrCalendar staff={hrdStaff} rates={hrdRates} events={calEvents} setEvents={setCalEvents} today={FIN.TODAY} canEdit={p.attendance || p.payroll} />
+            <COMPANY.HrCalendar staff={hrdStaff} rates={hrdRates} events={calEvents} setEvents={applyEvents} today={FIN.TODAY} canEdit={p.attendance || p.payroll} />
           )}
 
           {screen === 'orientation' && p.payroll && (

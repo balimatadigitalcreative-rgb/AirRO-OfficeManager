@@ -1482,8 +1482,8 @@ function HrCalendar({ staff, rates, events, setEvents, today, canEdit }) {
   const cells = [];
   for (let i = 0; i < startOff; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  const removeEv = (id) => { if (confirm(trC('cal.removeConfirm'))) { CO.removeEvent(id); if (setEvents) setEvents(CO.loadEvents()); } };
-  const saveEv = (ev) => { CO.addEvent(ev); if (setEvents) setEvents(CO.loadEvents()); setAddOpen(false); };
+  const removeEv = (id) => { if (confirm(trC('cal.removeConfirm')) && setEvents) setEvents((prev) => (prev || []).filter((e) => e.id !== id)); };
+  const saveEv = (ev) => { if (setEvents) setEvents((prev) => [...(prev || []).filter((e) => e.id !== ev.id), ev]); setAddOpen(false); };
 
   return (
     <div className="screen-enter">
