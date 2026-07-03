@@ -203,6 +203,14 @@ model Employee {
   addressDomisili String?
   maritalStatus   String   @default("TK") // TK | K | Cerai
 
+  // Full frontend staff object (JSON), verbatim. The structured columns above are a
+  // server-side PROJECTION (payroll engine + queries + NIP); `data` is the faithful
+  // source of truth so frontend-only fields (pos, pph, offDays, deductions[], nik,
+  // bank, account, phone, employment-type `status`, inline `orientation`, …) are
+  // never dropped on the round-trip. Same idea as a per-record document.
+  data      String?
+  updatedAt DateTime @updatedAt @default(now()) // bumped on every change (incremental sync)
+
   cashbons          Cashbon[]
   trainings         Training[]
   calendarEvents    CalendarEvent[]

@@ -98,8 +98,14 @@ describe('Employees + payroll', () => {
     const res = await request(app).post('/api/v1/employees').set(auth('hrd')).send({ name: 'Budi', department: 'Driver', base: 4000000, allowance: 500000, risk: 'Medium' });
     expect(res.status).toBe(201);
   });
-  it('finance (no employees perm) cannot manage employees', async () => {
-    const res = await request(app).get('/api/v1/employees').set(auth('finance'));
+  it('finance can VIEW the roster (feeds payroll) but cannot create employees', async () => {
+    const view = await request(app).get('/api/v1/employees').set(auth('finance'));
+    expect(view.status).toBe(200);   // has `payroll` cap → allowed to read the roster
+    const create = await request(app).post('/api/v1/employees').set(auth('finance')).send({ name: 'X' });
+    expect(create.status).toBe(403); // but not the employees-manage capability
+  });
+  it('adminfin (no roster-consuming cap) cannot read employees', async () => {
+    const res = await request(app).get('/api/v1/employees').set(auth('adminfin'));
     expect(res.status).toBe(403);
   });
   it('payroll run returns BPJS-laden totals', async () => {

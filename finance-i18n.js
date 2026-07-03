@@ -157,7 +157,7 @@
       // toasts
       'toast.incomeSaved': 'Income of {amt} saved', 'toast.expenseSaved': 'Expense of {amt} saved',
       'toast.deleted': 'Entry deleted', 'toast.updated': 'Entry updated',
-      'toast.onlyOwnerDelete': 'You don’t have delete permission — ask the GM to enable “Delete Transaction” for your account', 'toast.noDeletePerm': 'You don’t have permission to delete this entry', 'toast.noPerm': 'You don’t have permission for this action', 'toast.deleteConfirm': 'Delete this entry?\n\n{n} — {amt}\n\nThis cannot be undone.', 'toast.demoRestored': 'Demo data restored',
+      'toast.onlyOwnerDelete': 'You don’t have delete permission — ask the GM to enable “Delete Transaction” for your account', 'toast.noDeletePerm': 'You don’t have permission to delete this entry', 'toast.noPerm': 'You don’t have permission for this action', 'toast.noStaffPerm': 'You don’t have permission to edit employees — ask the GM to enable “Employees” for your account', 'toast.deleteConfirm': 'Delete this entry?\n\n{n} — {amt}\n\nThis cannot be undone.', 'toast.demoRestored': 'Demo data restored',
       'toast.payrollPosted': 'Payroll {amt} posted to Cash Book', 'toast.payrollUpdated': 'Payroll updated to {amt}',
       // reports
       'rep.thisMonth': 'This Month', 'rep.lastMonth': 'Last Month', 'rep.last7': 'Last 7 Days',
@@ -370,7 +370,7 @@
       'adv.s4': 'Tetapkan target tabungan realistis', 'adv.s5': 'Analisis pengeluaran terbesar saya',
       'toast.incomeSaved': 'Pemasukan {amt} disimpan', 'toast.expenseSaved': 'Pengeluaran {amt} disimpan',
       'toast.deleted': 'Catatan dihapus', 'toast.updated': 'Catatan diperbarui',
-      'toast.onlyOwnerDelete': 'Anda tidak punya izin hapus — minta GM mengaktifkan “Hapus Transaksi” untuk akun Anda', 'toast.noDeletePerm': 'Anda tidak punya izin menghapus transaksi ini', 'toast.noPerm': 'Anda tidak punya izin untuk aksi ini', 'toast.deleteConfirm': 'Hapus catatan ini?\n\n{n} — {amt}\n\nTidak dapat dibatalkan.', 'toast.demoRestored': 'Data demo dipulihkan',
+      'toast.onlyOwnerDelete': 'Anda tidak punya izin hapus — minta GM mengaktifkan “Hapus Transaksi” untuk akun Anda', 'toast.noDeletePerm': 'Anda tidak punya izin menghapus transaksi ini', 'toast.noPerm': 'Anda tidak punya izin untuk aksi ini', 'toast.noStaffPerm': 'Anda tidak punya izin mengubah data karyawan — minta GM mengaktifkan “Karyawan” untuk akun Anda', 'toast.deleteConfirm': 'Hapus catatan ini?\n\n{n} — {amt}\n\nTidak dapat dibatalkan.', 'toast.demoRestored': 'Data demo dipulihkan',
       'toast.payrollPosted': 'Gaji {amt} dicatat ke Buku Kas', 'toast.payrollUpdated': 'Gaji diperbarui jadi {amt}',
       'rep.thisMonth': 'Bulan Ini', 'rep.lastMonth': 'Bulan Lalu', 'rep.last7': '7 Hari Terakhir',
       'rep.last30': '30 Hari Terakhir', 'rep.thisYear': 'Tahun Ini', 'rep.custom': 'Khusus',

@@ -64,7 +64,11 @@ function FApp() {
   const [lang, setLang] = uSh(window.I18N.lang);
   const changeLang = (l) => { window.I18N.setLang(l); setLang(l); };
   const [hrdRates, setHrdRates] = uSh(() => HRD.loadRates());
-  const [hrdStaff, setHrdStaff] = uSh(() => HRD.loadStaff());
+  // Roster now lives in the REST per-record Employee table (like setoran/entries),
+  // NOT the /state blob — so one user's add/edit/offboard is never overwritten by
+  // another client's stale whole-array push. Seed from a SKIP-listed local cache for
+  // instant paint; GET /employees?includeInactive=true is authoritative.
+  const [hrdStaff, setHrdStaff] = uSh(() => { try { const c = localStorage.getItem('airro_staff_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [departments, setDepartments] = uSh(() => HRD.loadDepartments());
   const [hrBudget, setHrBudget] = uSh(() => HRD.loadBudget());
   const [approvals, setApprovals] = uSh(() => CO.load());
@@ -88,7 +92,6 @@ function FApp() {
   uEh(() => { FS.saveCats(cats); }, [cats]);
   uEh(() => { FS.saveSettings(settings); }, [settings]);
   uEh(() => { HRD.saveRates(hrdRates); }, [hrdRates]);
-  uEh(() => { HRD.saveStaff(hrdStaff); }, [hrdStaff]);
   uEh(() => { HRD.saveDepartments(departments); }, [departments]);
   uEh(() => { HRD.saveBudget(hrBudget); }, [hrBudget]);
   uEh(() => { CO.save(approvals); }, [approvals]);
@@ -232,6 +235,54 @@ function FApp() {
   // `entries` unchanged; only the WRITE paths were rerouted to REST.
   const entries = uMh(() => [...setoranEntries, ...realEntries], [setoranEntries, realEntries]);
 
+  // ── Roster: REST per-record (create/update/offboard one employee at a time) ──
+  // Reads are allowed for any role that consumes the roster (payroll/reports/kasbon/
+  // approvals/company/attendance), matching the server. WRITES require the
+  // `employees` capability server-side; a rejected write shows a message and reverts.
+  const canViewRoster = !!(p.employees || p.payroll || p.reports || p.company || p.kasbon || p.approvals || p.attendance);
+  const staffRef = uRf(hrdStaff);
+  uEh(() => { staffRef.current = hrdStaff; }, [hrdStaff]);
+  const cacheStaff = (arr) => { try { localStorage.setItem('airro_staff_cache_v1', JSON.stringify(arr)); } catch (e) {} };
+  const reloadStaff = () => {
+    if (!canViewRoster || !(window.API && window.API.employees)) return Promise.resolve();
+    return window.API.employees.list('includeInactive=true').then((r) => {
+      if (r && Array.isArray(r.data)) { staffRef.current = r.data; setHrdStaff(r.data); cacheStaff(r.data); }
+    }).catch(() => {});
+  };
+  const staffWriteErr = (err) => { setToast(tr(err && err.status === 403 ? 'toast.noStaffPerm' : 'st.syncErr')); reloadStaff(); };
+  const cleanStaff = (s) => { const c = { ...s }; delete c._isNew; return c; };
+  const restCreateStaff = (s) => { if (window.API && window.API.employees) window.API.employees.create(cleanStaff(s)).then(reloadStaff).catch(staffWriteErr); };
+  const restUpdateStaff = (s) => { if (window.API && window.API.employees) window.API.employees.update(s.id, cleanStaff(s)).then(reloadStaff).catch(staffWriteErr); };
+  const restDeleteStaff = (id) => { if (window.API && window.API.employees) window.API.employees.remove(id).then(reloadStaff).catch(staffWriteErr); };
+  const staffSame = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; } };
+  // Diff-based per-record persistence: whatever array transform an HR screen makes
+  // (upsert one, delete one, bulk dept-rename many) is translated to the matching
+  // REST calls. Optimistic — state updates immediately; reloadStaff re-syncs to the
+  // server's truth (also reverts an unauthorized optimistic change).
+  const applyStaff = (updater) => {
+    const prev = staffRef.current || [];
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    staffRef.current = next; setHrdStaff(next); cacheStaff(next);
+    // Only holders of the `employees` write cap persist. Others (e.g. an automatic
+    // late-deduction sync fired while a payroll-only user views a detail) update
+    // locally and harmlessly revert on the next reloadStaff — no 403 spam. Explicit
+    // edit controls are already UI-gated on p.employees.
+    if (!p.employees) return;
+    const prevById = new Map(prev.map((s) => [s.id, s]));
+    const nextIds = new Set(next.map((s) => s.id));
+    next.forEach((s) => { const b = prevById.get(s.id); if (!b) restCreateStaff(s); else if (!staffSame(b, s)) restUpdateStaff(s); });
+    prev.forEach((s) => { if (!nextIds.has(s.id)) restDeleteStaff(s.id); });
+  };
+  // Initial load + light backstop poll for anyone who can view the roster.
+  uEh(() => {
+    if (!canViewRoster || !(window.API && window.API.employees)) return;
+    reloadStaff();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadStaff(); }, 20000);
+    const onVis = () => { if (document.visibilityState === 'visible') reloadStaff(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [canViewRoster]);
+
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
   // directly inside components (attendance `airro_attendance_v2`, orientation
@@ -254,7 +305,7 @@ function FApp() {
     applySlice('cats', FS.loadCats(), setCats); applySlice('settings', FS.loadSettings(), setSettings);   // entries are REST-loaded (reloadEntries), not from the blob
     applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('fleet', FS.loadFleet(), setFleet);   // setoran is REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
-    applySlice('hrdStaff', HRD.loadStaff(), setHrdStaff); applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);
+    applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);   // hrdStaff is REST-loaded (reloadStaff), not from the blob
     applySlice('approvals', CO.load(), setApprovals); applySlice('projects', CO.loadProjects(), setProjects); applySlice('cashbons', CO.loadCashbons(), setCashbons); applySlice('calEvents', CO.loadEvents(), setCalEvents);
     applySlice('users', FS.loadUsers(), setUsers);
   };
@@ -264,7 +315,7 @@ function FApp() {
     // Backend session active → the cloud adapter hydrated localStorage from the
     // server; re-pull ALL slices so the UI shows the shared data. Entries & setoran
     // live in REST tables (not the blob), so pull them explicitly too.
-    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); }
+    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -289,6 +340,7 @@ function FApp() {
       if (!evt) return;
       if (evt.entity === 'setoran' || evt.entity === 'focus') reloadSetoran();
       if (evt.entity === 'entry' || evt.entity === 'focus') reloadEntries();
+      if (evt.entity === 'employee' || evt.entity === 'focus') reloadStaff();
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
@@ -301,7 +353,7 @@ function FApp() {
 
   const add = (e) => { addEntry(e); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
   // Upsert one staff into the roster (used by orientation actions + detail edits).
-  const upsertStaff = (s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
+  const upsertStaff = (s) => applyStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
   // ---- Orientation actions (new-hire lifecycle) ----
   // Graduating passes the employee out of the orientation/DW bucket into a payroll
   // stage (permanent/contract/probation) → they move to Data Karyawan automatically.
@@ -405,7 +457,7 @@ function FApp() {
   // approved deduction request → add to that employee's payroll deductions
   const approveDeduction = (req) => {
     if (!req || !req.staffId || !req.amount) return;
-    setHrdStaff((prev) => prev.map((s) => s.id === req.staffId
+    applyStaff((prev) => prev.map((s) => s.id === req.staffId
       ? { ...s, deductions: [...(s.deductions || []), { id: CO.newReqId(), label: req.title || 'Potongan', amount: +req.amount }] }
       : s));
   };
@@ -414,7 +466,7 @@ function FApp() {
 
   // keep auto late-penalty deduction + overtime pay in sync on each staff record
   const syncLateDeduct = (staffId, amount, label, otAmount) => {
-    setHrdStaff((prev) => prev.map((s) => {
+    applyStaff((prev) => prev.map((s) => {
       if (s.id !== staffId) return s;
       const manual = (s.deductions || []).filter((d) => !d.auto);
       const cur = (s.deductions || []).find((d) => d.auto && d.id === 'auto-late');
@@ -641,11 +693,11 @@ function FApp() {
             <COMPANY.HRReport staff={hrdStaff} rates={hrdRates} departments={departments} budget={hrBudget} monthKey={monthKey} today={FIN.TODAY} approvals={approvals} gran={gran} anchor={anchor} setAnchor={setAnchor} range={range} periodLbl={periodLbl} setGran={setGran} />
           )}
 
-          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={setHrdRates} departments={departments} setDepartments={setDepartments} staff={hrdStaff} setStaff={setHrdStaff} canEditDept={p.payroll} />
+          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={setHrdRates} departments={departments} setDepartments={setDepartments} staff={hrdStaff} setStaff={applyStaff} canEditDept={p.payroll} />
           )}
 
           {screen === 'employees' && p.employees && (
-            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.payroll} seeMoney={p.seeMoney} setStaff={setHrdStaff} />
+            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.employees} seeMoney={p.seeMoney} setStaff={applyStaff} />
           )}
 
           {screen === 'hrcalendar' && p.employees && (
@@ -653,7 +705,7 @@ function FApp() {
           )}
 
           {screen === 'orientation' && p.payroll && (
-            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={setHrdStaff} rates={hrdRates} today={FIN.TODAY} syncTick={syncTick} canEdit={p.payroll} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
+            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={applyStaff} rates={hrdRates} today={FIN.TODAY} syncTick={syncTick} canEdit={p.employees} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
           )}
 
           {screen === 'kasbon' && p.kasbon && (
@@ -673,7 +725,7 @@ function FApp() {
           )}
 
           {screen === 'payroll' && p.payroll && (
-            <PAYROLL.PayrollScreen rates={hrdRates} setRates={setHrdRates} staff={hrdStaff} setStaff={setHrdStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={true} cashbons={cashbons} monthKey={monthKey} />
+            <PAYROLL.PayrollScreen rates={hrdRates} setRates={setHrdRates} staff={hrdStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} />
           )}
 
           {screen === 'settings' && p.settings && (
@@ -707,7 +759,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.payroll} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={(s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; })} cashbons={cashbons} setCashbons={setCashbons} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} setCashbons={setCashbons} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );

@@ -45,4 +45,19 @@ function requireCap(perm) {
   };
 }
 
-module.exports = { requireAuth, requireRole, requireCap };
+// Pass if the user holds ANY of the listed capabilities. Used for shared READ
+// resources that several roles legitimately view (e.g. the employee roster feeds
+// payroll/reports/kasbon/approvals — not just the `employees` manage screen).
+// Does NOT grant write access; writes keep their own requireCap.
+function requireAnyCap(perms) {
+  return (req, res, next) => {
+    if (!req.user) return next(ApiError.unauthorized());
+    const have = resolvePerms(req.user.role, req.user.permissions);
+    if (!perms.some((p) => have[p])) {
+      return next(ApiError.forbidden(`Akun kamu tidak punya akses: ${perms.join('/')}`));
+    }
+    next();
+  };
+}
+
+module.exports = { requireAuth, requireRole, requireCap, requireAnyCap };
