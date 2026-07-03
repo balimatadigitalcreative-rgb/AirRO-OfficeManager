@@ -54,7 +54,7 @@ describe('Entries CRUD', () => {
   it('lists with pagination metadata', async () => {
     const res = await request(app).get('/api/v1/entries').set(auth(financeToken));
     expect(res.status).toBe(200);
-    expect(res.body.pagination).toMatchObject({ page: 1, limit: 20, total: 1 });
+    expect(res.body.pagination).toMatchObject({ page: 1, limit: 2000, total: 1 });
     expect(res.body.data).toHaveLength(1);
   });
 

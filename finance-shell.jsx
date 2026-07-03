@@ -46,7 +46,13 @@ function FApp() {
   // shows. This guarantees CLOUD is active whenever a user is signed in, so the
   // user-management / data screens always talk to the backend.
   const [user, setUser] = uSh(null);
-  const [entries, setEntries] = uSh(() => FS.load());
+  // Cash book now lives in the REST per-record Entry table (like setoran), NOT the
+  // /state blob — so one user deleting/editing an entry is never overwritten by
+  // another client's stale whole-array push. `realEntries` holds the persisted
+  // records; the setoran→cash-flow rows are DERIVED in-memory (see setoranEntries)
+  // and never persisted. We seed from a local read-cache (SKIP-listed) for instant
+  // paint; GET /entries is authoritative.
+  const [realEntries, setRealEntries] = uSh(() => { try { const c = localStorage.getItem('airro_cashbook_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [cats, setCats] = uSh(() => FS.loadCats());
   const [settings, setSettings] = uSh(() => FS.loadSettings());
   const [screen, setScreen] = uSh('overview');
@@ -79,7 +85,6 @@ function FApp() {
   const [syncTick, setSyncTick] = uSh(0);             // bumps on every applied remote change → forces on-demand readers (attendance / orientation) to re-read
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
 
-  uEh(() => { FS.save(entries); }, [entries]);
   uEh(() => { FS.saveCats(cats); }, [cats]);
   uEh(() => { FS.saveSettings(settings); }, [settings]);
   uEh(() => { HRD.saveRates(hrdRates); }, [hrdRates]);
@@ -135,6 +140,89 @@ function FApp() {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, [p.setoran]);
 
+  // ── Cash book: REST per-record (create/update/delete one entry at a time) ──
+  // Same model as setoran: each entry is its own row, so concurrent edits never
+  // clobber each other. Derived setoran rows (stinc-/stmfg-) are NEVER persisted —
+  // they are recomputed in-memory from the setoran table below.
+  const ENTRY_TAGS = ['custPay', 'party', 'payroll', 'thr', 'orientation'];
+  const isDerivedEntry = (id) => /^st(inc|mfg)-/.test(String(id || ''));
+  const entryToApi = (e) => {
+    const tags = {}; ENTRY_TAGS.forEach((k) => { if (e[k] != null) tags[k] = e[k]; });
+    return { id: e.id, type: e.type === 'income' ? 'income' : 'expense', amount: Math.max(0, Math.round(+e.amount || 0)),
+      note: e.note || '', method: e.method || 'Cash', date: e.date, time: e.time || '00:00',
+      category: e.category != null ? e.category : null, acct: e.acct != null ? e.acct : null,
+      proof: e.proof != null ? e.proof : null, meta: Object.keys(tags).length ? JSON.stringify(tags) : null };
+  };
+  const apiToEntry = (row) => {
+    let tags = {}; try { tags = row.meta ? JSON.parse(row.meta) : {}; } catch (e) {}
+    const o = { id: row.id, type: row.type, amount: row.amount, note: row.note || '', method: row.method || 'Cash',
+      date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined };
+    if (row.proof) o.proof = row.proof;
+    return Object.assign(o, tags);
+  };
+  const reloadEntries = () => {
+    if (!(window.API && window.API.entries)) return Promise.resolve();
+    return window.API.entries.list('limit=5000').then((r) => {
+      if (r && Array.isArray(r.data)) { const rows = r.data.map(apiToEntry); setRealEntries(rows); try { localStorage.setItem('airro_cashbook_cache_v1', JSON.stringify(rows)); } catch (e) {} }
+    }).catch(() => {});
+  };
+  const addEntry = (e) => {
+    if (isDerivedEntry(e.id)) return;   // derived rows are in-memory only
+    setRealEntries((prev) => [apiToEntry(entryToApi(e)), ...prev.filter((x) => x.id !== e.id)]);   // optimistic
+    if (window.API && window.API.entries) window.API.entries.create(entryToApi(e)).then(reloadEntries).catch(() => { setToast(tr('st.syncErr')); reloadEntries(); });
+  };
+  const editEntry = (e) => {
+    if (isDerivedEntry(e.id)) return;
+    setRealEntries((prev) => prev.map((x) => (x.id === e.id ? apiToEntry(entryToApi(e)) : x)));   // optimistic
+    if (window.API && window.API.entries) window.API.entries.update(e.id, entryToApi(e)).then(reloadEntries).catch(() => { setToast(tr('st.syncErr')); reloadEntries(); });
+  };
+  const removeEntry = (id) => {
+    if (isDerivedEntry(id)) return;   // can't delete a derived row; it regenerates from setoran
+    setRealEntries((prev) => prev.filter((x) => x.id !== id));   // optimistic
+    if (window.API && window.API.entries) window.API.entries.remove(id).then(reloadEntries).catch(() => { setToast(tr('st.syncErr')); reloadEntries(); });
+  };
+  // Initial load + light realtime poll (only for users with cash-book access).
+  uEh(() => {
+    if (!p.cashflow || !(window.API && window.API.entries)) return;
+    reloadEntries();
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadEntries(); }, 15000);
+    const onVis = () => { if (document.visibilityState === 'visible') reloadEntries(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [p.cashflow]);
+
+  // setoran → cash flow, DERIVED (in-memory, never persisted). Whenever setoran
+  // rows or cost/gallon change, each day's linked income (deposit) + manufacturing
+  // expense are recomputed from the setoran REST table. These rows carry
+  // setoranDay/setoranMfg tags and stable ids (stinc-/stmfg-DAY); they are merged
+  // into `entries` for display/stats but are excluded from the Entry table.
+  const setoranEntries = uMh(() => {
+    const salesCat = (cats.income.find((c) => /refill|galon|jual|sales/i.test(c.label)) || cats.income[0] || {}).key || 'Refill';
+    const supCat = (cats.expense.find((c) => /supplies|produksi|pabrik|bottling|manufact/i.test(c.label)) || cats.expense[0] || {}).key || 'Supplies';
+    const cashAcct = (accounts.find((a) => a.id === settings.setoranAcct) || accounts.find((a) => a.type === 'cash') || accounts[0] || {}).id;
+    const bankAcct = (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id;
+    const costPer = +settings.costPerGalon || 0;
+    const byDay = {};
+    setoran.forEach((r) => { (byDay[r.date] = byDay[r.date] || []).push(r); });
+    const out = [];
+    Object.keys(byDay).forEach((day) => {
+      const items = byDay[day];
+      const totalSetoran = items.reduce((s, r) => s + FS.setoranOf(r), 0);
+      const galon = items.reduce((s, r) => s + (+r.galon || 0), 0);
+      if (totalSetoran !== 0) out.push({ id: 'stinc-' + day, type: 'income', category: salesCat, amount: totalSetoran,
+        acct: cashAcct, note: tr('st.noteEntry', { d: day, n: galon, c: items.length }), method: 'Cash', date: day, time: '18:00', setoranDay: day, proof: (items.find((r) => r.proof) || {}).proof });
+      const mfg = galon * costPer;
+      if (mfg > 0) out.push({ id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg,
+        acct: bankAcct, note: tr('st.mfgNote', { d: day, n: galon, c: FIN.fmt(costPer) }), method: 'Transfer', date: day, time: '18:05', setoranMfg: day });
+    });
+    return out;
+  }, [setoran, settings.costPerGalon, settings.setoranAcct, cats, accounts, lang]);
+
+  // The cash book the whole app reads: derived setoran rows + persisted real
+  // entries. Every existing consumer (stats, reports, ledger, alerts) keeps using
+  // `entries` unchanged; only the WRITE paths were rerouted to REST.
+  const entries = uMh(() => [...setoranEntries, ...realEntries], [setoranEntries, realEntries]);
+
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
   // directly inside components (attendance `airro_attendance_v2`, orientation
@@ -154,7 +242,7 @@ function FApp() {
     setter(val);
   };
   const refreshAllSlices = () => {
-    applySlice('entries', FS.load(), setEntries); applySlice('cats', FS.loadCats(), setCats); applySlice('settings', FS.loadSettings(), setSettings);
+    applySlice('cats', FS.loadCats(), setCats); applySlice('settings', FS.loadSettings(), setSettings);   // entries are REST-loaded (reloadEntries), not from the blob
     applySlice('accounts', FS.loadAccts(), setAccounts); applySlice('fleet', FS.loadFleet(), setFleet);   // setoran is REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
     applySlice('hrdStaff', HRD.loadStaff(), setHrdStaff); applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);
@@ -165,8 +253,9 @@ function FApp() {
   const login = (u) => {
     FS.setSession(u.id); setUser(u); setScreen(FS.landingScreen(u.role));
     // Backend session active → the cloud adapter hydrated localStorage from the
-    // server; re-pull ALL slices so the UI shows the shared data.
-    if (window.CLOUD && window.CLOUD.active) refreshAllSlices();
+    // server; re-pull ALL slices so the UI shows the shared data. Entries & setoran
+    // live in REST tables (not the blob), so pull them explicitly too.
+    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -187,7 +276,11 @@ function FApp() {
     window.CLOUD.onStatus = (s) => setSyncStatus(s);
     // SSE notice for a non-/state REST entity (setoran) or a tab-focus resync →
     // re-fetch that entity immediately. Near-0 latency; the 3s poll is now a backstop.
-    window.CLOUD.onEvent = (evt) => { if (evt && (evt.entity === 'setoran' || evt.entity === 'focus')) reloadSetoran(); };
+    window.CLOUD.onEvent = (evt) => {
+      if (!evt) return;
+      if (evt.entity === 'setoran' || evt.entity === 'focus') reloadSetoran();
+      if (evt.entity === 'entry' || evt.entity === 'focus') reloadEntries();
+    };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
 
@@ -197,7 +290,7 @@ function FApp() {
     return () => document.body.classList.remove('drawer-lock');
   }, [drawer]);
 
-  const add = (e) => { setEntries((prev) => [e, ...prev]); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
+  const add = (e) => { addEntry(e); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
   // Upsert one staff into the roster (used by orientation actions + detail edits).
   const upsertStaff = (s) => setHrdStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
   // ---- Orientation actions (new-hire lifecycle) ----
@@ -214,13 +307,15 @@ function FApp() {
       const bank = accounts.find((a) => a.type === 'bank') || accounts[0] || {};
       const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: 'Orientation', amount: total, acct: bank.id,
         note: tr('ori.expenseNote', { n: s.name }), method: 'Transfer BCA', date: FIN.TODAY, time: '09:00', orientation: s.id };
-      setEntries((prev) => [entry, ...prev]);
+      addEntry(entry);
     }
     setToast(tr('ori.toastPaid', { amt: FIN.fmt(total) }));
   };
-  const del = (id) => { if (!p.delete) { setToast(tr('toast.onlyOwnerDelete')); return; } const e = entries.find((x) => x.id === id); if (e && !confirm(tr('toast.deleteConfirm', { n: e.note || '', amt: FIN.fmt(e.amount || 0) }))) return; setEntries((prev) => prev.filter((x) => x.id !== id)); setToast(tr('toast.deleted')); };
-  const saveEdit = (upd) => { setEntries((prev) => prev.map((x) => x.id === upd.id ? upd : x)); setEditing(null); setToast(tr('toast.updated')); };
-  const resetData = () => { if (!p.reset) return; if (confirm('Reset all entries back to the demo data?')) { setEntries(FS.reset()); setToast(tr('toast.demoRestored')); } };
+  const del = (id) => { if (!p.delete) { setToast(tr('toast.onlyOwnerDelete')); return; } const e = entries.find((x) => x.id === id); if (e && !confirm(tr('toast.deleteConfirm', { n: e.note || '', amt: FIN.fmt(e.amount || 0) }))) return; removeEntry(id); setToast(tr('toast.deleted')); };
+  const saveEdit = (upd) => { editEntry(upd); setEditing(null); setToast(tr('toast.updated')); };
+  // Demo reset now clears the REST cash book (real entries only; derived setoran
+  // rows regenerate). Deletes each persisted entry, then repaints empty.
+  const resetData = () => { if (!p.reset) return; if (!confirm('Hapus SEMUA catatan kas (kembali kosong)?')) return; realEntries.forEach((e) => { if (window.API && window.API.entries) window.API.entries.remove(e.id).catch(() => {}); }); setRealEntries([]); try { localStorage.setItem('airro_cashbook_cache_v1', '[]'); } catch (e) {} setTimeout(reloadEntries, 400); setToast(tr('toast.demoRestored')); };
 
   const range = PERIOD.resolveRange(gran, anchor);
   const periodLbl = PERIOD.periodLabel(gran, anchor, range);
@@ -340,7 +435,8 @@ function FApp() {
     const date = curMonthKey === FIN.TODAY.slice(0, 7) ? FIN.TODAY : `${curMonthKey}-${String(lastDay).padStart(2, '0')}`;
     const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: salaryCatKey, amount, acct: (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id,
       note: tr('hrd.payrollNote', { m: label, n: hrdStaff.length }), method: 'Transfer BCA', date, time: '09:00', payroll: curMonthKey };
-    setEntries((prev) => [entry, ...prev.filter((e) => e.payroll !== curMonthKey)]);
+    realEntries.filter((e) => e.payroll === curMonthKey).forEach((e) => removeEntry(e.id));   // drop the previous month's posting
+    addEntry(entry);
     // Kasbon of the payroll cycle just paid → mark settled ('paid') so they stop counting.
     const anchor = HRD.payCycle().anchor;
     setCashbons((prev) => prev.map((c) => (c.status === 'active' && (c.cycleAnchor || HRD.payCycle(c.date).anchor) === anchor) ? { ...c, status: 'paid' } : c));
@@ -356,49 +452,25 @@ function FApp() {
     const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: salaryCatKey, amount,
       acct: (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id,
       note: tr('thr.noteEntry', { d: label, n: hrdStaff.length }), method: 'Transfer BCA', date: FIN.TODAY, time: '09:30', thr: true };
-    setEntries((prev) => [entry, ...prev.filter((e) => !e.thr)]);
+    realEntries.filter((e) => e.thr).forEach((e) => removeEntry(e.id));   // replace the previous THR posting
+    addEntry(entry);
     setToast(tr('thr.toast', { amt: FIN.fmt(amount) }));
   };
 
-  // setoran → cash flow: AUTO-SYNC. Whenever setoran rows or cost/gallon change,
-  // rebuild each day's linked income (deposit) + manufacturing expense in the cash book.
+  // Which setoran days are reflected in the cash book (derived, always true when the
+  // day has a deposit) — used by the setoran screen's "posted" pill.
   const setoranPosted = uMh(() => { const m = {}; entries.forEach((e) => { if (e.setoranDay) m[e.setoranDay] = true; }); return m; }, [entries]);
   // customer payment transfers (bon/credit settled by transfer) → income entries tagged custPay
   const custPayments = uMh(() => entries.filter((e) => e.custPay).sort(FS.byNewest), [entries]);
   const addPayment = (pay) => {
     const salesCat = (cats.income.find((c) => /refill|galon|jual|sales|bon|piutang/i.test(c.label)) || cats.income[0] || {}).key || 'Refill';
-    setEntries((prev) => [{ id: 'cp' + Date.now().toString(36), type: 'income', category: salesCat, amount: +pay.amount || 0,
-      acct: pay.acct, note: tr('cp.note', { who: pay.party || '—', m: pay.method }), method: pay.method || 'Transfer', date: pay.date, time: '12:00', custPay: true, party: pay.party, proof: pay.proof }, ...prev]);
+    addEntry({ id: 'cp' + Date.now().toString(36), type: 'income', category: salesCat, amount: +pay.amount || 0,
+      acct: pay.acct, note: tr('cp.note', { who: pay.party || '—', m: pay.method }), method: pay.method || 'Transfer', date: pay.date, time: '12:00', custPay: true, party: pay.party, proof: pay.proof });
     setToast(tr('cp.toast', { amt: FIN.fmt(+pay.amount || 0) }));
   };
-  const delPayment = (id) => setEntries((prev) => prev.filter((e) => e.id !== id));
-  uEh(() => {
-    const salesCat = (cats.income.find((c) => /refill|galon|jual|sales/i.test(c.label)) || cats.income[0] || {}).key || 'Refill';
-    const supCat = (cats.expense.find((c) => /supplies|produksi|pabrik|bottling|manufact/i.test(c.label)) || cats.expense[0] || {}).key || 'Supplies';
-    const cashAcct = (accounts.find((a) => a.id === settings.setoranAcct) || accounts.find((a) => a.type === 'cash') || accounts[0] || {}).id;
-    const bankAcct = (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id;
-    const costPer = +settings.costPerGalon || 0;
-    const byDay = {};
-    setoran.forEach((r) => { (byDay[r.date] = byDay[r.date] || []).push(r); });
-    const fresh = [];
-    Object.keys(byDay).forEach((day) => {
-      const items = byDay[day];
-      const totalSetoran = items.reduce((s, r) => s + FS.setoranOf(r), 0);
-      const galon = items.reduce((s, r) => s + (+r.galon || 0), 0);
-      if (totalSetoran !== 0) fresh.push({ id: 'stinc-' + day, type: 'income', category: salesCat, amount: totalSetoran,
-        acct: cashAcct, note: tr('st.noteEntry', { d: day, n: galon, c: items.length }), method: 'Cash', date: day, time: '18:00', setoranDay: day, proof: (items.find((r) => r.proof) || {}).proof });
-      const mfg = galon * costPer;
-      if (mfg > 0) fresh.push({ id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg,
-        acct: bankAcct, note: tr('st.mfgNote', { d: day, n: galon, c: FIN.fmt(costPer) }), method: 'Transfer', date: day, time: '18:05', setoranMfg: day });
-    });
-    setEntries((prev) => {
-      const others = prev.filter((e) => !e.setoranDay && !e.setoranMfg);
-      const cur = prev.filter((e) => e.setoranDay || e.setoranMfg);
-      const sig = (arr) => arr.map((e) => (e.setoranDay || e.setoranMfg) + ':' + e.amount + ':' + e.acct + ':' + (e.proof ? '1' : '0')).sort().join('|');
-      if (sig(cur) === sig(fresh)) return prev;
-      return [...fresh, ...others];
-    });
-  }, [setoran, settings.costPerGalon, settings.setoranAcct, cats, accounts, lang]);
+  const delPayment = (id) => removeEntry(id);
+  // (setoran→cash-flow derivation is the `setoranEntries` memo above — computed
+  // in-memory from the setoran REST table and never persisted.)
 
   const alerts = uMh(() => p.seeMoney
     ? ALERTS.computeAlerts({ entries, balance: stats.balance, monthIncome: monthStats.income, monthExpense: monthStats.expense, month: monthKey, thresholds: settings, fmt: FIN.fmt, lang })

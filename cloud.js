@@ -35,9 +35,11 @@
   // Sync every airro_* key EXCEPT per-browser / auth-only ones. The sync-meta key
   // (per-key last local-write time) is also local-only.
   const META_KEY = 'airro_synmeta_v1';
-  // Setoran migrated to the REST per-record table — its old blob (airro_setoran_v2)
-  // and the local read-cache must NOT be mirrored, or the two paths would fight.
-  const SKIP = new Set(['airro_session_v1', 'airro_navopen_v1', 'airro_users_v1', 'airro_jwt_v1', 'airro_setoran_v2', 'airro_setoran_cache_v1', META_KEY]);
+  // Setoran AND the cash book are migrated to REST per-record tables — their old
+  // blobs (airro_setoran_v2 / airro_cashbook_v4) and local read-caches must NOT be
+  // mirrored to /state, or the two paths would fight (the poll would resurrect a
+  // deleted entry from a stale blob push — the exact data-loss this fixes).
+  const SKIP = new Set(['airro_session_v1', 'airro_navopen_v1', 'airro_users_v1', 'airro_jwt_v1', 'airro_setoran_v2', 'airro_setoran_cache_v1', 'airro_cashbook_v4', 'airro_cashbook_cache_v1', META_KEY]);
   const shouldSync = (k) => /^airro_/i.test(k) && !SKIP.has(k);
 
   const rawSet = localStorage.setItem.bind(localStorage);

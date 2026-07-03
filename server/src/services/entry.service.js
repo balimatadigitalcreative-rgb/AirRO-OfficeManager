@@ -15,10 +15,11 @@ function buildWhere(q) {
     if (q.dateFrom) where.date.gte = q.dateFrom;
     if (q.dateTo) where.date.lte = q.dateTo;
   }
+  if (q.since) where.updatedAt = { gte: new Date(q.since) };
   if (q.search) {
     where.OR = [
       { note: { contains: q.search } },
-      { categoryKey: { contains: q.search } },
+      { category: { contains: q.search } },
       { method: { contains: q.search } },
     ];
   }
@@ -43,6 +44,7 @@ async function list(q) {
 
   return {
     data: items,
+    now: new Date().toISOString(),   // lets the client run an incremental (?since=) poll
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 },
   };
 }

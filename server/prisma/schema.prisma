@@ -74,8 +74,23 @@ model Entry {
   time        String    @default("00:00") // HH:mm
   status      String    @default("Completed") // Completed | Pending | Failed
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt @default(now()) // bumped on every change (incremental sync)
 
-  category   Category? @relation(fields: [categoryKey], references: [key])
+  // The frontend cash book stores category/account as free-form keys resolved
+  // against its own (blob-backed) category & account lists — which may include
+  // user-created categories that never reach the Category table. So these are
+  // PLAIN columns (like Setoran.armada), NOT foreign keys, to avoid rejecting a
+  // valid entry whose category/account only exists client-side.
+  category   String? // frontend category key (e.g. "Refill", "Supplies")
+  acct       String? // frontend account id (e.g. "cash", "bca")
+  proof      String? // attached proof image (data URL / path)
+  // Extra frontend-specific tags (custPay/party/payroll/thr/orientation), JSON.
+  // Kept opaque here so new tags never require a schema change.
+  meta       String?
+
+  // Legacy relational columns kept for backward-compatibility; unused by the
+  // per-record cash-book path above (always null there).
+  categoryRel Category? @relation(fields: [categoryKey], references: [key])
   categoryKey String?
   account    Account?  @relation(fields: [accountId], references: [id])
   accountId  String?
@@ -84,6 +99,7 @@ model Entry {
 
   @@index([date])
   @@index([type])
+  @@index([updatedAt])
 }
 
 model Transfer {
