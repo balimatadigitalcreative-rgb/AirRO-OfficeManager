@@ -166,20 +166,29 @@ function FApp() {
       if (r && Array.isArray(r.data)) { const rows = r.data.map(apiToEntry); setRealEntries(rows); try { localStorage.setItem('airro_cashbook_cache_v1', JSON.stringify(rows)); } catch (e) {} }
     }).catch(() => {});
   };
+  // On failure: a 403 means the server refused (missing addEntry/edit/delete cap) —
+  // tell the user plainly; anything else is a transient network error that retries.
+  // Either way reloadEntries() re-syncs the optimistic change to the server's truth
+  // (a rejected delete reappears; a rejected add drops back out).
+  const entryErr = (op) => (err) => {
+    const denied = err && err.status === 403;
+    setToast(tr(denied ? (op === 'delete' ? 'toast.noDeletePerm' : 'toast.noPerm') : 'st.syncErr'));
+    reloadEntries();
+  };
   const addEntry = (e) => {
     if (isDerivedEntry(e.id)) return;   // derived rows are in-memory only
     setRealEntries((prev) => [apiToEntry(entryToApi(e)), ...prev.filter((x) => x.id !== e.id)]);   // optimistic
-    if (window.API && window.API.entries) window.API.entries.create(entryToApi(e)).then(reloadEntries).catch(() => { setToast(tr('st.syncErr')); reloadEntries(); });
+    if (window.API && window.API.entries) window.API.entries.create(entryToApi(e)).then(reloadEntries).catch(entryErr('add'));
   };
   const editEntry = (e) => {
     if (isDerivedEntry(e.id)) return;
     setRealEntries((prev) => prev.map((x) => (x.id === e.id ? apiToEntry(entryToApi(e)) : x)));   // optimistic
-    if (window.API && window.API.entries) window.API.entries.update(e.id, entryToApi(e)).then(reloadEntries).catch(() => { setToast(tr('st.syncErr')); reloadEntries(); });
+    if (window.API && window.API.entries) window.API.entries.update(e.id, entryToApi(e)).then(reloadEntries).catch(entryErr('edit'));
   };
   const removeEntry = (id) => {
     if (isDerivedEntry(id)) return;   // can't delete a derived row; it regenerates from setoran
     setRealEntries((prev) => prev.filter((x) => x.id !== id));   // optimistic
-    if (window.API && window.API.entries) window.API.entries.remove(id).then(reloadEntries).catch(() => { setToast(tr('st.syncErr')); reloadEntries(); });
+    if (window.API && window.API.entries) window.API.entries.remove(id).then(reloadEntries).catch(entryErr('delete'));
   };
   // Initial load + light realtime poll (only for users with cash-book access).
   uEh(() => {
