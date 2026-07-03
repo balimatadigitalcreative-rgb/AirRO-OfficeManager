@@ -39,7 +39,9 @@
   // blobs (airro_setoran_v2 / airro_cashbook_v4) and local read-caches must NOT be
   // mirrored to /state, or the two paths would fight (the poll would resurrect a
   // deleted entry from a stale blob push — the exact data-loss this fixes).
-  const SKIP = new Set(['airro_session_v1', 'airro_navopen_v1', 'airro_users_v1', 'airro_jwt_v1', 'airro_setoran_v2', 'airro_setoran_cache_v1', 'airro_cashbook_v4', 'airro_cashbook_cache_v1', 'airro_hrd_staff_v7', 'airro_staff_cache_v1', 'airro_cashbon_v1', 'airro_cashbon_cache_v1', 'airro_approvals_v4', 'airro_approvals_cache_v1', 'airro_calendar_v1', 'airro_calendar_cache_v1', 'airro_accounts_v2', 'airro_accounts_cache_v1', 'airro_cats_v1', 'airro_cats_cache_v1', META_KEY]);
+  const SKIP = new Set(['airro_session_v1', 'airro_navopen_v1', 'airro_users_v1', 'airro_jwt_v1', 'airro_setoran_v2', 'airro_setoran_cache_v1', 'airro_cashbook_v4', 'airro_cashbook_cache_v1', 'airro_hrd_staff_v7', 'airro_staff_cache_v1', 'airro_cashbon_v1', 'airro_cashbon_cache_v1', 'airro_approvals_v4', 'airro_approvals_cache_v1', 'airro_calendar_v1', 'airro_calendar_cache_v1', 'airro_accounts_v2', 'airro_accounts_cache_v1', 'airro_cats_v1', 'airro_cats_cache_v1',
+    'airro_settings_v1', 'airro_settings_cache_v1', 'airro_hrd_rates_v1', 'airro_hrd_rates_cache_v1', 'airro_hr_budget_v1', 'airro_hr_budget_cache_v1',
+    'airro_departments_v1', 'airro_departments_cache_v1', 'airro_projects_v3', 'airro_projects_cache_v1', META_KEY]);
   const shouldSync = (k) => /^airro_/i.test(k) && !SKIP.has(k);
 
   const rawSet = localStorage.setItem.bind(localStorage);

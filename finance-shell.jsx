@@ -100,13 +100,10 @@ function FApp() {
   const [syncTick, setSyncTick] = uSh(0);             // bumps on every applied remote change → forces on-demand readers (attendance / orientation) to re-read
   const [navOpen, setNavOpen] = uSh(() => { try { return JSON.parse(localStorage.getItem('airro_navopen_v1')) || {}; } catch (e) { return {}; } });
 
-  uEh(() => { FS.saveSettings(settings); }, [settings]);
-  uEh(() => { HRD.saveRates(hrdRates); }, [hrdRates]);
-  uEh(() => { HRD.saveDepartments(departments); }, [departments]);
-  uEh(() => { HRD.saveBudget(hrBudget); }, [hrBudget]);
+  // settings/rates/budget/departments/projects persist to REST /settings keys (see
+  // the config slices below) — no longer mirrored to /state.
   uEh(() => { FS.saveFleet(fleet); }, [fleet]);
   uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
-  uEh(() => { CO.saveProjects(projects); }, [projects]);
   uEh(() => { FS.saveUsers(users); }, [users]);
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
@@ -419,13 +416,34 @@ function FApp() {
       return next;
     });
   };
+  // ── Config singletons via the REST /settings key-value store (off /state). Each
+  // is one JSON key; low-conflict, whole-object write. Writes gate per-key on the
+  // server (finance settings → 'settings'; HR keys → payroll/attendance/employees).
+  const settingSlice = (key, cacheKey, setState, canWrite) => {
+    const cache = (v) => { try { localStorage.setItem(cacheKey, JSON.stringify(v)); } catch (e) {} };
+    const reload = () => (window.API && window.API.settings) ? window.API.settings.get(key).then((r) => { const v = r && r.data ? r.data.value : undefined; if (v !== undefined && v !== null) { setState(v); cache(v); } }).catch(() => {}) : Promise.resolve();
+    const apply = (updater) => setState((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      cache(next);
+      if (canWrite && window.API && window.API.settings) window.API.settings.set(key, next).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reload(); });
+      return next;
+    });
+    return { reload, apply };
+  };
+  const settingsSlice = settingSlice('airro_settings', 'airro_settings_cache_v1', setSettings, !!p.settings);
+  const ratesSlice = settingSlice('airro_hrd_rates', 'airro_hrd_rates_cache_v1', setHrdRates, !!(p.payroll || p.attendance || p.settings));
+  const budgetSlice = settingSlice('airro_hr_budget', 'airro_hr_budget_cache_v1', setHrBudget, !!(p.payroll || p.settings));
+  const deptSlice = settingSlice('airro_departments', 'airro_departments_cache_v1', setDepartments, !!(p.payroll || p.employees || p.settings));
+  const projSlice = settingSlice('airro_projects', 'airro_projects_cache_v1', setProjects, !!(p.company || p.payroll || p.settings));
+  const applySettings = settingsSlice.apply, applyRates = ratesSlice.apply, applyBudget = budgetSlice.apply, applyDepartments = deptSlice.apply, applyProjects = projSlice.apply;
+  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); };
   uEh(() => {
     if (!(window.API && window.API.accounts)) return;
-    reloadAccounts(); reloadCats();
-    const onVis = () => { if (document.visibilityState === 'visible') { reloadAccounts(); reloadCats(); } };
+    reloadConfig();
+    const onVis = () => { if (document.visibilityState === 'visible') reloadConfig(); };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
-  }, [p.seeMoney]);
+  }, [p.seeMoney, p.payroll]);
 
   // Re-read every data slice from the (server-hydrated) stores into React state.
   // NOTE: this covers every slice held in shell state. On-demand stores read
@@ -446,11 +464,9 @@ function FApp() {
     setter(val);
   };
   const refreshAllSlices = () => {
-    applySlice('settings', FS.loadSettings(), setSettings);   // entries/cats are REST-loaded, not from the blob
-    applySlice('fleet', FS.loadFleet(), setFleet);   // accounts/setoran are REST-loaded, not from the blob
+    applySlice('fleet', FS.loadFleet(), setFleet);   // accounts/setoran/cats/settings are REST-loaded, not from the blob
     applySlice('transfers', FS.loadTransfers(), setTransfers);
-    applySlice('hrdRates', HRD.loadRates(), setHrdRates); applySlice('hrBudget', HRD.loadBudget(), setHrBudget); applySlice('departments', HRD.loadDepartments(), setDepartments);   // hrdStaff is REST-loaded (reloadStaff), not from the blob
-    applySlice('projects', CO.loadProjects(), setProjects);   // approvals + cashbons + calendar are REST-loaded, not from the blob
+    // hrdStaff, rates, budget, departments, projects, approvals, cashbons, calendar are all REST-loaded, not from the blob
     applySlice('users', FS.loadUsers(), setUsers);
   };
 
@@ -459,7 +475,7 @@ function FApp() {
     // Backend session active → the cloud adapter hydrated localStorage from the
     // server; re-pull ALL slices so the UI shows the shared data. Entries & setoran
     // live in REST tables (not the blob), so pull them explicitly too.
-    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); reloadAccounts(); reloadCats(); }
+    if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); reloadConfig(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
 
@@ -488,7 +504,7 @@ function FApp() {
       if (evt.entity === 'cashbon' || evt.entity === 'focus') reloadCashbons();
       if (evt.entity === 'approval' || evt.entity === 'focus') reloadApprovals();
       if (evt.entity === 'calendar' || evt.entity === 'focus') reloadEvents();
-      if (evt.entity === 'config' || evt.entity === 'focus') { reloadAccounts(); reloadCats(); }
+      if (evt.entity === 'config' || evt.entity === 'focus') reloadConfig();
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
   }, []);
@@ -795,7 +811,7 @@ function FApp() {
           </header>
 
           {screen === 'setoran' && p.setoran && (
-            <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? setFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => setSettings({ ...settings, costPerGalon: v })} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => setSettings({ ...settings, setoranAcct: v })} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
+            <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? setFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
           )}
 
           {screen === 'moneyspots' && p.cashflow && (
@@ -830,21 +846,21 @@ function FApp() {
           )}
 
           {screen === 'projects' && p.company && p.reset && (
-            <COMPANY.ProjectsScreen projects={projects} setProjects={setProjects} canEdit={true} />
+            <COMPANY.ProjectsScreen projects={projects} setProjects={applyProjects} canEdit={true} />
           )}
 
           {screen === 'company' && p.company && (            <COMPANY.CompanyDashboard fin={stats} staff={hrdStaff} rates={hrdRates} budget={hrBudget} approvals={approvals} setApprovals={applyApprovals} role={user.role} projects={projects} setoran={setoran} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} userName={user.name} />
           )}
 
           {screen === 'headcount' && p.payroll && p.attendance && (
-            <COMPANY.HeadcountAffordability staff={hrdStaff} rates={hrdRates} budget={hrBudget} setBudget={setHrBudget} canEdit={p.payroll} />
+            <COMPANY.HeadcountAffordability staff={hrdStaff} rates={hrdRates} budget={hrBudget} setBudget={applyBudget} canEdit={p.payroll} />
           )}
 
           {screen === 'hrreport' && p.employees && (
             <COMPANY.HRReport staff={hrdStaff} rates={hrdRates} departments={departments} budget={hrBudget} monthKey={monthKey} today={FIN.TODAY} approvals={approvals} gran={gran} anchor={anchor} setAnchor={setAnchor} range={range} periodLbl={periodLbl} setGran={setGran} />
           )}
 
-          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={setHrdRates} departments={departments} setDepartments={setDepartments} staff={hrdStaff} setStaff={applyStaff} canEditDept={p.payroll} />
+          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={applyRates} departments={departments} setDepartments={applyDepartments} staff={hrdStaff} setStaff={applyStaff} canEditDept={p.payroll} />
           )}
 
           {screen === 'employees' && p.employees && (
@@ -872,15 +888,15 @@ function FApp() {
           )}
 
           {screen === 'thr' && p.payroll && (
-            <COMPANY.ThrScreen staff={hrdStaff} rates={hrdRates} setRates={setHrdRates} today={FIN.TODAY} posted={thrPosted} onPost={postThr} canPost={p.addEntry || p.payroll} canEdit={p.payroll} />
+            <COMPANY.ThrScreen staff={hrdStaff} rates={hrdRates} setRates={applyRates} today={FIN.TODAY} posted={thrPosted} onPost={postThr} canPost={p.addEntry || p.payroll} canEdit={p.payroll} />
           )}
 
           {screen === 'payroll' && p.payroll && (
-            <PAYROLL.PayrollScreen rates={hrdRates} setRates={setHrdRates} staff={hrdStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} />
+            <PAYROLL.PayrollScreen rates={hrdRates} setRates={applyRates} staff={hrdStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} />
           )}
 
           {screen === 'settings' && p.settings && (
-            <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canReset={p.reset} onResetData={resetData} settings={settings} onSettingsChange={setSettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
+            <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canReset={p.reset} onResetData={resetData} settings={settings} onSettingsChange={applySettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
           )}
 
           {screen === 'users' && p.reset && (

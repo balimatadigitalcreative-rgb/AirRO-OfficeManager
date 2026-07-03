@@ -1,13 +1,12 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
-const state = require('./state.service');
 const rules = require('./cashbon.rules');
 
-// Staff + kasbon are now per-record REST tables (TAHAP B/C). Only the HR rate table
-// is still a shared /state doc, so read the kasbon week-mode from there.
-const RATES_DOC = 'airro_hrd_rates_v1';
-const parseDoc = (v, fb) => { if (!v) return fb; try { return JSON.parse(v); } catch (e) { return fb; } };
+// Staff + kasbon are now per-record REST tables (TAHAP B/C). HR rates moved to the
+// /settings key-value store (TAHAP C4b), so read the kasbon week-mode from there
+// (NOT the old airro_hrd_rates_v1 /state blob, which is no longer mirrored).
+const settingsService = require('./settings.service');
 const TRAIL = ['requestedBy', 'requestedAt', 'approvedBy', 'decidedAt', 'rejectReason'];
 
 // Base salary from the Employee table (the `data` document is authoritative; the
@@ -35,7 +34,7 @@ async function cycleContext(employeeId) {
   const CONSUMES = { pending: 1, approved: 1, active: 1 };
   const rows = await prisma.cashbon.findMany({ where: { employeeId } });
   const existing = rows.filter((c) => CONSUMES[c.status || 'pending']);
-  const r = parseDoc(await state.get(RATES_DOC), {});
+  let r = {}; try { r = (await settingsService.get('airro_hrd_rates')) || {}; } catch (e) {}
   const mode = r && r.cashbonWeekMode === 'calendar' ? 'calendar' : 'cutoff';
   return { base, existing, mode };
 }

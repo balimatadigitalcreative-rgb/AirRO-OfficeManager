@@ -47,9 +47,30 @@ async function migrateCats() {
   console.log(`✅ Setting "airro_cats" written: ${obj.income.length} income + ${obj.expense.length} expense categories.`);
 }
 
+// settings/rates/budget/departments/projects → one Setting key each (verbatim).
+const KEY_MAP = [
+  ['airro_settings_v1', 'airro_settings'],
+  ['airro_hrd_rates_v1', 'airro_hrd_rates'],
+  ['airro_hr_budget_v1', 'airro_hr_budget'],
+  ['airro_departments_v1', 'airro_departments'],
+  ['airro_projects_v3', 'airro_projects'],
+];
+async function migrateSettingKeys() {
+  console.log(`\n== Settings keys ==`);
+  for (const [blobKey, settingKey] of KEY_MAP) {
+    const doc = await prisma.document.findUnique({ where: { key: blobKey } });
+    if (!doc) { console.log(`  ${blobKey} → ${settingKey}: no blob, skipped.`); continue; }
+    let val; try { val = JSON.parse(doc.value); } catch (e) { console.log(`  ${blobKey}: not JSON, skipped.`); continue; }
+    await prisma.setting.upsert({ where: { key: settingKey }, update: { value: JSON.stringify(val) }, create: { key: settingKey, value: JSON.stringify(val) } });
+    const desc = Array.isArray(val) ? `${val.length} items` : (typeof val === 'object' ? `${Object.keys(val).length} keys` : String(val));
+    console.log(`  ✅ ${blobKey} → Setting "${settingKey}" (${desc})`);
+  }
+}
+
 async function main() {
   await migrateAccounts();
   await migrateCats();
+  await migrateSettingKeys();
   console.log('\nDone.');
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());
