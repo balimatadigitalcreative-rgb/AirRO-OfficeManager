@@ -1131,9 +1131,31 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .content { max-width: 100%; }
 img, svg, canvas, video { max-width: 100%; }
 
+/* Phones (≤560px): keep the employee detail + attendance readable and un-cramped;
+   the time/calendar/dropdown popups already float (fixed) so they aren't clipped. */
+@media (max-width: 560px) {
+  /* Detail header: name + icon-only action buttons + X all fit on one row. */
+  .ed-head { padding: 14px 14px; gap: 10px; }
+  .ed-name { font-size: 16px; }
+  .ed-pos { font-size: 12px; }
+  .ed-head .ed-editbtn { font-size: 0; padding: 0 10px; gap: 0; height: 34px; }
+  .ed-head .ed-editbtn svg { margin: 0; }
+  .ed-body { padding: 16px 14px calc(18px + env(safe-area-inset-bottom)); }
+  /* Attendance edit row → date + status on top, times full-width beneath (no crowding). */
+  .ed-log-row.edit { grid-template-columns: 38px 1fr; row-gap: 7px; padding: 8px 10px; }
+  .ed-log-row.edit > .ed-inline-times { grid-column: 1 / -1; justify-self: stretch; justify-content: flex-start; flex-wrap: wrap; }
+  .ed-inline-times .ui-tp.compact .ui-dd-control { height: 34px; }
+  /* Big stat numbers may wrap instead of being clipped. */
+  .stat-box .tnum, .acct-card .tnum, .today-card .tnum, .fin-stat-row .tnum { overflow-wrap: anywhere; }
+  /* Forms: full-width inputs + comfortable 44px tap targets, footer buttons don't clip. */
+  .modal-card .fld, .modal-card .amt-input, .modal-card .ui-dd, .modal-card .ui-dd-control { width: 100%; }
+  .modal-foot { flex-wrap: wrap; }
+  .modal-foot .btn { min-height: 44px; flex: 1 1 auto; }
+}
+
 /* Small phones (≤380px, e.g. iPhone SE / mini): tighten chrome */
 @media (max-width: 380px) {
-  .content { padding: 12px 10px 96px; }
+  .content { padding: 12px 10px calc(74px + env(safe-area-inset-bottom)); }
   .modal-scrim { padding: 12px; }
   .modal-card { padding: 18px 16px; border-radius: 18px; }
   /* Match the sticky header's bleed to the mobile card padding (18/16) so it

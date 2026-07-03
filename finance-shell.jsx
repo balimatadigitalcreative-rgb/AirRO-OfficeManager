@@ -613,7 +613,11 @@ function FApp() {
         {NAV.slice(0, 4).map((n) => (
           <button key={n.id} className={`mnav ${screen === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>{Ish(n.icon, { s: 22 })}<span>{n.label}</span></button>
         ))}
-        <button className="mnav" onClick={logout}><IconLogout s={22} /><span>{tr('nav.signout')}</span></button>
+        {/* "Menu" opens the drawer with EVERY permitted menu (finance + HR + admin),
+            so nothing is unreachable on mobile. Highlighted when the drawer is open
+            OR the current screen isn't one of the 4 quick items. Logout lives in the
+            drawer's user chip. */}
+        <button className={`mnav ${drawer || !NAV.slice(0, 4).some((n) => n.id === screen) ? 'on' : ''}`} onClick={() => setDrawer(true)}><IconMenu s={22} /><span>{tr('nav.more')}</span></button>
       </nav>
 
       {toast && <FToast msg={toast} onDone={() => setToast(null)} />}

@@ -181,7 +181,8 @@
 @media (max-width: 860px) {
   .sidebar { display: none; }
   .main { padding: 0; }
-  .content { border-radius: 0; min-height: 100vh; padding: calc(16px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 90px calc(14px + env(safe-area-inset-left)); gap: 16px; }
+  /* Bottom padding clears the fixed bottom-nav (~62px) AND the iOS home indicator. */
+  .content { border-radius: 0; min-height: 100vh; padding: calc(16px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(74px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); gap: 16px; overflow-x: hidden; }
   .hamburger { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); color: var(--ink); }
   .topbar h1 { font-size: 21px; }
   .topbar .sub { display: none; }
@@ -194,12 +195,16 @@
   .tx-head .sort-head { font-size: 11px; }
   .mobile-nav {
     display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
-    background: var(--card); border-top: 1px solid var(--border); padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
-    justify-content: space-around;
+    background: var(--card); border-top: 1px solid var(--border); padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    gap: 2px;
   }
-  .mnav { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; color: var(--text-faint); padding: 4px 14px; border-radius: 12px; }
-  .mnav.on { color: var(--green-800); }
+  /* Each item takes an equal share so 5 (4 quick + Menu) fit any phone width. */
+  .mnav { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; color: var(--text-faint); padding: 5px 2px; border-radius: 12px; min-height: 48px; justify-content: center; }
+  .mnav svg { flex-shrink: 0; }
+  .mnav span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mnav.on { color: var(--green-800); background: var(--mint-50, rgba(11,126,177,.08)); }
   .mnav.on svg { color: var(--green-800); }
+  .mnav:active { background: var(--card-soft); }
   /* slide-in drawer */
   .drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--canvas); z-index: 60; padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)) 16px; transform: translateX(-100%); transition: transform .26s ease; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-lg); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .drawer.open { transform: none; }
