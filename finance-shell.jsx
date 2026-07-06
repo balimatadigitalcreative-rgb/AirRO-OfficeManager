@@ -84,8 +84,8 @@ function FApp() {
   // local read-cache (SKIP-listed, not mirrored) just for instant paint on reload;
   // the authoritative list is (re)loaded from GET /setoran.
   const [setoran, setSetoran] = uSh(() => { try { const c = localStorage.getItem('airro_setoran_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
-  const [fleet, setFleet] = uSh(() => FS.loadFleet());
-  const [transfers, setTransfers] = uSh(() => FS.loadTransfers());
+  const [fleet, setFleet] = uSh(() => { try { const c = localStorage.getItem('airro_fleet_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a) && a.length) return a; } } catch (e) {} return FS.loadFleet(); });
+  const [transfers, setTransfers] = uSh(() => { try { const c = localStorage.getItem('airro_transfers_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return FS.loadTransfers(); });
   const [projects, setProjects] = uSh(() => CO.loadProjects());
   // Kasbon now lives in the REST per-record Cashbon table (like setoran/entries/
   // staff), NOT the /state blob — submit/approve by different users no longer clobber
@@ -102,9 +102,7 @@ function FApp() {
 
   // settings/rates/budget/departments/projects persist to REST /settings keys (see
   // the config slices below) — no longer mirrored to /state.
-  uEh(() => { FS.saveFleet(fleet); }, [fleet]);
-  uEh(() => { FS.saveTransfers(transfers); }, [transfers]);
-  uEh(() => { FS.saveUsers(users); }, [users]);
+  uEh(() => { FS.saveUsers(users); }, [users]);   // fleet/transfers are REST-loaded (see config slices below)
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
   const p = (user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier');
@@ -436,7 +434,28 @@ function FApp() {
   const deptSlice = settingSlice('airro_departments', 'airro_departments_cache_v1', setDepartments, !!(p.payroll || p.employees || p.settings));
   const projSlice = settingSlice('airro_projects', 'airro_projects_cache_v1', setProjects, !!(p.company || p.payroll || p.settings));
   const applySettings = settingsSlice.apply, applyRates = ratesSlice.apply, applyBudget = budgetSlice.apply, applyDepartments = deptSlice.apply, applyProjects = projSlice.apply;
-  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); };
+  // Fleet is a plain string array → a /settings key (write cap: settings|setoran).
+  const fleetSlice = settingSlice('airro_fleet', 'airro_fleet_cache_v1', setFleet, !!(p.setoran || p.settings));
+  const applyFleet = fleetSlice.apply;
+  // Transfers → /transfers replace-collection sync. Frontend uses from/to; the table
+  // uses fromId/toId (FK to Account). Read cap 'cashflow', write cap 'addEntry'.
+  const transferToApi = (t) => ({ id: t.id, fromId: t.from, toId: t.to, amount: Math.max(0, Math.round(+t.amount || 0)), date: t.date, note: t.note || '' });
+  const apiToTransfer = (r) => ({ id: r.id, from: r.fromId, to: r.toId, amount: r.amount, date: r.date, note: r.note || '' });
+  const reloadTransfers = () => {
+    if (!p.cashflow || !(window.API && window.API.transfers)) return Promise.resolve();
+    return window.API.transfers.list('limit=5000').then((r) => {
+      if (r && Array.isArray(r.data)) { const rows = r.data.map(apiToTransfer); setTransfers(rows); try { localStorage.setItem('airro_transfers_cache_v1', JSON.stringify(rows)); } catch (e) {} }
+    }).catch(() => {});
+  };
+  const applyTransfers = (updater) => {
+    setTransfers((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try { localStorage.setItem('airro_transfers_cache_v1', JSON.stringify(next)); } catch (e) {}
+      if (p.addEntry && window.API && window.API.transfers) window.API.transfers.sync(next.map(transferToApi)).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadTransfers(); });
+      return next;
+    });
+  };
+  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); };
   uEh(() => {
     if (!(window.API && window.API.accounts)) return;
     reloadConfig();
@@ -464,9 +483,9 @@ function FApp() {
     setter(val);
   };
   const refreshAllSlices = () => {
-    applySlice('fleet', FS.loadFleet(), setFleet);   // accounts/setoran/cats/settings are REST-loaded, not from the blob
-    applySlice('transfers', FS.loadTransfers(), setTransfers);
-    // hrdStaff, rates, budget, departments, projects, approvals, cashbons, calendar are all REST-loaded, not from the blob
+    // Everything shared is REST-loaded now (entries, setoran, staff, cashbons,
+    // approvals, calendar, accounts, cats, settings, rates, budget, departments,
+    // projects, fleet, transfers). Only the users list remains blob-backed.
     applySlice('users', FS.loadUsers(), setUsers);
   };
 
@@ -811,11 +830,11 @@ function FApp() {
           </header>
 
           {screen === 'setoran' && p.setoran && (
-            <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? setFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
+            <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
           )}
 
           {screen === 'moneyspots' && p.cashflow && (
-            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={setTransfers} canEdit={p.addEntry} />
+            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} />
           )}
 
           {screen === 'overview' && p.cashflow && (

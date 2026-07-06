@@ -47,13 +47,14 @@ async function migrateCats() {
   console.log(`✅ Setting "airro_cats" written: ${obj.income.length} income + ${obj.expense.length} expense categories.`);
 }
 
-// settings/rates/budget/departments/projects → one Setting key each (verbatim).
+// settings/rates/budget/departments/projects/fleet → one Setting key each (verbatim).
 const KEY_MAP = [
   ['airro_settings_v1', 'airro_settings'],
   ['airro_hrd_rates_v1', 'airro_hrd_rates'],
   ['airro_hr_budget_v1', 'airro_hr_budget'],
   ['airro_departments_v1', 'airro_departments'],
   ['airro_projects_v3', 'airro_projects'],
+  ['airro_fleet_v1', 'airro_fleet'],
 ];
 async function migrateSettingKeys() {
   console.log(`\n== Settings keys ==`);
@@ -67,10 +68,34 @@ async function migrateSettingKeys() {
   }
 }
 
+// transfers (airro_transfers_v1) → Transfer table. Frontend uses from/to; the table
+// uses fromId/toId (FK to Account). Skips transfers whose account is missing.
+async function migrateTransfers() {
+  const doc = await prisma.document.findUnique({ where: { key: 'airro_transfers_v1' } });
+  const before = await prisma.transfer.count();
+  console.log(`\n== Transfers ==  table BEFORE: ${before}`);
+  if (!doc) { console.log('No airro_transfers_v1 blob — skipping.'); return; }
+  let arr; try { arr = JSON.parse(doc.value); } catch (e) { console.log('transfers blob not JSON — skipping.'); return; }
+  if (!Array.isArray(arr)) { console.log('transfers blob not an array — skipping.'); return; }
+  let created = 0, updated = 0, missing = 0;
+  for (const t of arr.filter((x) => x && x.id && x.date && x.amount != null)) {
+    const fromId = t.from || t.fromId, toId = t.to || t.toId;
+    const okF = fromId && await prisma.account.count({ where: { id: String(fromId) } });
+    const okT = toId && await prisma.account.count({ where: { id: String(toId) } });
+    if (!okF || !okT) { missing++; continue; }
+    const data = { fromId: String(fromId), toId: String(toId), amount: num(t.amount), date: String(t.date), note: t.note != null ? String(t.note) : '' };
+    const ex = await prisma.transfer.findUnique({ where: { id: String(t.id) } });
+    if (ex) { await prisma.transfer.update({ where: { id: String(t.id) }, data }); updated++; }
+    else { await prisma.transfer.create({ data: { id: String(t.id), ...data } }); created++; }
+  }
+  console.log(`Blob transfers: ${arr.length}. Created: ${created}, Updated: ${updated}, Skipped(missing account): ${missing}. Table AFTER: ${await prisma.transfer.count()}`);
+}
+
 async function main() {
   await migrateAccounts();
   await migrateCats();
   await migrateSettingKeys();
+  await migrateTransfers();
   console.log('\nDone.');
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());
