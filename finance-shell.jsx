@@ -540,6 +540,18 @@ function FApp() {
     if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); reloadConfig(); }
   };
   const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
+  // Self profile edit (display name + avatar colour only — server rejects anything
+  // else). Reflect the new name/colour in the signed-in user + users list so every
+  // profile card updates immediately; role/permissions are left untouched.
+  const updateProfile = (data) => {
+    if (!(window.API && window.API.auth && window.API.auth.updateProfile)) return Promise.reject(new Error('offline'));
+    return window.API.auth.updateProfile(data).then((u) => {
+      setUser((prev) => ({ ...prev, name: u.name, color: u.color }));
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, name: u.name, color: u.color } : x)));
+      setToast(tr('pm.saved'));
+      return u;
+    });
+  };
 
   // Restore a backend session from a persisted JWT on reload.
   uEh(() => {
@@ -808,6 +820,9 @@ function FApp() {
 
   const NAV = navForRole(p, user ? user.role : '');
   const go = (id) => { if (NAV.find((n) => n.id === id)) setScreen(id); setDrawer(false); };
+  // Admin/settings shortcuts inside the profile menu — already perm-filtered by NAV,
+  // so a non-admin simply sees none.
+  const pmShortcuts = NAV.filter((n) => n.id === 'users' || n.id === 'settings' || n.id === 'hrsettings');
   const toggleGrp = (g) => setNavOpen((prev) => { const n = { ...prev, [g]: prev[g] === false ? true : false }; try { localStorage.setItem('airro_navopen_v1', JSON.stringify(n)); } catch (e) {} return n; });
   const Nav = () => (
     <>
@@ -907,7 +922,8 @@ function FApp() {
               )}
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
               {p.seeMoney && <ALERTS.AlertBell alerts={alerts} />}
-              <div className="avatar" title={user.name} style={{ background: user.color, color: '#fff' }}>{FS.initials(user.name)}</div>
+              <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []}
+                onChangePassword={() => setPwModal(true)} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
           </header>
 

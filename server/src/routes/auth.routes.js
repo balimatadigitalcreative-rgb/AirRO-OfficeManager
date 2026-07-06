@@ -11,5 +11,7 @@ router.post('/login', validate({ body: ctrl.schemas.loginSchema }), ctrl.login);
 router.get('/me', requireAuth, ctrl.me);
 // A signed-in user changes their own password (verifies the current one first).
 router.post('/change-password', requireAuth, validate({ body: ctrl.schemas.changePasswordSchema }), ctrl.changePassword);
+// A signed-in user edits their own profile (display name / avatar colour only).
+router.patch('/me', requireAuth, validate({ body: ctrl.schemas.updateProfileSchema }), ctrl.updateProfile);
 
 module.exports = router;

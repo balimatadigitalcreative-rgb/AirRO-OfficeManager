@@ -52,6 +52,8 @@
   async function me() { const r = await req('GET', '/auth/me'); return r.user; }
   // Change the signed-in user's own password (server verifies the old one).
   async function changePassword(oldPassword, newPassword) { return req('POST', '/auth/change-password', { oldPassword, newPassword }); }
+  // Edit the signed-in user's own profile (display name / avatar colour only).
+  async function updateProfile(data) { const r = await req('PATCH', '/auth/me', data); return r.user; }
   function logout() { setToken(null); }
 
   // ---- generic resource helpers ----
@@ -67,8 +69,8 @@
   window.API = {
     BASE, ApiOffline, ApiError,
     onUnauthorized: null,   // set by the cloud adapter; called on any non-login 401
-    getToken, setToken, ping, login, me, logout, changePassword,
-    auth: { login, me, logout, changePassword },
+    getToken, setToken, ping, login, me, logout, changePassword, updateProfile,
+    auth: { login, me, logout, changePassword, updateProfile },
     accounts: collection('accounts'),
     transfers: collection('transfers'),
     entries: collection('entries'),

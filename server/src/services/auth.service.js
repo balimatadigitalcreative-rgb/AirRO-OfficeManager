@@ -68,4 +68,16 @@ async function changePassword(userId, oldPassword, newPassword) {
   return { ok: true };
 }
 
-module.exports = { register, login, me, changePassword, signToken, publicUser, PUBLIC_FIELDS, PASSWORD_MIN };
+// A user edits their OWN profile — display name and avatar colour only. Sensitive
+// fields (role, permissions, username, salary/position) are intentionally NOT
+// updatable here; those stay under HRD/owner control via user management.
+async function updateProfile(userId, { name, color }) {
+  const data = {};
+  if (name != null) data.name = name;
+  if (color != null) data.color = color;
+  if (!Object.keys(data).length) return me(userId);
+  const user = await prisma.user.update({ where: { id: userId }, data, select: PUBLIC_FIELDS });
+  return publicUser(user);
+}
+
+module.exports = { register, login, me, changePassword, updateProfile, signToken, publicUser, PUBLIC_FIELDS, PASSWORD_MIN };

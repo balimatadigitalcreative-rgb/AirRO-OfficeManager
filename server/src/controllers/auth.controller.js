@@ -23,6 +23,13 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8, 'Password baru minimal 8 karakter').max(200),
 });
 
+// Self profile edit — only display name + avatar colour. Role/permissions/username
+// are deliberately absent so a user can never elevate their own access here.
+const updateProfileSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  color: z.string().trim().max(20).optional(),
+}).refine((d) => d.name !== undefined || d.color !== undefined, { message: 'Nothing to update' });
+
 const register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body);
   res.status(201).json(result);
@@ -43,4 +50,9 @@ const changePassword = asyncHandler(async (req, res) => {
   res.status(200).json({ data: { ok: true } });
 });
 
-module.exports = { register, login, me, changePassword, schemas: { registerSchema, loginSchema, changePasswordSchema } };
+const updateProfile = asyncHandler(async (req, res) => {
+  const user = await authService.updateProfile(req.user.id, req.body);
+  res.status(200).json({ user });
+});
+
+module.exports = { register, login, me, changePassword, updateProfile, schemas: { registerSchema, loginSchema, changePasswordSchema, updateProfileSchema } };

@@ -832,6 +832,47 @@ select.fld::-ms-expand { display: none; }
 .alert-banner { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-radius: 14px; background: var(--neg-bg); border: 1px solid #F6C9C6; color: #8A2A2A; font-size: 13.5px; margin-bottom: 18px; }
 .alert-banner .alert-ic { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: #fff; color: var(--neg); flex-shrink: 0; }
 
+/* ============ Profile menu (topbar avatar dropdown) ============ */
+.pm-wrap { position: relative; display: inline-flex; }
+.pm-av { position: relative; cursor: pointer; border: none; padding: 0; }
+.pm-avdot { position: absolute; top: 1px; right: 1px; width: 11px; height: 11px; border-radius: 50%; background: var(--warn); border: 2px solid var(--card); }
+.pm-avdot.high { background: var(--neg); }
+/* floating card — position:fixed coords are computed in JS (portaled to body) */
+.pm-menu { position: fixed; z-index: 1250; background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg); padding: 8px; overflow-y: auto; animation: jernihFade .16s ease both; }
+.pm-head { display: flex; gap: 11px; align-items: center; padding: 8px 8px 12px; border-bottom: 1px solid var(--border-soft); margin-bottom: 6px; }
+.pm-name { font-size: 14.5px; font-weight: 800; color: var(--ink); line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+.pm-username { font-size: 12px; color: var(--text-faint); margin-top: 3px; }
+.pm-list { display: flex; flex-direction: column; }
+.pm-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 10px; border-radius: 11px; font-size: 13.5px; font-weight: 600; color: var(--ink); text-align: left; transition: background .12s; }
+.pm-item:hover, .pm-item:focus-visible { background: var(--card-soft); }
+.pm-item .pm-lbl { flex: 1; min-width: 0; }
+.pm-ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--card-soft); color: var(--green-800); flex-shrink: 0; }
+.pm-danger { color: var(--neg); }
+.pm-danger .pm-ic { background: var(--neg-bg); color: var(--neg); }
+.pm-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--warn); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; flex-shrink: 0; }
+.pm-count.high { background: var(--neg); }
+.pm-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.pm-row .pm-lbl { flex: 1; min-width: 0; }
+.pm-sep { height: 1px; background: var(--border-soft); margin: 6px 4px; }
+/* sub-panels (Profil / Notifikasi / Aktivitas) render inline in the same card */
+.pm-panel { padding: 4px 6px 8px; }
+.pm-panel-bar { display: flex; align-items: center; justify-content: space-between; }
+.pm-back { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 700; color: var(--text-mut); padding: 6px 4px; }
+.pm-txtbtn { font-size: 12px; font-weight: 700; color: var(--green-800); padding: 6px 4px; }
+.pm-panel-title { font-size: 13px; font-weight: 800; color: var(--ink); padding: 4px 4px 8px; }
+.pm-panel-title .tnum { color: var(--text-faint); font-weight: 600; }
+.pm-preview { display: grid; place-items: center; padding: 6px 0 4px; }
+.pm-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.pm-sw { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: #fff; border: 2px solid transparent; transition: transform .1s; }
+.pm-sw.on { border-color: var(--ink); transform: scale(1.08); }
+.pm-note { font-size: 11.5px; color: var(--text-faint); margin-top: 10px; line-height: 1.5; }
+.pm-read { opacity: .5; }
+.pm-activity-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 22px 12px; }
+.pm-ae-ic { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: var(--card-soft); color: var(--text-mut); }
+.pm-ae-title { font-size: 13.5px; font-weight: 700; color: var(--ink); margin-top: 6px; }
+.pm-ae-sub { font-size: 12px; color: var(--text-mut); line-height: 1.5; max-width: 230px; }
+@media (max-width: 560px) { .pm-item, .pm-row { padding-top: 13px; padding-bottom: 13px; } }
+
 /* ============ Reports: range picker & print ============ */
 .rep-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .rep-tabs { display: inline-flex; background: var(--card-soft); border: 1px solid var(--border); border-radius: 12px; padding: 4px; gap: 4px; margin-bottom: 18px; }

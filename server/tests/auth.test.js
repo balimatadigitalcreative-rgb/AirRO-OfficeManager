@@ -63,4 +63,27 @@ describe('Auth', () => {
     expect(res.status).toBe(200);
     expect(res.body.user.username).toBe('tester');
   });
+
+  it('PATCH /auth/me updates the user\'s own name + colour', async () => {
+    const login = await request(app).post('/api/v1/auth/login').send({ username: 'tester', password: 'secret123' });
+    const res = await request(app).patch('/api/v1/auth/me').set('Authorization', `Bearer ${login.body.token}`)
+      .send({ name: 'Renamed User', color: '#7C3AED' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.name).toBe('Renamed User');
+    expect(res.body.user.color).toBe('#7C3AED');
+  });
+
+  it('PATCH /auth/me can NOT change role or permissions (stripped by schema)', async () => {
+    const login = await request(app).post('/api/v1/auth/login').send({ username: 'tester', password: 'secret123' });
+    const res = await request(app).patch('/api/v1/auth/me').set('Authorization', `Bearer ${login.body.token}`)
+      .send({ name: 'Still Finance', role: 'owner', permissions: { reset: true } });
+    expect(res.status).toBe(200);
+    expect(res.body.user.name).toBe('Still Finance');
+    expect(res.body.user.role).toBe('finance');   // role untouched — self-elevation blocked
+  });
+
+  it('PATCH /auth/me requires a token', async () => {
+    const res = await request(app).patch('/api/v1/auth/me').send({ name: 'x' });
+    expect(res.status).toBe(401);
+  });
 });

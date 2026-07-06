@@ -119,6 +119,13 @@
       'pw.change': 'Change Password', 'pw.forcedTitle': 'Set a new password', 'pw.forcedSub': 'For security, please set a new password before continuing.',
       'pw.old': 'Current password', 'pw.new': 'New password', 'pw.confirm': 'Confirm new password', 'pw.min': 'At least 8 characters', 'pw.mismatch': 'Passwords do not match',
       'pw.save': 'Save password', 'pw.changed': 'Password changed', 'pw.failGeneric': 'Could not change password',
+      // profile menu (avatar dropdown)
+      'pm.profile': 'My Profile', 'pm.password': 'Change Password', 'pm.notif': 'Notifications', 'pm.activity': 'My Activity',
+      'pm.lang': 'Language', 'pm.logout': 'Sign out', 'pm.back': 'Back', 'pm.save': 'Save changes', 'pm.saved': 'Profile updated',
+      'pm.dispName': 'Display name', 'pm.avColor': 'Avatar colour', 'pm.nameReq': 'Name cannot be empty', 'pm.saveErr': 'Could not save profile',
+      'pm.selfNote': 'Role & access are managed by HRD/owner and can’t be changed here.',
+      'pm.markRead': 'Mark all read',
+      'pm.actSoonTitle': 'Activity log coming soon', 'pm.actSoonSub': 'Your recent actions will appear here once the audit trail is enabled.',
       'um.resetPw': 'Reset Password', 'um.forceChange': 'Force change on next login', 'um.pwReset': 'Password reset', 'um.newPwPh': 'New temporary password (min 4)',
       // topbar titles
       't.overview': 'Finance Manager', 's.overview': 'Record daily income & expenses for AirRO',
@@ -361,6 +368,13 @@
       'pw.change': 'Ganti Password', 'pw.forcedTitle': 'Buat password baru', 'pw.forcedSub': 'Demi keamanan, buat password baru sebelum melanjutkan.',
       'pw.old': 'Password lama', 'pw.new': 'Password baru', 'pw.confirm': 'Ulangi password baru', 'pw.min': 'Minimal 8 karakter', 'pw.mismatch': 'Konfirmasi password tidak cocok',
       'pw.save': 'Simpan password', 'pw.changed': 'Password diganti', 'pw.failGeneric': 'Gagal mengganti password',
+      // menu profil (dropdown avatar)
+      'pm.profile': 'Profil Saya', 'pm.password': 'Ganti Password', 'pm.notif': 'Notifikasi', 'pm.activity': 'Aktivitas Saya',
+      'pm.lang': 'Bahasa', 'pm.logout': 'Keluar', 'pm.back': 'Kembali', 'pm.save': 'Simpan perubahan', 'pm.saved': 'Profil diperbarui',
+      'pm.dispName': 'Nama tampilan', 'pm.avColor': 'Warna avatar', 'pm.nameReq': 'Nama tidak boleh kosong', 'pm.saveErr': 'Gagal menyimpan profil',
+      'pm.selfNote': 'Peran & hak akses dikelola HRD/owner dan tidak bisa diubah di sini.',
+      'pm.markRead': 'Tandai sudah dibaca',
+      'pm.actSoonTitle': 'Log aktivitas segera hadir', 'pm.actSoonSub': 'Tindakan terakhir Anda akan tampil di sini setelah jejak audit diaktifkan.',
       'um.resetPw': 'Reset Password', 'um.forceChange': 'Paksa ganti saat login berikutnya', 'um.pwReset': 'Password direset', 'um.newPwPh': 'Password sementara baru (min 4)',
       't.overview': 'Manajer Keuangan', 's.overview': 'Catat pemasukan & pengeluaran harian AirRO',
       't.entries': 'Semua Catatan', 's.entries': 'Telusuri, cari, dan ubah setiap catatan',
