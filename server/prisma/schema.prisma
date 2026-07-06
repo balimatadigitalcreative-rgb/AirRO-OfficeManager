@@ -233,8 +233,10 @@ model Employee {
   updatedAt DateTime @updatedAt @default(now()) // bumped on every change (incremental sync)
   // Creator snapshot captured AT INPUT TIME (name + role as they were then). Plain
   // columns — authoritative, server-stamped from the token, never from the client
-  // `data` blob — so "added by" is a stable historical record. (Employee has no
-  // createdBy FK relation; the snapshot is what the UI needs and can't be forged.)
+  // `data` blob — so "added by" is a stable historical record. createdById is the
+  // stable identity (drives per-user "My Activity"); name/role are the historical
+  // display. (Employee has no createdBy FK relation; the snapshot can't be forged.)
+  createdById   String?
   createdByName String?
   createdByRole String?
 
@@ -333,6 +335,8 @@ model Cashbon {
   updatedAt DateTime @updatedAt @default(now()) // bumped on every change (incremental sync)
   // Creator snapshot at request time (name + role then) — server-stamped from the
   // token, never the client body/trail, so "diajukan oleh" is historical + unforgeable.
+  // createdById is the stable identity (drives per-user "My Activity").
+  createdById   String?
   createdByName String?
   createdByRole String?
 
@@ -355,6 +359,8 @@ model Approval {
   updatedAt DateTime @updatedAt @default(now())
   // Creator snapshot at submit time (name + role then) — server-stamped from the
   // token, never the client body, so "diajukan oleh" is historical + unforgeable.
+  // createdById is the stable identity (drives per-user "My Activity").
+  createdById   String?
   createdByName String?
   createdByRole String?
 

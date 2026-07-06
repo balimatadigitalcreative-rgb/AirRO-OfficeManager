@@ -183,6 +183,8 @@ function FApp() {
       date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined };
     const pf = proofFromApi(row.proof); if (pf) o.proof = pf;
     if (row.createdBy && row.createdBy.name) o.createdBy = { name: row.createdBy.name, role: row.createdBy.role || null };   // "input by" snapshot
+    if (row.createdById) o.createdById = row.createdById;   // identity → drives "My Activity"
+    if (row.createdAt) o.createdAt = new Date(row.createdAt).getTime();
     return Object.assign(o, tags);
   };
   const reloadEntries = () => {
@@ -206,7 +208,7 @@ function FApp() {
     if (isDerivedEntry(e.id)) return;   // derived rows are in-memory only
     // Stamp the creator optimistically (the server does the authoritative stamp from
     // the token); reloadEntries then replaces it with the server's snapshot.
-    const optimistic = { ...apiToEntry(entryToApi(e)), createdBy: e.createdBy || (user ? { name: user.name, role: user.role } : null) };
+    const optimistic = { ...apiToEntry(entryToApi(e)), createdBy: e.createdBy || (user ? { name: user.name, role: user.role } : null), createdById: e.createdById || (user ? user.id : undefined), createdAt: e.createdAt || Date.now() };
     setRealEntries((prev) => [optimistic, ...prev.filter((x) => x.id !== e.id)]);
     if (window.API && window.API.entries) window.API.entries.create(entryToApi(e)).then(reloadEntries).catch(entryErr('add'));
   };
@@ -820,6 +822,20 @@ function FApp() {
     ? ALERTS.computeAlerts({ entries, balance: stats.balance, monthIncome: monthStats.income, monthExpense: monthStats.expense, month: monthKey, thresholds: settings, fmt: FIN.fmt, lang })
     : [], [entries, stats.balance, monthStats, monthKey, settings, p.seeMoney, lang]);
 
+  // "Aktivitas Saya": the current user's own recent creations, gathered from the
+  // records already loaded in shell state and filtered by createdById (stable
+  // identity — survives a rename and never collides with a same-named colleague).
+  // Only entities the user's role can see contribute, which is exactly right.
+  const myActivity = uMh(() => {
+    if (!user) return [];
+    const uid = user.id, items = [];
+    (realEntries || []).forEach((e) => { if (e.createdById === uid) items.push({ kind: 'entry', id: e.id, title: e.note || (catMap[e.category] && catMap[e.category].label) || tr('nav.entries'), amount: e.type === 'income' ? e.amount : -e.amount, when: e.createdAt || 0, date: e.date }); });
+    (cashbons || []).forEach((c) => { if (c.createdById === uid) { const emp = (hrdStaff || []).find((s) => s.id === c.employeeId); items.push({ kind: 'kasbon', id: c.id, title: emp ? emp.name : tr('nav.kasbon'), amount: -(c.amount || 0), when: c.createdAt || 0, date: c.date }); } });
+    (approvals || []).forEach((a) => { if (a.createdById === uid) items.push({ kind: 'approval', id: a.id, title: a.title || tr('nav.approvals'), amount: a.amount ? -a.amount : 0, when: a.createdAt || 0, date: a.date }); });
+    (hrdStaff || []).forEach((s) => { if (s.createdById === uid) items.push({ kind: 'employee', id: s.id, title: s.name, when: s.createdAt || 0, date: s.joinedDate || s.contractStart }); });
+    return items.sort((a, b) => (b.when || 0) - (a.when || 0) || String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 25);
+  }, [user, realEntries, cashbons, approvals, hrdStaff, catMap]);
+
   // ---- not logged in ----
   if (!user) return <AUTH.LoginScreen onLogin={login} lang={lang} onLang={changeLang} users={users} />;
 
@@ -927,7 +943,7 @@ function FApp() {
               )}
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
               {p.seeMoney && <ALERTS.AlertBell alerts={alerts} />}
-              <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []}
+              <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []} activity={myActivity}
                 onChangePassword={() => setPwModal(true)} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
           </header>

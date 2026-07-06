@@ -72,11 +72,11 @@ async function main() {
     const rb = trail.requestedBy;
     if (!rb) { cbUnmatched++; continue; }
     if (!requesterCache.has(rb)) {
-      requesterCache.set(rb, await prisma.user.findFirst({ where: { OR: [{ username: String(rb) }, { id: String(rb) }] }, select: { name: true, role: true } }));
+      requesterCache.set(rb, await prisma.user.findFirst({ where: { OR: [{ username: String(rb) }, { id: String(rb) }] }, select: { id: true, name: true, role: true } }));
     }
     const u = requesterCache.get(rb);
     if (!u) { cbUnmatched++; continue; }
-    await prisma.cashbon.update({ where: { id: c.id }, data: { createdByName: u.name, createdByRole: u.role } });
+    await prisma.cashbon.update({ where: { id: c.id }, data: { createdById: u.id, createdByName: u.name, createdByRole: u.role } });
     cbFilled++;
   }
   const cbSnapAfter = await prisma.cashbon.count({ where: { NOT: { createdByName: null } } });

@@ -83,7 +83,8 @@ function toColumns(o) {
 function toClient(row) {
   let obj = {}; try { obj = row.data ? JSON.parse(row.data) : {}; } catch (e) {}
   return { ...obj, id: row.id, nip: row.nip || obj.nip || '',
-    createdBy: row.createdByName ? { name: row.createdByName, role: row.createdByRole || null } : null };
+    createdBy: row.createdByName ? { name: row.createdByName, role: row.createdByRole || null } : null,
+    createdById: row.createdById || null, createdAt: row.createdAt ? new Date(row.createdAt).getTime() : null };
 }
 
 async function list(includeInactive) {
@@ -113,6 +114,7 @@ async function create(body, userId) {
   // input time) — never from the request body, so it can't be forged.
   const snap = {};
   if (userId) {
+    snap.createdById = userId;
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
     if (u) { snap.createdByName = u.name; snap.createdByRole = u.role; }
   }

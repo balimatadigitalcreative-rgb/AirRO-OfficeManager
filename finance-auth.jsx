@@ -175,7 +175,20 @@ function LoginScreen({ onLogin, lang, onLang }) {
    stay under HRD/owner control (never exposed in this menu). */
 const PM_AV_COLORS = ['#22A7A1', '#2563EB', '#7C3AED', '#DB2777', '#DC2626', '#EA580C', '#CA8A04', '#16A34A', '#0891B2', '#475569'];
 
-function ProfileMenu({ user, lang, onLang, alerts, onChangePassword, onLogout, onNavigate, shortcuts, onUpdateProfile }) {
+const PM_ACT_META = { entry: { icon: 'IconTx', k: 'pm.act.entry' }, kasbon: { icon: 'IconWallet', k: 'pm.act.kasbon' }, approval: { icon: 'IconInvoice', k: 'pm.act.approval' }, employee: { icon: 'IconCustomers', k: 'pm.act.employee' } };
+// compact "x mnt/jam/hr lalu" from a ms timestamp (browser-side; falls back to the date)
+function pmAgo(when, date) {
+  if (!when) return date || '';
+  const s = Math.max(0, (Date.now() - when) / 1000);
+  if (s < 60) return trA('pm.ago.now');
+  if (s < 3600) return trA('pm.ago.m', { n: Math.floor(s / 60) });
+  if (s < 86400) return trA('pm.ago.h', { n: Math.floor(s / 3600) });
+  if (s < 86400 * 7) return trA('pm.ago.d', { n: Math.floor(s / 86400) });
+  return date || '';
+}
+const pmMoney = (n) => (window.FIN && FIN.fmt) ? FIN.fmt(Math.abs(n)) : String(Math.abs(n));
+
+function ProfileMenu({ user, lang, onLang, alerts, activity, onChangePassword, onLogout, onNavigate, shortcuts, onUpdateProfile }) {
   const [open, setOpen] = uSa(false);
   const [view, setView] = uSa('menu');            // 'menu' | 'profile' | 'notif' | 'activity'
   const [pos, setPos] = uSa(null);                // fixed coords from the avatar
@@ -300,15 +313,28 @@ function ProfileMenu({ user, lang, onLang, alerts, onChangePassword, onLogout, o
             {view === 'activity' && (
               <div className="pm-panel">
                 <Back />
-                <div className="pm-panel-title">{trA('pm.activity')}</div>
-                {/* No per-record audit trail yet (entries/approvals don't store an
-                    author) — show an honest placeholder rather than fabricating
-                    attribution. Populates once the audit-trail feature lands. */}
-                <div className="pm-activity-empty">
-                  <span className="pm-ae-ic"><IconClock s={24} /></span>
-                  <div className="pm-ae-title">{trA('pm.actSoonTitle')}</div>
-                  <div className="pm-ae-sub">{trA('pm.actSoonSub')}</div>
-                </div>
+                <div className="pm-panel-title">{trA('pm.activity')}{activity && activity.length > 0 && <span className="tnum"> ({activity.length})</span>}</div>
+                {/* The user's own recent creations, attributed by stable identity
+                    (createdById) — see finance-shell myActivity. */}
+                {(!activity || activity.length === 0) ? (
+                  <div className="pm-activity-empty">
+                    <span className="pm-ae-ic"><IconClock s={24} /></span>
+                    <div className="pm-ae-title">{trA('pm.actNoneTitle')}</div>
+                    <div className="pm-ae-sub">{trA('pm.actNoneSub')}</div>
+                  </div>
+                ) : activity.map((it) => {
+                  const m = PM_ACT_META[it.kind] || PM_ACT_META.entry;
+                  return (
+                    <div key={it.kind + it.id} className="pm-act">
+                      <span className="pm-act-ic">{IcA(m.icon, { s: 16 })}</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="pm-act-title">{it.title}</div>
+                        <div className="pm-act-sub">{trA(m.k)}{it.date ? ' · ' + pmAgo(it.when, it.date) : ''}</div>
+                      </div>
+                      {it.amount ? <span className={`pm-act-amt ${it.amount < 0 ? 'neg' : 'pos'}`}>{it.amount < 0 ? '−' : '+'}{pmMoney(it.amount)}</span> : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

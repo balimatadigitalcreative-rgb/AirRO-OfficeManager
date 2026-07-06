@@ -32,6 +32,9 @@ describe('Creator attribution — kasbon + approvals', () => {
     const r = await request(app).post('/api/v1/cashbon/request').set(auth(hrd)).send({ employeeId: empId, amount: 100000, date: '2026-06-10', note: 'x' });
     expect(r.status).toBe(201);
     expect(r.body.data.cashbon.createdBy).toEqual({ name: 'Dewi', role: 'hrd' });
+    // identity is stamped too (drives per-user "My Activity")
+    const me = await request(app).get('/api/v1/auth/me').set(auth(hrd));
+    expect(r.body.data.cashbon.createdById).toBe(me.body.user.id);
   });
 
   it('kasbon direct create ignores a forged createdBy in the body', async () => {
