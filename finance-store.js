@@ -134,7 +134,24 @@
     adminfin:{ label: 'Admin Finance',    blurb: 'Daily delivery setoran input',
       perms: { company: false, cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: true,  reports: false, advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, setoran: true, setoranOnly: true, kasbon: false, kasbonApprove: false } },
   };
-  const perms = (role) => (ROLES[role] || ROLES.finance).perms;
+  // Roles are now DATA managed via /roles. The hard-coded ROLES above are the
+  // built-in defaults / offline fallback; the shell calls FS.setRoles(list) with the
+  // live roles after login, and everything below reads through roleMap().
+  let dynRoles = null;
+  function setRoles(list) {
+    if (!Array.isArray(list) || !list.length) { dynRoles = null; return; }
+    const m = {};
+    list.forEach((r) => { if (r && r.id) m[r.id] = { label: r.name || r.id, color: r.color || ROLE_COLORS[r.id] || '#22A7A1', perms: r.permissions || {}, builtin: !!r.builtin }; });
+    dynRoles = m;
+  }
+  function roleMap() {
+    if (dynRoles) return dynRoles;
+    const m = {}; Object.keys(ROLES).forEach((id) => { m[id] = { label: ROLES[id].label, color: ROLE_COLORS[id] || '#22A7A1', perms: ROLES[id].perms, builtin: true }; }); return m;
+  }
+  function roleList() { const rm = roleMap(); return Object.keys(rm).map((id) => ({ id, name: rm[id].label, color: rm[id].color, perms: rm[id].perms, builtin: rm[id].builtin })); }
+  const roleName = (role) => (roleMap()[role] && roleMap()[role].label) || role;
+  const roleColor = (role) => (roleMap()[role] && roleMap()[role].color) || ROLE_COLORS[role] || '#22A7A1';
+  const perms = (role) => (roleMap()[role] || roleMap().finance || ROLES.finance).perms;
   const landingScreen = (role) => { const p = perms(role); return p.setoranOnly ? 'setoran' : p.company ? 'company' : p.cashflow ? 'overview' : p.employees ? 'employees' : p.payroll ? 'payroll' : p.kasbon ? 'kasbon' : 'overview'; };
   const initials = (name) => name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   function loadSession() { try { const id = localStorage.getItem(SESSION_KEY); return loadUsers().find((u) => u.id === id) || null; } catch (e) { return null; } }
@@ -193,7 +210,7 @@
 
   window.FS = { KEY, INCOME_CATS, EXPENSE_CATS, CAT, methods, parties, load, save, reset, byNewest, seed,
     CAT_KEY, ICON_CHOICES, loadCats, saveCats, resetCats, buildMap, catInfo, newCatKey,
-    SESSION_KEY, USERS, ROLES, ROLE_COLORS, perms, landingScreen, initials, loadSession, setSession,
+    SESSION_KEY, USERS, ROLES, ROLE_COLORS, perms, setRoles, roleList, roleName, roleColor, landingScreen, initials, loadSession, setSession,
     USERS_KEY, SEED_USERS, loadUsers, saveUsers, newUserId,
     SETTINGS_KEY, DEFAULT_SETTINGS, loadSettings, saveSettings,
     ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance,

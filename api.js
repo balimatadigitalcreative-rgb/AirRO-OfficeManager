@@ -92,6 +92,7 @@
       reject: (id, data) => req('POST', '/cashbon/' + id + '/reject', data),
     }),
     users: collection('users'),
+    roles: collection('roles'),
     settings: {
       all: () => req('GET', '/settings'),
       get: (key) => req('GET', '/settings/' + key),

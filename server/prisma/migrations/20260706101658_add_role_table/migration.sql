@@ -1,0 +1,11 @@
+-- CreateTable
+CREATE TABLE "Role" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "color" TEXT NOT NULL DEFAULT '#22A7A1',
+    "permissions" TEXT NOT NULL,
+    "builtin" BOOLEAN NOT NULL DEFAULT false,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

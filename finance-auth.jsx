@@ -14,8 +14,11 @@ function LangToggle({ lang, onLang }) {
 }
 
 function RoleBadge({ role, size }) {
-  const cls = role === 'owner' ? 'rb-owner' : role === 'manager' ? 'rb-mgr' : 'rb-cashier';
-  return <span className={`role-badge ${cls} ${size === 'sm' ? 'sm' : ''}`}><IconShield s={size === 'sm' ? 11 : 13} />{trA('role.' + role)}</span>;
+  const cls = role === 'owner' ? 'rb-owner' : (role === 'gm' || role === 'manager') ? 'rb-mgr' : 'rb-cashier';
+  // Role names are dynamic (custom roles have no i18n key) — read the live name from
+  // the store, falling back to the i18n label for the built-ins.
+  const name = (window.FS && FS.roleName) ? FS.roleName(role) : trA('role.' + role);
+  return <span className={`role-badge ${cls} ${size === 'sm' ? 'sm' : ''}`}><IconShield s={size === 'sm' ? 11 : 13} />{name}</span>;
 }
 
 /* Change-password form — used both self-service (modal) and forced-on-login.

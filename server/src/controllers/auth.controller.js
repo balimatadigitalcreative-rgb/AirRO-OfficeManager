@@ -3,14 +3,12 @@ const { z } = require('zod');
 const authService = require('../services/auth.service');
 const asyncHandler = require('../utils/asyncHandler');
 
-const ROLES = ['owner', 'gm', 'hrd', 'finance', 'adminfin'];
-
 const registerSchema = z.object({
   name: z.string().trim().min(1).max(120),
   username: z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/,
     'Username may contain only letters, numbers, dot, underscore and hyphen'),
   password: z.string().min(6).max(200),
-  role: z.enum(ROLES).default('finance'),
+  role: z.string().trim().min(1).max(40).default('finance'),
   sub: z.string().trim().max(120).optional(),
   color: z.string().trim().max(20).optional(),
 });

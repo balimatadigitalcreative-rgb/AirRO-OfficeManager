@@ -43,7 +43,7 @@
     'airro_settings_v1', 'airro_settings_cache_v1', 'airro_hrd_rates_v1', 'airro_hrd_rates_cache_v1', 'airro_hr_budget_v1', 'airro_hr_budget_cache_v1',
     'airro_departments_v1', 'airro_departments_cache_v1', 'airro_projects_v3', 'airro_projects_cache_v1',
     'airro_fleet_v1', 'airro_fleet_cache_v1', 'airro_transfers_v1', 'airro_transfers_cache_v1',
-    'airro_attendance_v2', 'airro_oriatt_v1', 'airro_training_v1', 'airro_empacct_v2', META_KEY]);
+    'airro_attendance_v2', 'airro_oriatt_v1', 'airro_training_v1', 'airro_empacct_v2', 'airro_roles_cache_v1', META_KEY]);
   const shouldSync = (k) => /^airro_/i.test(k) && !SKIP.has(k);
 
   const rawSet = localStorage.setItem.bind(localStorage);

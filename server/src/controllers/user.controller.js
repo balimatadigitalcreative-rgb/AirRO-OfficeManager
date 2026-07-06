@@ -2,13 +2,11 @@
 const { z } = require('zod');
 const service = require('../services/user.service');
 const asyncHandler = require('../utils/asyncHandler');
-const { ROLES } = require('../config/permissions');
-
 const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
   username: z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/),
   password: z.string().min(4).max(200), // PIN-style (4+); login enforces no minimum
-  role: z.enum(ROLES),
+  role: z.string().trim().min(1).max(40),   // dynamic role id (validated against the Role table in the service)
   sub: z.string().max(120).optional(),
   color: z.string().max(20).optional(),
   active: z.boolean().optional(),

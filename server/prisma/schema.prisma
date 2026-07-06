@@ -35,6 +35,20 @@ model User {
   transfers Transfer[]
 }
 
+// ── Roles (editable by owner/GM; seeded from config/permissions.js) ───────
+// A role is data, not a constant: { id, name, color, permissions(JSON) }. Built-in
+// roles (owner/gm/hrd/finance/adminfin) are seeded at startup and can't be deleted.
+model Role {
+  id          String   @id // role key, e.g. "owner", "kasir"
+  name        String
+  color       String   @default("#22A7A1")
+  permissions String // JSON capability map { cap: bool }
+  builtin     Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt @default(now())
+}
+
 // ── Cash book ────────────────────────────────────────────────────────────
 // EntryType is "income" | "expense" — stored as String (SQLite-portable),
 // validated by Zod at the API layer.

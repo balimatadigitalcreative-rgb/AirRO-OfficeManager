@@ -4,6 +4,12 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const { PUBLIC_FIELDS, publicUser } = require('./auth.service');
 
+// Guard: a user's role must reference an existing role in the Role table.
+async function assertRole(role) {
+  if (role == null) return;
+  if (!(await prisma.role.count({ where: { id: role } }))) throw ApiError.badRequest(`Peran "${role}" tidak ada`);
+}
+
 // `permissions` arrives as an object (or null) — store it as a JSON string.
 function normalize({ permissions, ...rest }) {
   const data = { ...rest };
@@ -25,12 +31,14 @@ async function getById(id) {
 async function create({ password, ...rest }) {
   const existing = await prisma.user.findUnique({ where: { username: rest.username } });
   if (existing) throw ApiError.conflict('Username is already taken');
+  await assertRole(rest.role);
   const passwordHash = await bcrypt.hash(password, 10);
   const u = await prisma.user.create({ data: { ...normalize(rest), passwordHash }, select: PUBLIC_FIELDS });
   return publicUser(u);
 }
 async function update(id, { password, ...rest }) {
   await getById(id);
+  await assertRole(rest.role);
   const data = normalize(rest);
   if (password) data.passwordHash = await bcrypt.hash(password, 10);
   const u = await prisma.user.update({ where: { id }, data, select: PUBLIC_FIELDS });

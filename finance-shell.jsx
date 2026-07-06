@@ -3,7 +3,10 @@ const { useState: uSh, useEffect: uEh, useMemo: uMh, useRef: uRf } = React;
 const tr = (k, v) => window.t(k, v);
 function Ish(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
-function navForRole(p) {
+function navForRole(p, role) {
+  // Owner/GM always keep access to user & role management, even if the 'reset'
+  // capability were edited off their role — so an admin can't lock themselves out.
+  const canAdmin = !!(p.reset || role === 'owner' || role === 'gm');
   const items = [];
   if (p.company) items.push({ id: 'company', label: tr('nav.company'), icon: 'IconHome', grp: 'overview' });
   if (p.company && p.reset) items.push({ id: 'projects', label: tr('nav.projects'), icon: 'IconBolt', grp: 'overview' });
@@ -23,7 +26,7 @@ function navForRole(p) {
   if (p.payroll && p.attendance) items.push({ id: 'hrsettings', label: tr('nav.hrsettings'), icon: 'IconSettings', grp: 'hr' });
   if (p.approvals) items.push({ id: 'approvals', label: tr('nav.approvals'), icon: 'IconInvoice', grp: 'admin' });
   if (p.settings) items.push({ id: 'settings', label: tr('nav.settings'), icon: 'IconSettings', grp: 'admin' });
-  if (p.reset) items.push({ id: 'users', label: tr('nav.users'), icon: 'IconUserCircle', grp: 'admin' });
+  if (canAdmin) items.push({ id: 'users', label: tr('nav.users'), icon: 'IconUserCircle', grp: 'admin' });
   return items;
 }
 const NAV_GROUPS = ['overview', 'finance', 'hr', 'admin'];
@@ -65,6 +68,9 @@ function FApp() {
   const [toast, setToast] = uSh(null);
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
+  // Roles are DATA (managed via /roles). Seed FS with the cached list for instant
+  // paint; the shell reloads the live list after login (reloadRoles).
+  const [roles, setRolesState] = uSh(() => { try { const c = localStorage.getItem('airro_roles_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a) && a.length) { FS.setRoles(a); return a; } } } catch (e) {} return null; });
   const [editing, setEditing] = uSh(null);
   const [lang, setLang] = uSh(window.I18N.lang);
   const changeLang = (l) => { window.I18N.setLang(l); setLang(l); };
@@ -471,7 +477,14 @@ function FApp() {
   const pushAttRef = uRf(pushAtt), pushOriRef = uRf(pushOriAtt);
   pushAttRef.current = pushAtt; pushOriRef.current = pushOriAtt;
   uEh(() => { CO.setAttHooks(() => pushAttRef.current && pushAttRef.current(), () => pushOriRef.current && pushOriRef.current()); return () => CO.setAttHooks && CO.setAttHooks(null, null); }, []);
-  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); reloadAtt(); reloadOriAtt(); };
+  // Roles list (dynamic) — load into FS (drives FS.perms) + state (re-render).
+  const reloadRoles = () => {
+    if (!(window.API && window.API.roles)) return Promise.resolve();
+    return window.API.roles.list().then((r) => {
+      if (r && Array.isArray(r.data) && r.data.length) { FS.setRoles(r.data); setRolesState(r.data); try { localStorage.setItem('airro_roles_cache_v1', JSON.stringify(r.data)); } catch (e) {} }
+    }).catch(() => {});
+  };
+  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); reloadAtt(); reloadOriAtt(); reloadRoles(); };
   uEh(() => {
     if (!(window.API && window.API.accounts)) return;
     reloadConfig();
@@ -543,6 +556,7 @@ function FApp() {
       if (evt.entity === 'approval' || evt.entity === 'focus') reloadApprovals();
       if (evt.entity === 'calendar' || evt.entity === 'focus') reloadEvents();
       if (evt.entity === 'config' || evt.entity === 'focus') reloadConfig();
+      if (evt.entity === 'role') reloadRoles();
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; window.CLOUD.onSessionExpired = null; } };
   }, []);
@@ -778,7 +792,7 @@ function FApp() {
   // ---- not logged in ----
   if (!user) return <AUTH.LoginScreen onLogin={login} lang={lang} onLang={changeLang} users={users} />;
 
-  const NAV = navForRole(p);
+  const NAV = navForRole(p, user ? user.role : '');
   const go = (id) => { if (NAV.find((n) => n.id === id)) setScreen(id); setDrawer(false); };
   const toggleGrp = (g) => setNavOpen((prev) => { const n = { ...prev, [g]: prev[g] === false ? true : false }; try { localStorage.setItem('airro_navopen_v1', JSON.stringify(n)); } catch (e) {} return n; });
   const Nav = () => (
@@ -972,8 +986,8 @@ function FApp() {
             <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canReset={p.reset} onResetData={resetData} settings={settings} onSettingsChange={applySettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
           )}
 
-          {screen === 'users' && p.reset && (
-            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} />
+          {screen === 'users' && (p.reset || user.role === 'owner' || user.role === 'gm') && (
+            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={user.role === 'owner' || user.role === 'gm' || p.reset} />
           )}
 
           <footer className="app-footer">

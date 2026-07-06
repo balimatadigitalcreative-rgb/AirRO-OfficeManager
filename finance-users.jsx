@@ -49,7 +49,7 @@ function UserModal({ row, users, onSave, onClose, busy }) {
   const eff = f.permissions || FS.perms(f.role);
   const custom = !!f.permissions;
   const toggleCap = (key) => set({ permissions: { ...eff, [key]: !eff[key] } });
-  const changeRole = (r) => set({ role: r, color: FS.ROLE_COLORS[r] || f.color, permissions: null }); // reset to new role defaults
+  const changeRole = (r) => set({ role: r, color: FS.roleColor(r) || f.color, permissions: null }); // reset to new role defaults
   const resetToRole = () => set({ permissions: null });
 
   return (
@@ -60,7 +60,7 @@ function UserModal({ row, users, onSave, onClose, busy }) {
           <label className="fld-label" style={{ marginTop: 0 }}>{trU('um.name')}</label>
           <input className="fld" value={f.name} placeholder="e.g. Budi Santoso" onChange={(e) => set({ name: e.target.value })} />
           <label className="fld-label">{trU('um.role')}</label>
-          <UI.Dropdown value={f.role} options={ROLE_OPTS.map((r) => ({ value: r, label: trU('role.' + r) }))} onChange={changeRole} />
+          <UI.Dropdown value={f.role} options={FS.roleList().map((r) => ({ value: r.id, label: r.name }))} onChange={changeRole} />
           <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <label className="fld-label" style={{ marginTop: 0 }}>{trU('um.username')}</label>
@@ -113,12 +113,13 @@ function UserModal({ row, users, onSave, onClose, busy }) {
   );
 }
 
-function UserManagement({ users, setUsers, currentId }) {
+function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, canManageRoles }) {
   const cloud = !!(window.CLOUD && window.CLOUD.active && window.API);
   const [rows, setRows] = uSu(cloud ? null : (users || []));
   const [edit, setEdit] = uSu(null);
   const [busy, setBusy] = uSu(false);
   const [err, setErr] = uSu(null);
+  const [tab, setTab] = uSu('users');   // 'users' | 'roles'
 
   const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, mustChangePassword: !!u.mustChangePassword });
 
@@ -161,10 +162,27 @@ function UserManagement({ users, setUsers, currentId }) {
     }
   };
 
-  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.ROLE_COLORS.finance, permissions: null, _new: true }); };
+  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.roleColor('finance'), permissions: null, _new: true }); };
   const RoleBadge = window.AUTH.RoleBadge;
+  if (canManageRoles && tab === 'roles') {
+    return (
+      <div className="screen-enter">
+        <div className="gran-seg" style={{ marginBottom: 14 }}>
+          <button className={`gran-btn ${tab === 'users' ? 'on' : ''}`} onClick={() => setTab('users')}>{trU('um.tabUsers')}</button>
+          <button className={`gran-btn ${tab === 'roles' ? 'on' : ''}`} onClick={() => setTab('roles')}>{trU('um.tabRoles')}</button>
+        </div>
+        <RoleManager onChanged={onRolesChanged} />
+      </div>
+    );
+  }
   return (
     <div className="screen-enter">
+      {canManageRoles && (
+        <div className="gran-seg" style={{ marginBottom: 14 }}>
+          <button className={`gran-btn ${tab === 'users' ? 'on' : ''}`} onClick={() => setTab('users')}>{trU('um.tabUsers')}</button>
+          <button className={`gran-btn ${tab === 'roles' ? 'on' : ''}`} onClick={() => setTab('roles')}>{trU('um.tabRoles')}</button>
+        </div>
+      )}
       <div className="hrr-head">
         <div style={{ fontSize: 13, color: 'var(--text-mut)' }}>
           {trU('um.intro', { n: list.length })}
@@ -194,4 +212,103 @@ function UserManagement({ users, setUsers, currentId }) {
   );
 }
 
-window.USERMGMT = { UserManagement };
+/* ---------------- Role management (Kelola Peran) ---------------- */
+const ROLE_SWATCHES = ['#065489', '#0B7EB1', '#138FB3', '#22A7A1', '#3FB8B2', '#E8A33D', '#C9603F', '#7A5AF8', '#D6455D', '#5B8C3A'];
+
+function RoleModal({ row, onSave, onClose, busy, err }) {
+  const [f, setF] = uSu(row);
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const set = (p) => setF({ ...f, ...p });
+  const perms = f.permissions || {};
+  const toggleCap = (key) => set({ permissions: { ...perms, [key]: !perms[key] } });
+  const valid = (f.name || '').trim();
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{f._new ? trU('rm.add') : trU('rm.edit')}{f.builtin && <span className="um-you">{trU('rm.builtin')}</span>}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+          <label className="fld-label" style={{ marginTop: 0 }}>{trU('rm.name')}</label>
+          <input className="fld" value={f.name} placeholder={trU('rm.namePh')} onChange={(e) => set({ name: e.target.value })} />
+          <label className="fld-label">{trU('rm.color')}</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {ROLE_SWATCHES.map((c) => (
+              <button key={c} type="button" onClick={() => set({ color: c })} title={c}
+                style={{ width: 28, height: 28, borderRadius: 8, background: c, border: (f.color === c ? '3px solid var(--ink)' : '2px solid var(--border)'), cursor: 'pointer' }} />
+            ))}
+          </div>
+          <label className="fld-label">{trU('rm.caps')}</label>
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '2px 0 8px' }}>Centang fitur yang boleh diakses peran ini.</div>
+          {CAP_GROUPS.map((g) => (
+            <div key={g.title} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-mut)', marginBottom: 6 }}>{g.title}</div>
+              <div className="cat-chips">
+                {g.caps.map(([key, label]) => (
+                  <button key={key} type="button" className={`cat-chip ${perms[key] ? 'on' : ''}`} onClick={() => toggleCap(key)}>
+                    {perms[key] ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot">
+          {!f._new && !f.builtin && <button className="btn btn-ghost" style={{ color: 'var(--neg)', marginRight: 'auto' }} disabled={busy} onClick={() => onSave(f, true)}><IconClose s={15} />{trU('rm.delete')}</button>}
+          <button className="btn btn-ghost" onClick={onClose}>{trU('common.cancel') || 'Cancel'}</button>
+          <button className="btn btn-primary" disabled={!valid || busy} onClick={() => onSave(f)}>{busy ? '…' : trU('rm.save')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoleManager({ onChanged }) {
+  const [rows, setRows] = uSu(() => FS.roleList());
+  const [edit, setEdit] = uSu(null);
+  const [busy, setBusy] = uSu(false);
+  const [err, setErr] = uSu(null);
+  const refresh = () => { if (window.API && window.API.roles) window.API.roles.list().then((r) => { if (r && Array.isArray(r.data)) { FS.setRoles(r.data); setRows(FS.roleList()); } }).catch(() => {}); };
+  React.useEffect(() => { refresh(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  const capCount = (perms) => Object.values(perms || {}).filter(Boolean).length;
+  const save = async (role, remove) => {
+    setErr(null); setBusy(true);
+    try {
+      if (remove) {
+        if (!confirm(trU('rm.deleteConfirm', { n: role.name }))) { setBusy(false); return; }
+        await window.API.roles.remove(role.id);
+      } else if (role._new) {
+        await window.API.roles.create({ name: (role.name || '').trim(), color: role.color, permissions: role.permissions || {} });
+      } else {
+        await window.API.roles.update(role.id, { name: (role.name || '').trim(), color: role.color, permissions: role.permissions || {} });
+      }
+      setEdit(null); refresh(); onChanged && onChanged();
+    } catch (e) {
+      setErr((e.body && e.body.error && e.body.error.message) || e.message || 'Gagal menyimpan peran');
+    } finally { setBusy(false); }
+  };
+  const addNew = () => { setErr(null); setEdit({ id: '', name: '', color: '#22A7A1', permissions: { cashflow: true, seeMoney: true }, _new: true }); };
+  return (
+    <div className="screen-enter">
+      <div className="hrr-head">
+        <div style={{ fontSize: 13, color: 'var(--text-mut)' }}>{trU('rm.intro', { n: rows.length })}</div>
+        <button className="btn btn-primary" onClick={addNew}><IconPlus s={16} />{trU('rm.add')}</button>
+      </div>
+      {err && !edit && <div className="login-err" style={{ margin: '4px 0 12px' }}><IconClose s={14} />{err}</div>}
+      <div className="um-grid">
+        {rows.map((r) => (
+          <div key={r.id} className="um-card card" onClick={() => { setErr(null); setEdit({ id: r.id, name: r.name, color: r.color, builtin: r.builtin, permissions: { ...r.perms } }); }}>
+            <span className="user-av" style={{ background: r.color, width: 44, height: 44 }}><IconShield s={18} /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="um-name">{r.name}{r.builtin && <span className="um-you">{trU('rm.builtin')}</span>}</div>
+              <div className="um-user">{trU('rm.capsN', { n: capCount(r.perms) })}</div>
+            </div>
+            <span className="um-edit"><IconPencil s={15} /></span>
+          </div>
+        ))}
+      </div>
+      {edit && <RoleModal row={edit} onSave={save} onClose={() => setEdit(null)} busy={busy} err={err} />}
+    </div>
+  );
+}
+
+window.USERMGMT = { UserManagement, RoleManager };
