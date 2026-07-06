@@ -141,14 +141,52 @@ async function listAudit(q) {
   return { data: rows };
 }
 
-// Per-day summary for the dashboard (NOT posted to AirRO cash — informational).
+const addDays = (dateStr, n) => { const d = new Date(dateStr + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+// Everything the Distribusi dashboard needs in ONE call (NOT posted to AirRO cash —
+// informational): today's KPIs, a 7-day stacked series (lunas vs bon), the most
+// recent transactions (with a corrected flag), and the top customers in the window.
 async function dashboardSummary(date) {
-  const where = date ? { txnDate: date } : {};
-  const rows = await prisma.distTransaction.findMany({ where });
-  const sum = { date: date || null, count: rows.length, qty: 0, amount: 0, byMethod: { lunas: 0, bon: 0, pelunasan: 0 } };
-  rows.forEach((r) => { sum.qty += r.qty; sum.amount += r.amount; if (sum.byMethod[r.method] != null) sum.byMethod[r.method] += r.amount; });
+  const day = date || new Date().toISOString().slice(0, 10);
+  const from = addDays(day, -6);
+  const rows = await prisma.distTransaction.findMany({
+    where: { txnDate: { gte: from, lte: day } },
+    include: { customer: { select: { name: true, type: true } }, corrections: { select: { id: true } } },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  // Today's KPIs. uang masuk = cash actually received (lunas + pelunasan);
+  // piutang = new receivables booked as bon.
+  const todayRows = rows.filter((r) => r.txnDate === day);
+  const byMethod = { lunas: 0, bon: 0, pelunasan: 0 };
+  let qty = 0, amount = 0;
+  todayRows.forEach((r) => { qty += r.qty; amount += r.amount; if (byMethod[r.method] != null) byMethod[r.method] += r.amount; });
+  const uangMasuk = byMethod.lunas + byMethod.pelunasan;
+  const piutang = byMethod.bon;
+
+  // 7-day stacked series: cash bucket (lunas + pelunasan) vs bon.
+  const last7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = addDays(day, -i);
+    let lunas = 0, bon = 0;
+    rows.filter((r) => r.txnDate === d).forEach((r) => { if (r.method === 'bon') bon += r.amount; else lunas += r.amount; });
+    last7.push({ date: d, lunas, bon });
+  }
+
+  // Most recent transactions across the window.
+  const recent = rows.slice(0, 8).map((r) => ({
+    id: r.id, customerName: r.customer ? r.customer.name : '', customerType: r.customer ? r.customer.type : null,
+    qty: r.qty, unitPriceLocked: r.unitPriceLocked, amount: r.amount, method: r.method, txnDate: r.txnDate,
+    createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null, corrected: r.corrections.length > 0,
+  }));
+
+  // Top customers by amount in the window.
+  const byCust = {};
+  rows.forEach((r) => { const k = r.customerId; if (!byCust[k]) byCust[k] = { id: k, name: r.customer ? r.customer.name : '', type: r.customer ? r.customer.type : null, qty: 0, amount: 0 }; byCust[k].qty += r.qty; byCust[k].amount += r.amount; });
+  const topCustomers = Object.values(byCust).sort((a, b) => b.amount - a.amount).slice(0, 5);
+
   const customers = await prisma.customer.count();
-  return { ...sum, customers };
+  return { date: day, count: todayRows.length, qty, amount, byMethod, uangMasuk, piutang, customers, last7, recent, topCustomers };
 }
 
 module.exports = {

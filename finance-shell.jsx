@@ -94,6 +94,7 @@ function FApp() {
   const [drawer, setDrawer] = uSh(false);
   const [toast, setToast] = uSh(null);
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
+  const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard re-fetches
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
   // Roles are DATA (managed via /roles). Seed FS with the cached list for instant
   // paint; the shell reloads the live list after login (reloadRoles).
@@ -617,6 +618,7 @@ function FApp() {
       if (evt.entity === 'calendar' || evt.entity === 'focus') reloadEvents();
       if (evt.entity === 'config' || evt.entity === 'focus') reloadConfig();
       if (evt.entity === 'role') reloadRoles();
+      if (evt.entity === 'distribusi' || evt.entity === 'focus') setDistTick((t) => t + 1);   // Distribusi dashboard self-refetches
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; window.CLOUD.onSessionExpired = null; } };
   }, []);
@@ -977,7 +979,12 @@ function FApp() {
             </div>
           </header>
 
-          {screen && screen.indexOf('dist-') === 0 && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen === 'dist-dashboard' && (
+            <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
+              staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
+              onQuickInput={() => go('dist-transactions', !p.distribusi)} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
+          )}
+          {screen && screen.indexOf('dist-') === 0 && screen !== 'dist-dashboard' && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
