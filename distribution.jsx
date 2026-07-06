@@ -37,11 +37,14 @@ function SevenDayChart({ last7 }) {
   );
 }
 
-function Kpi({ icon, tile, fg, value, label, cls }) {
+function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero }) {
   return (
-    <div className="card stat-box dist-kpi">
-      <span className="icon-tile" style={{ background: tile, color: fg }}>{IcX(icon, { s: 19 })}</span>
-      <div className={`tnum dist-kpi-val ${cls || ''}`}>{value}</div>
+    <div className={`card dist-kpi ${hero ? 'dist-kpi-hero' : 'stat-box'}`}>
+      <div className="dist-kpi-top">
+        <span className={`icon-tile ${hero ? 'hero' : ''}`} style={hero ? null : { background: tile, color: fg }}>{IcX(icon, { s: 19 })}</span>
+        {pill ? <span className={`dist-kpi-pill ${pillCls || ''}`}>{pill}</span> : null}
+      </div>
+      <div className={`tnum dist-kpi-val ${cls || ''}`}>{value}{unit ? <span className="dist-kpi-unit"> {unit}</span> : null}</div>
       <div className="dist-kpi-lbl">{label}</div>
     </div>
   );
@@ -64,6 +67,7 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
 
   const recent = sum.recent || [];
   const top = sum.topCustomers || [];
+  const avgNota = sum.count ? Math.round(sum.amount / sum.count) : 0;
   return (
     <div className="dist-dash screen-enter">
       {staffMode && (
@@ -73,10 +77,10 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
       <div className="dist-grid">
         <div className="dist-main">
           <div className="dist-kpis">
-            <Kpi icon="IconDrop" tile="var(--mint-100)" fg="var(--green-800)" value={numX(sum.qty)} label={trD('dist.kpiGalon')} />
-            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpX(sum.uangMasuk)} label={trD('dist.kpiIn')} cls="amt-pos" />
-            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpX(sum.piutang)} label={trD('dist.kpiBon')} />
-            <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} />
+            <Kpi hero icon="IconDrop" value={numX(sum.qty)} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={trD('dist.pillToday')} pillCls="hero" />
+            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpX(sum.uangMasuk)} label={trD('dist.kpiIn')} cls="amt-pos" pill={trD('dist.pillCash')} pillCls="pos" />
+            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpX(sum.piutang)} label={trD('dist.kpiBon')} pill={trD('dist.pillPiutang')} pillCls="warn" />
+            <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={numX(sum.count) + ' ' + trD('dist.notaWord')} pillCls="blue" />
           </div>
 
           <div className="card dist-card">
@@ -96,13 +100,17 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
             {recent.map((t) => (
               <div key={t.id} className="dist-txn">
                 <span className="dist-txn-av">{(t.customerName || '?').slice(0, 1).toUpperCase()}</span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="dist-txn-name">{t.customerName || '—'}</div>
-                  <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · <span className={`dist-mpill ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span></div>
+                <div className="dist-txn-mid">
+                  <div className="dist-txn-line1">
+                    <span className="dist-txn-name">{t.customerName || '—'}</span>
+                    <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>
+                    {t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
+                  </div>
+                  <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)}</div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
+                <div className="dist-txn-right">
                   <div className="tnum dist-txn-amt">{rpFull(t.amount)}</div>
-                  <span className={`dist-badge ${t.corrected ? 'corr' : 'lock'}`}>{IcX(t.corrected ? 'IconPencil' : 'IconLock', { s: 11 })}{t.corrected ? trD('dist.corrected') : trD('dist.txLocked')}</span>
+                  <span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>
                 </div>
               </div>
             ))}
@@ -110,12 +118,13 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
         </div>
 
         <div className="dist-rail">
-          <div className="card dist-card">
-            <div className="sec-title">{trD('dist.today')}</div>
-            <div className="dist-sumrow"><span>{trD('dist.kpiGalon')}</span><b className="tnum">{numX(sum.qty)}</b></div>
-            <div className="dist-sumrow"><span>{trD('dist.kpiIn')}</span><b className="tnum amt-pos">{rpFull(sum.uangMasuk)}</b></div>
-            <div className="dist-sumrow"><span>{trD('dist.kpiBon')}</span><b className="tnum" style={{ color: 'var(--warn)' }}>{rpFull(sum.piutang)}</b></div>
-            <div className="dist-sumrow"><span>{trD('dist.kpiTxn')}</span><b className="tnum">{numX(sum.count)}</b></div>
+          <div className="card dist-today-hero">
+            <div className="dist-th-top"><span>{trD('dist.today')}</span><span className="dist-th-count">{numX(sum.count)} {trD('dist.notaWord')}</span></div>
+            <div className="dist-th-metrics">
+              <div><div className="dist-th-lbl">{trD('dist.kpiIn')}</div><div className="dist-th-val pos">{rpX(sum.uangMasuk)}</div></div>
+              <div><div className="dist-th-lbl">{trD('dist.bonBaru')}</div><div className="dist-th-val warn">{rpX(sum.piutang)}</div></div>
+            </div>
+            <div className="dist-th-avg"><span>{trD('dist.avgNota')}</span><b className="tnum">{rpFull(avgNota)}</b></div>
           </div>
 
           <div className="card dist-quick">
