@@ -455,7 +455,21 @@ function FApp() {
       return next;
     });
   };
-  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); };
+  // ── Attendance + orientation attendance: the whole nested map mirrors to a REST
+  // /settings key (off /state, so no poll-revert). CO writes fire a hook → debounced
+  // push; a remote pull hydrates the local map + bumps syncTick so on-demand readers
+  // re-render. Demo seeding is disabled in the store (months start empty). ──
+  const canViewAtt = !!(p.attendance || p.payroll || p.employees || p.empDetail);
+  const canWriteAtt = !!(p.attendance || p.payroll || p.employees);
+  const attTimer = uRf(null), oriTimer = uRf(null);
+  const pushAtt = () => { clearTimeout(attTimer.current); attTimer.current = setTimeout(() => { if (canWriteAtt && window.API && window.API.settings) window.API.settings.set('airro_attendance', CO.rawAtt()).catch(() => {}); }, 600); };
+  const pushOriAtt = () => { clearTimeout(oriTimer.current); oriTimer.current = setTimeout(() => { if (canWriteAtt && window.API && window.API.settings) window.API.settings.set('airro_oriatt', CO.rawOriAtt()).catch(() => {}); }, 600); };
+  const reloadAtt = () => (canViewAtt && window.API && window.API.settings) ? window.API.settings.get('airro_attendance').then((r) => { const v = r && r.data ? r.data.value : null; if (v && typeof v === 'object') { CO.hydrateAtt(v); setSyncTick((t) => t + 1); } }).catch(() => {}) : Promise.resolve();
+  const reloadOriAtt = () => (canViewAtt && window.API && window.API.settings) ? window.API.settings.get('airro_oriatt').then((r) => { const v = r && r.data ? r.data.value : null; if (v && typeof v === 'object') { CO.hydrateOriAtt(v); setSyncTick((t) => t + 1); } }).catch(() => {}) : Promise.resolve();
+  const pushAttRef = uRf(pushAtt), pushOriRef = uRf(pushOriAtt);
+  pushAttRef.current = pushAtt; pushOriRef.current = pushOriAtt;
+  uEh(() => { CO.setAttHooks(() => pushAttRef.current && pushAttRef.current(), () => pushOriRef.current && pushOriRef.current()); return () => CO.setAttHooks && CO.setAttHooks(null, null); }, []);
+  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); reloadAtt(); reloadOriAtt(); };
   uEh(() => {
     if (!(window.API && window.API.accounts)) return;
     reloadConfig();

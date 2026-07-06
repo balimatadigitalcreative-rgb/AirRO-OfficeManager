@@ -55,6 +55,8 @@ const KEY_MAP = [
   ['airro_departments_v1', 'airro_departments'],
   ['airro_projects_v3', 'airro_projects'],
   ['airro_fleet_v1', 'airro_fleet'],
+  ['airro_attendance_v2', 'airro_attendance'],
+  ['airro_oriatt_v1', 'airro_oriatt'],
 ];
 async function migrateSettingKeys() {
   console.log(`\n== Settings keys ==`);

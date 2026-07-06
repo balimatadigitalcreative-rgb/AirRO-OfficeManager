@@ -26,8 +26,17 @@
   // ---- deterministic attendance seed (this month, working days Mon–Sat) ----
   const ATT_KEY = 'airro_attendance_v2';   // trial: empty
   const PAD = (n) => String(n).padStart(2, '0');
+  // Attendance + orientation attendance now persist to the REST /settings store (off
+  // the /state block-mirror). The shell registers change hooks (setAttHooks) that
+  // push the map up on every write; hydrateAtt/hydrateOriAtt load it back WITHOUT
+  // re-firing the hook (so a remote pull doesn't echo back up).
+  let _attHook = null, _oriHook = null;
+  function setAttHooks(onAtt, onOri) { _attHook = onAtt || null; _oriHook = onOri || null; }
   function loadAttMap() { try { const r = localStorage.getItem(ATT_KEY); if (r) { const o = JSON.parse(r); if (o && typeof o === 'object') return o; } } catch (e) {} return {}; }
-  function saveAttMap(m) { try { localStorage.setItem(ATT_KEY, JSON.stringify(m)); } catch (e) {} }
+  function saveAttMapRaw(m) { try { localStorage.setItem(ATT_KEY, JSON.stringify(m || {})); } catch (e) {} }
+  function saveAttMap(m) { saveAttMapRaw(m); if (_attHook) { try { _attHook(); } catch (e) {} } }
+  function hydrateAtt(m) { if (m && typeof m === 'object') saveAttMapRaw(m); }
+  function rawAtt() { return loadAttMap(); }
 
   function genMonth(staff, monthKey, today) {
     let s = 0; for (let i = 0; i < staff.id.length; i++) s = (s * 31 + staff.id.charCodeAt(i)) & 0x7fffffff;
@@ -73,7 +82,7 @@
   // total late minutes + rupiah deduction for a staff's month, given policy {lateStart, latePerMin}
   function lateInfo(staff, monthKey, today, policy) {
     const map = loadAttMap(); const k = staff.id + '|' + monthKey;
-    if (!map[k]) { map[k] = genMonth(staff, monthKey, today); saveAttMap(map); }
+    if (!map[k]) map[k] = {};   // no demo seeding — unfilled month = no late minutes
     const start = toMin((policy && policy.lateStart) || '08:00');
     const basis = (policy && policy.lateBasis) === 'hour' ? 'hour' : 'minute';
     const per = (policy && +policy.latePerMin) || 0;
@@ -86,7 +95,7 @@
   // overtime: sum of per-day overtime hours × hourly rate
   function overtimeInfo(staff, monthKey, today, policy) {
     const map = loadAttMap(); const k = staff.id + '|' + monthKey;
-    if (!map[k]) { map[k] = genMonth(staff, monthKey, today); saveAttMap(map); }
+    if (!map[k]) map[k] = {};   // no demo seeding — unfilled month = no overtime
     const rate = (policy && +policy.otPerHour) || 0;
     let hours = 0;
     Object.values(map[k]).forEach((r) => { hours += (+r.ot || 0); });
@@ -97,8 +106,8 @@
   function attendance(staff, monthKey, today) {
     const map = loadAttMap();
     const k = staff.id + '|' + monthKey;
-    if (!map[k]) { map[k] = genMonth(staff, monthKey, today); saveAttMap(map); }
-    const recs = map[k];
+    // No demo seeding: an un-filled month starts EMPTY (all days 'none'); HR fills it.
+    const recs = map[k] || {};
     const log = allDates(monthKey).map((ds) => ({ date: ds, ...(recs[ds] || { status: 'none', in: null, out: null }) }));
     return { ...summarize(recs), log };
   }
@@ -169,7 +178,10 @@
   // overtimeHours = manual OT override (used only when checkOut is empty).
   const ORIATT_KEY = 'airro_oriatt_v1';
   function loadOriAtt() { try { const r = localStorage.getItem(ORIATT_KEY); if (r) { const o = JSON.parse(r); if (o && typeof o === 'object') return o; } } catch (e) {} return {}; }
-  function saveOriAtt(m) { try { localStorage.setItem(ORIATT_KEY, JSON.stringify(m || {})); } catch (e) {} }
+  function saveOriAttRaw(m) { try { localStorage.setItem(ORIATT_KEY, JSON.stringify(m || {})); } catch (e) {} }
+  function saveOriAtt(m) { saveOriAttRaw(m); if (_oriHook) { try { _oriHook(); } catch (e) {} } }
+  function hydrateOriAtt(m) { if (m && typeof m === 'object') saveOriAttRaw(m); }
+  function rawOriAtt() { return loadOriAtt(); }
   function oriAtt(staffId) {
     const days = loadOriAtt()[staffId] || {};
     return Object.keys(days).map((date) => ({ date, ...days[date] })).sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -197,6 +209,7 @@
   }
 
   window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId,
+    ATT_KEY, setAttHooks, hydrateAtt, rawAtt, hydrateOriAtt, rawOriAtt,   // attendance ↔ REST /settings
     CB_KEY, loadCashbons, saveCashbons, newCashbonId, cashbonsFor, addCashbon, updateCashbon, removeCashbon,
     TR_KEY, loadTrainings, saveTrainings, newTrainingId, trainingsFor, addTraining, updateTraining, removeTraining,
     ORIATT_KEY, oriAtt, setOriAttDay, removeOriAttDay,

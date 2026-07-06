@@ -18,6 +18,8 @@ const KEY_WRITE_CAPS = {
   airro_departments: ['settings', 'payroll', 'employees'],
   airro_projects: ['settings', 'company', 'payroll'],
   airro_fleet: ['settings', 'setoran'],
+  airro_attendance: ['attendance', 'payroll', 'employees', 'settings'],
+  airro_oriatt: ['attendance', 'payroll', 'employees', 'settings'],
 };
 const gateByKey = (req, res, next) => requireAnyCap(KEY_WRITE_CAPS[req.params.key] || ['settings'])(req, res, next);
 
