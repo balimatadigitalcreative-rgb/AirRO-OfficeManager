@@ -623,7 +623,10 @@ select.fld::-ms-expand { display: none; }
 .user-chip { margin-top: auto; display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 10px; }
 .user-av { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: #fff; font-weight: 800; font-size: 14px; flex-shrink: 0; }
 .user-av.lg { width: 56px; height: 56px; font-size: 18px; }
-.up-name { display: block; font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Profile name: wrap up to 2 lines (readable long names like "Ida Bagus Gede
+   Pujadnyana" instead of a mid-word "Ida Ba…"); the card height adapts. A rare name
+   longer than 2 lines ellipsizes on line 2 and the title tooltip has the full name. */
+.up-name { font-weight: 700; color: var(--ink); line-height: 1.22; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .up-sub { display: block; font-size: 11.5px; color: var(--text-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .logout-btn:hover { background: var(--neg-bg); color: var(--neg); }
 .del-spacer { width: 28px; }

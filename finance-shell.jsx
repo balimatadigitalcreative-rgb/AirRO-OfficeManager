@@ -871,7 +871,7 @@ function FApp() {
         <div className="user-chip">
           <span className="user-av" style={{ background: user.color, width: 38, height: 38 }}>{FS.initials(user.name)}</span>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="up-name" style={{ fontSize: 13.5 }}>{user.name}</div>
+            <div className="up-name" title={user.name} style={{ fontSize: 13.5 }}>{user.name}</div>
             <AUTH.RoleBadge role={user.role} size="sm" />
           </div>
           <button className="icon-btn" title={tr('pw.change')} onClick={() => setPwModal(true)}><IconLock s={17} /></button>
@@ -884,7 +884,7 @@ function FApp() {
         <Nav />
         <div className="user-chip" style={{ marginTop: 'auto' }}>
           <span className="user-av" style={{ background: user.color, width: 38, height: 38 }}>{FS.initials(user.name)}</span>
-          <div style={{ minWidth: 0, flex: 1 }}><div className="up-name" style={{ fontSize: 13.5 }}>{user.name}</div><AUTH.RoleBadge role={user.role} size="sm" /></div>
+          <div style={{ minWidth: 0, flex: 1 }}><div className="up-name" title={user.name} style={{ fontSize: 13.5 }}>{user.name}</div><AUTH.RoleBadge role={user.role} size="sm" /></div>
           <button className="icon-btn" title={tr('pw.change')} onClick={() => setPwModal(true)}><IconLock s={17} /></button>
           <button className="icon-btn logout-btn" onClick={logout}><IconLogout s={18} /></button>
         </div>
