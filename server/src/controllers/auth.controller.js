@@ -20,6 +20,11 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+const changePasswordSchema = z.object({
+  oldPassword: z.string().min(1),
+  newPassword: z.string().min(8, 'Password baru minimal 8 karakter').max(200),
+});
+
 const register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body);
   res.status(201).json(result);
@@ -35,4 +40,9 @@ const me = asyncHandler(async (req, res) => {
   res.status(200).json({ user });
 });
 
-module.exports = { register, login, me, schemas: { registerSchema, loginSchema } };
+const changePassword = asyncHandler(async (req, res) => {
+  await authService.changePassword(req.user.id, req.body.oldPassword, req.body.newPassword);
+  res.status(200).json({ data: { ok: true } });
+});
+
+module.exports = { register, login, me, changePassword, schemas: { registerSchema, loginSchema, changePasswordSchema } };

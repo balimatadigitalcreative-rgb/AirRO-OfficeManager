@@ -14,6 +14,8 @@ const createSchema = z.object({
   active: z.boolean().optional(),
   // Per-user capability override (object of booleans); null/omit = role defaults.
   permissions: z.record(z.boolean()).nullable().optional(),
+  // Admin password reset: force the user to set a new password on next login.
+  mustChangePassword: z.boolean().optional(),
 });
 const updateSchema = createSchema.partial();
 const idParams = z.object({ id: z.string().min(1) });

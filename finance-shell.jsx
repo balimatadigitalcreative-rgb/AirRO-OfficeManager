@@ -63,6 +63,7 @@ function FApp() {
   const [anchor, setAnchor] = uSh(FIN.TODAY);
   const [drawer, setDrawer] = uSh(false);
   const [toast, setToast] = uSh(null);
+  const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
   const [editing, setEditing] = uSh(null);
   const [lang, setLang] = uSh(window.I18N.lang);
   const changeLang = (l) => { window.I18N.setLang(l); setLang(l); };
@@ -841,6 +842,7 @@ function FApp() {
             <div className="up-name" style={{ fontSize: 13.5 }}>{user.name}</div>
             <AUTH.RoleBadge role={user.role} size="sm" />
           </div>
+          <button className="icon-btn" title={tr('pw.change')} onClick={() => setPwModal(true)}><IconLock s={17} /></button>
           <button className="icon-btn logout-btn" title="Sign out" onClick={logout}><IconLogout s={18} /></button>
         </div>
       </aside>
@@ -851,6 +853,7 @@ function FApp() {
         <div className="user-chip" style={{ marginTop: 'auto' }}>
           <span className="user-av" style={{ background: user.color, width: 38, height: 38 }}>{FS.initials(user.name)}</span>
           <div style={{ minWidth: 0, flex: 1 }}><div className="up-name" style={{ fontSize: 13.5 }}>{user.name}</div><AUTH.RoleBadge role={user.role} size="sm" /></div>
+          <button className="icon-btn" title={tr('pw.change')} onClick={() => setPwModal(true)}><IconLock s={17} /></button>
           <button className="icon-btn logout-btn" onClick={logout}><IconLogout s={18} /></button>
         </div>
       </div>
@@ -987,6 +990,7 @@ function FApp() {
       </nav>
 
       {toast && <FToast msg={toast} onDone={() => setToast(null)} />}
+      {pwModal && <AUTH.ChangePassword onClose={() => setPwModal(false)} onDone={() => { setPwModal(false); setToast(tr('pw.changed')); }} />}
       <PROOFMOUNT />
       {editing && p.edit && (
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />

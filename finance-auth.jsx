@@ -18,12 +18,68 @@ function RoleBadge({ role, size }) {
   return <span className={`role-badge ${cls} ${size === 'sm' ? 'sm' : ''}`}><IconShield s={size === 'sm' ? 11 : 13} />{trA('role.' + role)}</span>;
 }
 
+/* Change-password form — used both self-service (modal) and forced-on-login.
+   Forced mode hides the old-password field (uses the just-entered login password)
+   and removes the cancel affordance until a new password is set. */
+function ChangePassword({ forced, prefillOld, onDone, onClose }) {
+  const [oldP, setOldP] = uSa(prefillOld || '');
+  const [newP, setNewP] = uSa('');
+  const [conf, setConf] = uSa('');
+  const [show, setShow] = uSa(false);
+  const [err, setErr] = uSa('');
+  const [busy, setBusy] = uSa(false);
+  uEa(() => { if (!forced) { const o = (e) => e.key === 'Escape' && onClose && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); } }, []);
+  const min8 = newP.length >= 8;
+  const match = newP === conf;
+  const valid = (forced || oldP.length >= 1) && min8 && match && !busy;
+  const submit = async (e) => {
+    if (e) e.preventDefault();
+    if (!valid) return;
+    setBusy(true); setErr('');
+    try { await window.API.auth.changePassword(oldP, newP); setBusy(false); onDone && onDone(); }
+    catch (ex) { setBusy(false); setErr((ex && ex.body && ex.body.error && ex.body.error.message) || trA('pw.failGeneric')); }
+  };
+  return (
+    <div className="modal-scrim" onClick={forced ? undefined : onClose}>
+      <form className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }} onSubmit={submit}>
+        <div className="modal-head">
+          <div style={{ fontSize: 17, fontWeight: 700 }}>{forced ? trA('pw.forcedTitle') : trA('pw.change')}</div>
+          {!forced && <button type="button" className="jp-icon" onClick={onClose}><IconClose s={18} /></button>}
+        </div>
+        <div className="modal-body">
+          {forced && <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginBottom: 10 }}>{trA('pw.forcedSub')}</div>}
+          {!forced && (<>
+            <label className="fld-label" style={{ marginTop: 0 }}>{trA('pw.old')}</label>
+            <input className="fld" type="password" value={oldP} autoFocus onChange={(e) => { setOldP(e.target.value); setErr(''); }} />
+          </>)}
+          <label className="fld-label" style={forced ? { marginTop: 0 } : {}}>{trA('pw.new')}</label>
+          <div className="login-field" style={{ margin: 0 }}>
+            <IconLock s={18} />
+            <input type={show ? 'text' : 'password'} value={newP} autoFocus={forced} placeholder={trA('pw.min')} onChange={(e) => { setNewP(e.target.value); setErr(''); }} />
+            <button type="button" className="login-eye" onClick={() => setShow(!show)}>{show ? trA('login.hide') : trA('login.showpw')}</button>
+          </div>
+          {newP && !min8 && <div style={{ fontSize: 11.5, color: 'var(--neg)', marginTop: 4 }}>{trA('pw.min')}</div>}
+          <label className="fld-label">{trA('pw.confirm')}</label>
+          <input className="fld" type={show ? 'text' : 'password'} value={conf} onChange={(e) => { setConf(e.target.value); setErr(''); }} />
+          {conf && !match && <div style={{ fontSize: 11.5, color: 'var(--neg)', marginTop: 4 }}>{trA('pw.mismatch')}</div>}
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot">
+          {!forced && <button type="button" className="btn btn-ghost" onClick={onClose}>{trA('common.cancel') || 'Cancel'}</button>}
+          <button type="submit" className="btn btn-primary" disabled={!valid}>{busy ? '…' : trA('pw.save')}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin, lang, onLang }) {
   const [username, setUsername] = uSa('');
   const [password, setPassword] = uSa('');
   const [err, setErr] = uSa(false);
   const [errText, setErrText] = uSa('');
   const [show, setShow] = uSa(false);
+  const [forceUser, setForceUser] = uSa(null);   // {cu, pw} when the account must set a new password
 
   const [busy, setBusy] = uSa(false);
   const badMsg = () => trA('login.bad');
@@ -40,7 +96,10 @@ function LoginScreen({ onLogin, lang, onLang }) {
     try {
       const cu = await window.CLOUD.login(username.trim(), password);
       setBusy(false);
-      if (cu) { onLogin(cu); return; }   // signed in via backend
+      if (cu) {
+        if (cu.mustChangePassword) { setForceUser({ cu, pw: password }); return; }   // must set a new password first
+        onLogin(cu); return;             // signed in via backend
+      }
       fail(offlineMsg());                // null → backend unreachable
     } catch (err) {
       setBusy(false);
@@ -100,8 +159,9 @@ function LoginScreen({ onLogin, lang, onLang }) {
           <button type="submit" className="login-submit" disabled={busy}>{busy ? '…' : trA('login.login')}</button>
         </form>
       </div>
+      {forceUser && <ChangePassword forced prefillOld={forceUser.pw} onDone={() => onLogin({ ...forceUser.cu, mustChangePassword: false })} />}
     </div>
   );
 }
 
-window.AUTH = { LoginScreen, RoleBadge, LangToggle };
+window.AUTH = { LoginScreen, RoleBadge, LangToggle, ChangePassword };

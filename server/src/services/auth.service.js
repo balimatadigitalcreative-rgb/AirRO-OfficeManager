@@ -6,9 +6,10 @@ const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const { parsePerms } = require('../config/permissions');
 
+const PASSWORD_MIN = 8;   // minimum length for a user-chosen password (self change)
 const PUBLIC_FIELDS = {
   id: true, name: true, username: true, role: true, sub: true,
-  color: true, active: true, permissions: true, createdAt: true,
+  color: true, active: true, permissions: true, mustChangePassword: true, createdAt: true,
 };
 
 // Shape a user row for API responses: permissions returned as a parsed object.
@@ -54,4 +55,17 @@ async function me(userId) {
   return publicUser(user);
 }
 
-module.exports = { register, login, me, signToken, publicUser, PUBLIC_FIELDS };
+// A user changes their OWN password: verify the current one, then store the new
+// hash (bcrypt) and clear the force-change flag. The password is never returned.
+async function changePassword(userId, oldPassword, newPassword) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw ApiError.notFound('User not found');
+  const ok = await bcrypt.compare(oldPassword || '', user.passwordHash);
+  if (!ok) throw ApiError.unauthorized('Password lama salah');
+  if (!newPassword || newPassword.length < PASSWORD_MIN) throw ApiError.badRequest(`Password baru minimal ${PASSWORD_MIN} karakter`);
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false } });
+  return { ok: true };
+}
+
+module.exports = { register, login, me, changePassword, signToken, publicUser, PUBLIC_FIELDS, PASSWORD_MIN };

@@ -5,8 +5,8 @@ const validate = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = Router();
-// User administration is restricted to the General Manager role.
-router.use(requireAuth, requireRole('gm'));
+// User administration (incl. password reset) is restricted to the Owner & GM roles.
+router.use(requireAuth, requireRole('owner', 'gm'));
 
 router.get('/', ctrl.list);
 router.get('/:id', validate({ params: ctrl.schemas.idParams }), ctrl.getOne);

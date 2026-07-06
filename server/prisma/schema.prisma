@@ -21,6 +21,7 @@ model User {
   username     String   @unique
   passwordHash String
   pin          String? // optional quick-login PIN (hashed)
+  mustChangePassword Boolean @default(false) // force a password change on next login
   role         String   @default("finance")
   sub          String? // subtitle shown in the UI, e.g. "Finance · Keuangan"
   color        String   @default("#22A7A1")

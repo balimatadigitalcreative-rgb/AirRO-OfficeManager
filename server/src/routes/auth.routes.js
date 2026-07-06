@@ -9,5 +9,7 @@ const router = Router();
 router.post('/register', validate({ body: ctrl.schemas.registerSchema }), ctrl.register);
 router.post('/login', validate({ body: ctrl.schemas.loginSchema }), ctrl.login);
 router.get('/me', requireAuth, ctrl.me);
+// A signed-in user changes their own password (verifies the current one first).
+router.post('/change-password', requireAuth, validate({ body: ctrl.schemas.changePasswordSchema }), ctrl.changePassword);
 
 module.exports = router;

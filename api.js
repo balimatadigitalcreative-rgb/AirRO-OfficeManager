@@ -44,6 +44,8 @@
     return r.user;
   }
   async function me() { const r = await req('GET', '/auth/me'); return r.user; }
+  // Change the signed-in user's own password (server verifies the old one).
+  async function changePassword(oldPassword, newPassword) { return req('POST', '/auth/change-password', { oldPassword, newPassword }); }
   function logout() { setToken(null); }
 
   // ---- generic resource helpers ----
@@ -58,8 +60,8 @@
 
   window.API = {
     BASE, ApiOffline, ApiError,
-    getToken, setToken, ping, login, me, logout,
-    auth: { login, me, logout },
+    getToken, setToken, ping, login, me, logout, changePassword,
+    auth: { login, me, logout, changePassword },
     accounts: collection('accounts'),
     transfers: collection('transfers'),
     entries: collection('entries'),

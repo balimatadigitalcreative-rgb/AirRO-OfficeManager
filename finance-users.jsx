@@ -67,11 +67,17 @@ function UserModal({ row, users, onSave, onClose, busy }) {
               <input className="fld" value={f.user} placeholder="username" onChange={(e) => set({ user: e.target.value.replace(/\s/g, '') })} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <label className="fld-label" style={{ marginTop: 0 }}>{f._new ? 'Password (PIN)' : 'Password baru'}</label>
-              <input className="fld tnum" inputMode="numeric" value={f.pin} placeholder={f._new ? 'min. 4 angka' : 'kosongkan jika tetap'} onChange={(e) => set({ pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
+              <label className="fld-label" style={{ marginTop: 0 }}>{f._new ? 'Password (PIN)' : trU('um.resetPw')}</label>
+              <input className="fld tnum" inputMode="numeric" value={f.pin} placeholder={f._new ? 'min. 4 angka' : trU('um.newPwPh')} onChange={(e) => set({ pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
             </div>
           </div>
-          {!f._new && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 4 }}>Lupa password? Isi PIN baru di sini lalu Simpan, beri tahu user.</div>}
+          {!f._new && <>
+            <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 4 }}>Lupa password? Isi PIN baru di sini lalu Simpan, beri tahu user.</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginTop: 8, cursor: 'pointer', color: 'var(--text-mut)' }}>
+              <input type="checkbox" checked={!!f.mustChangePassword} onChange={(e) => set({ mustChangePassword: e.target.checked })} />
+              {trU('um.forceChange')}
+            </label>
+          </>}
           {dupUser && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={14} />{trU('um.dup')}</div>}
           <label className="fld-label">{trU('um.note')}</label>
           <input className="fld" value={f.sub || ''} placeholder={trU('um.notePh')} onChange={(e) => set({ sub: e.target.value })} />
@@ -114,7 +120,7 @@ function UserManagement({ users, setUsers, currentId }) {
   const [busy, setBusy] = uSu(false);
   const [err, setErr] = uSu(null);
 
-  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null });
+  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, mustChangePassword: !!u.mustChangePassword });
 
   const refresh = () => {
     if (!cloud) { setRows(users || []); return; }
@@ -142,7 +148,7 @@ function UserManagement({ users, setUsers, currentId }) {
       } else if (u._new) {
         await window.API.users.create({ name: u.name.trim(), username: u.user.trim(), password: u.pin, role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null });
       } else {
-        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null };
+        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, mustChangePassword: !!u.mustChangePassword };
         if (u.pin) body.password = u.pin;   // only change the password when re-entered
         await window.API.users.update(u.id, body);
       }
