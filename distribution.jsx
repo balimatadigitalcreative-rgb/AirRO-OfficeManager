@@ -15,6 +15,10 @@ const METHOD_META = {
   pelunasan: { cls: 'pelunasan', label: 'dist.pelunasan' },
 };
 const methodLabel = (m) => trD(METHOD_META[m] ? METHOD_META[m].label : 'dist.lunas') || m;
+const CUST_TYPES = ['reguler', 'kos', 'cafe', 'bulk'];
+const CUST_TAG = { reguler: 'reg', kos: 'kos', cafe: 'cafe', bulk: 'bulk' };
+const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Reguler');
+const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 
 // ── 7-day stacked bar (cash = navy, bon = amber) ──
 function SevenDayChart({ last7 }) {
@@ -343,4 +347,201 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions };
+// ════════════════ PELANGGAN (list + detail + add + import) ════════════════
+function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarga, onChanged }) {
+  const [view, setView] = uSx('list');
+  const [custs, setCusts] = uSx(null);
+  const [detail, setDetail] = uSx(null);
+  const [q, setQ] = uSx('');
+  const [filter, setFilter] = uSx('all');
+  const [toast, setToast] = uSx('');
+  const [addOpen, setAddOpen] = uSx(false);
+  const [af, setAf] = uSx({ name: '', phone: '', type: 'reguler', price: '' });
+  const [addSaving, setAddSaving] = uSx(false);
+  const [impOpen, setImpOpen] = uSx(false);
+  const [impText, setImpText] = uSx('');
+  const [impSaving, setImpSaving] = uSx(false);
+
+  const reload = () => window.API.distribusi.customers.list().then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
+  uEx(() => { if (window.API && window.API.distribusi) reload(); }, [refreshKey]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+
+  const openDetail = (id) => { setView('detail'); setDetail(null); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); };
+
+  const commitAdd = () => {
+    const name = af.name.trim(); const price = parseInt(String(af.price).replace(/[^0-9]/g, ''), 10);
+    if (!name || !price || addSaving) return;
+    setAddSaving(true);
+    window.API.distribusi.customers.create({ name, phone: af.phone.trim(), type: af.type, masterPrice: price })
+      .then(() => { setAddSaving(false); setAddOpen(false); setAf({ name: '', phone: '', type: 'reguler', price: '' }); flash(trD('dist.custAdded')); reload(); if (onChanged) onChanged(); })
+      .catch(() => setAddSaving(false));
+  };
+
+  // ── spreadsheet import parsing (live preview) ──
+  const existing = new Set((custs || []).map((c) => (c.name || '').toLowerCase()));
+  const seen = new Set();
+  let impLines = impText.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (impLines.length && /nama/i.test(impLines[0]) && /harga|price/i.test(impLines[0])) impLines = impLines.slice(1);
+  const impRows = impLines.map((line) => {
+    const cols = line.split(/\t|,|;/).map((s) => s.trim());
+    const name = cols[0] || ''; const phone = cols[1] || '';
+    const rawType = (cols[2] || '').toLowerCase();
+    const type = CUST_TYPES.includes(rawType) ? rawType : 'reguler';
+    const num = parseInt((cols[3] || '').replace(/[^0-9]/g, ''), 10);
+    const key = name.toLowerCase(); const dup = existing.has(key) || seen.has(key);
+    if (name) seen.add(key);
+    const valid = !!name && !!num && !dup;
+    return { name: name || '(kosong)', phone: phone || '—', type, price: num || 0, valid, status: valid ? 'ok' : (!name || !num) ? 'kurang' : 'dup' };
+  });
+  const impValid = impRows.filter((r) => r.valid);
+  const commitImport = () => {
+    if (!impValid.length || impSaving) return;
+    setImpSaving(true);
+    window.API.distribusi.customers.import(impValid.map((r) => ({ name: r.name, phone: r.phone === '—' ? '' : r.phone, type: r.type, masterPrice: r.price })))
+      .then((r) => { setImpSaving(false); setImpOpen(false); setImpText(''); flash(trD('dist.imported', { n: r.imported })); reload(); if (onChanged) onChanged(); })
+      .catch(() => setImpSaving(false));
+  };
+  const impSample = 'Warung Sejahtera\t0821-1122-3344\tReguler\t12500\nKos Anggrek\t0813-7788-9900\tKos\t13000\nCafe Ombak\t0817-2211-3344\tCafe\t14000';
+
+  const typeChip = (t, on, onClick) => <button type="button" key={t} className={`dist-typechip ${on ? 'on' : ''}`} onClick={onClick}>{typeLabel(t)}</button>;
+  const tag = (t) => <span className={`dist-ctag ${CUST_TAG[t] || 'reg'}`}>{typeLabel(t)}</span>;
+
+  // ── DETAIL ──
+  if (view === 'detail') {
+    const d = detail;
+    return (
+      <div className="dist-dash screen-enter">
+        <button type="button" className="dist-back" onClick={() => { setView('list'); setDetail(null); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backCust')}</button>
+        {!d ? <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div> : (<>
+          <div className="card dist-cd-head">
+            <span className="dist-cd-av">{initialsOf(d.name)}</span>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <div className="dist-cd-namerow"><h2 className="dist-cd-name">{d.name}</h2>{tag(d.type)}</div>
+              <div className="dist-cd-phone">{d.phone || '—'}</div>
+            </div>
+            <div className="dist-cd-stats">
+              <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
+              <div><div className="dist-cd-slbl">{trD('dist.totalGalon')}</div><div className="dist-cd-sval">{numX(d.totalGalon)}</div></div>
+            </div>
+          </div>
+          <div className="dist-cd-cols">
+            <div className="card dist-cd-price">
+              <div className="dist-card-head"><div className="sec-title">{trD('dist.hargaMenempel')}</div><span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span></div>
+              <p className="dist-cd-pricenote">{trD('dist.hargaMenempelNote')}</p>
+              <div className="dist-cd-pricebox"><div className="dist-cd-pricelbl">{trD('dist.hargaPerGalon')}</div><div className="dist-cd-priceval">{rpFull(d.masterPrice)}</div></div>
+              {canPrice
+                ? <button type="button" className="btn btn-ghost" style={{ width: '100%', marginTop: 14 }} onClick={onGoHarga}><IconPencil s={14} />{trD('dist.ubahHarga')}</button>
+                : <div className="dist-cd-lockednote"><IconLock s={14} />{trD('dist.hargaOwnerOnly')}</div>}
+            </div>
+            <div className="card dist-card" style={{ flex: 1, minWidth: 280 }}>
+              <div className="sec-title" style={{ marginBottom: 8 }}>{trD('dist.riwayat')}</div>
+              {(!d.transactions || d.transactions.length === 0) && <div className="dist-empty">{trD('dist.noTxn')}</div>}
+              {(d.transactions || []).map((t) => (
+                <div key={t.id} className="dist-txn">
+                  <span className="dist-cd-bar" style={{ background: t.method === 'bon' ? '#e0a13c' : t.method === 'pelunasan' ? '#2f6fb0' : '#17b083' }} />
+                  <div className="dist-txn-mid">
+                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}</div>
+                    <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · {t.txnDate} {hhmm(t.createdAt)}{t.actorName ? ' · ' + t.actorName : ''}</div>
+                  </div>
+                  <div className="tnum dist-txn-amt">{rpFull(t.amount)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>)}
+        {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+      </div>
+    );
+  }
+
+  // ── LIST ──
+  const rows = (custs || []).filter((c) => {
+    if (q && !((c.name || '') + (c.phone || '')).toLowerCase().includes(q.toLowerCase())) return false;
+    return filter === 'all' ? true : filter === 'bon' ? c.sisaBon > 0 : filter === 'bulk' ? c.type === 'bulk' : filter === 'reguler' ? c.type === 'reguler' : true;
+  });
+  const chips = [['all', trD('dist.fAll')], ['bon', trD('dist.filterBon')], ['reguler', trD('dist.filterReg')], ['bulk', trD('dist.filterBulk')]];
+  return (
+    <div className="dist-dash screen-enter">
+      <div className="dist-tx-toolbar">
+        <div className="dist-search"><IconSearch s={16} /><input value={q} placeholder={trD('dist.searchCust')} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
+        <div style={{ flex: 1 }} />
+        {canCustomers ? (
+          <div className="dist-cust-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => setImpOpen(true)}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.import')}</button>
+            <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}><IconPlus s={16} />{trD('dist.addCust')}</button>
+          </div>
+        ) : <div className="dist-lockbtn"><IconLock s={14} />{trD('dist.addOwner')}</div>}
+      </div>
+
+      <div className="card dist-card" style={{ padding: '6px 18px' }}>
+        {custs === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
+        {custs !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.noCust')}</div>}
+        {rows.map((c) => (
+          <div key={c.id} className="dist-cust-row" onClick={() => openDetail(c.id)}>
+            <span className="dist-txn-av">{initialsOf(c.name)}</span>
+            <div className="dist-cust-main">
+              <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}</div>
+              <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
+            </div>
+            <div className="dist-cust-price">
+              <div className="dist-cust-priceval">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
+              <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
+            </div>
+            <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpX(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
+            <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
+          </div>
+        ))}
+      </div>
+
+      {addOpen && (
+        <div className="modal-scrim" onClick={() => setAddOpen(false)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.addCust')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.addCustSub')}</div></div><button className="jp-icon" onClick={() => setAddOpen(false)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.cfName')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <input className="fld" value={af.name} placeholder={trD('dist.cfNamePh')} onChange={(e) => setAf({ ...af, name: e.target.value })} />
+              <label className="fld-label">{trD('dist.cfPhone')}</label>
+              <input className="fld" value={af.phone} placeholder="cth. 0812-3456-7890" onChange={(e) => setAf({ ...af, phone: e.target.value })} />
+              <label className="fld-label">{trD('dist.cfType')}</label>
+              <div className="dist-typechips">{CUST_TYPES.map((t) => typeChip(t, af.type === t, () => setAf({ ...af, type: t })))}</div>
+              <label className="fld-label">{trD('dist.cfPrice')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <div className="dist-priceinput"><IconLock s={15} /><input value={af.price} inputMode="numeric" placeholder="cth. 12000" onChange={(e) => setAf({ ...af, price: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+              <div className="dist-hint" style={{ marginTop: 8 }}>{trD('dist.cfPriceNote')}</div>
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAddOpen(false)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!af.name.trim() || !af.price || addSaving} onClick={commitAdd}>{addSaving ? '…' : trD('dist.cfSave')}</button></div>
+          </div>
+        </div>
+      )}
+
+      {impOpen && (
+        <div className="modal-scrim" onClick={() => setImpOpen(false)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.importT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.importSub')}</div></div><button className="jp-icon" onClick={() => setImpOpen(false)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Nama · No HP · Tipe · Harga</b></span><button type="button" className="dist-link" onClick={() => setImpText(impSample)}>{trD('dist.importSample')}</button></div>
+              <textarea className="fld dist-imp-ta" value={impText} placeholder={'Warung Sejahtera\t0821-1122-3344\tReguler\t12500'} onChange={(e) => setImpText(e.target.value)} />
+              {impRows.length > 0 && (<>
+                <div className="dist-imp-counts"><span className="dist-imp-ok">{impValid.length} {trD('dist.importReady')}</span><span className="dist-imp-skip">{impRows.length - impValid.length} {trD('dist.importSkip')}</span></div>
+                <div className="dist-imp-preview">
+                  <div className="dist-imp-hrow"><span>Nama</span><span>No HP</span><span>Tipe</span><span>Harga</span><span>Status</span></div>
+                  {impRows.map((r, i) => (
+                    <div key={i} className="dist-imp-row">
+                      <span className="dist-imp-name">{r.name}</span><span>{r.phone}</span><span>{typeLabel(r.type)}</span><span>{r.price ? rpFull(r.price) : '—'}</span>
+                      <span><span className={`dist-imp-status ${r.status}`}>{r.status === 'ok' ? trD('dist.impReady') : r.status === 'kurang' ? trD('dist.impMissing') : trD('dist.impDup')}</span></span>
+                    </div>
+                  ))}
+                </div>
+              </>)}
+              <div className="dist-hint" style={{ marginTop: 10 }}><IconLock s={12} /> {trD('dist.importLockNote')}</div>
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setImpOpen(false)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!impValid.length || impSaving} onClick={commitImport}>{impSaving ? '…' : trD('dist.importBtn', { n: impValid.length })}</button></div>
+          </div>
+        </div>
+      )}
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers };

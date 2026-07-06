@@ -29,14 +29,34 @@ async function logAudit(kind, title, detail, snap) {
 }
 
 // ── Customers ──────────────────────────────────────────────────────────────
+// Per-customer rollups from the (immutable) transactions: total gallons, running
+// bon (sisaBon = bon booked − pelunasan collected, floored at 0), last activity.
 async function listCustomers() {
   const rows = await prisma.customer.findMany({ orderBy: { name: 'asc' } });
-  return { data: rows };
+  const txns = await prisma.distTransaction.findMany({ select: { customerId: true, qty: true, amount: true, method: true, txnDate: true } });
+  const agg = {};
+  txns.forEach((t) => {
+    const a = agg[t.customerId] || (agg[t.customerId] = { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 });
+    a.totalGalon += t.qty; a.txnCount++;
+    if (t.method === 'bon') a.bon += t.amount; else if (t.method === 'pelunasan') a.pelunasan += t.amount;
+    if (t.txnDate > a.lastDate) a.lastDate = t.txnDate;
+  });
+  const data = rows.map((c) => {
+    const a = agg[c.id] || { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 };
+    return { ...c, totalGalon: a.totalGalon, sisaBon: Math.max(0, a.bon - a.pelunasan), lastDate: a.lastDate || null, txnCount: a.txnCount };
+  });
+  return { data };
 }
 async function getCustomer(id) {
   const c = await prisma.customer.findUnique({ where: { id }, include: { priceHistory: { orderBy: { changedAt: 'desc' } } } });
   if (!c) throw ApiError.notFound('Customer not found');
-  return c;
+  const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' }, include: { corrections: { select: { id: true } } } });
+  let bon = 0, pelunasan = 0, totalGalon = 0;
+  const transactions = txns.map((t) => {
+    totalGalon += t.qty; if (t.method === 'bon') bon += t.amount; else if (t.method === 'pelunasan') pelunasan += t.amount;
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: t.corrections.length > 0 };
+  });
+  return { ...c, transactions, totalGalon, sisaBon: Math.max(0, bon - pelunasan), txnCount: txns.length };
 }
 function customerCols(body) {
   return {
