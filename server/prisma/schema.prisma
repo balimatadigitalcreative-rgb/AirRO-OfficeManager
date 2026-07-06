@@ -111,6 +111,12 @@ model Entry {
   accountId  String?
   createdBy  User?     @relation(fields: [createdById], references: [id])
   createdById String?
+  // Creator snapshot captured AT INPUT TIME (name + role as they were then). Kept
+  // as plain columns — not derived from the live User relation — so the "input by"
+  // label is a stable historical record that never changes if the user is later
+  // renamed or moved to a different role.
+  createdByName String?
+  createdByRole String?
 
   @@index([date])
   @@index([type])

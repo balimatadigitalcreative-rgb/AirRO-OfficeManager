@@ -39,6 +39,19 @@ describe('Entries CRUD', () => {
     id = res.body.data.id;
   });
 
+  it('stamps the creator from the token (name + role), not from the body', async () => {
+    // client TRIES to forge a different creator — server must ignore it
+    const res = await request(app).post('/api/v1/entries').set(auth(financeToken))
+      .send({ ...sample, createdById: 'someone-else', createdByName: 'Hacker', createdByRole: 'owner' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.createdBy).toEqual({ name: 'Fin', role: 'finance' });
+    // and it survives a round-trip through list
+    const list = await request(app).get('/api/v1/entries').set(auth(financeToken));
+    const row = list.body.data.find((e) => e.id === res.body.data.id);
+    expect(row.createdBy).toEqual({ name: 'Fin', role: 'finance' });
+    await request(app).delete(`/api/v1/entries/${res.body.data.id}`).set(auth(financeToken));
+  });
+
   it('forbids owner (read-only) from creating', async () => {
     const res = await request(app).post('/api/v1/entries').set(auth(ownerToken)).send(sample);
     expect(res.status).toBe(403);

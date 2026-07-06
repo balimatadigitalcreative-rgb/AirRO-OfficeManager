@@ -273,6 +273,19 @@ function TodayCard({ today, seeMoney = true }) {
   );
 }
 
+// "Input by" line: historical creator snapshot (name · role-at-input). Role is
+// resolved to its display name via the live role list; legacy/auto rows show "—".
+const roleLbl = (r) => (r && window.FS && FS.roleName) ? FS.roleName(r) : (r || '');
+function byLine(e) {
+  const by = e.createdBy;
+  const txt = by && by.name ? (by.name + (by.role ? ' · ' + roleLbl(by.role) : '')) : '—';
+  return (
+    <div className="entry-by" title={trF('entry.by') + ': ' + txt}>
+      <IconUserCircle s={11} /><span>{txt}</span>
+    </div>
+  );
+}
+
 /* ---------------- Entries ledger (grouped by day) ---------------- */
 function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, canDelete = true, canEdit = false }) {
   const [f, setF] = uS('all');
@@ -329,6 +342,7 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}</div>
                     <div style={{ fontSize: 11.5, color: 'var(--text-mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.note}</div>
+                    {byLine(e)}
                   </div>
                   <span className="tnum entry-time" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{e.time}</span>
                   {e.proof

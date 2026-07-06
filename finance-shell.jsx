@@ -182,6 +182,7 @@ function FApp() {
     const o = { id: row.id, type: row.type, amount: row.amount, note: row.note || '', method: row.method || 'Cash',
       date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined };
     const pf = proofFromApi(row.proof); if (pf) o.proof = pf;
+    if (row.createdBy && row.createdBy.name) o.createdBy = { name: row.createdBy.name, role: row.createdBy.role || null };   // "input by" snapshot
     return Object.assign(o, tags);
   };
   const reloadEntries = () => {
@@ -203,12 +204,16 @@ function FApp() {
   };
   const addEntry = (e) => {
     if (isDerivedEntry(e.id)) return;   // derived rows are in-memory only
-    setRealEntries((prev) => [apiToEntry(entryToApi(e)), ...prev.filter((x) => x.id !== e.id)]);   // optimistic
+    // Stamp the creator optimistically (the server does the authoritative stamp from
+    // the token); reloadEntries then replaces it with the server's snapshot.
+    const optimistic = { ...apiToEntry(entryToApi(e)), createdBy: e.createdBy || (user ? { name: user.name, role: user.role } : null) };
+    setRealEntries((prev) => [optimistic, ...prev.filter((x) => x.id !== e.id)]);
     if (window.API && window.API.entries) window.API.entries.create(entryToApi(e)).then(reloadEntries).catch(entryErr('add'));
   };
   const editEntry = (e) => {
     if (isDerivedEntry(e.id)) return;
-    setRealEntries((prev) => prev.map((x) => (x.id === e.id ? apiToEntry(entryToApi(e)) : x)));   // optimistic
+    // Editing must not drop the original creator — preserve it on the optimistic row.
+    setRealEntries((prev) => prev.map((x) => (x.id === e.id ? { ...apiToEntry(entryToApi(e)), createdBy: x.createdBy || null } : x)));
     if (window.API && window.API.entries) window.API.entries.update(e.id, entryToApi(e)).then(reloadEntries).catch(entryErr('edit'));
   };
   const removeEntry = (id) => {
