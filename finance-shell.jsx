@@ -64,6 +64,7 @@ function FApp() {
   const [drawer, setDrawer] = uSh(false);
   const [toast, setToast] = uSh(null);
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
+  const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
   const [editing, setEditing] = uSh(null);
   const [lang, setLang] = uSh(window.I18N.lang);
   const changeLang = (l) => { window.I18N.setLang(l); setLang(l); };
@@ -528,6 +529,9 @@ function FApp() {
     if (!window.CLOUD) return;
     window.CLOUD.onSync = () => { refreshAllSlices(); setSyncTick((t) => t + 1); };
     window.CLOUD.onStatus = (s) => setSyncStatus(s);
+    // Token expired mid-session → prompt a re-login (unsynced local edits are kept
+    // and flushed after signing back in).
+    window.CLOUD.onSessionExpired = () => setSessionExpired(true);
     // SSE notice for a non-/state REST entity (setoran) or a tab-focus resync →
     // re-fetch that entity immediately. Near-0 latency; the 3s poll is now a backstop.
     window.CLOUD.onEvent = (evt) => {
@@ -540,7 +544,7 @@ function FApp() {
       if (evt.entity === 'calendar' || evt.entity === 'focus') reloadEvents();
       if (evt.entity === 'config' || evt.entity === 'focus') reloadConfig();
     };
-    return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; } };
+    return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; window.CLOUD.onSessionExpired = null; } };
   }, []);
 
   // Lock the page scroll behind the mobile drawer while it's open.
@@ -868,7 +872,7 @@ function FApp() {
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
               {(screen === 'overview' || screen === 'entries') && periodBar}
-              {window.CLOUD && window.CLOUD.active && (
+              {window.CLOUD && (window.CLOUD.active || syncStatus === 'expired') && (
                 <span className={`sync-pill ${syncStatus}`} title={tr('sync.' + syncStatus)}>
                   <span className="sync-dot" /><span className="sync-txt">{tr('sync.' + syncStatus)}</span>
                 </span>
@@ -991,6 +995,20 @@ function FApp() {
 
       {toast && <FToast msg={toast} onDone={() => setToast(null)} />}
       {pwModal && <AUTH.ChangePassword onClose={() => setPwModal(false)} onDone={() => { setPwModal(false); setToast(tr('pw.changed')); }} />}
+      {sessionExpired && (
+        <div className="modal-scrim" style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-body" style={{ textAlign: 'center', padding: '10px 6px' }}>
+              <span className="sess-ic"><IconLock s={26} /></span>
+              <div style={{ fontSize: 18, fontWeight: 800, marginTop: 12 }}>{tr('sess.title')}</div>
+              <div style={{ fontSize: 13.5, color: 'var(--text-mut)', marginTop: 8, lineHeight: 1.5 }}>{tr('sess.body')}</div>
+            </div>
+            <div className="modal-foot" style={{ justifyContent: 'center' }}>
+              <button className="btn btn-primary" onClick={() => { setSessionExpired(false); logout(); }}>{tr('sess.login')}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <PROOFMOUNT />
       {editing && p.edit && (
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />

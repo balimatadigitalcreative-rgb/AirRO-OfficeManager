@@ -347,6 +347,10 @@
 .sync-pill.saving .sync-dot { background: var(--warn); animation: syncPulse 1s ease-in-out infinite; }
 .sync-pill.error { color: var(--neg); background: var(--neg-bg); }
 .sync-pill.error .sync-dot { background: var(--neg); }
+.sync-pill.expired { color: var(--neg); background: var(--neg-bg); }
+.sync-pill.expired .sync-dot { background: var(--neg); }
+/* session-expired dialog icon badge */
+.sess-ic { display: inline-grid; place-items: center; width: 54px; height: 54px; border-radius: 16px; background: var(--neg-bg); color: var(--neg); }
 @keyframes syncPulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 @media (max-width: 640px) { .sync-pill .sync-txt { display: none; } .sync-pill { padding: 6px; } }
 .pc-nav { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--text-mut); transition: background .14s, color .14s; }

@@ -30,7 +30,7 @@
 (function () {
   if (!window.FS || !window.API) return;
   const API = window.API;
-  const state = { active: false, user: null };
+  const state = { active: false, user: null, sessionExpired: false };
 
   // Sync every airro_* key EXCEPT per-browser / auth-only ones. The sync-meta key
   // (per-key last local-write time) is also local-only.
@@ -83,7 +83,7 @@
 
   // ---- sync status (saving | saved | error) for the UI indicator ----
   let inflight = 0, hadError = false;
-  function status() { return hadError ? 'error' : (inflight > 0 || pendingKeys() ? 'saving' : 'saved'); }
+  function status() { return state.sessionExpired ? 'expired' : (hadError ? 'error' : (inflight > 0 || pendingKeys() ? 'saving' : 'saved')); }
   function pendingKeys() { for (const k in timers) if (timers[k]) return true; for (const k in retries) if (retries[k]) return true; return false; }
   function emit() { if (typeof window.CLOUD.onStatus === 'function') { try { window.CLOUD.onStatus(status()); } catch (e) {} } }
 
@@ -277,6 +277,7 @@
     // every user, on login AND on restore/refresh.
     state.active = true;
     state.user = user;
+    state.sessionExpired = false;   // fresh session — clear any prior expiry
     startPoll();
     startEvents();
     emit();
@@ -301,10 +302,32 @@
 
   function logout() {
     try { API.logout(); } catch (e) {}
-    state.active = false; state.user = null; stopPoll(); stopEvents();
+    state.active = false; state.user = null; state.sessionExpired = false; stopPoll(); stopEvents();
     Object.keys(timers).forEach((k) => clearTimeout(timers[k]));
     Object.keys(retries).forEach((k) => clearTimeout(retries[k]));
   }
+
+  // A 401 arrived while a session was active → the token expired. Stop the sync loop
+  // (so we don't retry-fail silently), DROP the dead token, but KEEP every localStorage
+  // key and its dirty/confirmed state so nothing is lost — on the next login,
+  // activate()'s flushDirty pushes the unsynced edits up. Then tell the shell so it can
+  // show a "session ended, please sign in again" prompt.
+  function handleSessionExpired() {
+    if (state.sessionExpired) return;                 // fire once
+    state.sessionExpired = true;
+    state.active = false;                             // pushes pause; local data + confirmed[] stay intact
+    hadError = true;
+    stopPoll(); stopEvents();
+    Object.keys(timers).forEach((k) => { clearTimeout(timers[k]); delete timers[k]; });
+    Object.keys(retries).forEach((k) => { clearTimeout(retries[k]); delete retries[k]; });
+    try { API.setToken(null); } catch (e) {}          // drop the expired JWT (localStorage data untouched)
+    emit();
+    if (typeof window.CLOUD.onSessionExpired === 'function') { try { window.CLOUD.onSessionExpired(); } catch (e) {} }
+  }
+  // Any non-login 401 (routed here from api.js) means the token is no longer valid —
+  // but only SURFACE it while a session is active. During restore() (before activate)
+  // a 401 on /auth/me just means "no valid session", handled quietly there.
+  API.onUnauthorized = () => { if (state.active) handleSessionExpired(); };
 
   async function restore() {
     if (!API.getToken()) return null;
@@ -320,9 +343,11 @@
   window.CLOUD = {
     get active() { return state.active; },
     get syncStatus() { return status(); },
+    get sessionExpired() { return state.sessionExpired; },
     login, logout, restore, activate, frontendUser,
     onSync: null,     // set by the app shell to re-read slices on remote change
     onStatus: null,   // set by the app shell to show a saving/saved/error indicator
     onEvent: null,    // set by the app shell to react to a non-state SSE entity notice
+    onSessionExpired: null,  // set by the app shell to prompt a re-login on token expiry
   };
 })();

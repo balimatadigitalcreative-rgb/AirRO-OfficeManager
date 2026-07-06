@@ -25,6 +25,12 @@
     } catch (e) {
       throw new ApiOffline(e.message);   // connection refused / DNS / CORS preflight failure
     }
+    // Centralised 401 (token expired/invalid): notify the app ONCE. Login is exempt
+    // (a 401 there is just wrong credentials, not an expired session). The cloud
+    // adapter decides whether to surface it (only while a session is active).
+    if (res.status === 401 && !/\/auth\/login$/.test(path) && window.API && typeof window.API.onUnauthorized === 'function') {
+      try { window.API.onUnauthorized(path); } catch (e) {}
+    }
     if (res.status === 204) return null;
     let data = null;
     try { data = await res.json(); } catch (e) {}
@@ -60,6 +66,7 @@
 
   window.API = {
     BASE, ApiOffline, ApiError,
+    onUnauthorized: null,   // set by the cloud adapter; called on any non-login 401
     getToken, setToken, ping, login, me, logout, changePassword,
     auth: { login, me, logout, changePassword },
     accounts: collection('accounts'),
