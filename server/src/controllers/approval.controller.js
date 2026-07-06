@@ -9,7 +9,7 @@ const bus = require('../lib/eventbus');
 const createSchema = z.object({
   id: z.string().min(1).max(80).optional(),
   type: z.string().max(40).optional(),
-  status: z.enum(['pending', 'approved', 'rejected']).optional(),
+  status: z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
 }).passthrough();
 const updateSchema = createSchema.partial();
 const idParams = z.object({ id: z.string().min(1) });

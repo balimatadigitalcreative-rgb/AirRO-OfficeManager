@@ -48,7 +48,9 @@
 
 .co-pend-badge { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); }
 .appr-row { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: 12px; background: var(--card-soft); }
-.appr-row.approved, .appr-row.rejected { opacity: .72; }
+.appr-row.approved, .appr-row.rejected, .appr-row.cancelled { opacity: .72; }
+.appr-row.cancelled { text-decoration: none; }
+.appr-row.cancelled .appr-title { text-decoration: line-through; color: var(--text-mut); }
 .appr-ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #fff; color: var(--green-700); flex-shrink: 0; }
 .appr-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appr-sub { font-size: 11.5px; color: var(--text-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -191,6 +193,11 @@
 .appr-btn { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; border: 1px solid var(--border); background: var(--card); }
 .appr-btn.ok { color: var(--green-700); } .appr-btn.ok:hover { background: var(--pos-bg); border-color: var(--mint-300); }
 .appr-btn.no { color: var(--neg); } .appr-btn.no:hover { background: var(--neg-bg); border-color: #F6C9C6; }
+/* small text actions (Batalkan / Hapus) + cancelled pill */
+.appr-txtbtn { flex-shrink: 0; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: 12px; font-weight: 600; color: var(--text-mut); white-space: nowrap; }
+.appr-txtbtn:hover { background: var(--card-soft); color: var(--ink); }
+.appr-txtbtn.del { color: var(--neg); } .appr-txtbtn.del:hover { background: var(--neg-bg); border-color: #F6C9C6; }
+.pill-mut { background: var(--card-soft); color: var(--text-mut); }
 
 .emp-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
 .dept-chips { display: flex; gap: 7px; flex-wrap: wrap; }

@@ -31,7 +31,7 @@ const CAP_GROUPS = [
   ] },
   { title: 'Perusahaan & Admin', caps: [
     ['company', 'Dashboard Perusahaan'],
-    ['approvals', 'Persetujuan'],
+    ['approvals', 'Pengajuan'],
     ['settings', 'Pengaturan'],
     ['reset', 'Kelola User'],
   ] },

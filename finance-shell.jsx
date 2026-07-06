@@ -657,15 +657,44 @@ function FApp() {
     if (!already) applyEvents((prev) => [...prev, { id: CO.newEventId(), type: 'leave', title: req.title || 'Cuti', employeeId: sid || null, startDate: req.from, endDate: req.to || req.from, note: req.detail || '', sourceId: req.id }]);
   };
 
-  // approved deduction request → add to that employee's payroll deductions
+  // approved deduction request → add to that employee's payroll deductions. Tag it
+  // with reqId so cancelling/deleting the request can find & remove exactly this one.
   const approveDeduction = (req) => {
     if (!req || !req.staffId || !req.amount) return;
     applyStaff((prev) => prev.map((s) => s.id === req.staffId
-      ? { ...s, deductions: [...(s.deductions || []), { id: CO.newReqId(), label: req.title || 'Potongan', amount: +req.amount }] }
+      ? { ...s, deductions: [...(s.deductions || []), { id: CO.newReqId(), label: req.title || 'Potongan', amount: +req.amount, reqId: req.id }] }
       : s));
   };
 
   const submitRequest = (req) => { applyApprovals((prev) => [req, ...prev]); setToast(tr('req.submitted')); };
+
+  // Undo the side-effects of an APPROVED request so nothing is left dangling when it
+  // is cancelled/deleted: the leave mirror on the calendar + the attendance leave
+  // marking, and the salary deduction it created.
+  const reverseApproval = (a) => {
+    if (!a) return;
+    if (a.type === 'leave' && a.from && a.to) {
+      const sid = a.staffId || (hrdStaff.find((s) => s.name === a.who) || {}).id;
+      if (sid) CO.clearLeave(sid, a.from.slice(0, 7), a.from, a.to);
+      applyEvents((prev) => (prev || []).filter((e) => e.sourceId !== a.id));
+    }
+    if (a.type === 'deduction' && a.staffId) {
+      applyStaff((prev) => prev.map((s) => s.id === a.staffId ? { ...s, deductions: (s.deductions || []).filter((d) => d.reqId !== a.id) } : s));
+    }
+  };
+  // Requester cancels their own still-pending request → status 'cancelled' (+ trail).
+  const cancelRequest = (a) => {
+    if (!a) return;
+    applyApprovals((prev) => prev.map((x) => x.id === a.id ? { ...x, status: 'cancelled', cancelledBy: user.name, cancelledAt: Date.now() } : x));
+    setToast(tr('req.cancelledToast'));
+  };
+  // Delete a request from the list. If it was approved, undo its effects first.
+  const deleteRequest = (a) => {
+    if (!a) return;
+    if (a.status === 'approved') reverseApproval(a);
+    applyApprovals((prev) => (prev || []).filter((x) => x.id !== a.id));
+    setToast(tr('req.deletedToast'));
+  };
 
   // keep auto late-penalty deduction + overtime pay in sync on each staff record
   const syncLateDeduct = (staffId, amount, label, otAmount) => {
@@ -886,7 +915,7 @@ function FApp() {
             <COMPANY.ProjectsScreen projects={projects} setProjects={applyProjects} canEdit={true} />
           )}
 
-          {screen === 'company' && p.company && (            <COMPANY.CompanyDashboard fin={stats} staff={hrdStaff} rates={hrdRates} budget={hrBudget} approvals={approvals} setApprovals={applyApprovals} role={user.role} projects={projects} setoran={setoran} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} userName={user.name} />
+          {screen === 'company' && p.company && (            <COMPANY.CompanyDashboard fin={stats} staff={hrdStaff} rates={hrdRates} budget={hrBudget} approvals={approvals} setApprovals={applyApprovals} role={user.role} projects={projects} setoran={setoran} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} onCancelRequest={cancelRequest} onDeleteRequest={deleteRequest} userName={user.name} />
           )}
 
           {screen === 'headcount' && p.payroll && p.attendance && (
@@ -917,7 +946,7 @@ function FApp() {
           )}
 
           {screen === 'approvals' && p.approvals && (
-            <div className="screen-enter"><COMPANY.ApprovalsCard approvals={approvals} setApprovals={applyApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} /></div>
+            <div className="screen-enter"><COMPANY.ApprovalsCard approvals={approvals} setApprovals={applyApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} onCancelRequest={cancelRequest} onDeleteRequest={deleteRequest} userName={user.name} /></div>
           )}
 
           {screen === 'reports' && p.reports && (

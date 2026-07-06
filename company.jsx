@@ -169,10 +169,14 @@ function NewRequestModal({ staff, role, onSubmit, onClose }) {
   );
 }
 
-function ApprovalsCard({ approvals, setApprovals, role, canSubmit, staff, compact, onApproveLeave, onApproveDeduction, onSubmitRequest }) {
+function ApprovalsCard({ approvals, setApprovals, role, canSubmit, staff, compact, onApproveLeave, onApproveDeduction, onSubmitRequest, onCancelRequest, onDeleteRequest, userName }) {
   const [showNew, setShowNew] = uSc(false);
-  const canActOn = (a) => role === 'gm' || a.routeTo === role;
-  const inbox = approvals.filter((a) => canActOn(a) || a.requestedBy === role);
+  const canActOn = (a) => role === 'gm' || a.routeTo === role;   // may approve/reject
+  const isMine = (a) => a.requestedBy === role;                  // the requester
+  // Who can delete: an approved request only by an approver (undoes its effects);
+  // anything else (pending / cancelled / rejected) by the requester or an approver.
+  const canDelete = (a) => (a.status === 'approved' ? canActOn(a) : (isMine(a) || canActOn(a)));
+  const inbox = approvals.filter((a) => canActOn(a) || isMine(a));
   const pending = inbox.filter((a) => a.status === 'pending' && canActOn(a));
   const act = (id, status) => {
     const item = approvals.find((a) => a.id === id);
@@ -182,6 +186,8 @@ function ApprovalsCard({ approvals, setApprovals, role, canSubmit, staff, compac
     }
     setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status } : a));
   };
+  const doCancel = (a) => { if (confirm(trC('req.cancelConfirm'))) (onCancelRequest ? onCancelRequest(a) : setApprovals((prev) => prev.map((x) => x.id === a.id ? { ...x, status: 'cancelled' } : x))); };
+  const doDelete = (a) => { if (confirm(trC(a.status === 'approved' ? 'req.deleteApprovedConfirm' : 'req.deleteConfirm'))) (onDeleteRequest ? onDeleteRequest(a) : setApprovals((prev) => prev.filter((x) => x.id !== a.id))); };
   const submit = (req) => { onSubmitRequest ? onSubmitRequest(req) : setApprovals((prev) => [req, ...prev]); setShowNew(false); };
   const list = compact ? inbox.filter((a) => a.status === 'pending').slice(0, 4) : inbox;
   return (
@@ -204,16 +210,18 @@ function ApprovalsCard({ approvals, setApprovals, role, canSubmit, staff, compac
                 <div className="appr-sub">{a.who !== '—' ? a.who + ' · ' : ''}{typeLabel}{a.detail ? ' · ' + a.detail : ''}</div>
                 <div className="appr-route">{trC('role.' + (a.requestedBy || 'hrd'))} <IconArrowUp s={11} style={{ transform: 'rotate(90deg)' }} /> {trC('role.' + (a.routeTo || 'gm'))}</div>
               </div>
-              {a.status === 'pending' ? (
-                canActOn(a) ? (
-                  <div className="appr-actions">
-                    <button className="appr-btn ok" title={trC('co.approve')} onClick={() => act(a.id, 'approved')}><IconCheck s={15} /></button>
-                    <button className="appr-btn no" title={trC('co.reject')} onClick={() => act(a.id, 'rejected')}><IconClose s={15} /></button>
-                  </div>
-                ) : <span className="pill pill-warn">{mine ? trC('req.waiting') : trC('co.pending')}</span>
-              ) : (
-                <span className={`pill ${a.status === 'approved' ? 'pill-pos' : 'pill-neg'}`}>{trC(a.status === 'approved' ? 'co.approved' : 'co.rejected')}</span>
-              )}
+              <div className="appr-actions">
+                {a.status === 'pending' && canActOn(a) && (<>
+                  <button className="appr-btn ok" title={trC('co.approve')} onClick={() => act(a.id, 'approved')}><IconCheck s={15} /></button>
+                  <button className="appr-btn no" title={trC('co.reject')} onClick={() => act(a.id, 'rejected')}><IconClose s={15} /></button>
+                </>)}
+                {a.status === 'pending' && !canActOn(a) && <span className="pill pill-warn">{mine ? trC('req.waiting') : trC('co.pending')}</span>}
+                {a.status === 'approved' && <span className="pill pill-pos">{trC('co.approved')}</span>}
+                {a.status === 'rejected' && <span className="pill pill-neg">{trC('co.rejected')}</span>}
+                {a.status === 'cancelled' && <span className="pill pill-mut">{trC('co.cancelled')}</span>}
+                {a.status === 'pending' && isMine(a) && <button className="appr-txtbtn" onClick={() => doCancel(a)}>{trC('req.cancel')}</button>}
+                {canDelete(a) && <button className="appr-txtbtn del" title={trC('req.delete')} onClick={() => doDelete(a)}>{trC('req.delete')}</button>}
+              </div>
             </div>
           );
         })}
@@ -250,7 +258,7 @@ function ProjectsCard({ projects }) {
   );
 }
 
-function CompanyDashboard({ fin, staff, rates, budget, approvals, setApprovals, role, projects, setoran, onApproveLeave, onApproveDeduction, onSubmitRequest, userName }) {
+function CompanyDashboard({ fin, staff, rates, budget, approvals, setApprovals, role, projects, setoran, onApproveLeave, onApproveDeduction, onSubmitRequest, onCancelRequest, onDeleteRequest, userName }) {
   const pendCount = approvals.filter((a) => a.status === 'pending').length;
   const monthKey = FIN.TODAY.slice(0, 7);
   const sales = uMc(() => {
@@ -294,7 +302,7 @@ function CompanyDashboard({ fin, staff, rates, budget, approvals, setApprovals, 
 
       <div className="co-grid">
         <ProjectsCard projects={projects} />
-        <ApprovalsCard approvals={approvals} setApprovals={setApprovals} role={role} canSubmit={false} staff={staff} onApproveLeave={onApproveLeave} onApproveDeduction={onApproveDeduction} onSubmitRequest={onSubmitRequest} compact />
+        <ApprovalsCard approvals={approvals} setApprovals={setApprovals} role={role} canSubmit={false} staff={staff} onApproveLeave={onApproveLeave} onApproveDeduction={onApproveDeduction} onSubmitRequest={onSubmitRequest} onCancelRequest={onCancelRequest} onDeleteRequest={onDeleteRequest} userName={userName} compact />
       </div>
     </div>
   );

@@ -131,6 +131,15 @@
     allDates(monthKey).forEach((ds) => { if (ds >= fromDate && ds <= toDate) map[k][ds] = { status: 'leave', in: null, out: null, ot: 0 }; });
     saveAttMap(map);
   }
+  // reverse applyLeave: clear the leave-marked days in a range (when the leave request
+  // is cancelled/deleted). Only removes days still marked 'leave' (leaves real edits).
+  function clearLeave(staffId, monthKey, fromDate, toDate) {
+    const map = loadAttMap();
+    const k = staffId + '|' + monthKey;
+    if (!map[k]) return;
+    allDates(monthKey).forEach((ds) => { if (ds >= fromDate && ds <= toDate && map[k][ds] && map[k][ds].status === 'leave') delete map[k][ds]; });
+    saveAttMap(map);
+  }
 
   // ---- demo account / employment info (with persisted overrides) ----
   const ACC_KEY = 'airro_empacct_v2';   // trial: empty (renamed; previously collided with money-spots 'airro_accounts_v1')
@@ -208,7 +217,7 @@
     return addEvent({ id: newEventId(), type: type || 'leave', title: req.title || (type === 'permit' ? 'Ijin' : 'Cuti'), employeeId: req.staffId || null, startDate: req.from, endDate: req.to || req.from, note: req.detail || '', sourceId: req.id, createdAt: Date.now() });
   }
 
-  window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId,
+  window.CO = { KEY, TYPE_META, ROUTE_ROLES, newReqId, load, save, reset, attendance, setAttDay, lateInfo, overtimeInfo, accountInfo, saveAccount, applyLeave, clearLeave, PROJ_STATUS, loadProjects, saveProjects, newProjId,
     ATT_KEY, setAttHooks, hydrateAtt, rawAtt, hydrateOriAtt, rawOriAtt,   // attendance ↔ REST /settings
     CB_KEY, loadCashbons, saveCashbons, newCashbonId, cashbonsFor, addCashbon, updateCashbon, removeCashbon,
     TR_KEY, loadTrainings, saveTrainings, newTrainingId, trainingsFor, addTraining, updateTraining, removeTraining,
