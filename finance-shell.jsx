@@ -27,13 +27,40 @@ function navForRole(p, role) {
   if (p.approvals) items.push({ id: 'approvals', label: tr('nav.approvals'), icon: 'IconInvoice', grp: 'admin' });
   if (p.settings) items.push({ id: 'settings', label: tr('nav.settings'), icon: 'IconSettings', grp: 'admin' });
   if (canAdmin) items.push({ id: 'users', label: tr('nav.users'), icon: 'IconUserCircle', grp: 'admin' });
+  // DISTRIBUSI — a separate module. Items are shown to everyone (discoverability);
+  // ones the role can't access render LOCKED (gembok), never hidden, per the spec.
+  // `cap` = the capability that unlocks the item; the server enforces it regardless.
+  [
+    { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', cap: 'distribusi' },
+    { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', cap: 'distribusi' },
+    { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', cap: 'distribusi' },
+    { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', cap: 'distribusi' },
+    { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', cap: 'distribusiHargaMaster' },
+    { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', cap: 'distribusiAudit' },
+  ].forEach((it) => items.push({ ...it, grp: 'distribusi', locked: !p[it.cap] }));
   return items;
 }
-const NAV_GROUPS = ['overview', 'finance', 'hr', 'admin'];
+const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'admin'];
 
 function FToast({ msg, onDone }) {
   uEh(() => { const t = setTimeout(onDone, 2400); return () => clearTimeout(t); }, [msg]);
   return <div className="fin-toast"><span style={{ color: '#22A7A1' }}><IconCheck s={17} /></span>{msg}</div>;
+}
+
+// Distribusi module — FOUNDATION placeholder. The real screens (Dashboard,
+// Pelanggan, Transaksi, Integrasi Kas, Harga Master, Log Audit) are built next; this
+// keeps navigation working and confirms access/lock state in the meantime.
+function DistPlaceholder({ screen, nav }) {
+  const item = (nav || []).find((n) => n.id === screen);
+  return (
+    <div className="screen-enter">
+      <div className="card dist-ph">
+        <span className="dist-ph-ic"><IconTruck s={30} /></span>
+        <div className="dist-ph-t">{tr('dist.module')} · {item ? item.label : ''}</div>
+        <div className="dist-ph-s">{tr('dist.phSub')}</div>
+      </div>
+    </div>
+  );
 }
 
 function PROOFMOUNT() {
@@ -840,7 +867,7 @@ function FApp() {
   if (!user) return <AUTH.LoginScreen onLogin={login} lang={lang} onLang={changeLang} users={users} />;
 
   const NAV = navForRole(p, user ? user.role : '');
-  const go = (id) => { if (NAV.find((n) => n.id === id)) setScreen(id); setDrawer(false); };
+  const go = (id, locked) => { if (locked) { setToast(tr('dist.lockedToast')); return; } if (NAV.find((n) => n.id === id)) setScreen(id); setDrawer(false); };
   // Admin/settings shortcuts inside the profile menu — already perm-filtered by NAV,
   // so a non-admin simply sees none.
   const pmShortcuts = NAV.filter((n) => n.id === 'users' || n.id === 'settings' || n.id === 'hrsettings');
@@ -858,8 +885,8 @@ function FApp() {
               <span>{tr('navgrp.' + g)}</span><IconCaret s={13} />
             </button>
             {!collapsed && items.map((n) => (
-              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>
-                {Ish(n.icon, { s: 20 })}<span>{n.label}</span>
+              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''} ${n.locked ? 'locked' : ''}`} onClick={() => go(n.id, n.locked)} title={n.locked ? tr('dist.locked') : ''}>
+                {Ish(n.icon, { s: 20 })}<span>{n.label}</span>{n.locked && <IconLock s={13} className="nav-lock" />}
               </button>
             ))}
           </div>
@@ -898,7 +925,9 @@ function FApp() {
     kasbon: { t: tr('nav.kasbon'), s: tr('kb.intro') },
     settings: { t: tr('t.settings'), s: tr('s.settings') },
     users: { t: tr('t.users'), s: tr('s.users') },
-  }[screen] || { t: '', s: '' };
+  }[screen] || (screen && screen.indexOf('dist-') === 0
+    ? { t: (NAV.find((n) => n.id === screen) || {}).label || tr('dist.module'), s: tr('dist.module') }
+    : { t: '', s: '' });
 
   return (
     <div className="app">
@@ -947,6 +976,8 @@ function FApp() {
                 onChangePassword={() => setPwModal(true)} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
           </header>
+
+          {screen && screen.indexOf('dist-') === 0 && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />

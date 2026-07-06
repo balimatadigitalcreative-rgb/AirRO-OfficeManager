@@ -35,6 +35,12 @@ const CAP_GROUPS = [
     ['settings', 'Pengaturan'],
     ['reset', 'Kelola User'],
   ] },
+  { title: 'Distribusi', caps: [
+    ['distribusi', 'Akses Distribusi (input & koreksi)'],
+    ['distribusiCustomers', 'Kelola Pelanggan (tambah/impor)'],
+    ['distribusiHargaMaster', 'Ubah Harga Master'],
+    ['distribusiAudit', 'Lihat Log Audit'],
+  ] },
 ];
 
 function UserModal({ row, users, onSave, onClose, busy }) {

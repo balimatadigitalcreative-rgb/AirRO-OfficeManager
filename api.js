@@ -95,6 +95,23 @@
     }),
     users: collection('users'),
     roles: collection('roles'),
+    // Distribusi module (separate from the cash book). Append-only: no update/delete.
+    distribusi: {
+      customers: {
+        list: () => req('GET', '/distribusi/customers'),
+        get: (id) => req('GET', '/distribusi/customers/' + id),
+        create: (data) => req('POST', '/distribusi/customers', data),
+        import: (customers) => req('POST', '/distribusi/customers/import', { customers }),
+        setPrice: (id, newPrice) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice }),
+      },
+      transactions: {
+        list: (qs) => req('GET', '/distribusi/transactions' + (qs ? '?' + qs : '')),
+        create: (data) => req('POST', '/distribusi/transactions', data),
+        correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),
+      },
+      audit: (qs) => req('GET', '/distribusi/audit' + (qs ? '?' + qs : '')),
+      summary: (date) => req('GET', '/distribusi/dashboard/summary' + (date ? '?date=' + encodeURIComponent(date) : '')),
+    },
     settings: {
       all: () => req('GET', '/settings'),
       get: (key) => req('GET', '/settings/' + key),

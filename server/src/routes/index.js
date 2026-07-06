@@ -16,6 +16,7 @@ router.use('/categories', require('./category.routes'));
 router.use('/entries', require('./entry.routes'));
 router.use('/transfers', require('./transfer.routes'));
 router.use('/setoran', require('./setoran.routes'));
+router.use('/distribusi', require('./distribution.routes'));   // Distribusi module (separate from cash flow)
 router.use('/fleet', require('./fleet.routes'));
 router.use('/employees', require('./employee.routes'));
 router.use('/cashbon', require('./cashbon.routes'));

@@ -838,6 +838,15 @@ select.fld::-ms-expand { display: none; }
 .alert-banner { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-radius: 14px; background: var(--neg-bg); border: 1px solid #F6C9C6; color: #8A2A2A; font-size: 13.5px; margin-bottom: 18px; }
 .alert-banner .alert-ic { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: #fff; color: var(--neg); flex-shrink: 0; }
 
+/* ============ Distribusi: locked nav items + foundation placeholder ============ */
+.nav-item.locked { opacity: .5; }
+.nav-item.locked:hover { background: transparent; color: var(--text-mut); cursor: not-allowed; }
+.nav-item .nav-lock { margin-left: auto; flex-shrink: 0; opacity: .75; }
+.dist-ph { padding: 44px 24px; text-align: center; }
+.dist-ph-ic { display: inline-grid; place-items: center; width: 60px; height: 60px; border-radius: 18px; background: var(--mint-100); color: var(--green-800); }
+.dist-ph-t { font-size: 18px; font-weight: 800; margin-top: 14px; color: var(--ink); }
+.dist-ph-s { font-size: 13.5px; color: var(--text-mut); margin-top: 8px; line-height: 1.5; max-width: 440px; margin-left: auto; margin-right: auto; }
+
 /* ============ Profile menu (topbar avatar dropdown) ============ */
 .pm-wrap { position: relative; display: inline-flex; }
 .pm-av { position: relative; cursor: pointer; border: none; padding: 0; }

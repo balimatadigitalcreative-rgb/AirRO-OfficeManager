@@ -10,30 +10,36 @@ const ROLE_PERMS = {
     delete: false, seeMoney: true, allEntries: false, reports: true, advisor: false,
     payroll: false, approvals: false, settings: false, reset: false, setoran: false, setoranOnly: false,
     kasbon: false, kasbonApprove: false,
+    // Distribusi (Pemilik = all four)
+    distribusi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
   },
   gm: {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
     delete: true, seeMoney: true, allEntries: true, reports: true, advisor: true,
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
+    distribusi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
   },
   hrd: {
     company: false, cashflow: false, employees: true, empDetail: true, attendance: true, addEntry: false, edit: false,
     delete: false, seeMoney: true, allEntries: false, reports: false, advisor: false,
     payroll: true, approvals: true, settings: false, reset: false, setoran: false, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
+    distribusi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
   },
   finance: {
     company: false, cashflow: true, employees: false, empDetail: false, attendance: false, addEntry: true, edit: true,
     delete: true, seeMoney: true, allEntries: true, reports: true, advisor: true,
     payroll: true, approvals: true, settings: true, reset: false, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: false,
+    distribusi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
   },
   adminfin: {
     company: false, cashflow: true, employees: false, empDetail: false, attendance: false, addEntry: false, edit: false,
     delete: false, seeMoney: true, allEntries: true, reports: false, advisor: false,
     payroll: false, approvals: false, settings: false, reset: false, setoran: true, setoranOnly: true,
     kasbon: false, kasbonApprove: false,
+    distribusi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
   },
 };
 // Display metadata used when seeding the built-in roles into the Role table.
@@ -70,11 +76,18 @@ async function seedBuiltinRoles() {
     for (let i = 0; i < BUILTIN_IDS.length; i++) {
       const id = BUILTIN_IDS[i];
       const meta = BUILTIN_META[id] || { name: id, color: '#22A7A1' };
-      await prisma.role.upsert({
-        where: { id },
-        update: { builtin: true },   // keep name/color/permissions if an admin edited them
-        create: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(ROLE_PERMS[id]), builtin: true, sortOrder: i },
-      });
+      const seed = ROLE_PERMS[id];
+      const existing = await prisma.role.findUnique({ where: { id } });
+      if (existing) {
+        // Preserve admin edits, but ADD any NEW seed capabilities the stored role is
+        // missing (e.g. the distribusi caps on an already-seeded DB). Existing values
+        // win; only absent keys are filled — so an admin's on/off choices are kept.
+        const cur = parsePerms(existing.permissions) || {};
+        const merged = { ...seed, ...cur };
+        await prisma.role.update({ where: { id }, data: { builtin: true, permissions: JSON.stringify(merged) } });
+      } else {
+        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(seed), builtin: true, sortOrder: i } });
+      }
     }
   } catch (e) { /* table may not exist yet on very first migrate; ignored */ }
   return refreshRoleCache();

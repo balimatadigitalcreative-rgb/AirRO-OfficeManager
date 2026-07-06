@@ -401,3 +401,102 @@ model Document {
   value     String // JSON blob (the localStorage value, verbatim)
   updatedAt DateTime @updatedAt
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// DISTRIBUSI — a SEPARATE module from the AirRO cash book. Distribution sales
+// never post to the AirRO Entry/cash-flow tables. Field names are camelCase
+// (repo convention); the design-handoff snake_case names map 1:1 (master_price
+// → masterPrice, unit_price_locked → unitPriceLocked, txn_date → txnDate, …).
+// created_by / actor_* keep a name+role snapshot too, matching the app-wide
+// creator-attribution pattern (historical, server-stamped, unforgeable).
+// ════════════════════════════════════════════════════════════════════════
+
+model Customer {
+  id            String   @id @default(cuid())
+  name          String
+  phone         String   @default("")
+  type          String   @default("reguler") // reguler | kos | cafe | bulk
+  masterPrice   Int      @default(0)          // master_price (IDR per unit)
+  createdById   String?                        // created_by (identity)
+  createdByName String?
+  createdByRole String?
+  createdAt     DateTime @default(now())
+
+  transactions DistTransaction[]
+  priceHistory PriceHistory[]
+
+  @@index([type])
+}
+
+// Append-only ledger of master-price changes (never updated/deleted).
+model PriceHistory {
+  id            String   @id @default(cuid())
+  customerId    String
+  oldPrice      Int
+  newPrice      Int
+  changedById   String?                        // changed_by
+  changedByName String?
+  changedByRole String?
+  changedAt     DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+}
+
+// Distribution sales. IMMUTABLE — never updated or deleted; mistakes are fixed
+// by appending a Correction. The unit price is LOCKED server-side from the
+// customer's master_price at input time and amount is computed on the server.
+model DistTransaction {
+  id              String   @id @default(cuid())
+  customerId      String
+  qty             Int
+  unitPriceLocked Int                          // unit_price_locked
+  amount          Int                          // qty * unitPriceLocked (server-computed)
+  method          String   @default("lunas")   // lunas | bon | pelunasan
+  txnDate         String                        // txn_date (YYYY-MM-DD)
+  actorId         String?                       // actor_id
+  actorRole       String?                       // actor_role (at input time)
+  actorName       String?
+  createdAt       DateTime @default(now())
+
+  customer    Customer     @relation(fields: [customerId], references: [id])
+  corrections Correction[]
+
+  @@index([txnDate])
+  @@index([customerId])
+}
+
+// Append-only corrections against a transaction (the transaction itself is never
+// mutated). `reason` is required; `byStaff` flags a correction made by a
+// staff-level actor (distribusi only, no owner caps).
+model Correction {
+  id            String   @id @default(cuid())
+  transactionId String
+  reason        String                          // required
+  oldValue      String?                          // old_value (JSON string)
+  newValue      String?                          // new_value (JSON string)
+  actorId       String?
+  actorRole     String?
+  byStaff       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  transaction DistTransaction @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId])
+}
+
+// Immutable, append-only audit trail for every distribusi write.
+model DistAuditLog {
+  id        String   @id @default(cuid())
+  kind      String                              // koreksi | harga | input | impor | pelanggan
+  title     String
+  detail    String   @default("")
+  actorId   String?
+  actorRole String?
+  actorName String?
+  createdAt DateTime @default(now())
+
+  @@index([kind])
+  @@index([createdAt])
+}
