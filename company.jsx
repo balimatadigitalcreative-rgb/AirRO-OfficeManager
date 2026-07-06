@@ -213,6 +213,7 @@ function ApprovalsCard({ approvals, setApprovals, role, canSubmit, staff, compac
                 <div className="appr-title">{a.title}{a.amount > 0 && <b className="tnum"> · {rpC(a.amount)}</b>}</div>
                 <div className="appr-sub">{a.who !== '—' ? a.who + ' · ' : ''}{typeLabel}{a.detail ? ' · ' + a.detail : ''}</div>
                 <div className="appr-route">{trC('role.' + (a.requestedBy || 'hrd'))} <IconArrowUp s={11} style={{ transform: 'rotate(90deg)' }} /> {trC('role.' + (a.routeTo || 'gm'))}</div>
+                {a.createdBy && <div className="appr-by">{trC('req.by')}: {createdByLbl(a.createdBy)}</div>}
               </div>
               <div className="appr-actions">
                 {a.status === 'pending' && canActOn(a) && (<>
@@ -456,7 +457,9 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, canAppro
               </div>
               {c.note && <div className="kb-card-note">{c.note}</div>}
               <div className="kb-card-trail">
-                {c.requestedBy && <span>{trC('kb.requestedBy', { n: c.requestedBy })}</span>}
+                {c.createdBy
+                  ? <span>{trC('req.by')}: {createdByLbl(c.createdBy)}</span>
+                  : (c.requestedBy && <span>{trC('kb.requestedBy', { n: c.requestedBy })}</span>)}
                 {dec && c.approvedBy && <span>{(c.status === 'rejected' ? trC('kb.rejectedBy', { n: c.approvedBy }) : trC('kb.approvedBy', { n: c.approvedBy }))}{c.rejectReason ? ` · ${c.rejectReason}` : ''}</span>}
               </div>
               {canApprove && (c.status || 'pending') === 'pending' && (

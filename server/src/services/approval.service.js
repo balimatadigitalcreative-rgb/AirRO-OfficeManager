@@ -3,10 +3,18 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 
 // The full frontend approval object lives in `data`; type/status are projected
-// columns. toClient returns the stored object with the authoritative id/status.
+// columns. toClient returns the stored object with the authoritative id/status and
+// the server-stamped creator snapshot (overrides anything the client put in `data`).
 function toClient(row) {
   let obj = {}; try { obj = row.data ? JSON.parse(row.data) : {}; } catch (e) {}
-  return { ...obj, id: row.id, type: row.type, status: row.status };
+  return { ...obj, id: row.id, type: row.type, status: row.status,
+    createdBy: row.createdByName ? { name: row.createdByName, role: row.createdByRole || null } : null };
+}
+// name+role read from the DB at submit time — never from the request body.
+async function creatorSnap(userId) {
+  if (!userId) return {};
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
+  return u ? { createdByName: u.name, createdByRole: u.role } : {};
 }
 function cols(body) {
   return {
@@ -27,8 +35,8 @@ async function getRow(id) {
 }
 async function getById(id) { return toClient(await getRow(id)); }
 
-async function create(body) {
-  const data = cols(body);
+async function create(body, userId) {
+  const data = { ...cols(body), ...(await creatorSnap(userId)) };
   if (body.id) data.id = String(body.id);   // keep the client id (optimistic insert)
   return toClient(await prisma.approval.create({ data }));
 }

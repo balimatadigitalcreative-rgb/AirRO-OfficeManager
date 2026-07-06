@@ -55,6 +55,7 @@
 .appr-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appr-sub { font-size: 11.5px; color: var(--text-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appr-route { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; color: var(--green-700); background: var(--mint-100); padding: 1px 8px; border-radius: 999px; margin-top: 4px; }
+.appr-by { font-size: 10.5px; color: var(--text-faint); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .req-route { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-mut); background: var(--mint-100); border-radius: 9px; padding: 8px 12px; margin-top: 10px; }
 .req-route svg { color: var(--green-700); }
 .req-route b { color: var(--green-800); }

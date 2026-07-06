@@ -17,7 +17,7 @@ const idParams = z.object({ id: z.string().min(1) });
 const bcast = (action, id) => bus.broadcast({ entity: 'approval', action, id });
 const list = asyncHandler(async (req, res) => res.json(await service.list()));
 const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id) }));
-const create = asyncHandler(async (req, res) => { const a = await service.create(req.body); bcast('create', a.id); res.status(201).json({ data: a }); });
+const create = asyncHandler(async (req, res) => { const a = await service.create(req.body, req.user?.id); bcast('create', a.id); res.status(201).json({ data: a }); });
 const update = asyncHandler(async (req, res) => { const a = await service.update(req.params.id, req.body); bcast('update', a.id); res.json({ data: a }); });
 const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bcast('delete', req.params.id); res.status(204).send(); });
 

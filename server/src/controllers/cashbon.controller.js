@@ -31,7 +31,7 @@ const preview = asyncHandler(async (req, res) => res.json({ data: await service.
 const request = asyncHandler(async (req, res) => { const r = await service.request(req.body, req.user); bcast('create', r.cashbon.id); res.status(201).json({ data: r }); });
 const list = asyncHandler(async (req, res) => res.json(await service.list(req.query)));
 const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id) }));
-const create = asyncHandler(async (req, res) => { const c = await service.create(req.body); bcast('create', c.id); res.status(201).json({ data: c }); });
+const create = asyncHandler(async (req, res) => { const c = await service.create(req.body, req.user?.id); bcast('create', c.id); res.status(201).json({ data: c }); });
 const update = asyncHandler(async (req, res) => { const c = await service.update(req.params.id, req.body); bcast('update', c.id); res.json({ data: c }); });
 const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bcast('delete', req.params.id); res.status(204).send(); });
 const approve = asyncHandler(async (req, res) => { const c = await service.decide(req.params.id, 'approved', req.user); bcast('update', c.id); res.json({ data: c }); });

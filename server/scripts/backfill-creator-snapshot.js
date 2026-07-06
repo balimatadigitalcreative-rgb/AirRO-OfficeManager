@@ -11,6 +11,10 @@
     real values at input time and are unaffected.
   - Employee: the roster never stored a creator id, so there is nothing to derive
     from — those rows keep "—" (added-by unknown). Reported for transparency.
+  - Cashbon: the JSON trail recorded the requester's USERNAME (requestedBy); rows are
+    matched to that user and filled with their current name+role (best-effort).
+  - Approval: legacy rows recorded only a routing ROLE (not a specific submitter), so
+    they cannot be backfilled — they stay "—". Reported for transparency.
 
   SAFE + idempotent:
     - only fills rows whose snapshot is still empty (re-running changes nothing new),
@@ -56,6 +60,34 @@ async function main() {
   const empSnap = await prisma.employee.count({ where: { NOT: { createdByName: null } } });
   console.log(`Employee: ${empTotal} total; ${empSnap} with a creator snapshot; ${empTotal - empSnap} without ` +
     `(no creator id was ever stored → shown as "—"). Nothing to backfill.`);
+
+  // ── Cashbon ── (match the trail's requestedBy username/id to a user)
+  const cbTotal = await prisma.cashbon.count();
+  const cbSnapBefore = await prisma.cashbon.count({ where: { NOT: { createdByName: null } } });
+  const cbCandidates = await prisma.cashbon.findMany({ where: { createdByName: null }, select: { id: true, data: true } });
+  const requesterCache = new Map();   // requestedBy → {name, role} | null
+  let cbFilled = 0, cbUnmatched = 0;
+  for (const c of cbCandidates) {
+    let trail = {}; try { trail = c.data ? JSON.parse(c.data) : {}; } catch (e) {}
+    const rb = trail.requestedBy;
+    if (!rb) { cbUnmatched++; continue; }
+    if (!requesterCache.has(rb)) {
+      requesterCache.set(rb, await prisma.user.findFirst({ where: { OR: [{ username: String(rb) }, { id: String(rb) }] }, select: { name: true, role: true } }));
+    }
+    const u = requesterCache.get(rb);
+    if (!u) { cbUnmatched++; continue; }
+    await prisma.cashbon.update({ where: { id: c.id }, data: { createdByName: u.name, createdByRole: u.role } });
+    cbFilled++;
+  }
+  const cbSnapAfter = await prisma.cashbon.count({ where: { NOT: { createdByName: null } } });
+  console.log(`Cashbon: ${cbTotal} total; snapshot present BEFORE ${cbSnapBefore} → AFTER ${cbSnapAfter}.`);
+  console.log(`Cashbon: filled ${cbFilled} from the trail's requestedBy; ${cbUnmatched} unmatched (no/unknown requester) → "—".`);
+
+  // ── Approval ── (only a routing role was recorded → not backfillable)
+  const apTotal = await prisma.approval.count();
+  const apSnap = await prisma.approval.count({ where: { NOT: { createdByName: null } } });
+  console.log(`Approval: ${apTotal} total; ${apSnap} with a creator snapshot; ${apTotal - apSnap} without ` +
+    `(legacy rows recorded only a routing role, not a specific submitter → shown as "—"). Not backfillable.`);
 
   console.log('✅ Backfill complete (idempotent — safe to re-run).');
 }

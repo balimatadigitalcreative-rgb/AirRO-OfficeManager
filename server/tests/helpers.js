@@ -11,6 +11,8 @@ async function resetDb() {
   await prisma.fleet.deleteMany();
   await prisma.account.deleteMany();
   await prisma.category.deleteMany();
+  await prisma.cashbon.deleteMany();    // child of Employee (employeeId FK) — before employee
+  await prisma.approval.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.user.deleteMany();
   await prisma.setting.deleteMany();

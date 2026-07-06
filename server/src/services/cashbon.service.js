@@ -20,11 +20,20 @@ async function empBase(employeeId) {
   return base;
 }
 
-// Merge the JSON approval trail back onto a Cashbon row; expose createdAt as ms.
+// Merge the JSON approval trail back onto a Cashbon row; expose createdAt as ms and
+// the server-stamped creator snapshot as createdBy { name, role } (historical).
 function toClient(r) {
   let trail = {}; try { trail = r.data ? JSON.parse(r.data) : {}; } catch (e) {}
-  const { data, createdAt, updatedAt, ...rest } = r;
-  return { ...rest, ...trail, createdAt: createdAt ? new Date(createdAt).getTime() : Date.now(), perInstallment: perInstallment(r) };
+  const { data, createdAt, updatedAt, createdByName, createdByRole, ...rest } = r;
+  return { ...rest, ...trail,
+    createdBy: createdByName ? { name: createdByName, role: createdByRole || null } : null,
+    createdAt: createdAt ? new Date(createdAt).getTime() : Date.now(), perInstallment: perInstallment(r) };
+}
+// name+role read from the DB at request time — never from the client body/trail.
+async function creatorSnap(userId) {
+  if (!userId) return {};
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
+  return u ? { createdByName: u.name, createdByRole: u.role } : {};
 }
 
 async function cycleContext(employeeId) {
@@ -60,6 +69,7 @@ async function request({ employeeId, amount, date, note }, user) {
     id: 'kb' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
     employeeId, amount: +amount, date, note: (note || '').trim(),
     installments: 1, status: 'pending', cycleAnchor: v.cycleAnchor, data: JSON.stringify(trail),
+    ...(await creatorSnap(user && user.id)),
   } });
   const cashbon = toClient(row);
   const summary = rules.summarize(base, existing.concat(row), date, mode);
@@ -100,12 +110,13 @@ async function getById(id) {
 
 // Direct create (API completeness / imports). Accepts a client id + trail fields;
 // the trail is folded into `data`.
-async function create(body) {
+async function create(body, userId) {
   const exists = await prisma.employee.count({ where: { id: body.employeeId } });
   if (!exists) throw ApiError.badRequest('employeeId does not reference an existing employee');
   const trail = {}; TRAIL.forEach((k) => { if (body[k] != null) trail[k] = body[k]; });
-  const { requestedBy, requestedAt, approvedBy, decidedAt, rejectReason, createdAt, perInstallment: _pi, ...cols } = body;
-  const r = await prisma.cashbon.create({ data: { ...cols, data: Object.keys(trail).length ? JSON.stringify(trail) : null } });
+  // Strip client-supplied creator fields — the snapshot is authoritative (token only).
+  const { requestedBy, requestedAt, approvedBy, decidedAt, rejectReason, createdAt, perInstallment: _pi, createdByName, createdByRole, createdBy, ...cols } = body;
+  const r = await prisma.cashbon.create({ data: { ...cols, data: Object.keys(trail).length ? JSON.stringify(trail) : null, ...(await creatorSnap(userId)) } });
   return toClient(r);
 }
 
@@ -114,7 +125,8 @@ async function update(id, body) {
   if (!existing) throw ApiError.notFound('Cashbon not found');
   let trail = {}; try { trail = existing.data ? JSON.parse(existing.data) : {}; } catch (e) {}
   TRAIL.forEach((k) => { if (body[k] != null) trail[k] = body[k]; });
-  const { requestedBy, requestedAt, approvedBy, decidedAt, rejectReason, createdAt, perInstallment: _pi, ...cols } = body;
+  // Never let an update rewrite the original creator snapshot (strip from body).
+  const { requestedBy, requestedAt, approvedBy, decidedAt, rejectReason, createdAt, perInstallment: _pi, createdByName, createdByRole, createdBy, ...cols } = body;
   const r = await prisma.cashbon.update({ where: { id }, data: { ...cols, data: JSON.stringify(trail) } });
   return toClient(r);
 }

@@ -331,6 +331,10 @@ model Cashbon {
   data      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt @default(now()) // bumped on every change (incremental sync)
+  // Creator snapshot at request time (name + role then) — server-stamped from the
+  // token, never the client body/trail, so "diajukan oleh" is historical + unforgeable.
+  createdByName String?
+  createdByRole String?
 
   employee Employee @relation(fields: [employeeId], references: [id])
 
@@ -349,6 +353,10 @@ model Approval {
   data      String? // full frontend approval object (verbatim)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt @default(now())
+  // Creator snapshot at submit time (name + role then) — server-stamped from the
+  // token, never the client body, so "diajukan oleh" is historical + unforgeable.
+  createdByName String?
+  createdByRole String?
 
   @@index([status])
   @@index([updatedAt])
