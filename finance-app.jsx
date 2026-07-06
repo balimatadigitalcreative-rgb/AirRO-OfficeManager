@@ -158,23 +158,39 @@ function DeltaPillF({ delta, invert }) {
 }
 
 function StatRow({ stats, seeMoney = true, deltas }) {
+  const [showBd, setShowBd] = uS(false);   // Cash Balance breakdown toggle (tap/click)
+  // fmt() drops the sign (abs); a cash balance CAN go negative (overspent) — show the
+  // minus, but no leading '+' for positives (that's for signed deltas, not a balance).
+  const balStr = (stats.balance < 0 ? '−' : '') + fmt(stats.balance);
   const all = [
-    { key: 'balance', label: trF('stat.balance'), value: fmt(stats.balance), icon: 'IconWallet', bg: 'var(--green-800)', dark: true },
+    { key: 'balance', label: trF('stat.balance'), value: balStr, icon: 'IconWallet', bg: 'var(--green-800)', dark: true, neg: stats.balance < 0,
+      sub: trF('stat.balanceSub'), tip: trF('stat.balanceTip'),
+      bd: [[trF('stat.bdOpening'), fmt(stats.opening), null], [trF('stat.bdIn'), fmt(stats.totalIn), 'amt-pos'], [trF('stat.bdOut'), '− ' + fmt(stats.totalOut), 'amt-neg']] },
     { key: 'income', label: trF('stat.income') + ' · ' + stats.monLabel, value: fmt(stats.income), icon: 'IconCoinIn', bg: 'var(--mint-100)', fg: 'var(--green-800)', cls: 'amt-pos', delta: deltas && deltas.income },
     { key: 'expense', label: trF('stat.expense') + ' · ' + stats.monLabel, value: fmt(stats.expense), icon: 'IconCoinOut', bg: '#EAF1F4', fg: '#5E7A88', cls: 'amt-neg', delta: deltas && deltas.expense, invert: true },
-    { key: 'profit', label: trF('stat.profit') + ' · ' + stats.monLabel, value: fmtS(stats.profit), icon: 'IconTrendUp', bg: 'var(--sand)', fg: 'var(--green-900)', margin: stats.margin, cls: stats.profit >= 0 ? 'amt-pos' : 'amt-neg', delta: deltas && deltas.profit },
+    { key: 'profit', label: trF('stat.profit') + ' · ' + stats.monLabel, value: fmtS(stats.profit), icon: 'IconTrendUp', bg: 'var(--sand)', fg: 'var(--green-900)', margin: stats.margin, cls: stats.profit >= 0 ? 'amt-pos' : 'amt-neg', delta: deltas && deltas.profit, tip: trF('stat.profitTip') },
   ];
   const cards = seeMoney ? all : all.filter((c) => c.key === 'income' || c.key === 'expense');
   return (
     <div className={`fin-stat-row ${seeMoney ? '' : 'two'}`}>
       {cards.map((c, i) => (
-        <div key={i} className={`card stat-box ${c.dark ? 'dark' : ''}`}>
+        <div key={i} className={`card stat-box ${c.dark ? 'dark' : ''} ${c.bd ? 'has-bd' : ''}`} title={c.tip || undefined}
+          onClick={c.bd ? () => setShowBd((v) => !v) : undefined} style={c.bd ? { cursor: 'pointer' } : undefined}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span className="icon-tile" style={{ background: c.dark ? 'rgba(255,255,255,.12)' : c.bg, color: c.dark ? '#22A7A1' : c.fg }}>{Icn(c.icon, { s: 19 })}</span>
             {c.margin != null && <span className="pill pill-pos tnum">{c.margin}%</span>}
+            {c.bd && <span className="stat-info" title={c.tip}>{showBd ? '✕' : 'ⓘ'}</span>}
           </div>
-          <div className={`tnum ${c.dark ? '' : c.cls}`} style={{ fontSize: 23, fontWeight: 800, marginTop: 14, whiteSpace: 'nowrap', color: c.dark ? '#fff' : undefined }}>{c.value}</div>
-          <div style={{ fontSize: 12.5, color: c.dark ? 'rgba(255,255,255,.65)' : 'var(--text-mut)', marginTop: 2 }}>{c.label}</div>
+          <div className={`tnum ${c.dark ? '' : c.cls}`} style={{ fontSize: 23, fontWeight: 800, marginTop: 14, whiteSpace: 'nowrap', color: c.dark ? (c.neg ? '#ffc4b8' : '#fff') : undefined }}>{c.value}</div>
+          <div style={{ fontSize: 12.5, color: c.dark ? 'rgba(255,255,255,.65)' : 'var(--text-mut)', marginTop: 2 }}>{c.label}{c.sub ? <span style={{ opacity: .8 }}> · {c.sub}</span> : ''}</div>
+          {c.bd && showBd && (
+            <div className="stat-bd" onClick={(e) => e.stopPropagation()}>
+              {c.bd.map(([lbl, val, cls], j) => (
+                <div key={j} className="stat-bd-row"><span>{lbl}</span><b className={`tnum ${cls || ''}`}>{val}</b></div>
+              ))}
+              <div className="stat-bd-row total"><span>{trF('stat.balance')}</span><b className={`tnum ${c.neg ? 'amt-neg' : ''}`}>{balStr}</b></div>
+            </div>
+          )}
           {c.delta !== undefined && c.delta !== null && <DeltaPillF delta={c.delta} invert={c.invert} />}
         </div>
       ))}

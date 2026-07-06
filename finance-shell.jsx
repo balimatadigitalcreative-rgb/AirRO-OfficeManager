@@ -588,7 +588,11 @@ function FApp() {
     });
     const profit = pIn - pOut;
     const openingTotal = accounts.reduce((s, a) => s + (+a.opening || 0), 0);
-    return { balance: openingTotal + balIn - balOut, income: pIn, expense: pOut, profit, margin: pIn ? Math.round((profit / pIn) * 1000) / 10 : 0, monLabel: periodLbl };
+    // Cash Balance = REAL cash on hand across all accounts = opening balances + every
+    // inflow − every outflow (all-time). This matches the per-account totals in Kas &
+    // Bank (FS.acctBalance also starts from each account's opening). It is deliberately
+    // NOT the same as Net Profit, which is period income − expense (no opening).
+    return { balance: openingTotal + balIn - balOut, opening: openingTotal, totalIn: balIn, totalOut: balOut, income: pIn, expense: pOut, profit, margin: pIn ? Math.round((profit / pIn) * 1000) / 10 : 0, monLabel: periodLbl };
   }, [entries, accounts, range.start, range.end, periodLbl]);
 
   const deltas = uMh(() => {

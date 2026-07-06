@@ -123,6 +123,9 @@
       't.settings': 'Settings', 's.settings': 'Manage categories and data',
       // stats
       'stat.balance': 'Cash Balance', 'stat.income': 'Income', 'stat.expense': 'Expense', 'stat.profit': 'Net Profit', 'stat.margin': 'margin',
+      'stat.balanceSub': 'incl. account opening balances', 'stat.bdOpening': 'Opening', 'stat.bdIn': 'In', 'stat.bdOut': 'Out',
+      'stat.balanceTip': 'Real cash across all accounts = opening balances + all income − all expenses. Includes opening, unlike Net Profit.',
+      'stat.profitTip': 'Income − expenses for this period only (does NOT include account opening balances).',
       // add entry
       'add.title': 'Add Daily Entry', 'add.income': 'Income', 'add.expense': 'Expense',
       'add.amount': 'Amount', 'add.category': 'Category', 'add.date': 'Date',
@@ -342,6 +345,9 @@
       't.payroll': 'Penggajian / HRD', 's.payroll': 'Gaji staf, BPJS Kesehatan & Ketenagakerjaan',
       't.settings': 'Pengaturan', 's.settings': 'Kelola kategori dan data',
       'stat.balance': 'Saldo Kas', 'stat.income': 'Pemasukan', 'stat.expense': 'Pengeluaran', 'stat.profit': 'Laba Bersih', 'stat.margin': 'margin',
+      'stat.balanceSub': 'termasuk saldo awal akun', 'stat.bdOpening': 'Saldo awal', 'stat.bdIn': 'Masuk', 'stat.bdOut': 'Keluar',
+      'stat.balanceTip': 'Kas nyata seluruh akun = saldo awal + semua pemasukan − semua pengeluaran. Termasuk saldo awal, beda dari Laba Bersih.',
+      'stat.profitTip': 'Pemasukan − pengeluaran periode ini saja (TIDAK termasuk saldo awal akun).',
       'add.title': 'Tambah Catatan Harian', 'add.income': 'Pemasukan', 'add.expense': 'Pengeluaran',
       'add.amount': 'Jumlah', 'add.category': 'Kategori', 'add.date': 'Tanggal',
       'add.note': 'Catatan (opsional)', 'add.notePh': 'cth. Warung Berkah — 20 galon',
