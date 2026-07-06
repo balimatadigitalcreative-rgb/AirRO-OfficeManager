@@ -94,7 +94,8 @@ function FApp() {
   const [drawer, setDrawer] = uSh(false);
   const [toast, setToast] = uSh(null);
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
-  const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard re-fetches
+  const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard/transaksi re-fetch
+  const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
   // Roles are DATA (managed via /roles). Seed FS with the cached list for instant
   // paint; the shell reloads the live list after login (reloadRoles).
@@ -982,9 +983,14 @@ function FApp() {
           {screen === 'dist-dashboard' && (
             <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
-              onQuickInput={() => go('dist-transactions', !p.distribusi)} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
+              onQuickInput={() => { go('dist-transactions', !p.distribusi); if (p.distribusi) setDistFormTick((t) => t + 1); }} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && screen !== 'dist-dashboard' && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen === 'dist-transactions' && (
+            <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
+              staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
+              onChanged={() => setDistTick((t) => t + 1)} />
+          )}
+          {screen && screen.indexOf('dist-') === 0 && screen !== 'dist-dashboard' && screen !== 'dist-transactions' && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />

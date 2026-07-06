@@ -454,6 +454,7 @@ model DistTransaction {
   unitPriceLocked Int                          // unit_price_locked
   amount          Int                          // qty * unitPriceLocked (server-computed)
   method          String   @default("lunas")   // lunas | bon | pelunasan
+  note            String   @default("")
   txnDate         String                        // txn_date (YYYY-MM-DD)
   actorId         String?                       // actor_id
   actorRole       String?                       // actor_role (at input time)

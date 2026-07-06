@@ -22,6 +22,7 @@ const txnSchema = z.object({
   customerId: z.string().min(1),
   qty: z.number().int().positive(),
   method: z.enum(['lunas', 'bon', 'pelunasan']).optional().default('lunas'),
+  note: z.string().max(300).optional().default(''),
   txnDate: DATE,
 });
 const correctionSchema = z.object({

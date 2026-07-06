@@ -108,7 +108,7 @@ async function createTransaction(body, actor) {
   const amount = qty * unitPriceLocked;
   const snap = await actorSnap(actor);
   const txn = await prisma.distTransaction.create({ data: {
-    customerId: customer.id, qty, unitPriceLocked, amount, method,
+    customerId: customer.id, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
     txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
   } });
   await logAudit('input', `Transaksi: ${customer.name}`, `${qty} × ${unitPriceLocked} = ${amount} (${method})`, snap);
