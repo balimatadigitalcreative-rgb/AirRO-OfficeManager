@@ -231,6 +231,12 @@ model Employee {
   // never dropped on the round-trip. Same idea as a per-record document.
   data      String?
   updatedAt DateTime @updatedAt @default(now()) // bumped on every change (incremental sync)
+  // Creator snapshot captured AT INPUT TIME (name + role as they were then). Plain
+  // columns — authoritative, server-stamped from the token, never from the client
+  // `data` blob — so "added by" is a stable historical record. (Employee has no
+  // createdBy FK relation; the snapshot is what the UI needs and can't be forged.)
+  createdByName String?
+  createdByRole String?
 
   cashbons          Cashbon[]
   trainings         Training[]

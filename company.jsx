@@ -3,6 +3,10 @@ const { useState: uSc, useMemo: uMc, useEffect: uEc } = React;
 const trC = (k, v) => window.t(k, v);
 function IcC(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 const rpC = (n) => FIN.fmt(n);
+// Historical creator label: "{name} · {role-at-input}" (role resolved to its display
+// name). Returns "—" when the record predates creator tracking.
+const roleLblC = (r) => (r && window.FS && window.FS.roleName) ? window.FS.roleName(r) : (r || '');
+const createdByLbl = (cb) => (cb && cb.name) ? (cb.name + (cb.role ? ' · ' + roleLblC(cb.role) : '')) : '—';
 
 /* ---------- Budget gauge ring ---------- */
 function BudgetRing({ aff }) {
@@ -798,6 +802,7 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="ed-name">{staff.name}</div>
             <div className="ed-pos">{staff.pos || '—'} · {staff.dept}</div>
+            <div className="ed-by" title={trC('emp.by') + ': ' + createdByLbl(staff.createdBy)}><IconUserCircle s={11} />{trC('emp.by')}: {createdByLbl(staff.createdBy)}</div>
           </div>
           {canEdit && onSaveStaff && !separated && <button className="btn btn-lime ed-editbtn" onClick={() => setIdentEdit(true)}><IconPencil s={15} />{trC('co.editData')}</button>}
           {canEdit && onSaveStaff && !separated && <button className="ed-editbtn ed-offbtn" onClick={() => setOffboard(true)} title={trC('co.offboard')}><IconLogout s={15} />{trC('co.offboard')}</button>}

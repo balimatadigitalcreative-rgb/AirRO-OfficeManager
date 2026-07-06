@@ -98,6 +98,16 @@ describe('Employees + payroll', () => {
     const res = await request(app).post('/api/v1/employees').set(auth('hrd')).send({ name: 'Budi', department: 'Driver', base: 4000000, allowance: 500000, risk: 'Medium' });
     expect(res.status).toBe(201);
   });
+  it('stamps the creator from the token (name + role), not from the body', async () => {
+    const res = await request(app).post('/api/v1/employees').set(auth('hrd'))
+      .send({ name: 'Sari', department: 'Admin', createdBy: { name: 'Fake', role: 'owner' }, createdByName: 'Fake', createdByRole: 'owner' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.createdBy).toEqual({ name: 'Hrd', role: 'hrd' });
+    const list = await request(app).get('/api/v1/employees').set(auth('hrd'));
+    const row = list.body.data.find((e) => e.id === res.body.data.id);
+    expect(row.createdBy).toEqual({ name: 'Hrd', role: 'hrd' });   // survives round-trip, not forgeable
+    await request(app).delete(`/api/v1/employees/${res.body.data.id}`).set(auth('hrd'));   // keep payroll count clean
+  });
   it('finance can VIEW the roster (feeds payroll) but cannot create employees', async () => {
     const view = await request(app).get('/api/v1/employees').set(auth('finance'));
     expect(view.status).toBe(200);   // has `payroll` cap → allowed to read the roster

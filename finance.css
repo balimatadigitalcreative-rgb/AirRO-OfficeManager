@@ -221,6 +221,8 @@
 .ed-head { display: flex; align-items: center; gap: 13px; padding: 18px 20px; background: linear-gradient(135deg, #065489, #06334F); color: #fff; flex-shrink: 0; }
 .ed-name { font-family: 'Poppins'; font-size: 18px; font-weight: 700; }
 .ed-pos { font-size: 12.5px; color: rgba(255,255,255,.75); margin-top: 1px; }
+.ed-by { display: flex; align-items: center; gap: 4px; font-size: 11px; color: rgba(255,255,255,.6); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ed-by svg { flex-shrink: 0; opacity: .85; }
 .ed-editbtn { height: 36px; }
 .ed-body { padding: 20px 22px 22px; overflow-y: auto; flex: 1; min-height: 0; }
 .ed-section-t { font-family: 'Poppins'; font-size: 13px; font-weight: 700; color: var(--green-900); margin: 16px 0 10px; display: flex; align-items: center; gap: 7px; }

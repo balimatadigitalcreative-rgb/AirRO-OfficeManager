@@ -78,10 +78,12 @@ function toColumns(o) {
   };
   return c;
 }
-// Row → the frontend object it stored (verbatim), with the authoritative id/nip.
+// Row → the frontend object it stored (verbatim), with the authoritative id/nip and
+// the server-stamped creator snapshot (overrides anything in the client `data` blob).
 function toClient(row) {
   let obj = {}; try { obj = row.data ? JSON.parse(row.data) : {}; } catch (e) {}
-  return { ...obj, id: row.id, nip: row.nip || obj.nip || '' };
+  return { ...obj, id: row.id, nip: row.nip || obj.nip || '',
+    createdBy: row.createdByName ? { name: row.createdByName, role: row.createdByRole || null } : null };
 }
 
 async function list(includeInactive) {
@@ -98,7 +100,7 @@ async function getRow(id) {
 }
 async function getById(id) { return toClient(await getRow(id)); }
 
-async function create(body) {
+async function create(body, userId) {
   const cols = toColumns(body);
   // NIP is controlled by the frontend, which pre-allocates via POST /employees/nip
   // and includes it here. Do NOT auto-allocate on create — that would burn an extra
@@ -107,7 +109,14 @@ async function create(body) {
   const nip = body.nip ? String(body.nip) : null;
   const full = { ...body, nip: nip || '' };          // faithful copy incl. the resolved NIP
   delete full._isNew;
-  const data = { ...cols, nip, data: JSON.stringify(full) };
+  // Stamp the creator from the AUTHENTICATED user (name/role read from the DB at
+  // input time) — never from the request body, so it can't be forged.
+  const snap = {};
+  if (userId) {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
+    if (u) { snap.createdByName = u.name; snap.createdByRole = u.role; }
+  }
+  const data = { ...cols, ...snap, nip, data: JSON.stringify(full) };
   if (body.id) data.id = String(body.id);           // keep the client id (optimistic insert)
   const row = await prisma.employee.create({ data });
   return toClient(row);

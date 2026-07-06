@@ -126,7 +126,7 @@
       'pm.selfNote': 'Role & access are managed by HRD/owner and can’t be changed here.',
       'pm.markRead': 'Mark all read',
       'pm.actSoonTitle': 'Activity log coming soon', 'pm.actSoonSub': 'Your recent actions will appear here once the audit trail is enabled.',
-      'entry.by': 'Input by',
+      'entry.by': 'Input by', 'emp.by': 'Added by',
       'um.resetPw': 'Reset Password', 'um.forceChange': 'Force change on next login', 'um.pwReset': 'Password reset', 'um.newPwPh': 'New temporary password (min 4)',
       // topbar titles
       't.overview': 'Finance Manager', 's.overview': 'Record daily income & expenses for AirRO',
@@ -376,7 +376,7 @@
       'pm.selfNote': 'Peran & hak akses dikelola HRD/owner dan tidak bisa diubah di sini.',
       'pm.markRead': 'Tandai sudah dibaca',
       'pm.actSoonTitle': 'Log aktivitas segera hadir', 'pm.actSoonSub': 'Tindakan terakhir Anda akan tampil di sini setelah jejak audit diaktifkan.',
-      'entry.by': 'Diinput oleh',
+      'entry.by': 'Diinput oleh', 'emp.by': 'Ditambahkan oleh',
       'um.resetPw': 'Reset Password', 'um.forceChange': 'Paksa ganti saat login berikutnya', 'um.pwReset': 'Password direset', 'um.newPwPh': 'Password sementara baru (min 4)',
       't.overview': 'Manajer Keuangan', 's.overview': 'Catat pemasukan & pengeluaran harian AirRO',
       't.entries': 'Semua Catatan', 's.entries': 'Telusuri, cari, dan ubah setiap catatan',
