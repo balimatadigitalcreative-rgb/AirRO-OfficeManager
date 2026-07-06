@@ -124,37 +124,71 @@ function TimePicker({ value, onChange, compact, color, menuColor, placeholder })
   );
 }
 /* file/photo proof attachment — resizes images to keep storage small */
+// Proof photos are embedded (base64) in the transaction record, so a raw camera
+// photo (3–8 MB) would bloat the payload and the save would fail ("server tidak
+// terjangkau"). We ALWAYS shrink an image here to a small target BEFORE it is stored:
+// resize the longest side to ≤ MAX_DIM and re-encode to JPEG, dropping quality (then
+// dimensions) until the data URL is under TARGET_CHARS. Detection is decode-based, so
+// odd/mislabelled MIME types (e.g. iPhone HEIC) are handled, not passed through raw.
+const tA = (k) => (window.t ? window.t(k) : k);
+const MAX_SRC_BYTES = 30 * 1024 * 1024;     // hard guard on the original file (memory)
+const TARGET_CHARS = 520 * 1024;            // ~380 KB actual → tiny payload, still legible
+const MAX_PDF_CHARS = 1.6 * 1024 * 1024;    // ~1.1 MB PDF (can't be canvas-compressed)
+const readDataURL = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('read')); r.readAsDataURL(file); });
+const loadImage = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('decode')); i.src = src; });
+function shrinkToJpeg(img) {
+  let maxDim = 1280;
+  for (let attempt = 0; attempt < 7; attempt++) {
+    let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    if (w > maxDim || h > maxDim) { const r = Math.min(maxDim / w, maxDim / h); w = Math.max(1, Math.round(w * r)); h = Math.max(1, Math.round(h * r)); }
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);   // white bg so transparent PNGs aren't black
+    const q = Math.max(0.4, 0.72 - attempt * 0.08);
+    const data = c.toDataURL('image/jpeg', q);
+    if (data.length <= TARGET_CHARS || (maxDim <= 720 && q <= 0.4)) return data;   // good enough
+    maxDim = Math.round(maxDim * 0.82);   // still too big → shrink dimensions and retry
+  }
+  const c = document.createElement('canvas'); const s = 720 / Math.max(img.naturalWidth || img.width, 1);
+  c.width = Math.max(1, Math.round((img.naturalWidth || img.width) * Math.min(1, s))); c.height = Math.max(1, Math.round((img.naturalHeight || img.height) * Math.min(1, s)));
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.4);
+}
+
 function FileAttach({ value, onChange, compact }) {
   const inputRef = uRd(null);
-  const onPick = (e) => {
+  const [busy, setBusy] = uSd(false);
+  const [err, setErr] = uSd('');
+  const onPick = async (e) => {
     const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = reader.result;
-      if (file.type.startsWith('image/')) {
-        const img = new Image();
-        img.onload = () => {
-          const max = 1100; let { width: w, height: h } = img;
-          if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
-          const c = document.createElement('canvas'); c.width = w; c.height = h;
-          c.getContext('2d').drawImage(img, 0, 0, w, h);
-          onChange({ name: file.name, type: file.type, isImg: true, data: c.toDataURL('image/jpeg', 0.7) });
-        };
-        img.src = src;
-      } else {
-        onChange({ name: file.name, type: file.type, isImg: false, data: src });
-      }
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+    setErr('');
+    if (file.size > MAX_SRC_BYTES) { setErr(tA('att.tooBig')); return; }
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    setBusy(true);
+    try {
+      const src = await readDataURL(file);
+      if (isPdf) {
+        if (src.length > MAX_PDF_CHARS) { setErr(tA('att.pdfBig')); return; }
+        onChange({ name: file.name, type: file.type, isImg: false, data: src });
+      } else {
+        const img = await loadImage(src);   // throws for non-image / undecodable formats
+        const data = shrinkToJpeg(img);
+        const base = (file.name || 'foto').replace(/\.[^.]+$/, '');
+        onChange({ name: base + '.jpg', type: 'image/jpeg', isImg: true, data });
+      }
+    } catch (ex) {
+      setErr(tA('att.badImg'));
+    } finally { setBusy(false); }
   };
   return (
     <div className={`ui-attach ${compact ? 'compact' : ''}`}>
       <input ref={inputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={onPick} />
-      {!value ? (
+      {busy ? (
+        <div className="ui-attach-btn" style={{ opacity: .8 }}><span className="ui-attach-spin" />{tA('att.processing')}</div>
+      ) : !value ? (
         <button type="button" className="ui-attach-btn" onClick={() => inputRef.current && inputRef.current.click()}>
-          <IconPlus s={15} /><span>{(window.t && window.t('att.upload')) || 'Attach proof'}</span>
+          <IconPlus s={15} /><span>{tA('att.upload') || 'Attach proof'}</span>
         </button>
       ) : (
         <div className="ui-attach-prev">
@@ -164,6 +198,7 @@ function FileAttach({ value, onChange, compact }) {
           <button type="button" className="ui-attach-x" onClick={() => onChange(null)}><IconClose s={14} /></button>
         </div>
       )}
+      {err && <div className="login-err" style={{ marginTop: 6 }}><IconClose s={13} />{err}</div>}
     </div>
   );
 }

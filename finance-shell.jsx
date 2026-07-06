@@ -120,11 +120,23 @@ function FApp() {
   // The old model mirrored the whole array to /state, so two users saving at once
   // clobbered each other (last-write-wins on the blob). Now each row is its own
   // REST record; a light 3s poll of GET /setoran keeps everyone current.
-  const setoranToApi = (r) => ({ id: r.id, date: r.date, armada: r.armada || '', galon: +r.galon || 0, cash: +r.cash || 0, bon: +r.bon || 0, bonPay: +r.bonPay || 0, expense: +r.expense || 0, note: r.note || '', proof: r.proof || null });
+  // Proof photos travel as a JSON STRING in the REST record (the server proof column
+  // is a string), while the app works with an object { name, isImg, data }. Serialize
+  // on the way out; parse on the way back (tolerating a legacy raw data-URL string).
+  // Sending the object as-is was rejected 400 by the server → surfaced as the
+  // misleading "server tidak terjangkau".
+  const proofToApi = (pr) => (pr == null ? null : (typeof pr === 'string' ? pr : JSON.stringify(pr)));
+  const proofFromApi = (s) => {
+    if (s == null || s === '') return undefined;
+    if (typeof s === 'object') return s;
+    try { const o = JSON.parse(s); if (o && typeof o === 'object' && 'data' in o) return o; } catch (e) {}
+    return /^data:/.test(s) ? { name: 'bukti', isImg: /^data:image\//.test(s), data: s } : undefined;
+  };
+  const setoranToApi = (r) => ({ id: r.id, date: r.date, armada: r.armada || '', galon: +r.galon || 0, cash: +r.cash || 0, bon: +r.bon || 0, bonPay: +r.bonPay || 0, expense: +r.expense || 0, note: r.note || '', proof: proofToApi(r.proof) });
   const reloadSetoran = () => {
     if (!(window.API && window.API.setoran)) return Promise.resolve();
     return window.API.setoran.list('limit=2000').then((r) => {
-      if (r && Array.isArray(r.data)) { setSetoran(r.data); try { localStorage.setItem('airro_setoran_cache_v1', JSON.stringify(r.data)); } catch (e) {} }
+      if (r && Array.isArray(r.data)) { const rows = r.data.map((row) => ({ ...row, proof: proofFromApi(row.proof) })); setSetoran(rows); try { localStorage.setItem('airro_setoran_cache_v1', JSON.stringify(rows)); } catch (e) {} }
     }).catch(() => {});
   };
   const addSetoran = (rec) => {
@@ -163,13 +175,13 @@ function FApp() {
     return { id: e.id, type: e.type === 'income' ? 'income' : 'expense', amount: Math.max(0, Math.round(+e.amount || 0)),
       note: e.note || '', method: e.method || 'Cash', date: e.date, time: e.time || '00:00',
       category: e.category != null ? e.category : null, acct: e.acct != null ? e.acct : null,
-      proof: e.proof != null ? e.proof : null, meta: Object.keys(tags).length ? JSON.stringify(tags) : null };
+      proof: proofToApi(e.proof), meta: Object.keys(tags).length ? JSON.stringify(tags) : null };
   };
   const apiToEntry = (row) => {
     let tags = {}; try { tags = row.meta ? JSON.parse(row.meta) : {}; } catch (e) {}
     const o = { id: row.id, type: row.type, amount: row.amount, note: row.note || '', method: row.method || 'Cash',
       date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined };
-    if (row.proof) o.proof = row.proof;
+    const pf = proofFromApi(row.proof); if (pf) o.proof = pf;
     return Object.assign(o, tags);
   };
   const reloadEntries = () => {
@@ -183,8 +195,10 @@ function FApp() {
   // Either way reloadEntries() re-syncs the optimistic change to the server's truth
   // (a rejected delete reappears; a rejected add drops back out).
   const entryErr = (op) => (err) => {
-    const denied = err && err.status === 403;
-    setToast(tr(denied ? (op === 'delete' ? 'toast.noDeletePerm' : 'toast.noPerm') : 'st.syncErr'));
+    const key = err && err.status === 403 ? (op === 'delete' ? 'toast.noDeletePerm' : 'toast.noPerm')
+      : (err && err.status === 413) ? 'att.saveTooBig'   // payload too large → almost always the proof photo
+      : 'st.syncErr';
+    setToast(tr(key));
     reloadEntries();
   };
   const addEntry = (e) => {

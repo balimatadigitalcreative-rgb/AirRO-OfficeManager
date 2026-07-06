@@ -758,6 +758,8 @@ select.fld::-ms-expand { display: none; }
 .entry-proof:hover { border-color: var(--green-700); }
 .ui-attach-btn { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 16px; border-radius: 11px; border: 1.5px dashed var(--border); background: var(--card-soft); color: var(--green-700); font-family: 'Poppins'; font-weight: 600; font-size: 13px; width: 100%; justify-content: center; transition: all .14s; }
 .ui-attach-btn:hover { border-color: var(--green-700); background: var(--mint-100); }
+.ui-attach-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--mint-300, #a7ddd6); border-top-color: var(--green-700); animation: attSpin .7s linear infinite; display: inline-block; }
+@keyframes attSpin { to { transform: rotate(360deg); } }
 .ui-attach-prev { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); }
 .ui-attach-prev img { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; cursor: pointer; flex-shrink: 0; }
 .ui-attach-file { width: 42px; height: 42px; border-radius: 8px; background: var(--mint-100); color: var(--green-700); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }

@@ -145,6 +145,7 @@
       'val.amountPos': 'Enter an amount greater than zero.', 'val.amountMax': 'Amount is too large.', 'val.dateReq': 'Please choose a date.', 'val.dateFuture': 'Date cannot be in the future.',
       'a11y.edit': 'Edit entry', 'a11y.delete': 'Delete entry',
       'att.proof': 'Proof (photo / file)', 'att.upload': 'Attach proof', 'att.view': 'View proof',
+      'att.processing': 'Compressing photo…', 'att.tooBig': 'File too large. Please pick a smaller photo.', 'att.pdfBig': 'PDF too large — attach a photo or a smaller PDF.', 'att.badImg': 'Could not read that image. Try another photo (JPG/PNG).', 'att.saveTooBig': 'Proof photo too large to save — please re-attach a smaller photo.',
       // today / monitor / category
       'today.title': 'Today', 'today.income': 'Income', 'today.expense': 'Expense',
       'today.net': 'Net today', 'today.entries': '{n} entries',
@@ -378,6 +379,7 @@
       'val.amountPos': 'Masukkan jumlah lebih dari nol.', 'val.amountMax': 'Jumlah terlalu besar.', 'val.dateReq': 'Pilih tanggal.', 'val.dateFuture': 'Tanggal tidak boleh di masa depan.',
       'a11y.edit': 'Ubah catatan', 'a11y.delete': 'Hapus catatan',
       'att.proof': 'Bukti (foto / file)', 'att.upload': 'Lampirkan bukti', 'att.view': 'Lihat bukti',
+      'att.processing': 'Mengompres foto…', 'att.tooBig': 'File terlalu besar. Pilih foto yang lebih kecil.', 'att.pdfBig': 'PDF terlalu besar — lampirkan foto atau PDF lebih kecil.', 'att.badImg': 'Gambar tidak terbaca. Coba foto lain (JPG/PNG).', 'att.saveTooBig': 'Foto bukti terlalu besar untuk disimpan — lampirkan ulang foto yang lebih kecil.',
       'today.title': 'Hari Ini', 'today.income': 'Pemasukan', 'today.expense': 'Pengeluaran',
       'today.net': 'Bersih hari ini', 'today.entries': '{n} catatan',
       'monitor.title': '7 Hari Terakhir', 'monitor.in': 'Masuk', 'monitor.out': 'Keluar',
