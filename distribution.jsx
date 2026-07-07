@@ -19,6 +19,9 @@ const CUST_TYPES = ['reguler', 'kos', 'cafe', 'bulk'];
 const CUST_TAG = { reguler: 'reg', kos: 'kos', cafe: 'cafe', bulk: 'bulk' };
 const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Reguler');
 const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' } };
+const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+function fmtDT(iso) { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const p = (n) => String(n).padStart(2, '0'); return d.getDate() + ' ' + MONTHS_ID[d.getMonth()] + ' ' + d.getFullYear() + ' · ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
 
 // ── 7-day stacked bar (cash = navy, bon = amber) ──
 function SevenDayChart({ last7 }) {
@@ -608,4 +611,52 @@ function DistPrices({ canPrice, refreshKey, onChanged }) {
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Prices: DistPrices };
+// ════════════════ LOG AUDIT (owner only, immutable timeline) ════════════════
+function DistAudit({ canAudit, refreshKey }) {
+  const [rows, setRows] = uSx(null);
+  const [kind, setKind] = uSx('all');
+  const [q, setQ] = uSx('');
+  const reload = () => window.API.distribusi.audit('limit=500').then((r) => setRows(r.data || [])).catch(() => setRows([]));
+  uEx(() => { if (canAudit && window.API && window.API.distribusi) reload(); }, [refreshKey, canAudit]);
+  if (!canAudit) return <DistLocked />;
+
+  const kindChips = [['all', trD('dist.fAll')], ['koreksi', trD('dist.akKoreksi')], ['harga', trD('dist.akHarga')], ['input', trD('dist.akInput')], ['impor', trD('dist.akImpor')], ['pelanggan', trD('dist.akPelanggan')]];
+  const filtered = (rows || []).filter((a) => {
+    if (kind !== 'all' && a.kind !== kind) return false;
+    if (q && !((a.title || '') + (a.detail || '') + (a.actorName || '')).toLowerCase().includes(q.toLowerCase())) return false;
+    return true;
+  });
+  return (
+    <div className="dist-dash screen-enter">
+      <div className="dist-tx-toolbar">
+        <div className="dist-search"><IconSearch s={16} /><input value={q} placeholder={trD('dist.auditSearch')} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="dist-chips">{kindChips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{l}</button>)}</div>
+        <div style={{ flex: 1 }} />
+        <span className="dist-immutable"><IconLock s={13} />{trD('dist.immutable')}</span>
+      </div>
+      <div className="card dist-card" style={{ padding: '10px 22px' }}>
+        {rows === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
+        {rows !== null && filtered.length === 0 && <div className="dist-empty">{trD('dist.noAudit')}</div>}
+        {filtered.map((a) => {
+          const m = AUDIT_KIND[a.kind] || AUDIT_KIND.input;
+          return (
+            <div key={a.id} className="dist-audit-row">
+              <div className="dist-audit-rail"><span className="dist-audit-dot" /></div>
+              <div className="dist-audit-body">
+                <div className="dist-audit-head">
+                  <span className={`dist-akind ${m.cls}`}>{trD(m.k)}</span>
+                  <span className="dist-audit-title">{a.title}</span>
+                  {a.actorStaff ? <span className="dist-audit-staff">{trD('dist.olehStaff')}</span> : null}
+                </div>
+                {a.detail ? <div className="dist-audit-detail">{a.detail}</div> : null}
+                <div className="dist-audit-meta"><span className={a.actorStaff ? 'staff' : ''}>{a.actorName || a.actorRole || '—'}</span><span>{fmtDT(a.createdAt)}</span></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Prices: DistPrices, Audit: DistAudit };

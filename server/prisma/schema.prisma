@@ -493,10 +493,11 @@ model DistAuditLog {
   kind      String                              // koreksi | harga | input | impor | pelanggan
   title     String
   detail    String   @default("")
-  actorId   String?
-  actorRole String?
-  actorName String?
-  createdAt DateTime @default(now())
+  actorId    String?
+  actorRole  String?
+  actorName  String?
+  actorStaff Boolean  @default(false) // actor was a distribusi-staff (no owner caps)
+  createdAt  DateTime @default(now())
 
   @@index([kind])
   @@index([createdAt])

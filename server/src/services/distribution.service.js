@@ -8,6 +8,7 @@
 //   • every write also appends an immutable DistAuditLog row.
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const { resolvePerms } = require('../config/permissions');
 
 const CUSTOMER_TYPES = ['reguler', 'kos', 'cafe', 'bulk'];
 const METHODS = ['lunas', 'bon', 'pelunasan'];
@@ -16,16 +17,21 @@ const int = (v) => Math.max(0, Math.round(+v || 0));
 // actor = req.user ({ id, role, username }). We snapshot id+role (+name from DB) so
 // the trail is historical and can never be forged from the request body.
 async function actorSnap(actor) {
-  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null };
+  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null, actorStaff: false };
   if (actor && actor.id) {
-    const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true } });
-    if (u) out.actorName = u.name;
+    const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true, role: true, permissions: true } });
+    if (u) {
+      out.actorName = u.name;
+      const perms = resolvePerms(u.role, u.permissions);
+      // A "staff" actor has base distribusi but none of the owner distribusi caps.
+      out.actorStaff = !!(perms.distribusi && !perms.distribusiAudit && !perms.distribusiHargaMaster && !perms.distribusiCustomers);
+    }
   }
   return out;
 }
 // Append one immutable audit row. `snap` is the resolved actor snapshot.
 async function logAudit(kind, title, detail, snap) {
-  return prisma.distAuditLog.create({ data: { kind, title, detail: detail || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+  return prisma.distAuditLog.create({ data: { kind, title, detail: detail || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, actorStaff: !!snap.actorStaff } });
 }
 
 // ── Customers ──────────────────────────────────────────────────────────────

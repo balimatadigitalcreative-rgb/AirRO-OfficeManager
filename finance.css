@@ -1069,6 +1069,28 @@ select.fld::-ms-expand { display: none; }
   .dist-harga-apply { width: 100%; }
 }
 
+/* ---- Distribusi Log Audit (immutable timeline) ---- */
+.dist-immutable { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: var(--text-mut); background: var(--card-soft); padding: 7px 12px; border-radius: 9px; }
+.dist-immutable svg { flex-shrink: 0; }
+.dist-audit-row { display: flex; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border-soft); }
+.dist-audit-row:first-child { border-top: 0; }
+.dist-audit-rail { position: relative; width: 10px; flex-shrink: 0; }
+.dist-audit-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green-800); margin-top: 5px; }
+.dist-audit-rail::before { content: ''; position: absolute; left: 4px; top: 20px; bottom: -16px; width: 2px; background: var(--border-soft); }
+.dist-audit-row:last-child .dist-audit-rail::before { display: none; }
+.dist-audit-body { flex: 1; min-width: 0; }
+.dist-audit-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.dist-akind { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 7px; }
+.dist-akind.koreksi { background: var(--warn-bg); color: var(--warn); }
+.dist-akind.harga { background: #E7F1F5; color: #0B7EB1; }
+.dist-akind.input { background: var(--pos-bg); color: var(--green-800); }
+.dist-audit-title { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.dist-audit-staff { font-size: 9.5px; font-weight: 800; letter-spacing: .3px; color: var(--warn); background: var(--warn-bg); padding: 2px 8px; border-radius: 6px; }
+.dist-audit-detail { font-size: 12.5px; color: var(--text-mut); margin-top: 5px; line-height: 1.45; }
+.dist-audit-meta { display: flex; align-items: center; gap: 14px; margin-top: 7px; font-size: 11.5px; color: var(--text-faint); }
+.dist-audit-meta .staff { color: var(--warn); font-weight: 700; }
+.dist-audit-meta span:first-child { font-weight: 700; color: var(--text-mut); }
+
 /* ============ Profile menu (topbar avatar dropdown) ============ */
 .pm-wrap { position: relative; display: inline-flex; }
 .pm-av { position: relative; cursor: pointer; border: none; padding: 0; }
