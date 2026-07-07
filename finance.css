@@ -854,8 +854,11 @@ select.fld::-ms-expand { display: none; }
 .dist-staff-banner span:last-child { display: block; font-size: 12px; color: #8A5A1A; opacity: .85; }
 .dist-grid { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 18px; align-items: start; }
 .dist-main, .dist-rail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.dist-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 16px; }
-.dist-kpi { display: block; }
+/* KPI row — 4 equal cards. align-items:stretch (grid default, stated for clarity) so
+   every card matches the tallest; wraps 4→2×2→1 as the row narrows. Each card is a
+   `stat-box` (same padding/size); the hero differs by COLOUR only, never size. */
+.dist-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; align-items: stretch; }
+.dist-kpi { display: block; min-width: 0; }
 .dist-kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .dist-kpi-val { font-size: 24px; font-weight: 800; margin-top: 16px; white-space: nowrap; letter-spacing: -.5px; }
 .dist-kpi-unit { font-size: 14px; font-weight: 600; color: var(--text-faint); }

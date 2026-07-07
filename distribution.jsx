@@ -60,8 +60,10 @@ function SevenDayChart({ last7 }) {
 }
 
 function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero }) {
+  // Every KPI is a `stat-box` → identical padding/size on all four. `dist-kpi-hero`
+  // is a COLOUR-ONLY modifier (gradient + light text); it must not change the size.
   return (
-    <div className={`card dist-kpi ${hero ? 'dist-kpi-hero' : 'stat-box'}`}>
+    <div className={`card stat-box dist-kpi ${hero ? 'dist-kpi-hero' : ''}`}>
       <div className="dist-kpi-top">
         <span className={`icon-tile ${hero ? 'hero' : ''}`} style={hero ? null : { background: tile, color: fg }}>{IcX(icon, { s: 19 })}</span>
         {pill ? <span className={`dist-kpi-pill ${pillCls || ''}`}>{pill}</span> : null}
