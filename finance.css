@@ -1091,6 +1091,50 @@ select.fld::-ms-expand { display: none; }
 .dist-audit-meta .staff { color: var(--warn); font-weight: 700; }
 .dist-audit-meta span:first-child { font-weight: 700; color: var(--text-mut); }
 
+/* ---- Distribusi Integrasi Kas (read-only cash-flow mirror) ---- */
+.dist-integ-banner { display: flex; align-items: center; gap: 13px; background: #EAF4FB; border: 1px solid #CFE6F4; border-radius: 14px; padding: 13px 17px; margin-bottom: 16px; }
+.dist-integ-flow { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; width: 42px; height: 42px; justify-content: center; border-radius: 12px; background: #fff; border: 1px solid #CFE6F4; color: #1a7fb8; }
+.dist-integ-banner b { display: block; font-size: 13.5px; color: #205a7a; }
+.dist-integ-banner span:last-child { display: block; font-size: 12px; color: #3a7091; opacity: .9; margin-top: 2px; line-height: 1.45; }
+.dist-integ-range { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-mut); background: var(--card-soft); padding: 8px 12px; border-radius: 10px; white-space: nowrap; }
+.dist-integ-range svg { color: var(--text-faint); flex-shrink: 0; }
+.dist-integ-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
+.dist-integ-kpi { display: block; }
+.dist-integ-kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.dist-integ-kpi-val { font-size: 23px; font-weight: 800; margin-top: 14px; white-space: nowrap; letter-spacing: -.5px; }
+.dist-integ-kpi-lbl { font-size: 13px; font-weight: 700; color: var(--ink); margin-top: 4px; }
+.dist-integ-kpi-sub { font-size: 11.5px; color: var(--text-mut); margin-top: 2px; line-height: 1.4; }
+.dist-integ-ledger { padding: 16px 20px; }
+.dist-integ-line { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-top: 1px solid var(--border-soft); }
+.dist-integ-line:first-of-type { border-top: 0; }
+.dist-integ-line-l { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 13.5px; color: var(--ink); }
+.dist-integ-line-l svg { color: var(--green-700); flex-shrink: 0; }
+.dist-integ-line-l small { font-size: 11px; color: var(--text-faint); font-weight: 600; white-space: nowrap; }
+.dist-integ-line b { font-size: 14.5px; white-space: nowrap; }
+.dist-integ-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.dist-integ-dot.lunas { background: #17b083; }
+.dist-integ-dot.pelunasan { background: #2f6fb0; }
+.dist-integ-dot.bon { background: #e0a13c; }
+.dist-integ-dot.adj { background: #8AA0AD; }
+.dist-integ-line.total { border-top: 1.5px solid var(--border); margin-top: 2px; }
+.dist-integ-line.total .dist-integ-line-l { font-weight: 800; font-size: 14px; }
+.dist-integ-line.total b { font-size: 16px; }
+.dist-integ-line.memo { background: var(--card-soft); border-top: 0; margin: 4px -20px 0; padding: 11px 20px; }
+.dist-integ-line.memo + .dist-integ-line.memo { margin-top: 0; border-top: 1px solid var(--border-soft); }
+.dist-integ-line.memo .dist-integ-line-l { color: var(--text-mut); }
+.dist-integ-foot { display: grid; grid-template-columns: minmax(0, 300px) 1fr; gap: 14px; margin-top: 14px; align-items: stretch; }
+.dist-integ-outstanding { padding: 16px 18px; }
+.dist-integ-out-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--text-mut); }
+.dist-integ-out-head svg { color: var(--warn); flex-shrink: 0; }
+.dist-integ-out-val { font-size: 21px; font-weight: 800; color: var(--warn); margin-top: 10px; letter-spacing: -.5px; }
+.dist-integ-out-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; line-height: 1.4; }
+.dist-integ-note { display: flex; align-items: flex-start; gap: 10px; background: var(--card-soft); border-radius: 14px; padding: 15px 17px; font-size: 12.5px; color: var(--text-mut); line-height: 1.5; }
+.dist-integ-note svg { color: var(--text-faint); flex-shrink: 0; margin-top: 1px; }
+@media (max-width: 720px) {
+  .dist-integ-cards { grid-template-columns: 1fr; }
+  .dist-integ-foot { grid-template-columns: 1fr; }
+}
+
 /* ============ Profile menu (topbar avatar dropdown) ============ */
 .pm-wrap { position: relative; display: inline-flex; }
 .pm-av { position: relative; cursor: pointer; border: none; padding: 0; }

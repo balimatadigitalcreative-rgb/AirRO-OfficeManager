@@ -1013,10 +1013,13 @@ function FApp() {
           {screen === 'dist-prices' && (
             <DIST.Prices refreshKey={distTick} canPrice={!!p.distribusiHargaMaster} onChanged={() => setDistTick((t) => t + 1)} />
           )}
+          {screen === 'dist-integration' && (
+            <DIST.Integration refreshKey={distTick} today={FIN.TODAY} />
+          )}
           {screen === 'dist-audit' && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />

@@ -22,6 +22,21 @@ const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((
 const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' } };
 const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 function fmtDT(iso) { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const p = (n) => String(n).padStart(2, '0'); return d.getDate() + ' ' + MONTHS_ID[d.getMonth()] + ' ' + d.getFullYear() + ' · ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+// Local YYYY-MM-DD helpers for the Cash Integration period picker.
+const pad2 = (n) => String(n).padStart(2, '0');
+const isoDay = (v) => { const d = new Date(v); return isNaN(d) ? '' : d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+const isoAddDays = (dateStr, n) => { const d = new Date(dateStr + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+function periodRange(period, today) {
+  if (period === 'today') return { from: today, to: today };
+  if (period === 'week') return { from: isoAddDays(today, -6), to: today };
+  return { from: today.slice(0, 8) + '01', to: today }; // month-to-date
+}
+function copyText(text, done) {
+  const fin = () => { if (done) done(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(fin).catch(() => fin()); return; }
+  try { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch (e) { /* ignore */ }
+  fin();
+}
 
 // ── 7-day stacked bar (cash = navy, bon = amber) ──
 function SevenDayChart({ last7 }) {
@@ -659,4 +674,140 @@ function DistAudit({ canAudit, refreshKey }) {
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Prices: DistPrices, Audit: DistAudit };
+// ════════════════ INTEGRASI KAS (cash-flow mirror — read-only) ════════════════
+// Distribusi is deliberately SEPARATE from the AirRO cash book: nothing here posts
+// into the Entry/cash-flow tables. This screen is the bridge VIEW — for a chosen
+// period it maps distribusi activity onto cash-book terms so the owner can see (and
+// hand-copy) what really became cash:
+//   • Lunas + Pelunasan → Uang Masuk (cash-book income)
+//   • Bon               → Piutang (receivable, not cash yet)
+//   • Koreksi + Harga   → Penyesuaian (adjustment / audit note)
+// It never double-posts — that separation is the whole point.
+function DistIntegration({ refreshKey, today }) {
+  const [period, setPeriod] = uSx('month');
+  const [txns, setTxns] = uSx(null);
+  const [audit, setAudit] = uSx([]);
+  const [custs, setCusts] = uSx([]);
+  const [toast, setToast] = uSx('');
+  const range = periodRange(period, today);
+
+  uEx(() => {
+    if (!(window.API && window.API.distribusi)) { setTxns([]); return; }
+    let live = true; setTxns(null);
+    Promise.all([
+      window.API.distribusi.transactions.list('dateFrom=' + range.from + '&dateTo=' + range.to).then((r) => r.data || []).catch(() => []),
+      window.API.distribusi.audit('limit=500').then((r) => r.data || []).catch(() => []),
+      window.API.distribusi.customers.list().then((r) => r.data || []).catch(() => []),
+    ]).then(([t, a, c]) => { if (!live) return; setTxns(t); setAudit(a); setCusts(c); });
+    return () => { live = false; };
+  }, [refreshKey, period]);
+
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+
+  const rows = txns || [];
+  let lunas = 0, pelunasan = 0, bon = 0, qty = 0;
+  const cnt = { lunas: 0, pelunasan: 0, bon: 0 };
+  rows.forEach((t) => {
+    qty += t.qty;
+    if (t.method === 'bon') { bon += t.amount; cnt.bon++; }
+    else if (t.method === 'pelunasan') { pelunasan += t.amount; cnt.pelunasan++; }
+    else { lunas += t.amount; cnt.lunas++; }
+  });
+  const masukKas = lunas + pelunasan;
+  const adjRows = (audit || []).filter((a) => { if (a.kind !== 'koreksi' && a.kind !== 'harga') return false; const d = isoDay(a.createdAt); return d >= range.from && d <= range.to; });
+  const koreksiN = adjRows.filter((a) => a.kind === 'koreksi').length;
+  const hargaN = adjRows.filter((a) => a.kind === 'harga').length;
+  const adjN = koreksiN + hargaN;
+  const piutangBerjalan = (custs || []).reduce((s, c) => s + (c.sisaBon || 0), 0);
+  const empty = rows.length === 0 && adjN === 0;
+
+  const copySummary = () => {
+    const lines = [
+      trD('nav.distIntegration') + ' — ' + range.from + ' → ' + range.to,
+      trD('dist.integLineLunas') + ': ' + rpFull(lunas),
+      trD('dist.integLinePelunasan') + ': ' + rpFull(pelunasan),
+      trD('dist.integTotalIn') + ': ' + rpFull(masukKas),
+      trD('dist.integLineBon') + ': ' + rpFull(bon) + ' (' + trD('dist.integBonMemo') + ')',
+      trD('dist.integLineAdjust') + ': ' + adjN + ' (' + koreksiN + ' ' + trD('dist.akKoreksi') + ', ' + hargaN + ' ' + trD('dist.akHarga') + ')',
+    ];
+    copyText(lines.join('\n'), () => flash(trD('dist.integCopied')));
+  };
+
+  const periods = [['today', trD('dist.periodToday')], ['week', trD('dist.periodWeek')], ['month', trD('dist.periodMonth')]];
+  return (
+    <div className="dist-dash screen-enter">
+      <div className="dist-integ-banner">
+        <span className="dist-integ-flow"><IconTruck s={15} /><IconCaret s={12} style={{ transform: 'rotate(-90deg)' }} /><IconCoinIn s={15} /></span>
+        <div><b>{trD('dist.integBannerT')}</b><span>{trD('dist.integBannerS')}</span></div>
+      </div>
+
+      <div className="dist-tx-toolbar">
+        <div className="dist-chips">{periods.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+        <div style={{ flex: 1 }} />
+        <span className="dist-integ-range"><IconCalendar s={13} />{range.from} — {range.to}</span>
+        <button type="button" className="btn btn-ghost" disabled={txns === null} onClick={copySummary}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('dist.integCopy')}</button>
+      </div>
+
+      {txns === null ? <div className="card"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div> : (<>
+        <div className="dist-integ-cards">
+          <div className="card stat-box dist-integ-kpi">
+            <div className="dist-integ-kpi-top"><span className="icon-tile" style={{ background: 'var(--pos-bg)', color: 'var(--green-800)' }}>{IcX('IconCoinIn', { s: 18 })}</span><span className="dist-kpi-pill pos">{trD('dist.pillCash')}</span></div>
+            <div className="tnum dist-integ-kpi-val amt-pos">{rpFull(masukKas)}</div>
+            <div className="dist-integ-kpi-lbl">{trD('dist.integMasukKas')}</div>
+            <div className="dist-integ-kpi-sub">{trD('dist.integMasukKasSub')}</div>
+          </div>
+          <div className="card stat-box dist-integ-kpi">
+            <div className="dist-integ-kpi-top"><span className="icon-tile" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>{IcX('IconInvoice', { s: 18 })}</span><span className="dist-kpi-pill warn">{trD('dist.pillPiutang')}</span></div>
+            <div className="tnum dist-integ-kpi-val" style={{ color: 'var(--warn)' }}>{rpFull(bon)}</div>
+            <div className="dist-integ-kpi-lbl">{trD('dist.integPiutang')}</div>
+            <div className="dist-integ-kpi-sub">{trD('dist.integPiutangSub')}</div>
+          </div>
+          <div className="card stat-box dist-integ-kpi">
+            <div className="dist-integ-kpi-top"><span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX('IconPencil', { s: 17 })}</span><span className="dist-kpi-pill blue">{numX(adjN)}</span></div>
+            <div className="tnum dist-integ-kpi-val">{numX(adjN)}</div>
+            <div className="dist-integ-kpi-lbl">{trD('dist.integAdjust')}</div>
+            <div className="dist-integ-kpi-sub">{trD('dist.integAdjustSub')}</div>
+          </div>
+        </div>
+
+        <div className="card dist-integ-ledger">
+          <div className="dist-card-head"><div className="sec-title">{trD('dist.integLedger')}</div><span className="dist-badge lock"><IconLock s={10} />{trD('dist.integInfoBadge')}</span></div>
+          {empty ? <div className="dist-empty">{trD('dist.integNoData')}</div> : (<>
+            <div className="dist-integ-line">
+              <span className="dist-integ-line-l"><span className="dist-integ-dot lunas" /><span>{trD('dist.integLineLunas')}</span><small>{numX(cnt.lunas)} {trD('dist.notaWord')}</small></span>
+              <b className="tnum amt-pos">+{rpFull(lunas)}</b>
+            </div>
+            <div className="dist-integ-line">
+              <span className="dist-integ-line-l"><span className="dist-integ-dot pelunasan" /><span>{trD('dist.integLinePelunasan')}</span><small>{numX(cnt.pelunasan)} {trD('dist.notaWord')}</small></span>
+              <b className="tnum amt-pos">+{rpFull(pelunasan)}</b>
+            </div>
+            <div className="dist-integ-line total">
+              <span className="dist-integ-line-l"><IconCoinIn s={14} /><span>{trD('dist.integTotalIn')}</span></span>
+              <b className="tnum amt-pos">{rpFull(masukKas)}</b>
+            </div>
+            <div className="dist-integ-line memo">
+              <span className="dist-integ-line-l"><span className="dist-integ-dot bon" /><span>{trD('dist.integLineBon')}</span><small>{trD('dist.integBonMemo')}</small></span>
+              <b className="tnum" style={{ color: 'var(--warn)' }}>{rpFull(bon)}</b>
+            </div>
+            <div className="dist-integ-line memo">
+              <span className="dist-integ-line-l"><span className="dist-integ-dot adj" /><span>{trD('dist.integLineAdjust')}</span><small>{numX(koreksiN)} {trD('dist.akKoreksi')} · {numX(hargaN)} {trD('dist.akHarga')}</small></span>
+              <b className="tnum" style={{ color: 'var(--text-mut)' }}>{numX(adjN)}</b>
+            </div>
+          </>)}
+        </div>
+
+        <div className="dist-integ-foot">
+          <div className="card dist-integ-outstanding">
+            <div className="dist-integ-out-head"><IconInvoice s={15} /><span>{trD('dist.integOutstanding')}</span></div>
+            <div className="tnum dist-integ-out-val">{rpFull(piutangBerjalan)}</div>
+            <div className="dist-integ-out-sub">{trD('dist.integOutstandingSub')}</div>
+          </div>
+          <div className="dist-integ-note"><IconLock s={14} /><span>{trD('dist.integFootNote')}</span></div>
+        </div>
+      </>)}
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit };
