@@ -11,8 +11,9 @@ router.use(requireAuth);
 // Viewing the customer list/detail is part of base module access ('distribusi').
 router.get('/customers', requireCap('distribusi'), ctrl.listCustomers);
 router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getCustomer);
-// Delivery-fleet list for the customer form (reuses the Setoran fleet table).
-router.get('/fleet', requireCap('distribusi'), ctrl.listFleet);
+// NOTE: the delivery-fleet list is NOT served here — armada has a single app-wide
+// source (the `airro_fleet` /settings key managed in Setoran → Kelola Armada), read
+// by the client directly. No duplicate fleet source lives in this module.
 // Adding / editing / importing customers needs the dedicated capability.
 router.post('/customers', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.customerSchema }), ctrl.createCustomer);
 router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.customerUpdateSchema }), ctrl.updateCustomer);

@@ -133,13 +133,6 @@ describe('Distribusi — delivery days, fleet, editable customer types', () => {
     expect(r.body.data.masterPrice).toBe(9000);   // NOT changed by the edit route
   });
 
-  it('fleet list is readable through the distribusi module (base cap)', async () => {
-    await prisma.fleet.create({ data: { plate: 'BIRU' } });
-    const r = await request(app).get('/api/v1/distribusi/fleet').set(auth(staff));
-    expect(r.status).toBe(200);
-    expect(r.body.data.some((f) => f.plate === 'BIRU')).toBe(true);
-  });
-
   it('create a new type "Kantor"; usable on a customer; rename is safe (id stable)', async () => {
     const t = await request(app).post('/api/v1/distribusi/customer-types').set(auth(owner)).send({ label: 'Kantor' });
     expect(t.status).toBe(201);

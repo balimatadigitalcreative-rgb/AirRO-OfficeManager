@@ -371,11 +371,13 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
 }
 
 // ════════════════ PELANGGAN (list + detail + add + import) ════════════════
-function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarga, onChanged }) {
+// `fleet` is the SINGLE app-wide armada source (shell state ← /settings airro_fleet,
+// the same list managed in Setoran → Kelola Armada). Distribusi never keeps its own
+// copy — changing a plate there is reflected here immediately.
+function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, onGoHarga, onChanged }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [types, setTypes] = uSx([]);
-  const [fleet, setFleet] = uSx([]);
   const [detail, setDetail] = uSx(null);
   const [q, setQ] = uSx('');
   const [filter, setFilter] = uSx('all');
@@ -393,7 +395,6 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
   uEx(() => {
     if (!(window.API && window.API.distribusi)) return;
     reload(); reloadTypes();
-    window.API.distribusi.fleet().then((r) => setFleet(r.data || [])).catch(() => {});
   }, [refreshKey]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
@@ -401,7 +402,16 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
   const typeLabelOf = (id) => (typeMap[id] && typeMap[id].label) || typeLabel(id);
   const tag = (id) => <span className={`dist-ctag ${CUST_TAG[id] || 'other'}`}>{typeLabelOf(id)}</span>;
   const defaultType = () => (types[0] && types[0].id) || 'reguler';
-  const fleetOpts = [{ value: '', label: trD('dist.noArmada') }, ...fleet.map((f) => ({ value: f.plate, label: f.plate }))];
+  // Armada options from the single source. A value the customer already has but that
+  // is no longer in the fleet list is kept (shown as "non-aktif") so it never vanishes.
+  const fleetList = Array.isArray(fleet) ? fleet : [];
+  const isActiveArmada = (v) => !v || fleetList.includes(v);
+  const armadaFull = (v) => (v ? v + (isActiveArmada(v) ? '' : ' ' + trD('dist.armadaInactive')) : '');
+  const fleetOptsFor = (cur) => {
+    const opts = [{ value: '', label: trD('dist.noArmada') }, ...fleetList.map((pl) => ({ value: pl, label: pl }))];
+    if (cur && !fleetList.includes(cur)) opts.push({ value: cur, label: armadaFull(cur) });
+    return opts;
+  };
 
   const openDetail = (id) => { setView('detail'); setDetail(null); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); };
   const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '' }); };
@@ -471,7 +481,7 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
           <label className="fld-label">{trD('dist.cfDays')}</label>
           <div className="dist-typechips">{DAY_CODES.map((dd) => <button type="button" key={dd} className={`dist-typechip ${form.deliveryDays.includes(dd) ? 'on' : ''}`} onClick={() => toggleDay(dd)}>{dd}</button>)}</div>
           <label className="fld-label">{trD('dist.cfArmada')}</label>
-          <UI.Dropdown value={form.armada} options={fleetOpts} placeholder={trD('dist.noArmada')} onChange={(v) => setForm({ ...form, armada: v })} fluid />
+          <UI.Dropdown value={form.armada} options={fleetOptsFor(form.armada)} placeholder={trD('dist.noArmada')} onChange={(v) => setForm({ ...form, armada: v })} fluid />
           {!form.id ? (<>
             <label className="fld-label">{trD('dist.cfPrice')} <span style={{ color: 'var(--neg)' }}>*</span></label>
             <div className="dist-priceinput"><IconLock s={15} /><input value={form.price} inputMode="numeric" placeholder="cth. 12000" onChange={(e) => setForm({ ...form, price: e.target.value.replace(/[^0-9]/g, '') })} /></div>
@@ -500,7 +510,7 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
               <div className="dist-cd-phone">{d.phone || '—'}</div>
               <div className="dist-cd-meta">
                 <span><IconCalendar s={13} />{trD('dist.kirimHari')}: <b>{days || '—'}</b></span>
-                <span><IconTruck s={13} />{trD('dist.armada')}: <b>{d.armada || '—'}</b></span>
+                <span className={d.armada && !isActiveArmada(d.armada) ? 'inactive' : ''}><IconTruck s={13} />{trD('dist.armada')}: <b>{d.armada ? armadaFull(d.armada) : '—'}</b></span>
               </div>
             </div>
             <div className="dist-cd-stats">
@@ -576,7 +586,7 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
                 {(days || c.armada) && (
                   <div className="dist-cust-meta">
                     {days && <span><IconCalendar s={11} />{days}</span>}
-                    {c.armada && <span><IconTruck s={11} />{c.armada}</span>}
+                    {c.armada && <span className={isActiveArmada(c.armada) ? '' : 'inactive'}><IconTruck s={11} />{armadaFull(c.armada)}</span>}
                   </div>
                 )}
               </div>

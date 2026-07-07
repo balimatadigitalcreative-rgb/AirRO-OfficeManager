@@ -106,8 +106,6 @@
         import: (customers) => req('POST', '/distribusi/customers/import', { customers }),
         setPrice: (id, newPrice) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice }),
       },
-      // Delivery fleet (reuses the Setoran fleet list) for the customer form.
-      fleet: () => req('GET', '/distribusi/fleet'),
       // Editable customer-type dictionary (id + label).
       types: {
         list: () => req('GET', '/distribusi/customer-types'),

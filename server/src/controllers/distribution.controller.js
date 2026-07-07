@@ -60,7 +60,6 @@ const createCustomer = asyncHandler(async (req, res) => { const c = await servic
 const updateCustomer = asyncHandler(async (req, res) => { const c = await service.updateCustomer(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user); bcast('import', 'customers'); res.status(201).json(r); });
 const updatePrice = asyncHandler(async (req, res) => { const c = await service.updatePrice(req.params.id, req.body.newPrice, req.user); bcast('price', c.id); res.json({ data: c }); });
-const listFleet = asyncHandler(async (req, res) => res.json(await service.fleetList()));
 
 // ── customer types (editable dictionary) ──
 const listTypes = asyncHandler(async (req, res) => res.json(await service.listTypes()));
@@ -85,7 +84,7 @@ const listAudit = asyncHandler(async (req, res) => res.json(await service.listAu
 const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.query.date) }));
 
 module.exports = {
-  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, listFleet,
+  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery },

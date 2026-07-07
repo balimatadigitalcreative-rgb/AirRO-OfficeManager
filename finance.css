@@ -1010,6 +1010,8 @@ select.fld::-ms-expand { display: none; }
 .dist-cust-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
 .dist-cust-meta span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--text-faint); }
 .dist-cust-meta svg { flex-shrink: 0; color: var(--text-faint); }
+.dist-cust-meta span.inactive, .dist-cd-meta span.inactive { color: var(--warn); }
+.dist-cd-meta span.inactive b { color: var(--warn); }
 /* detail */
 .dist-cd-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 22px 24px; }
 .dist-cd-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; }

@@ -190,12 +190,6 @@ async function importCustomers(list, actor) {
   await logAudit('impor', `Impor ${created} pelanggan`, `Dari ${rows.length} baris`, snap);
   return { data: out, imported: created, received: rows.length };
 }
-// Delivery fleet list for the customer form — reuses the shared Setoran fleet table
-// (kept read-only here; managing plates stays in the Setoran/Settings area).
-async function fleetList() {
-  const rows = await prisma.fleet.findMany({ orderBy: { plate: 'asc' } });
-  return { data: rows.map((f) => ({ id: f.id, plate: f.plate })) };
-}
 
 // Owner-only master price change. Appends price_history + audit; does NOT touch any
 // existing transaction (their unit_price_locked stays exactly as sold).
@@ -320,7 +314,7 @@ async function dashboardSummary(date) {
 
 module.exports = {
   METHODS, DAY_CODES,
-  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, fleetList,
+  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
 };
