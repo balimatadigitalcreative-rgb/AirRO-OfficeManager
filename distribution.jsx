@@ -544,4 +544,68 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers };
+// ════════════════ HARGA MASTER (owner only) ════════════════
+function DistLocked() {
+  return (
+    <div className="dist-dash screen-enter">
+      <div className="card dist-lockedpanel">
+        <span className="dist-lockedpanel-ic"><IconLock s={26} /></span>
+        <div className="dist-lockedpanel-t">{trD('dist.lockedStaff')}</div>
+        <div className="dist-lockedpanel-s">{trD('dist.lockedStaffSub')}</div>
+      </div>
+    </div>
+  );
+}
+
+function DistPrices({ canPrice, refreshKey, onChanged }) {
+  const [custs, setCusts] = uSx(null);
+  const [drafts, setDrafts] = uSx({});
+  const [saving, setSaving] = uSx('');
+  const [toast, setToast] = uSx('');
+  const reload = () => window.API.distribusi.customers.list().then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
+  uEx(() => { if (canPrice && window.API && window.API.distribusi) reload(); }, [refreshKey, canPrice]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+
+  if (!canPrice) return <DistLocked />;
+
+  const tag = (t) => <span className={`dist-ctag ${CUST_TAG[t] || 'reg'}`}>{typeLabel(t)}</span>;
+  const apply = (c) => {
+    const num = parseInt(String(drafts[c.id] || '').replace(/[^0-9]/g, ''), 10);
+    if (!num || num === c.masterPrice || saving) return;
+    setSaving(c.id);
+    window.API.distribusi.customers.setPrice(c.id, num)
+      .then(() => { setSaving(''); setDrafts((d) => ({ ...d, [c.id]: '' })); flash(trD('dist.hargaUpdated', { n: c.name })); reload(); if (onChanged) onChanged(); })
+      .catch(() => setSaving(''));
+  };
+
+  return (
+    <div className="dist-dash screen-enter">
+      <div className="dist-warnbanner">
+        <IconInvoice s={18} />
+        <div><b>{trD('dist.hargaBannerT')}</b> {trD('dist.hargaBannerS')}</div>
+      </div>
+      <div className="card dist-card" style={{ padding: '6px 18px' }}>
+        <div className="dist-harga-hrow"><span>{trD('dist.fCust')}</span><span>{trD('dist.hargaBerlaku')}</span><span>{trD('dist.hargaBaru')}</span><span /></div>
+        {custs === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
+        {custs !== null && custs.length === 0 && <div className="dist-empty">{trD('dist.noCust')}</div>}
+        {(custs || []).map((c) => {
+          const draft = drafts[c.id] || '';
+          const num = parseInt(String(draft).replace(/[^0-9]/g, ''), 10);
+          const ready = !!num && num !== c.masterPrice;
+          return (
+            <div key={c.id} className="dist-harga-row">
+              <div className="dist-harga-cust"><span className="dist-txn-av sm">{initialsOf(c.name)}</span><div style={{ minWidth: 0 }}><div className="dist-txn-name">{c.name}</div>{tag(c.type)}</div></div>
+              <div className="dist-harga-cur">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
+              <div className="dist-harga-new"><input className="fld" value={draft} inputMode="numeric" placeholder={rpFull(c.masterPrice)} onChange={(e) => setDrafts((d) => ({ ...d, [c.id]: e.target.value.replace(/[^0-9]/g, '') }))} onKeyDown={(e) => { if (e.key === 'Enter' && ready) apply(c); }} /></div>
+              <button type="button" className="btn btn-ghost dist-harga-apply" disabled={!ready || saving === c.id} onClick={() => apply(c)}>{saving === c.id ? '…' : trD('dist.terapkan')}</button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="dist-hint" style={{ marginTop: 8 }}><IconLock s={12} /> {trD('dist.hargaFootNote')}</div>
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Prices: DistPrices };

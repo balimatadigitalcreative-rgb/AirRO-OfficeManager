@@ -37,7 +37,10 @@ function navForRole(p, role) {
     { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', cap: 'distribusi' },
     { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', cap: 'distribusiHargaMaster' },
     { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', cap: 'distribusiAudit' },
-  ].forEach((it) => items.push({ ...it, grp: 'distribusi', locked: !p[it.cap] }));
+    // `locked` (padlock) = missing the item's own cap; `blocked` (no nav) = missing
+    // base distribusi entirely. A staff (has distribusi, not the owner caps) CAN open
+    // Harga/Audit — the screen itself shows a "Terkunci untuk Staff" panel.
+  ].forEach((it) => items.push({ ...it, grp: 'distribusi', locked: !p[it.cap], blocked: !p.distribusi }));
   return items;
 }
 const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'admin'];
@@ -888,7 +891,7 @@ function FApp() {
               <span>{tr('navgrp.' + g)}</span><IconCaret s={13} />
             </button>
             {!collapsed && items.map((n) => (
-              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''} ${n.locked ? 'locked' : ''}`} onClick={() => go(n.id, n.locked)} title={n.locked ? tr('dist.locked') : ''}>
+              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''} ${n.locked ? 'locked' : ''}`} onClick={() => go(n.id, n.blocked)} title={n.locked ? tr('dist.locked') : ''}>
                 {Ish(n.icon, { s: 20 })}<span>{n.label}</span>{n.locked && <IconLock s={13} className="nav-lock" />}
               </button>
             ))}
@@ -993,9 +996,12 @@ function FApp() {
           {screen === 'dist-customers' && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canPrice={!!p.distribusiHargaMaster}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
-              onGoHarga={() => go('dist-prices', !p.distribusiHargaMaster)} onChanged={() => setDistTick((t) => t + 1)} />
+              onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen === 'dist-prices' && (
+            <DIST.Prices refreshKey={distTick} canPrice={!!p.distribusiHargaMaster} onChanged={() => setDistTick((t) => t + 1)} />
+          )}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-prices'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />

@@ -1045,6 +1045,30 @@ select.fld::-ms-expand { display: none; }
 .dist-imp-status.dup { background: var(--warn-bg); color: var(--warn); }
 @media (max-width: 560px) { .dist-cust-pricecap { display: none; } .dist-cust-bon { width: auto; } }
 
+/* ---- Distribusi Harga Master + locked panel ---- */
+.dist-lockedpanel { padding: 44px; text-align: center; }
+.dist-lockedpanel-ic { display: inline-grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--card-soft); color: var(--text-faint); }
+.dist-lockedpanel-t { font-size: 17px; font-weight: 800; color: var(--text-mut); margin-top: 16px; }
+.dist-lockedpanel-s { font-size: 13px; color: var(--text-faint); margin-top: 8px; max-width: 420px; margin-left: auto; margin-right: auto; line-height: 1.5; }
+.dist-warnbanner { display: flex; align-items: flex-start; gap: 11px; background: var(--warn-bg); border: 1px solid var(--sand-soft); border-radius: 14px; padding: 15px 18px; margin-bottom: 16px; font-size: 13px; color: #8a5a12; line-height: 1.5; }
+.dist-warnbanner svg { flex-shrink: 0; margin-top: 1px; color: var(--warn); }
+.dist-harga-hrow, .dist-harga-row { display: grid; grid-template-columns: 2fr 1.2fr 1.4fr 120px; gap: 16px; align-items: center; }
+.dist-harga-hrow { padding: 12px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .3px; color: var(--text-faint); text-transform: uppercase; border-bottom: 1px solid var(--border-soft); }
+.dist-harga-row { padding: 12px 4px; border-bottom: 1px solid var(--border-soft); }
+.dist-harga-row:last-child { border-bottom: 0; }
+.dist-harga-cust { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.dist-txn-av.sm { width: 34px; height: 34px; border-radius: 10px; font-size: 12px; }
+.dist-harga-cur { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 700; color: var(--text-mut); white-space: nowrap; }
+.dist-harga-cur svg { color: var(--text-faint); }
+.dist-harga-new .fld { max-width: 160px; height: 40px; }
+.dist-harga-apply { justify-self: end; padding: 8px 16px; font-size: 12.5px; }
+@media (max-width: 640px) {
+  .dist-harga-hrow { display: none; }
+  .dist-harga-row { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+  .dist-harga-new .fld { max-width: none; width: 100%; }
+  .dist-harga-apply { width: 100%; }
+}
+
 /* ============ Profile menu (topbar avatar dropdown) ============ */
 .pm-wrap { position: relative; display: inline-flex; }
 .pm-av { position: relative; cursor: pointer; border: none; padding: 0; }
