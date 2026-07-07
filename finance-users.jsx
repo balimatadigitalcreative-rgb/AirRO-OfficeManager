@@ -67,7 +67,7 @@ function UserModal({ row, users, onSave, onClose, busy }) {
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{f._new ? trU('um.add') : trU('um.edit')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
-        <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+        <div className="modal-body">
           <label className="fld-label" style={{ marginTop: 0 }}>{trU('um.name')}</label>
           <input className="fld" value={f.name} placeholder="e.g. Budi Santoso" onChange={(e) => set({ name: e.target.value })} />
           <label className="fld-label">{trU('um.role')}</label>
@@ -258,7 +258,7 @@ function RoleModal({ row, onSave, onClose, busy, err }) {
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{f._new ? trU('rm.add') : trU('rm.edit')}{f.builtin && <span className="um-you">{trU('rm.builtin')}</span>}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
-        <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+        <div className="modal-body">
           <label className="fld-label" style={{ marginTop: 0 }}>{trU('rm.name')}</label>
           <input className="fld" value={f.name} placeholder={trU('rm.namePh')} onChange={(e) => set({ name: e.target.value })} />
           <label className="fld-label">{trU('rm.color')}</label>

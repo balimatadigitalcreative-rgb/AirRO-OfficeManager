@@ -437,6 +437,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
           <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
         </div>
 
+        <div className="staff-scroll">
         {ident ? (
           /* IDENTITY-first: profile fields prominent, salary optional/collapsed */
           <div className="staff-form-single">
@@ -472,6 +473,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
             {showIdent && identityBlock}
           </>
         )}
+        </div>
 
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose}>{trH('common.cancel')}</button>

@@ -786,12 +786,23 @@ select.fld::-ms-expand { display: none; }
 
 /* ============ Edit modal ============ */
 .modal-scrim { position: fixed; inset: 0; z-index: 90; background: rgba(6,51,79,.46); display: grid; place-items: center; padding: 20px; animation: airroFade .18s ease; }
-/* Height follows content. overflow: hidden auto → NEVER horizontal scroll; vertical
-   only as a safety when content is taller than max-height (short phones). When the
-   content fits, there is no scrollbar at all (the fixed calendar popup no longer
-   inflates it). box-sizing:border-box is global (styles.css). */
-.modal-card { width: 100%; max-width: 440px; height: auto; max-height: min(88vh, calc(100vh - 32px)); overflow: hidden auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; padding: 20px; box-shadow: var(--shadow-lg); }
-.modal-body { overflow-x: hidden; }   /* content never scrolls sideways */
+/* ONE scrollbar rule for every modal. The card is a flex column; the SINGLE inner region
+   scrolls when content is tall — never the card AND an inner element at once (no double bar).
+   Cards WITHOUT an inner scroll region (content sits straight in the card) fall back to
+   scrolling themselves via `overflow: hidden auto`; the `:has()` rule below re-clips the card
+   for cards that DO own a scroll region (.modal-body / .staff-scroll). Keeping the fallback as
+   the base means browsers without `:has()` degrade to the old single-card scroll rather than
+   clipping content. When content fits there is no scrollbar at all. box-sizing is global. */
+.modal-card { width: 100%; max-width: 440px; max-height: min(92vh, calc(100vh - 32px)); overflow: hidden auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; padding: 20px; box-shadow: var(--shadow-lg); box-sizing: border-box; }
+.modal-card * { box-sizing: border-box; }
+/* Cards that own an inner scroll region become a flex column that CLIPS: the inner region is
+   the only scrollbar, header & footer stay pinned outside it → no card+inner double bar.
+   Body-less cards keep the plain `overflow: hidden auto` block scroll above (safe when tall). */
+.modal-card:has(.modal-body), .modal-card:has(.staff-scroll) { display: flex; flex-direction: column; overflow: hidden; }
+/* The single vertical scroll region; the scrollbar shows only when content exceeds the space. */
+.modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+/* Header & footer sit outside the scroll area and stay visible. */
+.modal-head, .modal-foot { flex-shrink: 0; }
 .modal-card input, .modal-card select, .modal-card textarea, .modal-card .ui-dd, .modal-card .amt-input { max-width: 100%; }   /* no child wider than the modal */
 .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .modal-head > div:first-child { flex: 1; min-width: 0; }
@@ -1497,11 +1508,14 @@ select.fld::-ms-expand { display: none; }
 
 /* staff editor: two-column with live breakdown */
 .modal-card.wide { max-width: 760px; width: 100%; }
+/* The ONE scroll region for the staff editor (head + this + foot). Columns flow inside
+   it — they no longer scroll on their own, so there is never a card+column double bar. */
+.staff-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .staff-edit-grid { display: grid; grid-template-columns: 1fr 300px; gap: 0; overflow: hidden; }
-.staff-form { padding: 20px 22px; overflow-y: auto; max-height: 70vh; }
+.staff-form { padding: 20px 22px; }
 .fld-hint { font-size: 11.5px; color: var(--text-mut); margin-top: 8px; line-height: 1.5; }
 .fld-hint b { color: var(--ink); font-variant-numeric: tabular-nums; }
-.staff-breakdown { background: var(--card-soft); border-left: 1px solid var(--border); padding: 18px 18px 20px; overflow-y: auto; max-height: 70vh; }
+.staff-breakdown { background: var(--card-soft); border-left: 1px solid var(--border); padding: 18px 18px 20px; }
 .sb-head { display: flex; align-items: center; gap: 7px; font-family: 'Poppins'; font-size: 13.5px; font-weight: 700; color: var(--green-800); margin-bottom: 10px; }
 .sb-head svg { color: var(--green-700); }
 .sb-sec { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin: 14px 0 6px; }
@@ -1521,10 +1535,9 @@ select.fld::-ms-expand { display: none; }
 .sb-cost .tnum { font-weight: 800; font-size: 14px; }
 
 @media (max-width: 680px) {
+  /* Columns stack; .staff-scroll still owns the single scrollbar on mobile too. */
   .staff-edit-grid { grid-template-columns: 1fr; }
-  .staff-breakdown { border-left: none; border-top: 1px solid var(--border); max-height: none; }
-  .staff-form { max-height: none; }
-  .modal-card.wide { max-height: min(88vh, calc(100vh - 24px)); overflow: hidden auto; }
+  .staff-breakdown { border-left: none; border-top: 1px solid var(--border); }
 }
 
 /* payslip */
