@@ -90,7 +90,7 @@
       // Validate + PERSIST a kasbon as 'pending' (server enforces cycle/weekly rules).
       request: (data) => req('POST', '/cashbon/request', data),
       // Approve / reject a pending kasbon (requires kasbonApprove).
-      approve: (id) => req('POST', '/cashbon/' + id + '/approve'),
+      approve: (id, data) => req('POST', '/cashbon/' + id + '/approve', data || {}),
       reject: (id, data) => req('POST', '/cashbon/' + id + '/reject', data),
     }),
     users: collection('users'),

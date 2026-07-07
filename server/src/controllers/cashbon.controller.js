@@ -14,6 +14,7 @@ const createSchema = z.object({
   employeeId: z.string().min(1),
   amount: z.number().int().positive(),
   date: DATE,
+  disbursedDate: DATE.nullable().optional(),
   note: z.string().max(300).optional().default(''),
   installments: z.number().int().positive().max(60).optional().default(1),
   status: STATUS.optional().default('pending'),
@@ -23,7 +24,8 @@ const updateSchema = createSchema.partial();
 const listQuery = z.object({ employeeId: z.string().optional(), status: STATUS.optional() });
 const idParams = z.object({ id: z.string().min(1) });
 const previewSchema = z.object({ employeeId: z.string().min(1), date: DATE, amount: z.number().int().nonnegative().optional().default(0) });
-const requestSchema = z.object({ employeeId: z.string().min(1), amount: z.number().int().positive(), date: DATE, note: z.string().max(300).optional().default('') });
+const requestSchema = z.object({ employeeId: z.string().min(1), amount: z.number().int().positive(), date: DATE, disbursedDate: DATE.optional(), note: z.string().max(300).optional().default('') });
+const approveSchema = z.object({ disbursedDate: DATE.optional() });
 const rejectSchema = z.object({ reason: z.string().max(300).optional().default('') });
 
 const bcast = (action, id) => bus.broadcast({ entity: 'cashbon', action, id });
@@ -34,7 +36,7 @@ const getOne = asyncHandler(async (req, res) => res.json({ data: await service.g
 const create = asyncHandler(async (req, res) => { const c = await service.create(req.body, req.user?.id); bcast('create', c.id); res.status(201).json({ data: c }); });
 const update = asyncHandler(async (req, res) => { const c = await service.update(req.params.id, req.body); bcast('update', c.id); res.json({ data: c }); });
 const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bcast('delete', req.params.id); res.status(204).send(); });
-const approve = asyncHandler(async (req, res) => { const c = await service.decide(req.params.id, 'approved', req.user); bcast('update', c.id); res.json({ data: c }); });
+const approve = asyncHandler(async (req, res) => { const c = await service.decide(req.params.id, 'approved', req.user, null, req.body && req.body.disbursedDate); bcast('update', c.id); res.json({ data: c }); });
 const reject = asyncHandler(async (req, res) => { const c = await service.decide(req.params.id, 'rejected', req.user, req.body.reason); bcast('update', c.id); res.json({ data: c }); });
 
-module.exports = { list, getOne, create, update, remove, preview, request, approve, reject, schemas: { createSchema, updateSchema, listQuery, idParams, previewSchema, requestSchema, rejectSchema } };
+module.exports = { list, getOne, create, update, remove, preview, request, approve, reject, schemas: { createSchema, updateSchema, listQuery, idParams, previewSchema, requestSchema, approveSchema, rejectSchema } };

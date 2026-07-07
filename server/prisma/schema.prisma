@@ -324,10 +324,11 @@ model Cashbon {
   id           String   @id @default(cuid())
   employeeId   String
   amount       Int // nominal kasbon (IDR)
-  date         String // YYYY-MM-DD pengajuan
+  date         String // YYYY-MM-DD tanggal pengajuan (requestDate)
+  disbursedDate String? // YYYY-MM-DD tanggal DIBERIKAN/dicairkan — set on ACC; drives the deduction cycle
   note         String   @default("")
   installments Int      @default(1) // dicicil berapa bulan (legacy; per-cycle rule deducts in full)
-  status       String   @default("pending") // pending | approved | rejected (legacy: active | paid | cancelled)
+  status       String   @default("pending") // pending | approved | rejected | paid | cancelled (legacy: active)
   cycleAnchor  String? // payroll cycle this kasbon belongs to (cutoff date YYYY-MM-15)
   // Approval trail (requestedBy/requestedAt/approvedBy/decidedAt/rejectReason), JSON.
   data      String?

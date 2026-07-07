@@ -282,7 +282,10 @@
     let ey = sy, em = sm + 1; if (em > 12) { em = 1; ey = ey + 1; }
     return { start: `${sy}-${pad2(sm)}-16`, end: `${ey}-${pad2(em)}-15`, anchor: `${ey}-${pad2(em)}-15` };
   }
-  const cbAnchor = (c) => c.cycleAnchor || payCycle(c.date).anchor;
+  // Which payroll cutoff a kasbon is DEDUCTED at. The cycle follows the DISBURSED
+  // date (when the money was actually given) when present — set on approval; legacy /
+  // pre-disbursed rows fall back to cycleAnchor or the request date.
+  const cbAnchor = (c) => c.disbursedDate ? payCycle(c.disbursedDate).anchor : (c.cycleAnchor || payCycle(c.date).anchor);
   function cashbonCeiling(staff) { return Math.floor(0.5 * (+staff.base || 0)); }
   function cashbonWeeklyMax(staff) { return Math.floor(cashbonCeiling(staff) / 4); }
   // Only APPROVED kasbon is deducted (legacy 'active' rows count as approved).
@@ -299,14 +302,17 @@
   function cashbonOutstanding(staffId, cashbons) {
     return (cashbons || []).filter((c) => c.employeeId === staffId && cbApproved(c)).reduce((a, c) => a + (+c.amount || 0), 0);
   }
-  // Fold a cycle's kasbon total into the staff's deductions as one auto "Kasbon"
-  // row so compute()/payslip/breakdown pick it up. Default cycle = today's.
+  // Fold this cycle's APPROVED kasbon into the staff's deductions — ONE line per
+  // kasbon, labelled with its disbursed date, so compute()/payslip/breakdown pick them
+  // up ("Kasbon (diberikan 2026-07-16) −Rp X"). Default cycle = today's. Cancelling /
+  // rejecting a kasbon flips cbApproved → false, so its line simply disappears here
+  // (deductions are computed, never stored — no dangling deduction to clean up).
   function withCashbon(staff, cashbons, anchor) {
     anchor = anchor || payCycle().anchor;
-    const total = cashbonCycleTotal(staff.id, cashbons, anchor);
     const keep = Array.isArray(staff.deductions) ? staff.deductions.filter((d) => !d.kasbon) : (staff.deductions || []);
-    if (total <= 0) return { ...staff, deductions: keep };
-    return { ...staff, deductions: [...keep, { id: 'kasbon-cycle', label: 'Kasbon', amount: total, auto: true, kasbon: true }] };
+    const cyc = (cashbons || []).filter((c) => c.employeeId === staff.id && cbApproved(c) && cbAnchor(c) === anchor);
+    const lines = cyc.map((c) => ({ id: 'kasbon-' + c.id, label: c.disbursedDate ? `Kasbon (diberikan ${c.disbursedDate})` : 'Kasbon', amount: +c.amount || 0, auto: true, kasbon: true, cbId: c.id }));
+    return { ...staff, deductions: [...keep, ...lines] };
   }
 
   // ---- Offboarding / separation (Tahap 4) ----

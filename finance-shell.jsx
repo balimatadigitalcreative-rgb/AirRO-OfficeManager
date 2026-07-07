@@ -355,9 +355,14 @@ function FApp() {
   };
   // A kasbon returned by API.cashbon.request is ALREADY persisted → just merge + reload.
   const onAddCashbon = (cb) => { setCashbons((prev) => [cb, ...(prev || []).filter((x) => x.id !== cb.id)]); reloadCashbons(); };
-  const onDecideCashbon = (id, status, reason) => {
-    setCashbons((prev) => prev.map((c) => (c.id === id ? { ...c, status, ...(status === 'rejected' ? { rejectReason: reason || '' } : {}) } : c)));   // optimistic
-    const call = status === 'approved' ? window.API.cashbon.approve(id) : window.API.cashbon.reject(id, { reason: reason || '' });
+  // Approve → set status + disbursedDate (the ACC date; drives the deduction cycle).
+  // Reject → status only. Cancel (an already-approved kasbon) → status 'cancelled',
+  // which removes its computed payroll deduction automatically (withCashbon).
+  const onDecideCashbon = (id, status, reason, disbursedDate) => {
+    setCashbons((prev) => prev.map((c) => (c.id === id ? { ...c, status, ...(status === 'approved' ? { disbursedDate: disbursedDate || c.disbursedDate || FIN.TODAY } : {}), ...(status === 'rejected' ? { rejectReason: reason || '' } : {}) } : c)));   // optimistic
+    const call = status === 'approved' ? window.API.cashbon.approve(id, { disbursedDate: disbursedDate || FIN.TODAY })
+      : status === 'cancelled' ? window.API.cashbon.update(id, { status: 'cancelled' })
+        : window.API.cashbon.reject(id, { reason: reason || '' });
     call.then(reloadCashbons).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadCashbons(); });
   };
   const onUpdateCashbon = (id, patch) => {

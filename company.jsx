@@ -317,7 +317,8 @@ function CompanyDashboard({ fin, staff, rates, budget, approvals, setApprovals, 
 function CashbonModal({ staff, onSave, onClose }) {
   const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
   const [amount, setAmount] = uSc(0);
-  const [date, setDate] = uSc(today);
+  const [date, setDate] = uSc(today);      // tanggal pengajuan (requestDate)
+  const [disbursed, setDisbursed] = uSc(''); // tanggal diberikan (opsional saat ajukan)
   const [note, setNote] = uSc('');
   const [pv, setPv] = uSc(null);      // server preview: { base, summary, check }
   const [err, setErr] = uSc('');
@@ -339,7 +340,7 @@ function CashbonModal({ staff, onSave, onClose }) {
   const submit = async () => {
     if (busy) return; setBusy(true); setErr('');
     try {
-      const r = await window.API.cashbon.request({ employeeId: staff.id, amount: +amount, date, note: note.trim() });
+      const r = await window.API.cashbon.request({ employeeId: staff.id, amount: +amount, date, disbursedDate: disbursed || undefined, note: note.trim() });
       onSave(r.data.cashbon);
     } catch (e) { setErr(e && e.offline ? trC('co.kasbonOffline') : ((e.body && e.body.error && e.body.error.message) || e.message || trC('co.kasbonOffline'))); }
     finally { setBusy(false); }
@@ -369,7 +370,8 @@ function CashbonModal({ staff, onSave, onClose }) {
               <input inputMode="numeric" style={{ fontSize: 16 }} value={amount ? (+amount).toLocaleString('id-ID') : ''} onChange={(e) => setAmount(+e.target.value.replace(/\D/g, '') || 0)} /></div>
           </label>
           <label className="ed-af"><span>{trC('co.kasbonDate')}</span><DP.DateField value={date} max={today} onChange={setDate} /></label>
-          <label className="ed-af"><span>{trC('co.kasbonNote')}</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="—" /></label>
+          <label className="ed-af"><span>{trC('kb.disbursedOpt')}</span><DP.DateField value={disbursed} onChange={setDisbursed} placeholder={trC('kb.disbursedPh')} /></label>
+          <label className="ed-af ed-af-wide"><span>{trC('co.kasbonNote')}</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="—" /></label>
         </div>
         <div className={`kb-hint ${(err || (check && !check.ok && amount > 0)) ? 'over' : ''}`}>
           {err ? `⚠ ${err}`
@@ -387,8 +389,31 @@ function CashbonModal({ staff, onSave, onClose }) {
 }
 
 /* ---------- Kasbon screen (request + approval workflow) ---------- */
-const KB_STATUS = { pending: { l: 'kb.stPending', c: 'var(--warn)', bg: 'var(--sand-soft)' }, approved: { l: 'kb.stApproved', c: 'var(--green-700)', bg: 'var(--mint-100)' }, rejected: { l: 'kb.stRejected', c: 'var(--neg)', bg: '#FDEBEC' }, active: { l: 'kb.stApproved', c: 'var(--green-700)', bg: 'var(--mint-100)' }, cancelled: { l: 'kb.stRejected', c: 'var(--text-mut)', bg: 'var(--card-soft)' } };
+const KB_STATUS = { pending: { l: 'kb.stPending', c: 'var(--warn)', bg: 'var(--sand-soft)' }, approved: { l: 'kb.stApproved', c: 'var(--green-700)', bg: 'var(--mint-100)' }, rejected: { l: 'kb.stRejected', c: 'var(--neg)', bg: '#FDEBEC' }, active: { l: 'kb.stApproved', c: 'var(--green-700)', bg: 'var(--mint-100)' }, paid: { l: 'kb.stPaid', c: 'var(--blue-700)', bg: '#E7F1F5' }, cancelled: { l: 'kb.stCancelled', c: 'var(--text-mut)', bg: 'var(--card-soft)' } };
 const kbStat = (s) => KB_STATUS[s || 'pending'] || KB_STATUS.pending;
+
+// ACC modal — the approver sets the DISBURSED date (default today / the requested one).
+// That date decides the payroll cutoff the kasbon is deducted at.
+function ApproveKasbonModal({ cb, name, onConfirm, onClose }) {
+  const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
+  const [disbursed, setDisbursed] = uSc(cb.disbursedDate || today);
+  uEc(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const cyc = (window.HRD && HRD.payCycle && disbursed) ? HRD.payCycle(disbursed) : null;
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" style={{ maxWidth: 430 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 700 }}>{trC('kb.approveT')} · {name}</div><button className="icon-btn" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="kb-approve-amt"><span>{trC('co.kasbonAmount')}</span><b className="tnum">{rpC(cb.amount)}</b></div>
+          <label className="fld-label">{trC('kb.disbursedReq')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <DP.DateField value={disbursed} onChange={setDisbursed} />
+          <div className="kb-approve-note"><IconCheck s={13} />{trC('kb.approveCycleNote', { a: cyc ? cyc.anchor : '—' })}</div>
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trC('common.cancel')}</button><button className="btn btn-primary" disabled={!disbursed} onClick={() => onConfirm(disbursed)}>{trC('kb.approveConfirm')}</button></div>
+      </div>
+    </div>
+  );
+}
 
 function KasbonPicker({ staff, onPick, onClose }) {
   const [id, setId] = uSc('');
@@ -414,6 +439,7 @@ function KasbonPicker({ staff, onPick, onClose }) {
 function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, canApprove, today, userName }) {
   const [pick, setPick] = uSc(false);        // employee-picker open
   const [reqStaff, setReqStaff] = uSc(null); // staff chosen → CashbonModal
+  const [appr, setAppr] = uSc(null);         // kasbon chosen → ApproveKasbonModal
   const [fEmp, setFEmp] = uSc('all');
   const [fStatus, setFStatus] = uSc('all');
   const active = HRD.activeStaff(staff || []);
@@ -427,6 +453,7 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, canAppro
     if (!canApprove) return;
     let reason = '';
     if (status === 'rejected') { const r = prompt(trC('kb.rejectReason')); if (r == null) return; reason = r; }
+    if (status === 'cancelled' && !confirm(trC('kb.cancelConfirm'))) return;
     if (onDecideCashbon) onDecideCashbon(id, status, reason);
   };
   const pending = rows.filter((c) => (c.status || 'pending') === 'pending').length;
@@ -450,7 +477,11 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, canAppro
               <div className="kb-card-top">
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="kb-card-name">{nameOf(c.employeeId)}</div>
-                  <div className="kb-card-sub">{c.date} · {trC('co.kasbonCycle', { a: c.cycleAnchor || '—' })}</div>
+                  <div className="kb-card-sub">
+                    <span>{trC('kb.dtRequested')}: {c.date}</span>
+                    {c.disbursedDate ? <span> · {trC('kb.dtDisbursed')}: {c.disbursedDate}</span> : null}
+                    {(c.disbursedDate || c.cycleAnchor) ? <span> · {trC('co.kasbonCycle', { a: c.disbursedDate ? HRD.payCycle(c.disbursedDate).anchor : c.cycleAnchor })}</span> : null}
+                  </div>
                 </div>
                 <div className="kb-card-amt tnum">{rpC(c.amount)}</div>
                 <span className="kb-badge" style={{ background: st.bg, color: st.c }}>{trC(st.l)}</span>
@@ -464,8 +495,13 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, canAppro
               </div>
               {canApprove && (c.status || 'pending') === 'pending' && (
                 <div className="kb-card-actions">
-                  <button className="btn btn-lime btn-sm" onClick={() => decide(c.id, 'approved')}><IconCheck s={15} />{trC('kb.approve')}</button>
+                  <button className="btn btn-lime btn-sm" onClick={() => setAppr(c)}><IconCheck s={15} />{trC('kb.approve')}</button>
                   <button className="btn btn-ghost btn-sm" style={{ color: 'var(--neg)' }} onClick={() => decide(c.id, 'rejected')}><IconClose s={15} />{trC('kb.reject')}</button>
+                </div>
+              )}
+              {canApprove && (c.status === 'approved' || c.status === 'active') && (
+                <div className="kb-card-actions">
+                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--neg)' }} onClick={() => decide(c.id, 'cancelled')}><IconClose s={15} />{trC('kb.cancel')}</button>
                 </div>
               )}
             </div>
@@ -474,6 +510,7 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, canAppro
       )}
       {pick && <KasbonPicker staff={active} onPick={(s) => { setReqStaff(s); setPick(false); }} onClose={() => setPick(false)} />}
       {reqStaff && <CashbonModal staff={reqStaff} onSave={save} onClose={() => setReqStaff(null)} />}
+      {appr && <ApproveKasbonModal cb={appr} name={nameOf(appr.employeeId)} onConfirm={(d) => { if (onDecideCashbon) onDecideCashbon(appr.id, 'approved', '', d); setAppr(null); }} onClose={() => setAppr(null)} />}
     </div>
   );
 }

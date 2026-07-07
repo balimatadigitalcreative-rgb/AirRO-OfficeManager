@@ -17,7 +17,7 @@ router.get('/:id', requireCap('kasbon'), validate({ params: ctrl.schemas.idParam
 router.post('/', requireCap('kasbon'), validate({ body: ctrl.schemas.createSchema }), ctrl.create);
 
 // ── Approving / rejecting / editing → 'kasbonApprove' capability ──
-router.post('/:id/approve', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams }), ctrl.approve);
+router.post('/:id/approve', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.approveSchema }), ctrl.approve);
 router.post('/:id/reject', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.rejectSchema }), ctrl.reject);
 router.patch('/:id', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.updateSchema }), ctrl.update);
 router.delete('/:id', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams }), ctrl.remove);

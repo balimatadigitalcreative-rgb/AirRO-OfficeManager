@@ -26,6 +26,7 @@ function toClient(r) {
   let trail = {}; try { trail = r.data ? JSON.parse(r.data) : {}; } catch (e) {}
   const { data, createdAt, updatedAt, createdByName, createdByRole, createdById, ...rest } = r;
   return { ...rest, ...trail, createdById: createdById || null,
+    requestDate: r.date,   // `date` IS the request date — expose it under the spec name too
     createdBy: createdByName ? { name: createdByName, role: createdByRole || null } : null,
     createdAt: createdAt ? new Date(createdAt).getTime() : Date.now(), perInstallment: perInstallment(r) };
 }
@@ -58,16 +59,18 @@ async function preview({ employeeId, date, amount }) {
 
 // Authoritative validation + PERSIST. On success the kasbon is created in the table
 // as 'pending' (per-record — no more shared-blob append) and returned to the client.
-async function request({ employeeId, amount, date, note }, user) {
+async function request({ employeeId, amount, date, note, disbursedDate }, user) {
   const { base, existing, mode } = await cycleContext(employeeId);
   const v = rules.validate({ base, date, amount, existing, mode });
   if (!v.ok) throw ApiError.badRequest(v.message, v);
   const exists = await prisma.employee.count({ where: { id: employeeId } });
   if (!exists) throw ApiError.badRequest('employeeId does not reference an existing employee');
+  // A new kasbon is ALWAYS 'pending' → it does NOT deduct salary until an approver
+  // ACCs it. disbursedDate is optional at request time (filled/confirmed on approval).
   const trail = { requestedBy: (user && (user.username || user.id)) || '', requestedAt: Date.now(), approvedBy: '', decidedAt: null, rejectReason: '' };
   const row = await prisma.cashbon.create({ data: {
     id: 'kb' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
-    employeeId, amount: +amount, date, note: (note || '').trim(),
+    employeeId, amount: +amount, date, disbursedDate: disbursedDate || null, note: (note || '').trim(),
     installments: 1, status: 'pending', cycleAnchor: v.cycleAnchor, data: JSON.stringify(trail),
     ...(await creatorSnap(user && user.id)),
   } });
@@ -77,14 +80,19 @@ async function request({ employeeId, amount, date, note }, user) {
 }
 
 // Approve/reject a kasbon in the table; the approval trail is merged into `data`.
-async function decide(id, status, user, reason) {
+// On APPROVE we also stamp disbursedDate (the ACC date; the deduction cycle is derived
+// from it) — the caller passes it (defaulting to "today"); fall back to the request
+// date or the server date so an approved kasbon always has a disbursed date.
+async function decide(id, status, user, reason, disbursedDate) {
   const existing = await prisma.cashbon.findUnique({ where: { id } });
   if (!existing) throw ApiError.notFound('Cashbon not found');
   let trail = {}; try { trail = existing.data ? JSON.parse(existing.data) : {}; } catch (e) {}
   trail.approvedBy = (user && (user.username || user.id)) || '';
   trail.decidedAt = Date.now();
   if (status === 'rejected') trail.rejectReason = reason || '';
-  const r = await prisma.cashbon.update({ where: { id }, data: { status, data: JSON.stringify(trail) } });
+  const data = { status, data: JSON.stringify(trail) };
+  if (status === 'approved') data.disbursedDate = disbursedDate || existing.disbursedDate || new Date().toISOString().slice(0, 10);
+  const r = await prisma.cashbon.update({ where: { id }, data });
   return toClient(r);
 }
 
