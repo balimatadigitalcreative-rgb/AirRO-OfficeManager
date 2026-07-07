@@ -416,8 +416,10 @@ model Customer {
   id            String   @id @default(cuid())
   name          String
   phone         String   @default("")
-  type          String   @default("reguler") // reguler | kos | cafe | bulk
+  type          String   @default("reguler") // CustomerType id (seed ids: reguler|kos|cafe|bulk)
   masterPrice   Int      @default(0)          // master_price (IDR per unit)
+  deliveryDays  String   @default("[]")       // JSON array of day codes, e.g. ["Sen","Rab","Jum"]
+  armada        String   @default("")         // delivery fleet plate (reuses the Setoran fleet list)
   createdById   String?                        // created_by (identity)
   createdByName String?
   createdByRole String?
@@ -427,6 +429,15 @@ model Customer {
   priceHistory PriceHistory[]
 
   @@index([type])
+}
+
+// Editable customer-type dictionary (id + label so a rename never orphans customers).
+// Seeded with reguler/kos/cafe/bulk (ids match the legacy string values → back-compat).
+model CustomerType {
+  id        String   @id @default(cuid())
+  label     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
 }
 
 // Append-only ledger of master-price changes (never updated/deleted).

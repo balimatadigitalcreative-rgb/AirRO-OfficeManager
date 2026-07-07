@@ -102,8 +102,18 @@
         list: () => req('GET', '/distribusi/customers'),
         get: (id) => req('GET', '/distribusi/customers/' + id),
         create: (data) => req('POST', '/distribusi/customers', data),
+        update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),
         import: (customers) => req('POST', '/distribusi/customers/import', { customers }),
         setPrice: (id, newPrice) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice }),
+      },
+      // Delivery fleet (reuses the Setoran fleet list) for the customer form.
+      fleet: () => req('GET', '/distribusi/fleet'),
+      // Editable customer-type dictionary (id + label).
+      types: {
+        list: () => req('GET', '/distribusi/customer-types'),
+        create: (label) => req('POST', '/distribusi/customer-types', { label }),
+        rename: (id, label) => req('PATCH', '/distribusi/customer-types/' + id, { label }),
+        remove: (id, reassignTo) => req('DELETE', '/distribusi/customer-types/' + id + (reassignTo ? '?reassignTo=' + encodeURIComponent(reassignTo) : '')),
       },
       transactions: {
         list: (qs) => req('GET', '/distribusi/transactions' + (qs ? '?' + qs : '')),

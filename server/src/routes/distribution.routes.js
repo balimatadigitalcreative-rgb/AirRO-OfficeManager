@@ -11,11 +11,20 @@ router.use(requireAuth);
 // Viewing the customer list/detail is part of base module access ('distribusi').
 router.get('/customers', requireCap('distribusi'), ctrl.listCustomers);
 router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getCustomer);
-// Adding / importing customers needs the dedicated capability.
+// Delivery-fleet list for the customer form (reuses the Setoran fleet table).
+router.get('/fleet', requireCap('distribusi'), ctrl.listFleet);
+// Adding / editing / importing customers needs the dedicated capability.
 router.post('/customers', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.customerSchema }), ctrl.createCustomer);
+router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.customerUpdateSchema }), ctrl.updateCustomer);
 router.post('/customers/import', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
 // Master-price change is owner-level; writes price_history + audit, leaves old txns.
 router.patch('/customers/:id/price', requireCap('distribusiHargaMaster'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.priceSchema }), ctrl.updatePrice);
+
+// ── Customer types (editable dictionary) ── read = base module; write = distribusiCustomers.
+router.get('/customer-types', requireCap('distribusi'), ctrl.listTypes);
+router.post('/customer-types', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.typeCreateSchema }), ctrl.createType);
+router.patch('/customer-types/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.typeRenameSchema }), ctrl.updateType);
+router.delete('/customer-types/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, query: ctrl.schemas.typeDeleteQuery }), ctrl.deleteType);
 
 // ── Transactions ── (price locked server-side; append-only)
 router.get('/transactions', requireCap('distribusi'), validate({ query: ctrl.schemas.listTxnQuery }), ctrl.listTransactions);

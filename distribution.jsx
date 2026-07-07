@@ -15,9 +15,12 @@ const METHOD_META = {
   pelunasan: { cls: 'pelunasan', label: 'dist.pelunasan' },
 };
 const methodLabel = (m) => trD(METHOD_META[m] ? METHOD_META[m].label : 'dist.lunas') || m;
-const CUST_TYPES = ['reguler', 'kos', 'cafe', 'bulk'];
+// Colour class per seed type id; anything else (custom types) uses the neutral 'other'.
 const CUST_TAG = { reguler: 'reg', kos: 'kos', cafe: 'cafe', bulk: 'bulk' };
 const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Reguler');
+// Delivery-day codes (Mon…Sun). Server stores the customer's days as a subset of these.
+const DAY_CODES = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+const fmtDays = (arr) => (Array.isArray(arr) && arr.length ? DAY_CODES.filter((d) => arr.includes(d)).join(', ') : '');
 const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' } };
 const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
@@ -371,33 +374,60 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
 function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarga, onChanged }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
+  const [types, setTypes] = uSx([]);
+  const [fleet, setFleet] = uSx([]);
   const [detail, setDetail] = uSx(null);
   const [q, setQ] = uSx('');
   const [filter, setFilter] = uSx('all');
   const [toast, setToast] = uSx('');
-  const [addOpen, setAddOpen] = uSx(false);
-  const [af, setAf] = uSx({ name: '', phone: '', type: 'reguler', price: '' });
-  const [addSaving, setAddSaving] = uSx(false);
+  const [form, setForm] = uSx(null);        // {id?, name, phone, type, price, deliveryDays[], armada} — Add/Edit modal
+  const [saving, setSaving] = uSx(false);
+  const [formErr, setFormErr] = uSx('');
   const [impOpen, setImpOpen] = uSx(false);
   const [impText, setImpText] = uSx('');
   const [impSaving, setImpSaving] = uSx(false);
+  const [typesOpen, setTypesOpen] = uSx(false);
 
   const reload = () => window.API.distribusi.customers.list().then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
-  uEx(() => { if (window.API && window.API.distribusi) reload(); }, [refreshKey]);
+  const reloadTypes = () => window.API.distribusi.types.list().then((r) => setTypes(r.data || [])).catch(() => {});
+  uEx(() => {
+    if (!(window.API && window.API.distribusi)) return;
+    reload(); reloadTypes();
+    window.API.distribusi.fleet().then((r) => setFleet(r.data || [])).catch(() => {});
+  }, [refreshKey]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
-  const openDetail = (id) => { setView('detail'); setDetail(null); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); };
+  const typeMap = {}; types.forEach((t) => { typeMap[t.id] = t; });
+  const typeLabelOf = (id) => (typeMap[id] && typeMap[id].label) || typeLabel(id);
+  const tag = (id) => <span className={`dist-ctag ${CUST_TAG[id] || 'other'}`}>{typeLabelOf(id)}</span>;
+  const defaultType = () => (types[0] && types[0].id) || 'reguler';
+  const fleetOpts = [{ value: '', label: trD('dist.noArmada') }, ...fleet.map((f) => ({ value: f.plate, label: f.plate }))];
 
-  const commitAdd = () => {
-    const name = af.name.trim(); const price = parseInt(String(af.price).replace(/[^0-9]/g, ''), 10);
-    if (!name || !price || addSaving) return;
-    setAddSaving(true);
-    window.API.distribusi.customers.create({ name, phone: af.phone.trim(), type: af.type, masterPrice: price })
-      .then(() => { setAddSaving(false); setAddOpen(false); setAf({ name: '', phone: '', type: 'reguler', price: '' }); flash(trD('dist.custAdded')); reload(); if (onChanged) onChanged(); })
-      .catch(() => setAddSaving(false));
+  const openDetail = (id) => { setView('detail'); setDetail(null); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); };
+  const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '' }); };
+  const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '' }); };
+  const toggleDay = (d) => setForm((f) => ({ ...f, deliveryDays: f.deliveryDays.includes(d) ? f.deliveryDays.filter((x) => x !== d) : [...f.deliveryDays, d] }));
+
+  const commitForm = () => {
+    if (!form || saving) return;
+    const name = form.name.trim();
+    if (!name) { setFormErr(trD('dist.cfNameReq')); return; }
+    const onErr = (e) => { setSaving(false); setFormErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); };
+    const finish = (msg, data) => { setSaving(false); setForm(null); flash(msg); reload(); if (data) setDetail((d) => (d && d.id === data.id ? { ...d, ...data } : d)); if (onChanged) onChanged(); };
+    setSaving(true); setFormErr('');
+    if (!form.id) {
+      const price = parseInt(String(form.price).replace(/[^0-9]/g, ''), 10);
+      if (!price) { setSaving(false); setFormErr(trD('dist.cfPriceReq')); return; }
+      window.API.distribusi.customers.create({ name, phone: form.phone.trim(), type: form.type, masterPrice: price, deliveryDays: form.deliveryDays, armada: form.armada })
+        .then(() => finish(trD('dist.custAdded'))).catch(onErr);
+    } else {
+      window.API.distribusi.customers.update(form.id, { name, phone: form.phone.trim(), type: form.type, deliveryDays: form.deliveryDays, armada: form.armada })
+        .then((r) => finish(trD('dist.custSaved'), r.data)).catch(onErr);
+    }
   };
 
-  // ── spreadsheet import parsing (live preview) ──
+  // ── spreadsheet import parsing (type matched by LABEL against the dynamic dictionary) ──
+  const typeByLabel = {}; types.forEach((t) => { typeByLabel[(t.label || '').toLowerCase()] = t.id; });
   const existing = new Set((custs || []).map((c) => (c.name || '').toLowerCase()));
   const seen = new Set();
   let impLines = impText.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -405,8 +435,7 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
   const impRows = impLines.map((line) => {
     const cols = line.split(/\t|,|;/).map((s) => s.trim());
     const name = cols[0] || ''; const phone = cols[1] || '';
-    const rawType = (cols[2] || '').toLowerCase();
-    const type = CUST_TYPES.includes(rawType) ? rawType : 'reguler';
+    const type = typeByLabel[(cols[2] || '').toLowerCase()] || 'reguler';
     const num = parseInt((cols[3] || '').replace(/[^0-9]/g, ''), 10);
     const key = name.toLowerCase(); const dup = existing.has(key) || seen.has(key);
     if (name) seen.add(key);
@@ -423,12 +452,43 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
   };
   const impSample = 'Warung Sejahtera\t0821-1122-3344\tReguler\t12500\nKos Anggrek\t0813-7788-9900\tKos\t13000\nCafe Ombak\t0817-2211-3344\tCafe\t14000';
 
-  const typeChip = (t, on, onClick) => <button type="button" key={t} className={`dist-typechip ${on ? 'on' : ''}`} onClick={onClick}>{typeLabel(t)}</button>;
-  const tag = (t) => <span className={`dist-ctag ${CUST_TAG[t] || 'reg'}`}>{typeLabel(t)}</span>;
+  // Add/Edit modal — shared by the list and detail views. Price is add-only (edits
+  // go through Harga Master, which keeps the price history).
+  const renderForm = () => form && (
+    <div className="modal-scrim" onClick={() => setForm(null)} style={{ zIndex: 200 }}>
+      <div className="modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{form.id ? trD('dist.editCust') : trD('dist.addCust')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.addCustSub')}</div></div><button className="jp-icon" onClick={() => setForm(null)}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.cfName')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <input className="fld" value={form.name} placeholder={trD('dist.cfNamePh')} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <label className="fld-label">{trD('dist.cfPhone')}</label>
+          <input className="fld" value={form.phone} placeholder="cth. 0812-3456-7890" onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <label className="fld-label">{trD('dist.cfType')}</label>
+          <div className="dist-typechips">
+            {types.map((t) => <button type="button" key={t.id} className={`dist-typechip ${form.type === t.id ? 'on' : ''}`} onClick={() => setForm({ ...form, type: t.id })}>{t.label}</button>)}
+            {canCustomers && <button type="button" className="dist-typechip add" onClick={() => setTypesOpen(true)}><IconPlus s={13} />{trD('dist.kelolaTipe')}</button>}
+          </div>
+          <label className="fld-label">{trD('dist.cfDays')}</label>
+          <div className="dist-typechips">{DAY_CODES.map((dd) => <button type="button" key={dd} className={`dist-typechip ${form.deliveryDays.includes(dd) ? 'on' : ''}`} onClick={() => toggleDay(dd)}>{dd}</button>)}</div>
+          <label className="fld-label">{trD('dist.cfArmada')}</label>
+          <UI.Dropdown value={form.armada} options={fleetOpts} placeholder={trD('dist.noArmada')} onChange={(v) => setForm({ ...form, armada: v })} fluid />
+          {!form.id ? (<>
+            <label className="fld-label">{trD('dist.cfPrice')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <div className="dist-priceinput"><IconLock s={15} /><input value={form.price} inputMode="numeric" placeholder="cth. 12000" onChange={(e) => setForm({ ...form, price: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+            <div className="dist-hint" style={{ marginTop: 8 }}>{trD('dist.cfPriceNote')}</div>
+          </>) : <div className="dist-hint" style={{ marginTop: 10 }}><IconLock s={12} /> {trD('dist.cfPriceEditNote')}</div>}
+          {formErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{formErr}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setForm(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!form.name.trim() || saving} onClick={commitForm}>{saving ? '…' : trD('dist.cfSave')}</button></div>
+      </div>
+    </div>
+  );
+  const typesModal = () => typesOpen && <CustomerTypesModal types={types} custs={custs} onReload={() => { reloadTypes(); reload(); }} onClose={() => setTypesOpen(false)} />;
 
   // ── DETAIL ──
   if (view === 'detail') {
     const d = detail;
+    const days = d ? fmtDays(d.deliveryDays) : '';
     return (
       <div className="dist-dash screen-enter">
         <button type="button" className="dist-back" onClick={() => { setView('list'); setDetail(null); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backCust')}</button>
@@ -438,11 +498,16 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
             <div style={{ flex: 1, minWidth: 180 }}>
               <div className="dist-cd-namerow"><h2 className="dist-cd-name">{d.name}</h2>{tag(d.type)}</div>
               <div className="dist-cd-phone">{d.phone || '—'}</div>
+              <div className="dist-cd-meta">
+                <span><IconCalendar s={13} />{trD('dist.kirimHari')}: <b>{days || '—'}</b></span>
+                <span><IconTruck s={13} />{trD('dist.armada')}: <b>{d.armada || '—'}</b></span>
+              </div>
             </div>
             <div className="dist-cd-stats">
               <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
               <div><div className="dist-cd-slbl">{trD('dist.totalGalon')}</div><div className="dist-cd-sval">{numX(d.totalGalon)}</div></div>
             </div>
+            {canCustomers && <button type="button" className="btn btn-ghost dist-cd-edit" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
           </div>
           <div className="dist-cd-cols">
             <div className="card dist-cd-price">
@@ -469,6 +534,8 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
             </div>
           </div>
         </>)}
+        {renderForm()}
+        {typesModal()}
         {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
       </div>
     );
@@ -488,8 +555,9 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
         <div style={{ flex: 1 }} />
         {canCustomers ? (
           <div className="dist-cust-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => setTypesOpen(true)}><IconSettings s={15} />{trD('dist.kelolaTipe')}</button>
             <button type="button" className="btn btn-ghost" onClick={() => setImpOpen(true)}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.import')}</button>
-            <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}><IconPlus s={16} />{trD('dist.addCust')}</button>
+            <button type="button" className="btn btn-primary" onClick={openAdd}><IconPlus s={16} />{trD('dist.addCust')}</button>
           </div>
         ) : <div className="dist-lockbtn"><IconLock s={14} />{trD('dist.addOwner')}</div>}
       </div>
@@ -497,42 +565,34 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
       <div className="card dist-card" style={{ padding: '6px 18px' }}>
         {custs === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
         {custs !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.noCust')}</div>}
-        {rows.map((c) => (
-          <div key={c.id} className="dist-cust-row" onClick={() => openDetail(c.id)}>
-            <span className="dist-txn-av">{initialsOf(c.name)}</span>
-            <div className="dist-cust-main">
-              <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}</div>
-              <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
+        {rows.map((c) => {
+          const days = fmtDays(c.deliveryDays);
+          return (
+            <div key={c.id} className="dist-cust-row" onClick={() => openDetail(c.id)}>
+              <span className="dist-txn-av">{initialsOf(c.name)}</span>
+              <div className="dist-cust-main">
+                <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}</div>
+                <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
+                {(days || c.armada) && (
+                  <div className="dist-cust-meta">
+                    {days && <span><IconCalendar s={11} />{days}</span>}
+                    {c.armada && <span><IconTruck s={11} />{c.armada}</span>}
+                  </div>
+                )}
+              </div>
+              <div className="dist-cust-price">
+                <div className="dist-cust-priceval">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
+                <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
+              </div>
+              <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpX(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
+              <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
             </div>
-            <div className="dist-cust-price">
-              <div className="dist-cust-priceval">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
-              <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
-            </div>
-            <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpX(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
-            <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {addOpen && (
-        <div className="modal-scrim" onClick={() => setAddOpen(false)} style={{ zIndex: 200 }}>
-          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.addCust')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.addCustSub')}</div></div><button className="jp-icon" onClick={() => setAddOpen(false)}><IconClose s={18} /></button></div>
-            <div className="modal-body">
-              <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.cfName')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <input className="fld" value={af.name} placeholder={trD('dist.cfNamePh')} onChange={(e) => setAf({ ...af, name: e.target.value })} />
-              <label className="fld-label">{trD('dist.cfPhone')}</label>
-              <input className="fld" value={af.phone} placeholder="cth. 0812-3456-7890" onChange={(e) => setAf({ ...af, phone: e.target.value })} />
-              <label className="fld-label">{trD('dist.cfType')}</label>
-              <div className="dist-typechips">{CUST_TYPES.map((t) => typeChip(t, af.type === t, () => setAf({ ...af, type: t })))}</div>
-              <label className="fld-label">{trD('dist.cfPrice')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <div className="dist-priceinput"><IconLock s={15} /><input value={af.price} inputMode="numeric" placeholder="cth. 12000" onChange={(e) => setAf({ ...af, price: e.target.value.replace(/[^0-9]/g, '') })} /></div>
-              <div className="dist-hint" style={{ marginTop: 8 }}>{trD('dist.cfPriceNote')}</div>
-            </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAddOpen(false)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!af.name.trim() || !af.price || addSaving} onClick={commitAdd}>{addSaving ? '…' : trD('dist.cfSave')}</button></div>
-          </div>
-        </div>
-      )}
+      {renderForm()}
+      {typesModal()}
 
       {impOpen && (
         <div className="modal-scrim" onClick={() => setImpOpen(false)} style={{ zIndex: 200 }}>
@@ -560,6 +620,82 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, onGoHarg
         </div>
       )}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+// ════════════════ KELOLA TIPE PELANGGAN (editable dictionary) ════════════════
+// Add / rename / delete customer types. Deleting a type still used by customers is
+// blocked until they are reassigned — the modal shows the count and a "move to" picker.
+function CustomerTypesModal({ types, custs, onReload, onClose }) {
+  const [newLabel, setNewLabel] = uSx('');
+  const [busy, setBusy] = uSx('');
+  const [editId, setEditId] = uSx(null);
+  const [editLabel, setEditLabel] = uSx('');
+  const [delType, setDelType] = uSx(null);   // type pending delete (in use)
+  const [reassign, setReassign] = uSx('');
+  const [err, setErr] = uSx('');
+  const usage = {}; (custs || []).forEach((c) => { usage[c.type] = (usage[c.type] || 0) + 1; });
+  const onErr = (e) => { setBusy(''); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); };
+
+  const add = () => { const l = newLabel.trim(); if (!l || busy) return; setBusy('add'); setErr('');
+    window.API.distribusi.types.create(l).then(() => { setBusy(''); setNewLabel(''); onReload(); }).catch(onErr); };
+  const saveRename = (id) => { const l = editLabel.trim(); if (!l || busy) return; setBusy(id); setErr('');
+    window.API.distribusi.types.rename(id, l).then(() => { setBusy(''); setEditId(null); onReload(); }).catch(onErr); };
+  const askDelete = (t) => { setErr(''); if ((usage[t.id] || 0) > 0) { setDelType(t); setReassign(''); } else { doDelete(t.id, null); } };
+  const doDelete = (id, to) => { if (busy) return; setBusy('del'); setErr('');
+    window.API.distribusi.types.remove(id, to).then(() => { setBusy(''); setDelType(null); onReload(); }).catch(onErr); };
+
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 210 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.kelolaTipeT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.kelolaTipeSub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-type-add">
+            <input className="fld" value={newLabel} placeholder={trD('dist.tipeNamePh')} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+            <button type="button" className="btn btn-primary" disabled={!newLabel.trim() || busy === 'add'} onClick={add}><IconPlus s={15} />{trD('dist.tambah')}</button>
+          </div>
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+          <div className="dist-type-list">
+            {types.map((t) => {
+              const inUse = usage[t.id] || 0;
+              if (delType && delType.id === t.id) {
+                const opts = types.filter((x) => x.id !== t.id).map((x) => ({ value: x.id, label: x.label }));
+                return (
+                  <div key={t.id} className="dist-type-row del">
+                    <div className="dist-type-delnote"><IconInvoice s={14} />{trD('dist.tipeInUse', { n: inUse })}</div>
+                    <div className="dist-type-delrow">
+                      <UI.Dropdown value={reassign} options={[{ value: '', label: trD('dist.pilihTipeTujuan') }, ...opts]} onChange={setReassign} fluid />
+                      <button type="button" className="btn btn-ghost" onClick={() => setDelType(null)}>{trD('dist.cancel')}</button>
+                      <button type="button" className="btn btn-primary" disabled={!reassign || busy === 'del'} onClick={() => doDelete(t.id, reassign)}>{busy === 'del' ? '…' : trD('dist.pindahHapus')}</button>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div key={t.id} className="dist-type-row">
+                  {editId === t.id ? (
+                    <input className="fld dist-type-edit" autoFocus value={editLabel} onChange={(e) => setEditLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveRename(t.id); if (e.key === 'Escape') setEditId(null); }} />
+                  ) : (
+                    <div className="dist-type-name"><span className={`dist-ctag ${CUST_TAG[t.id] || 'other'}`}>{t.label}</span>{inUse > 0 && <span className="dist-type-count">{trD('dist.tipeCount', { n: inUse })}</span>}</div>
+                  )}
+                  <div className="dist-type-actions">
+                    {editId === t.id ? (<>
+                      <button type="button" className="icon-btn" title={trD('dist.simpan')} disabled={!editLabel.trim()} onClick={() => saveRename(t.id)}><IconCheck s={15} /></button>
+                      <button type="button" className="icon-btn" title={trD('dist.cancel')} onClick={() => setEditId(null)}><IconClose s={15} /></button>
+                    </>) : (<>
+                      <button type="button" className="icon-btn" title={trD('dist.ubah')} onClick={() => { setEditId(t.id); setEditLabel(t.label); setErr(''); }}><IconPencil s={14} /></button>
+                      <button type="button" className="icon-btn del" title={trD('dist.hapus')} onClick={() => askDelete(t)}><IconBackspace s={15} /></button>
+                    </>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="dist-hint" style={{ marginTop: 10 }}><IconInvoice s={12} /> {trD('dist.kelolaTipeNote')}</div>
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.tutup')}</button></div>
+      </div>
     </div>
   );
 }

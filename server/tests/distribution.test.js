@@ -95,3 +95,86 @@ describe('Distribusi — permissions, price lock, immutability, audit', () => {
     expect(r.body.data.amount).toBeGreaterThanOrEqual(18000);
   });
 });
+
+describe('Distribusi — delivery days, fleet, editable customer types', () => {
+  it('seed types exist (reguler/kos/cafe/bulk) and are readable with base distribusi', async () => {
+    const r = await request(app).get('/api/v1/distribusi/customer-types').set(auth(staff));
+    expect(r.status).toBe(200);
+    expect(r.body.data.map((t) => t.id).sort()).toEqual(['bulk', 'cafe', 'kos', 'reguler']);
+  });
+
+  it('create customer with deliveryDays + armada; both round-trip (and canonicalise)', async () => {
+    const r = await request(app).post('/api/v1/distribusi/customers').set(auth(owner))
+      .send({ name: 'Warung Kirim', type: 'reguler', masterPrice: 12000, deliveryDays: ['Rab', 'Sen', 'zzz'], armada: 'BIRU' });
+    expect(r.status).toBe(201);
+    expect(r.body.data.deliveryDays).toEqual(['Sen', 'Rab']);   // dedup + canonical Mon..Sun order, junk dropped
+    expect(r.body.data.armada).toBe('BIRU');
+    const got = await request(app).get(`/api/v1/distribusi/customers/${r.body.data.id}`).set(auth(owner));
+    expect(got.body.data.deliveryDays).toEqual(['Sen', 'Rab']);
+  });
+
+  it('old customer without the columns shows []/"" (back-compat)', async () => {
+    const c = await request(app).get(`/api/v1/distribusi/customers/${custId}`).set(auth(owner));
+    expect(c.body.data.deliveryDays).toEqual([]);
+    expect(c.body.data.armada).toBe('');
+  });
+
+  it('edit customer (type/phone/days/armada) via PATCH — needs distribusiCustomers; masterPrice untouched', async () => {
+    const made = await request(app).post('/api/v1/distribusi/customers').set(auth(owner)).send({ name: 'Edit Me', type: 'reguler', masterPrice: 9000 });
+    const id = made.body.data.id;
+    // staff (distribusi only, no distribusiCustomers) is forbidden to edit
+    expect((await request(app).patch(`/api/v1/distribusi/customers/${id}`).set(auth(staff)).send({ phone: '0811' })).status).toBe(403);
+    const r = await request(app).patch(`/api/v1/distribusi/customers/${id}`).set(auth(owner)).send({ type: 'kos', phone: '0899', deliveryDays: ['Jum'], armada: 'MERAH' });
+    expect(r.status).toBe(200);
+    expect(r.body.data.type).toBe('kos');
+    expect(r.body.data.phone).toBe('0899');
+    expect(r.body.data.deliveryDays).toEqual(['Jum']);
+    expect(r.body.data.armada).toBe('MERAH');
+    expect(r.body.data.masterPrice).toBe(9000);   // NOT changed by the edit route
+  });
+
+  it('fleet list is readable through the distribusi module (base cap)', async () => {
+    await prisma.fleet.create({ data: { plate: 'BIRU' } });
+    const r = await request(app).get('/api/v1/distribusi/fleet').set(auth(staff));
+    expect(r.status).toBe(200);
+    expect(r.body.data.some((f) => f.plate === 'BIRU')).toBe(true);
+  });
+
+  it('create a new type "Kantor"; usable on a customer; rename is safe (id stable)', async () => {
+    const t = await request(app).post('/api/v1/distribusi/customer-types').set(auth(owner)).send({ label: 'Kantor' });
+    expect(t.status).toBe(201);
+    const typeId = t.body.data.id;
+    const cust = await request(app).post('/api/v1/distribusi/customers').set(auth(owner)).send({ name: 'PT Contoh', type: typeId, masterPrice: 15000 });
+    expect(cust.body.data.type).toBe(typeId);
+    // rename keeps the id → the customer is unaffected
+    const rn = await request(app).patch(`/api/v1/distribusi/customer-types/${typeId}`).set(auth(owner)).send({ label: 'Kantor Pusat' });
+    expect(rn.status).toBe(200);
+    const still = await request(app).get(`/api/v1/distribusi/customers/${cust.body.data.id}`).set(auth(owner));
+    expect(still.body.data.type).toBe(typeId);
+  });
+
+  it('duplicate / empty type names are rejected', async () => {
+    expect((await request(app).post('/api/v1/distribusi/customer-types').set(auth(owner)).send({ label: 'Reguler' })).status).toBe(400);   // dup (case-insensitive)
+    expect((await request(app).post('/api/v1/distribusi/customer-types').set(auth(owner)).send({ label: '   ' })).status).toBe(400);        // empty
+  });
+
+  it('type write needs distribusiCustomers (staff forbidden)', async () => {
+    expect((await request(app).post('/api/v1/distribusi/customer-types').set(auth(staff)).send({ label: 'X' })).status).toBe(403);
+  });
+
+  it('deleting a type IN USE is refused until customers are reassigned', async () => {
+    const t = await request(app).post('/api/v1/distribusi/customer-types').set(auth(owner)).send({ label: 'Sekolah' });
+    const typeId = t.body.data.id;
+    const cust = await request(app).post('/api/v1/distribusi/customers').set(auth(owner)).send({ name: 'SD Ceria', type: typeId, masterPrice: 8000 });
+    // in use → refused, reports the count
+    const refused = await request(app).delete(`/api/v1/distribusi/customer-types/${typeId}`).set(auth(owner));
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.details.inUse).toBe(1);
+    // reassign to reguler, then delete succeeds
+    const ok = await request(app).delete(`/api/v1/distribusi/customer-types/${typeId}?reassignTo=reguler`).set(auth(owner));
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.reassigned).toBe(1);
+    const moved = await request(app).get(`/api/v1/distribusi/customers/${cust.body.data.id}`).set(auth(owner));
+    expect(moved.body.data.type).toBe('reguler');   // no customer left on a missing type
+  });
+});

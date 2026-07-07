@@ -1005,8 +1005,18 @@ select.fld::-ms-expand { display: none; }
 .dist-ctag.kos { background: #E6F5F0; color: #159A6B; }
 .dist-ctag.cafe { background: var(--warn-bg); color: var(--warn); }
 .dist-ctag.bulk { background: #E7F1F5; color: #0B7EB1; }
+.dist-ctag.other { background: #EDE9FB; color: #6D50D6; }   /* custom (non-seed) types */
+/* delivery days + fleet on the customer row (list) */
+.dist-cust-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+.dist-cust-meta span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--text-faint); }
+.dist-cust-meta svg { flex-shrink: 0; color: var(--text-faint); }
 /* detail */
 .dist-cd-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 22px 24px; }
+.dist-cd-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; }
+.dist-cd-meta span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-mut); }
+.dist-cd-meta svg { flex-shrink: 0; color: var(--text-faint); }
+.dist-cd-meta b { color: var(--ink); font-weight: 700; }
+.dist-cd-edit { flex-shrink: 0; }
 .dist-cd-av { display: grid; place-items: center; width: 60px; height: 60px; border-radius: 16px; background: var(--green-900); color: #fff; font-size: 20px; font-weight: 800; flex-shrink: 0; }
 .dist-cd-namerow { display: flex; align-items: center; gap: 9px; }
 .dist-cd-name { margin: 0; font-size: 20px; font-weight: 800; color: var(--ink); }
@@ -1027,6 +1037,24 @@ select.fld::-ms-expand { display: none; }
 .dist-typechips { display: flex; gap: 8px; flex-wrap: wrap; }
 .dist-typechip { padding: 8px 13px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--text-mut); font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .dist-typechip.on { background: var(--green-800); color: #fff; border-color: var(--green-800); }
+.dist-typechip.add { display: inline-flex; align-items: center; gap: 5px; color: var(--green-700); border-style: dashed; }
+.dist-typechip.add:hover { background: var(--mint-100); }
+/* Kelola Tipe Pelanggan modal */
+.dist-type-add { display: flex; gap: 8px; align-items: stretch; }
+.dist-type-add .fld { flex: 1; }
+.dist-type-add .btn { flex-shrink: 0; }
+.dist-type-list { margin-top: 12px; border: 1px solid var(--border-soft); border-radius: 12px; overflow: hidden; }
+.dist-type-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; border-top: 1px solid var(--border-soft); }
+.dist-type-row:first-child { border-top: 0; }
+.dist-type-row.del { flex-direction: column; align-items: stretch; gap: 10px; background: var(--warn-bg); }
+.dist-type-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dist-type-count { font-size: 11px; color: var(--text-faint); font-weight: 600; }
+.dist-type-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.dist-type-edit { max-width: 220px; }
+.dist-type-delnote { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #8a5a12; font-weight: 600; }
+.dist-type-delnote svg { flex-shrink: 0; color: var(--warn); }
+.dist-type-delrow { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.dist-type-delrow > :first-child { flex: 1; min-width: 160px; }
 .dist-priceinput { display: flex; align-items: center; gap: 9px; border: 1.5px solid var(--border); border-radius: 11px; padding: 0 14px; }
 .dist-priceinput svg { color: var(--text-mut); flex-shrink: 0; }
 .dist-priceinput input { flex: 1; border: none; outline: none; padding: 12px 0; font-family: inherit; font-size: 14px; font-weight: 700; color: var(--ink); background: transparent; }

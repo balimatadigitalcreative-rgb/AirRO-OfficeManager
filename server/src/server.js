@@ -3,11 +3,14 @@ const createApp = require('./app');
 const config = require('./config/env');
 const prisma = require('./lib/prisma');
 const { seedBuiltinRoles } = require('./config/permissions');
+const distribution = require('./services/distribution.service');
 
 const app = createApp();
 // Ensure built-in roles exist + warm the permission cache (idempotent). resolvePerms
 // falls back to the hard-coded seed while this loads, so auth is never blocked.
 seedBuiltinRoles().catch(() => {});
+// Ensure the seed customer types (reguler/kos/cafe/bulk) exist (idempotent).
+distribution.seedCustomerTypes().catch(() => {});
 
 const server = app.listen(config.port, config.host, () => {
   // eslint-disable-next-line no-console
