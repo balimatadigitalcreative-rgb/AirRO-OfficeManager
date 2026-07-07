@@ -99,6 +99,7 @@ function FApp() {
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
   const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard/transaksi re-fetch
   const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
+  const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
   // Roles are DATA (managed via /roles). Seed FS with the cached list for instant
   // paint; the shell reloads the live list after login (reloadRoles).
@@ -1000,17 +1001,19 @@ function FApp() {
           {screen === 'dist-dashboard' && (
             <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onQuickInput={() => { go('dist-transactions', !p.distribusi); if (p.distribusi) setDistFormTick((t) => t + 1); }} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
           )}
           {screen === 'dist-transactions' && (
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-customers' && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canPrice={!!p.distribusiHargaMaster}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
-              fleet={fleet}
+              fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-prices' && (

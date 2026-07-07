@@ -62,6 +62,30 @@ function SevenDayChart({ last7 }) {
   );
 }
 
+// Fleet scope helpers. fleetScope is 'all' (or null) for full access, or an array of
+// fleet names for a scoped user. The effective fleet passed to the API: for full access
+// it's the chosen filter; for a scoped user it's 'all' (the server enforces the scope).
+const isScoped = (fleetScope) => Array.isArray(fleetScope);
+const effFleet = (fleetScope, distFleet) => (isScoped(fleetScope) ? 'all' : (distFleet || 'all'));
+// A bar above the Distribusi screens: a label ("Armada: Merah") for scoped users, or a
+// Semua/Merah/Biru toggle for full-access users so a GM can see the combined or per-fleet view.
+function FleetBar({ fleetScope, fleet, value, onChange }) {
+  if (isScoped(fleetScope)) {
+    if (!fleetScope.length) return null;
+    return <div className="dist-fleetbar scoped"><IconTruck s={14} /><span>{trD('dist.fleetLabel')}:</span><b>{fleetScope.join(', ')}</b></div>;
+  }
+  const opts = ['all', ...((fleet || []).filter(Boolean))];
+  if (opts.length <= 1) return null;   // no fleets defined → nothing to toggle
+  return (
+    <div className="dist-fleetbar">
+      <span className="dist-fleetbar-lbl"><IconTruck s={14} />{trD('dist.fleetFilter')}</span>
+      <div className="dist-chips">
+        {opts.map((f) => <button key={f} type="button" className={`dist-chip ${(value || 'all') === f ? 'on' : ''}`} onClick={() => onChange(f)}>{f === 'all' ? trD('dist.fleetAll') : f}</button>)}
+      </div>
+    </div>
+  );
+}
+
 function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero }) {
   // Every KPI is a `stat-box` → identical padding/size on all four. `dist-kpi-hero`
   // is a COLOUR-ONLY modifier (gradient + light text); it must not change the size.
@@ -77,26 +101,29 @@ function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero }) {
   );
 }
 
-function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, today }) {
+function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, today, fleetScope, fleet, distFleet, setDistFleet }) {
   const [sum, setSum] = uSx(null);
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
+  const ef = effFleet(fleetScope, distFleet);
   uEx(() => {
     let live = true; setErr(false);
     if (!(window.API && window.API.distribusi)) { setLoading(false); setErr(true); return; }
-    window.API.distribusi.summary(today).then((r) => { if (live) { setSum(r.data); setLoading(false); } })
+    window.API.distribusi.summary(today, ef).then((r) => { if (live) { setSum(r.data); setLoading(false); } })
       .catch(() => { if (live) { setErr(true); setLoading(false); } });
     return () => { live = false; };
-  }, [refreshKey, today]);
+  }, [refreshKey, today, ef]);
 
-  if (loading) return <div className="dist-dash screen-enter"><div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div></div>;
-  if (err || !sum) return <div className="dist-dash screen-enter"><div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}><IconRefresh s={20} /><div style={{ marginTop: 8 }}>{trD('dist.loadErr')}</div></div></div>;
+  const fleetBar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
+  if (loading) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div></div>;
+  if (err || !sum) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}><IconRefresh s={20} /><div style={{ marginTop: 8 }}>{trD('dist.loadErr')}</div></div></div>;
 
   const recent = sum.recent || [];
   const top = sum.topCustomers || [];
   const avgNota = sum.count ? Math.round(sum.amount / sum.count) : 0;
   return (
     <div className="dist-dash screen-enter">
+      {fleetBar}
       {staffMode && (
         <div className="dist-staff-banner"><span className="dist-staff-ic"><IconShield s={16} /></span><div><b>{trD('dist.staffMode')}</b><span>{trD('dist.staffModeSub')}</span></div></div>
       )}
@@ -185,7 +212,7 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
 function shortRef(id) { return '#' + String(id || '').slice(-6).toUpperCase(); }
 function hhmm(ms) { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); }
 
-function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChanged }) {
+function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet }) {
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -207,11 +234,13 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
   const [corrValue, setCorrValue] = uSx('');
   const [corrSaving, setCorrSaving] = uSx(false);
 
+  const ef = effFleet(fleetScope, distFleet);
+  const fleetQs = (ef && ef !== 'all') ? 'fleet=' + encodeURIComponent(ef) : '';
   const reload = () => Promise.all([
-    window.API.distribusi.transactions.list('').then((r) => setTxns(r.data || [])).catch(() => setTxns([])),
-    window.API.distribusi.customers.list().then((r) => setCustomers(r.data || [])).catch(() => {}),
+    window.API.distribusi.transactions.list(fleetQs).then((r) => setTxns(r.data || [])).catch(() => setTxns([])),
+    window.API.distribusi.customers.list(ef).then((r) => setCustomers(r.data || [])).catch(() => {}),
   ]);
-  uEx(() => { let live = true; if (window.API && window.API.distribusi) reload(); return () => { live = false; }; }, [refreshKey]);
+  uEx(() => { let live = true; if (window.API && window.API.distribusi) reload(); return () => { live = false; }; }, [refreshKey, ef]);
   uEx(() => { if (openFormTick) { setView('form'); setFErr(''); } }, [openFormTick]);
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
@@ -314,6 +343,7 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
   const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')]];
   return (
     <div className="dist-dash screen-enter">
+      <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
       <div className="dist-tx-toolbar">
         <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
         <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>
@@ -376,7 +406,7 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
 // `fleet` is the SINGLE app-wide armada source (shell state ← /settings airro_fleet,
 // the same list managed in Setoran → Kelola Armada). Distribusi never keeps its own
 // copy — changing a plate there is reflected here immediately.
-function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, onGoHarga, onChanged }) {
+function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [types, setTypes] = uSx([]);
@@ -392,12 +422,13 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, o
   const [impSaving, setImpSaving] = uSx(false);
   const [typesOpen, setTypesOpen] = uSx(false);
 
-  const reload = () => window.API.distribusi.customers.list().then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
+  const ef = effFleet(fleetScope, distFleet);
+  const reload = () => window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
   const reloadTypes = () => window.API.distribusi.types.list().then((r) => setTypes(r.data || [])).catch(() => {});
   uEx(() => {
     if (!(window.API && window.API.distribusi)) return;
     reload(); reloadTypes();
-  }, [refreshKey]);
+  }, [refreshKey, ef]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
   const typeMap = {}; types.forEach((t) => { typeMap[t.id] = t; });
@@ -578,6 +609,7 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, o
   const chips = [['all', trD('dist.fAll')], ['bon', trD('dist.filterBon')], ['reguler', trD('dist.filterReg')], ['bulk', trD('dist.filterBulk')]];
   return (
     <div className="dist-dash screen-enter">
+      <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
       <div className="dist-tx-toolbar">
         <div className="dist-search"><IconSearch s={16} /><input value={q} placeholder={trD('dist.searchCust')} onChange={(e) => setQ(e.target.value)} /></div>
         <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>

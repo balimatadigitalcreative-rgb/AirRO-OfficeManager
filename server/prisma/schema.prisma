@@ -27,6 +27,7 @@ model User {
   color        String   @default("#22A7A1")
   active       Boolean  @default(true)
   permissions  String? // JSON capability map; null = use the role's defaults
+  fleetScope   String   @default("all") // distribusi fleet access: "all" or a JSON array of fleet names
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -462,6 +463,7 @@ model PriceHistory {
 model DistTransaction {
   id              String   @id @default(cuid())
   customerId      String
+  fleetId         String   @default("")         // fleet scope — copied from the customer's armada at input time (immutable)
   qty             Int
   unitPriceLocked Int                          // unit_price_locked
   amount          Int                          // qty * unitPriceLocked (server-computed)
@@ -478,6 +480,7 @@ model DistTransaction {
 
   @@index([txnDate])
   @@index([customerId])
+  @@index([fleetId])
 }
 
 // Append-only corrections against a transaction (the transaction itself is never
@@ -517,6 +520,7 @@ model DistAuditLog {
   kind      String                              // koreksi | harga | input | impor | pelanggan
   title     String
   detail    String   @default("")
+  fleetId    String   @default("") // fleet scope of the event ("" = global/cross-fleet)
   actorId    String?
   actorRole  String?
   actorName  String?

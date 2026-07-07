@@ -9,18 +9,28 @@ const { parsePerms } = require('../config/permissions');
 const PASSWORD_MIN = 8;   // minimum length for a user-chosen password (self change)
 const PUBLIC_FIELDS = {
   id: true, name: true, username: true, role: true, sub: true,
-  color: true, active: true, permissions: true, mustChangePassword: true, createdAt: true,
+  color: true, active: true, permissions: true, fleetScope: true, mustChangePassword: true, createdAt: true,
 };
 
-// Shape a user row for API responses: permissions returned as a parsed object.
+// Distribusi fleet access is stored as a string: "all" or a JSON array of fleet names.
+// Parse to 'all' or an array for API responses.
+function parseFleetScope(str) {
+  if (str == null || str === 'all' || str === '') return 'all';
+  try { const a = JSON.parse(str); if (Array.isArray(a)) return a.filter((x) => typeof x === 'string' && x.trim()); if (a === 'all') return 'all'; } catch (e) {}
+  return 'all';
+}
+
+// Shape a user row for API responses: permissions + fleetScope returned parsed.
 function publicUser(user) {
-  return { ...user, permissions: parsePerms(user.permissions) };
+  return { ...user, permissions: parsePerms(user.permissions), fleetScope: parseFleetScope(user.fleetScope) };
 }
 
 function signToken(user) {
   return jwt.sign(
-    // The raw permissions JSON string travels in the token; requireCap resolves it.
-    { sub: user.id, role: user.role, username: user.username, permissions: user.permissions || null },
+    // The raw permissions JSON string + fleetScope travel in the token; the server
+    // resolves them (requireCap / distribusi fleet filter). Changing them takes effect
+    // on the user's next login.
+    { sub: user.id, role: user.role, username: user.username, permissions: user.permissions || null, fleetScope: user.fleetScope || 'all' },
     config.jwt.secret,
     { expiresIn: config.jwt.expiresIn },
   );

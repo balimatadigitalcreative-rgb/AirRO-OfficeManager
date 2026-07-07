@@ -9,7 +9,7 @@ router.use(requireAuth);
 
 // ── Customers ──
 // Viewing the customer list/detail is part of base module access ('distribusi').
-router.get('/customers', requireCap('distribusi'), ctrl.listCustomers);
+router.get('/customers', requireCap('distribusi'), validate({ query: ctrl.schemas.custListQuery }), ctrl.listCustomers);
 router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getCustomer);
 // NOTE: the delivery-fleet list is NOT served here — armada has a single app-wide
 // source (the `airro_fleet` /settings key managed in Setoran → Kelola Armada), read

@@ -50,20 +50,22 @@ const correctionSchema = z.object({
 const listTxnQuery = z.object({
   date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(),
   customerId: z.string().optional(), method: z.enum(['lunas', 'bon', 'pelunasan']).optional(),
+  fleet: z.string().max(60).optional(),
 });
-const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan']).optional(), limit: z.coerce.number().int().positive().max(2000).optional() });
-const summaryQuery = z.object({ date: DATE.optional() });
+const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan']).optional(), limit: z.coerce.number().int().positive().max(2000).optional(), fleet: z.string().max(60).optional() });
+const summaryQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
+const custListQuery = z.object({ fleet: z.string().max(60).optional() });
 const idParams = z.object({ id: z.string().min(1) });
 const batchParams = z.object({ batchId: z.string().min(1) });
 
 // ── customers ──
-const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers()));
-const getCustomer = asyncHandler(async (req, res) => res.json({ data: await service.getCustomer(req.params.id) }));
+const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet)));
+const getCustomer = asyncHandler(async (req, res) => res.json({ data: await service.getCustomer(req.params.id, req.user) }));
 const createCustomer = asyncHandler(async (req, res) => { const c = await service.createCustomer(req.body, req.user); bcast('create', c.id); res.status(201).json({ data: c }); });
 const updateCustomer = asyncHandler(async (req, res) => { const c = await service.updateCustomer(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user); bcast('import', 'customers'); res.status(201).json(r); });
 const updatePrice = asyncHandler(async (req, res) => { const c = await service.updatePrice(req.params.id, req.body.newPrice, req.user, req.body.scope); bcast('price', c.id); res.json({ data: c }); });
-const pricePreview = asyncHandler(async (req, res) => res.json({ data: await service.pricePreview(req.params.id, req.body.newPrice) }));
+const pricePreview = asyncHandler(async (req, res) => res.json({ data: await service.pricePreview(req.params.id, req.body.newPrice, req.user) }));
 const cancelPriceAdjustment = asyncHandler(async (req, res) => { const r = await service.cancelPriceAdjustment(req.params.batchId, req.user); bcast('price', req.params.batchId); res.json({ data: r }); });
 
 // ── customer types (editable dictionary) ──
@@ -73,7 +75,7 @@ const updateType = asyncHandler(async (req, res) => { const t = await service.re
 const deleteType = asyncHandler(async (req, res) => { const r = await service.deleteType(req.params.id, req.query.reassignTo, req.user); bcast('type', req.params.id); res.json({ data: r }); });
 
 // ── transactions ── (immutable; price locked server-side)
-const listTransactions = asyncHandler(async (req, res) => res.json(await service.listTransactions(req.query)));
+const listTransactions = asyncHandler(async (req, res) => res.json(await service.listTransactions(req.query, req.user)));
 const createTransaction = asyncHandler(async (req, res) => { const t = await service.createTransaction(req.body, req.user); bcast('create', t.id); res.status(201).json({ data: t }); });
 const addCorrection = asyncHandler(async (req, res) => {
   // A "staff" actor has 'distribusi' but none of the owner distribusi caps → flag it.
@@ -85,12 +87,12 @@ const addCorrection = asyncHandler(async (req, res) => {
 });
 
 // ── audit + dashboard ──
-const listAudit = asyncHandler(async (req, res) => res.json(await service.listAudit(req.query)));
-const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.query.date) }));
+const listAudit = asyncHandler(async (req, res) => res.json(await service.listAudit(req.query, req.user)));
+const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.query.date, req.user, req.query.fleet) }));
 
 module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
-  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams },
+  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, custListQuery, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams },
 };

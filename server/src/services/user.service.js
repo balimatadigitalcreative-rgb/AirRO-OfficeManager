@@ -10,11 +10,17 @@ async function assertRole(role) {
   if (!(await prisma.role.count({ where: { id: role } }))) throw ApiError.badRequest(`Peran "${role}" tidak ada`);
 }
 
-// `permissions` arrives as an object (or null) — store it as a JSON string.
-function normalize({ permissions, ...rest }) {
+// `permissions` arrives as an object (or null) and `fleetScope` as 'all' | string[] —
+// both are stored as strings.
+function normalize({ permissions, fleetScope, ...rest }) {
   const data = { ...rest };
   if (permissions !== undefined) {
     data.permissions = permissions ? JSON.stringify(permissions) : null;
+  }
+  if (fleetScope !== undefined) {
+    data.fleetScope = (fleetScope === 'all' || fleetScope == null || (Array.isArray(fleetScope) && fleetScope.length === 0))
+      ? 'all'
+      : JSON.stringify((Array.isArray(fleetScope) ? fleetScope : []).filter((x) => typeof x === 'string' && x.trim()));
   }
   return data;
 }

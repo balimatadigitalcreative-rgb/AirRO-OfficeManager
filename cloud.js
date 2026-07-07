@@ -300,7 +300,7 @@
 
   function frontendUser(u) {
     return { id: u.id, name: u.name, role: u.role, user: u.username, sub: u.sub,
-      color: u.color || '#22A7A1', permissions: u.permissions || null, mustChangePassword: !!u.mustChangePassword };
+      color: u.color || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword };
   }
 
   function logout() {

@@ -113,6 +113,27 @@ function UserModal({ row, users, onSave, onClose, busy }) {
               </div>
             </div>
           ))}
+
+          {/* ---- Distribusi fleet access (data scope) ---- */}
+          {(() => {
+            const fleet = (window.FS && FS.loadFleet && FS.loadFleet()) || [];
+            const isAll = f.fleetScope === 'all' || f.fleetScope == null;
+            const arr = Array.isArray(f.fleetScope) ? f.fleetScope : [];
+            const toggleFleet = (name) => { const cur = Array.isArray(f.fleetScope) ? f.fleetScope : []; const next = cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name]; set({ fleetScope: next.length ? next : 'all' }); };
+            return (
+              <div style={{ marginTop: 14 }}>
+                <label className="fld-label" style={{ margin: 0 }}>{trU('um.fleetScope')}</label>
+                <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '2px 0 8px' }}>{trU('um.fleetScopeHint')}</div>
+                <div className="cat-chips">
+                  <button type="button" className={`cat-chip ${isAll ? 'on' : ''}`} onClick={() => set({ fleetScope: 'all' })}>{isAll ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{trU('um.fleetAll')}</button>
+                  {fleet.map((name) => { const on = !isAll && arr.includes(name); return (
+                    <button key={name} type="button" className={`cat-chip ${on ? 'on' : ''}`} onClick={() => toggleFleet(name)}>{on ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{name}</button>
+                  ); })}
+                  {fleet.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{trU('um.fleetNone')}</span>}
+                </div>
+              </div>
+            );
+          })()}
         </div>
         <div className="modal-foot">
           {!f._new && users.length > 1 && <button className="btn btn-ghost" style={{ color: 'var(--neg)', marginRight: 'auto' }} disabled={busy} onClick={() => onSave(f, true)}><IconClose s={15} />{trU('um.remove')}</button>}
@@ -132,7 +153,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
   const [err, setErr] = uSu(null);
   const [tab, setTab] = uSu('users');   // 'users' | 'roles'
 
-  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, mustChangePassword: !!u.mustChangePassword });
+  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword });
 
   const refresh = () => {
     if (!cloud) { setRows(users || []); return; }
@@ -158,9 +179,9 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
         if (!confirm(trU('um.removeConfirm'))) { setBusy(false); return; }
         await window.API.users.remove(u.id);
       } else if (u._new) {
-        await window.API.users.create({ name: u.name.trim(), username: u.user.trim(), password: u.pin, role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null });
+        await window.API.users.create({ name: u.name.trim(), username: u.user.trim(), password: u.pin, role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, fleetScope: u.fleetScope || 'all' });
       } else {
-        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, mustChangePassword: !!u.mustChangePassword };
+        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword };
         if (u.pin) body.password = u.pin;   // only change the password when re-entered
         await window.API.users.update(u.id, body);
       }
@@ -173,7 +194,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
     }
   };
 
-  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.roleColor('finance'), permissions: null, _new: true }); };
+  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.roleColor('finance'), permissions: null, fleetScope: 'all', _new: true }); };
   const RoleBadge = window.AUTH.RoleBadge;
   if (canManageRoles && tab === 'roles') {
     return (

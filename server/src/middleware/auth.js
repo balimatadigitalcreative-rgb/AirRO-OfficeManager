@@ -13,7 +13,7 @@ function requireAuth(req, res, next) {
   }
   try {
     const payload = jwt.verify(token, config.jwt.secret);
-    req.user = { id: payload.sub, role: payload.role, username: payload.username, permissions: payload.permissions };
+    req.user = { id: payload.sub, role: payload.role, username: payload.username, permissions: payload.permissions, fleetScope: payload.fleetScope };
     next();
   } catch (e) {
     next(ApiError.unauthorized('Invalid or expired token'));

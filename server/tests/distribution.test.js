@@ -259,3 +259,71 @@ describe('Distribusi — retroactive master-price change (options + adjustments)
     expect((await request(app).delete('/api/v1/distribusi/price-adjustments/nope').set(auth(staff))).status).toBe(403);
   });
 });
+
+describe('Distribusi — per-fleet data separation (server-enforced)', () => {
+  let merahCust, biruCust, staffMerah, staffBiru;
+  const mkStaff = async (username, fleet) => {
+    const r = await reg({ name: username, username, password: 'secret123', role: 'finance' });
+    await request(app).patch(`/api/v1/users/${r.user.id}`).set(auth(owner)).send({ permissions: { distribusi: true, distribusiCustomers: true }, fleetScope: [fleet] });
+    return login(username, 'secret123');
+  };
+  beforeAll(async () => {
+    const cm = await request(app).post('/api/v1/distribusi/customers').set(auth(owner)).send({ name: 'Cust Merah', type: 'reguler', masterPrice: 10000, armada: 'Merah' });
+    const cb = await request(app).post('/api/v1/distribusi/customers').set(auth(owner)).send({ name: 'Cust Biru', type: 'reguler', masterPrice: 10000, armada: 'Biru' });
+    merahCust = cm.body.data.id; biruCust = cb.body.data.id;
+    await request(app).post('/api/v1/distribusi/transactions').set(auth(owner)).send({ customerId: merahCust, qty: 2, method: 'bon', txnDate: '2026-08-01' });
+    await request(app).post('/api/v1/distribusi/transactions').set(auth(owner)).send({ customerId: biruCust, qty: 3, method: 'lunas', txnDate: '2026-08-01' });
+    staffMerah = await mkStaff('staff_merah', 'Merah');
+    staffBiru = await mkStaff('staff_biru', 'Biru');
+  });
+
+  it('a new transaction copies the customer fleet onto the record (fleetId)', async () => {
+    const t = await request(app).post('/api/v1/distribusi/transactions').set(auth(owner)).send({ customerId: merahCust, qty: 1, method: 'lunas', txnDate: '2026-08-02' });
+    expect(t.body.data.fleetId).toBe('Merah');
+  });
+
+  it('scoped staff sees ONLY its fleet customers + transactions', async () => {
+    const custs = await request(app).get('/api/v1/distribusi/customers').set(auth(staffMerah));
+    expect(custs.body.data.every((c) => c.armada === 'Merah')).toBe(true);
+    expect(custs.body.data.some((c) => c.id === merahCust)).toBe(true);
+    expect(custs.body.data.some((c) => c.id === biruCust)).toBe(false);
+    const txns = await request(app).get('/api/v1/distribusi/transactions').set(auth(staffMerah));
+    expect(txns.body.data.every((t) => t.fleetId === 'Merah')).toBe(true);
+    // Biru staff mirror
+    const custsB = await request(app).get('/api/v1/distribusi/customers').set(auth(staffBiru));
+    expect(custsB.body.data.every((c) => c.armada === 'Biru')).toBe(true);
+  });
+
+  it('scoped staff CANNOT open a cross-fleet customer (404)', async () => {
+    expect((await request(app).get(`/api/v1/distribusi/customers/${biruCust}`).set(auth(staffMerah))).status).toBe(404);
+    expect((await request(app).get(`/api/v1/distribusi/customers/${merahCust}`).set(auth(staffMerah))).status).toBe(200);
+  });
+
+  it('scoped staff CANNOT write across fleets (transaction / customer)', async () => {
+    // transaction for a Biru customer → 403
+    expect((await request(app).post('/api/v1/distribusi/transactions').set(auth(staffMerah)).send({ customerId: biruCust, qty: 1, method: 'lunas', txnDate: '2026-08-03' })).status).toBe(403);
+    // creating a customer with another fleet → 403
+    expect((await request(app).post('/api/v1/distribusi/customers').set(auth(staffMerah)).send({ name: 'X', type: 'reguler', masterPrice: 9000, armada: 'Biru' })).status).toBe(403);
+  });
+
+  it('a scoped staff\'s new customer is FORCED to its fleet (armada omitted → its fleet)', async () => {
+    const r = await request(app).post('/api/v1/distribusi/customers').set(auth(staffMerah)).send({ name: 'Baru Merah', type: 'reguler', masterPrice: 9000 });
+    expect(r.status).toBe(201);
+    expect(r.body.data.armada).toBe('Merah');
+    // and a transaction they add on their own customer records fleetId Merah
+    const t = await request(app).post('/api/v1/distribusi/transactions').set(auth(staffMerah)).send({ customerId: merahCust, qty: 1, method: 'lunas', txnDate: '2026-08-04' });
+    expect(t.body.data.fleetId).toBe('Merah');
+  });
+
+  it('full-access (owner) sees all fleets and can filter by ?fleet', async () => {
+    const all = await request(app).get('/api/v1/distribusi/customers').set(auth(owner));
+    expect(all.body.data.some((c) => c.id === merahCust) && all.body.data.some((c) => c.id === biruCust)).toBe(true);
+    const merahOnly = await request(app).get('/api/v1/distribusi/customers?fleet=Merah').set(auth(owner));
+    expect(merahOnly.body.data.every((c) => c.armada === 'Merah')).toBe(true);
+    // dashboard customer count honours the fleet filter
+    const sB = await request(app).get('/api/v1/distribusi/dashboard/summary?date=2026-08-01&fleet=Biru').set(auth(owner));
+    expect(sB.body.data.customers).toBe(1);   // only Cust Biru carries the Biru fleet
+    const sScopedB = await request(app).get('/api/v1/distribusi/dashboard/summary?date=2026-08-01').set(auth(staffBiru));
+    expect(sScopedB.body.data.customers).toBe(1);   // scoped Biru staff sees only its fleet
+  });
+});

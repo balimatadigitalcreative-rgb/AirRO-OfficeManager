@@ -98,8 +98,10 @@
     roles: collection('roles'),
     // Distribusi module (separate from the cash book). Append-only: no update/delete.
     distribusi: {
+      // A `fleet` filter ('Merah'/'Biru'/…) narrows a full-access user to one fleet;
+      // scoped users are always restricted server-side regardless. Falsy/'all' = no filter.
       customers: {
-        list: () => req('GET', '/distribusi/customers'),
+        list: (fleet) => req('GET', '/distribusi/customers' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
         get: (id) => req('GET', '/distribusi/customers/' + id),
         create: (data) => req('POST', '/distribusi/customers', data),
         update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),
@@ -122,7 +124,7 @@
         correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),
       },
       audit: (qs) => req('GET', '/distribusi/audit' + (qs ? '?' + qs : '')),
-      summary: (date) => req('GET', '/distribusi/dashboard/summary' + (date ? '?date=' + encodeURIComponent(date) : '')),
+      summary: (date, fleet) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/dashboard/summary' + (p.length ? '?' + p.join('&') : '')); },
     },
     settings: {
       all: () => req('GET', '/settings'),
