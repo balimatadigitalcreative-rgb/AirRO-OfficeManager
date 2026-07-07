@@ -1663,7 +1663,7 @@ img, svg, canvas, video { max-width: 100%; }
 /* Kasbon screen */
 .kb-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 14px 0 4px; }
 .kb-pending-chip { font-size: 12px; font-weight: 700; color: #8a5a00; background: var(--sand-soft); padding: 5px 11px; border-radius: 999px; }
-.kb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+.kb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 12px; align-items: start; }
 .kb-card { padding: 14px 16px; }
 .kb-card-top { display: flex; align-items: center; gap: 10px; }
 .kb-card-name { font-size: 14.5px; font-weight: 700; }
@@ -1672,13 +1672,19 @@ img, svg, canvas, video { max-width: 100%; }
 .kb-badge { font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
 .kb-card-note { font-size: 12.5px; color: var(--text-mut); margin-top: 8px; }
 .kb-card-trail { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
-.kb-card-actions { display: flex; gap: 8px; margin-top: 12px; }
+/* Kasbon action row — WRAPS so all buttons stay fully visible (never truncated).
+   Buttons take ~half the width each → up to 2 per row (a pending card's 4 buttons
+   become a tidy 2×2), a lone action fills the row. Comfortable tap targets. */
+.kb-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.kb-actions .btn { flex: 1 1 calc(50% - 4px); min-width: calc(50% - 4px); min-height: 38px; margin: 0; justify-content: center; gap: 6px; white-space: nowrap; }
+.kb-actions .btn svg { flex-shrink: 0; }
+.kb-btn-danger { color: var(--neg); }
+.kb-btn-danger:hover { background: var(--neg-bg); }
+@media (max-width: 480px) { .kb-actions .btn { flex-basis: 100%; min-width: 0; } }   /* very narrow → stack full-width */
 .kb-approve-amt { display: flex; justify-content: space-between; align-items: center; background: var(--card-soft); border-radius: 11px; padding: 12px 14px; margin-bottom: 4px; font-size: 13px; color: var(--text-mut); }
 .kb-approve-amt b { font-size: 16px; color: var(--ink); }
 .kb-approve-note { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--green-700); margin-top: 10px; }
 .kb-approve-note svg { flex-shrink: 0; }
-.kb-del-btn { color: var(--neg); }
-.kb-del-btn:hover { background: var(--neg-bg); }
 /* Department manager */
 .dept-mgr { padding: 16px 18px; }
 .dept-list { display: flex; flex-direction: column; gap: 2px; }

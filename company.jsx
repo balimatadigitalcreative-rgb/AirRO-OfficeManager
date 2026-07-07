@@ -508,11 +508,11 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, onRemove
                 const showApprove = canApprove && st === 'pending';
                 if (!showApprove && !canCancel && !canDelete) return null;
                 return (
-                  <div className="kb-card-actions">
+                  <div className="kb-actions">
                     {showApprove && <button className="btn btn-lime btn-sm" onClick={() => setAppr(c)}><IconCheck s={15} />{trC('kb.approve')}</button>}
-                    {showApprove && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--neg)' }} onClick={() => decide(c.id, 'rejected')}><IconClose s={15} />{trC('kb.reject')}</button>}
+                    {showApprove && <button className="btn btn-ghost btn-sm kb-btn-danger" onClick={() => decide(c.id, 'rejected')}><IconClose s={15} />{trC('kb.reject')}</button>}
                     {canCancel && <button className="btn btn-ghost btn-sm" onClick={() => decide(c.id, 'cancelled')}><IconClose s={15} />{trC('kb.cancel')}</button>}
-                    {canDelete && <button className="btn btn-ghost btn-sm kb-del-btn" onClick={() => removeKb(c)}><IconBackspace s={15} />{trC('kb.delete')}</button>}
+                    {canDelete && <button className="btn btn-ghost btn-sm kb-btn-danger" onClick={() => removeKb(c)}><IconBackspace s={15} />{trC('kb.delete')}</button>}
                   </div>
                 );
               })()}
