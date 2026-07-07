@@ -34,6 +34,7 @@ function navForRole(p, role) {
     { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', cap: 'distribusi' },
     { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', cap: 'distribusi' },
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', cap: 'distribusi' },
+    { id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', cap: 'distribusi' },
     { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', cap: 'distribusi' },
     { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', cap: 'distribusiHargaMaster' },
     { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', cap: 'distribusiAudit' },
@@ -209,12 +210,13 @@ function FApp() {
     return { id: e.id, type: e.type === 'income' ? 'income' : 'expense', amount: Math.max(0, Math.round(+e.amount || 0)),
       note: e.note || '', method: e.method || 'Cash', date: e.date, time: e.time || '00:00',
       category: e.category != null ? e.category : null, acct: e.acct != null ? e.acct : null,
+      gallonQty: Math.max(0, Math.round(+e.gallonQty || 0)),   // "Pembelian Galon" → syncs a gallon purchase movement
       proof: proofToApi(e.proof), meta: Object.keys(tags).length ? JSON.stringify(tags) : null };
   };
   const apiToEntry = (row) => {
     let tags = {}; try { tags = row.meta ? JSON.parse(row.meta) : {}; } catch (e) {}
     const o = { id: row.id, type: row.type, amount: row.amount, note: row.note || '', method: row.method || 'Cash',
-      date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined };
+      date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined, gallonQty: row.gallonQty || 0 };
     const pf = proofFromApi(row.proof); if (pf) o.proof = pf;
     if (row.createdBy && row.createdBy.name) o.createdBy = { name: row.createdBy.name, role: row.createdBy.role || null };   // "input by" snapshot
     if (row.createdById) o.createdById = row.createdById;   // identity → drives "My Activity"
@@ -1016,6 +1018,10 @@ function FApp() {
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
+          {screen === 'dist-gallon' && (
+            <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
+          )}
           {screen === 'dist-prices' && (
             <DIST.Prices refreshKey={distTick} canPrice={!!p.distribusiHargaMaster} onChanged={() => setDistTick((t) => t + 1)} />
           )}
@@ -1025,7 +1031,7 @@ function FApp() {
           {screen === 'dist-audit' && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />

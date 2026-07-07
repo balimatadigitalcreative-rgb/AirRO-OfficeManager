@@ -1019,6 +1019,32 @@ select.fld::-ms-expand { display: none; }
 .dist-fleetbar.scoped b { color: #0B5E86; }
 .dist-fleetbar-lbl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--text-mut); }
 .dist-fleetbar-lbl svg { color: var(--text-faint); flex-shrink: 0; }
+/* Stok Galon screen */
+.dist-gm-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
+.dist-gm-cards .stat-box { display: block; }
+.dist-gm-val { font-size: 26px; font-weight: 800; margin-top: 12px; letter-spacing: -.5px; }
+.dist-gm-lbl { font-size: 12.5px; color: var(--text-mut); margin-top: 3px; }
+.dist-gm-balcard { width: 340px; flex: none; }
+@media (max-width: 720px) { .dist-gm-cards { grid-template-columns: 1fr; } .dist-gm-balcard { width: 100%; } }
+.dist-gm-bal { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-top: 1px solid var(--border-soft); }
+.dist-gm-bal:first-of-type { border-top: 0; }
+.dist-gm-held { font-size: 15px; color: var(--warn); white-space: nowrap; }
+.dist-gm-mtag { font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 7px; white-space: nowrap; flex-shrink: 0; }
+.dist-gm-mtag.purchase { background: var(--pos-bg); color: var(--green-800); }
+.dist-gm-mtag.out { background: var(--warn-bg); color: var(--warn); }
+.dist-gm-mtag.in { background: #E7F1F5; color: #0B7EB1; }
+.dist-gm-mtag.corr { background: #EDE9FB; color: #6D50D6; }
+.dist-gm-mqty { font-size: 14.5px; white-space: nowrap; }
+.dist-gm-mqty.purchase, .dist-gm-mqty.in { color: var(--green-700); }
+.dist-gm-mqty.out { color: var(--warn); }
+.dist-gm-mqty.corr { color: #6D50D6; }
+/* cash-flow "Pembelian Galon" field */
+.gal-buy { margin-top: 4px; }
+.gal-buy-row { display: flex; align-items: center; gap: 9px; border: 1.5px solid var(--border); border-radius: 11px; padding: 0 13px; }
+.gal-buy-ic { display: inline-flex; color: #1a7fb8; flex-shrink: 0; }
+.gal-buy-row input { flex: 1; border: none; outline: none; padding: 11px 0; font-family: inherit; font-size: 15px; font-weight: 700; color: var(--ink); background: transparent; }
+.gal-buy-unit { font-size: 12.5px; color: var(--text-faint); flex-shrink: 0; }
+.gal-buy-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 6px; }
 .dist-cd-meta span.inactive b { color: var(--warn); }
 /* detail */
 .dist-cd-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 22px 24px; }

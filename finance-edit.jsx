@@ -9,6 +9,7 @@ function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
   const [date, setDate] = uSe(entry.date);
   const [note, setNote] = uSe(entry.note);
   const [proof, setProof] = uSe(entry.proof || null);
+  const [gallonQty, setGallonQty] = uSe(entry.gallonQty || 0);   // "Pembelian Galon" stock qty (expense only)
   const cats = type === 'income' ? incomeCats : expenseCats;
   const accent = type === 'income' ? '#065489' : '#E5484D';
 
@@ -22,7 +23,7 @@ function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
   const label = (k) => { const c = cats.find((x) => x.key === k); return c ? c.label : k; };
   const save = () => {
     if (!amount || amount <= 0) return;
-    onSave({ ...entry, type, category: cat, amount, date, note: note.trim() || label(cat), proof });
+    onSave({ ...entry, type, category: cat, amount, date, note: note.trim() || label(cat), proof, gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0 });
   };
   const disp = amount ? amount.toLocaleString('id-ID') : '';
 
@@ -57,6 +58,18 @@ function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
             </button>
           ))}
         </div>
+
+        {type === 'expense' && (
+          <div className="gal-buy">
+            <label className="fld-label" style={{ marginTop: 14 }}>{(window.t && window.t('ce.gallonQty')) || 'Pembelian Galon (jumlah)'}</label>
+            <div className="gal-buy-row">
+              <span className="gal-buy-ic">{IcE('IconDrop', { s: 16 })}</span>
+              <input className="fld tnum" inputMode="numeric" value={gallonQty ? String(gallonQty) : ''} placeholder="0" onChange={(e) => setGallonQty(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+              <span className="gal-buy-unit">{(window.t && window.t('ce.gallonUnit')) || 'galon'}</span>
+            </div>
+            <div className="gal-buy-hint">{(window.t && window.t('ce.gallonHint')) || 'Isi bila ini pembelian stok galon → menambah stok depot (bisa ditelusuri).'}</div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
           <div style={{ flex: '0 0 150px' }}>

@@ -48,6 +48,7 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
   const [date, setDate] = uS(TODAY);
   const [note, setNote] = uS('');
   const [proof, setProof] = uS(null);
+  const [gallonQty, setGallonQty] = uS(0);   // "Pembelian Galon" stock qty (expense only)
   const [err, setErr] = uS(null);
   const cats = type === 'income' ? INC : EXP;
   const accent = type === 'income' ? '#065489' : '#E5484D';
@@ -76,9 +77,10 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
     const now = new Date();
     onAdd({
       id: 'e' + Date.now().toString(36), type, category: cat, amount, note: note.trim() || catLabel(cat), acct, proof,
+      gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0,
       method: ACCTS.find((a) => a.id === acct) ? (ACCTS.find((a) => a.id === acct).type === 'cash' ? 'Cash' : 'Transfer') : 'Cash', date, time: String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'),
     });
-    setAmount(0); setNote(''); setProof(null);
+    setAmount(0); setNote(''); setProof(null); setGallonQty(0);
   };
 
   return (
@@ -124,6 +126,18 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
           <input className="fld" value={note} placeholder={trF('add.notePh')} onChange={(e) => setNote(e.target.value)} />
         </div>
       </div>
+
+      {type === 'expense' && (
+        <div className="gal-buy">
+          <label className="fld-label">{(window.t && window.t('ce.gallonQty')) || 'Pembelian Galon (jumlah)'}</label>
+          <div className="gal-buy-row">
+            <span className="gal-buy-ic">{Icn('IconDrop', { s: 16 })}</span>
+            <input className="fld tnum" inputMode="numeric" value={gallonQty ? String(gallonQty) : ''} placeholder="0" onChange={(e) => setGallonQty(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+            <span className="gal-buy-unit">{(window.t && window.t('ce.gallonUnit')) || 'galon'}</span>
+          </div>
+          <div className="gal-buy-hint">{(window.t && window.t('ce.gallonHint')) || 'Isi bila ini pembelian stok galon → menambah stok depot.'}</div>
+        </div>
+      )}
 
       <div className="preset-row">
         <span style={{ fontSize: 11.5, color: 'var(--text-faint)', fontWeight: 600 }}>{trF('add.quick')}</span>

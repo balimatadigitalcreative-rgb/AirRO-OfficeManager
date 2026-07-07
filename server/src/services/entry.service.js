@@ -1,6 +1,7 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const distribution = require('./distribution.service');   // gallon-purchase movement sync (intentional cash-flow ↔ distribusi link)
 
 // Build a Prisma `where` clause from validated list filters.
 function buildWhere(q) {
@@ -66,27 +67,34 @@ async function getById(id) {
 // The creator is stamped from the AUTHENTICATED user (token → id), never from the
 // request body, and the name/role are read from the DB at input time — so a client
 // cannot forge who created a record, and the snapshot reflects the real user then.
-async function create(data, userId) {
+async function create(data, actor) {
+  const userId = actor && actor.id;
   const snap = { createdById: userId || null };
   if (userId) {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
     if (u) { snap.createdByName = u.name; snap.createdByRole = u.role; }
   }
   const entry = await prisma.entry.create({ data: { ...data, ...snap } });
+  // A "Pembelian Galon" expense mirrors into the gallon ledger (purchase movement).
+  if (entry.type === 'expense' && +entry.gallonQty > 0) await distribution.syncPurchaseMovement(entry.id, entry.gallonQty, actor);
   return shapeCreator(entry);
 }
 
-async function update(id, data) {
+async function update(id, data, actor) {
   await getById(id); // 404 if missing
   // Never let a PATCH overwrite the original creator snapshot (the fields aren't in
   // the update schema anyway, but strip defensively).
   const { createdById, createdByName, createdByRole, ...safe } = data;
   const entry = await prisma.entry.update({ where: { id }, data: safe });
+  // Re-sync the gallon purchase movement (replace-on-change) so an edit never leaves
+  // stock out of step; a non-gallon or income entry clears any prior movement.
+  await distribution.syncPurchaseMovement(entry.id, (entry.type === 'expense' ? entry.gallonQty : 0), actor || { id: entry.createdById });
   return shapeCreator(entry);
 }
 
 async function remove(id) {
   await getById(id);
+  await distribution.retractPurchaseMovement(id);   // pull back any gallon stock this entry added
   await prisma.entry.delete({ where: { id } });
 }
 

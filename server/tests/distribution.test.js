@@ -327,3 +327,66 @@ describe('Distribusi — per-fleet data separation (server-enforced)', () => {
     expect(sScopedB.body.data.customers).toBe(1);   // scoped Biru staff sees only its fleet
   });
 });
+
+describe('Distribusi — gallon stock (loan/exchange ledger)', () => {
+  let gm, cid;
+  const stock = async () => (await request(app).get('/api/v1/distribusi/gallon').set(auth(gm))).body.data.stock;
+  const held = async (id) => (await request(app).get(`/api/v1/distribusi/customers/${id}`).set(auth(gm))).body.data.gallonsHeld;
+  beforeAll(async () => {
+    gm = (await reg({ name: 'GM', username: 'gm_g', password: 'secret123', role: 'gm' })).token;
+    const c = await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'Gallon Cust', type: 'reguler', masterPrice: 10000 });
+    cid = c.body.data.id;
+  });
+
+  it('a delivery records movements: out 5 / in 3 → customer holds +2, depot −2 (from the ledger)', async () => {
+    const b = await stock();
+    const t = await request(app).post('/api/v1/distribusi/transactions').set(auth(gm)).send({ customerId: cid, qty: 5, method: 'lunas', txnDate: '2026-09-01', gallonOut: 5, gallonIn: 3 });
+    expect(t.status).toBe(201);
+    expect(t.body.data.gallonsHeld).toBe(2);
+    const g = await request(app).get('/api/v1/distribusi/gallon').set(auth(gm));
+    expect(g.body.data.stock.atCustomers).toBe(b.atCustomers + 2);
+    expect(g.body.data.stock.atDepot).toBe(b.atDepot - 2);
+    expect(g.body.data.balances.find((x) => x.customerId === cid).held).toBe(2);
+    expect(await held(cid)).toBe(2);   // customer detail exposes gallonsHeld
+    // ledger records both movements
+    const types = g.body.data.movements.filter((m) => m.customerId === cid).map((m) => m.type);
+    expect(types).toEqual(expect.arrayContaining(['delivery_out', 'return_in']));
+  });
+
+  it('gallonOut defaults to the qty sold when omitted', async () => {
+    const t = await request(app).post('/api/v1/distribusi/transactions').set(auth(gm)).send({ customerId: cid, qty: 4, method: 'lunas', txnDate: '2026-09-02' });
+    expect(t.body.data.gallonOut).toBe(4);
+    expect(t.body.data.gallonIn).toBe(0);
+    expect(await held(cid)).toBe(6);   // 2 + 4
+  });
+
+  it('buying gallons via a cash-flow expense adds to total + depot; deleting it pulls back', async () => {
+    const b = await stock();
+    const e = await request(app).post('/api/v1/entries').set(auth(gm)).send({ type: 'expense', amount: 500000, date: '2026-09-03', category: 'Pembelian Galon', gallonQty: 50 });
+    expect(e.status).toBe(201);
+    let g = await stock();
+    expect(g.totalOwned).toBe(b.totalOwned + 50);
+    expect(g.atDepot).toBe(b.atDepot + 50);
+    expect((await request(app).delete(`/api/v1/entries/${e.body.data.id}`).set(auth(gm))).status).toBe(204);
+    g = await stock();
+    expect(g.totalOwned).toBe(b.totalOwned);   // stock reverted — nothing dangling
+    expect(g.atDepot).toBe(b.atDepot);
+  });
+
+  it('editing a gallon-purchase entry re-syncs the movement (replace, not add)', async () => {
+    const b = await stock();
+    const e = await request(app).post('/api/v1/entries').set(auth(gm)).send({ type: 'expense', amount: 100000, date: '2026-09-04', gallonQty: 10 });
+    await request(app).patch(`/api/v1/entries/${e.body.data.id}`).set(auth(gm)).send({ gallonQty: 25 });
+    expect((await stock()).totalOwned).toBe(b.totalOwned + 25);   // 10 replaced by 25 (not 35)
+  });
+
+  it('a correction is signed + reason-required, adjusts the balance, and is audited (never overwrites)', async () => {
+    expect((await request(app).post('/api/v1/distribusi/gallon/correction').set(auth(gm)).send({ qty: 3, customerId: cid })).status).toBe(400);   // reason required
+    const before = await held(cid);
+    const r = await request(app).post('/api/v1/distribusi/gallon/correction').set(auth(gm)).send({ qty: -1, customerId: cid, reason: 'recount' });
+    expect(r.status).toBe(201);
+    expect(await held(cid)).toBe(before - 1);
+    const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(gm));
+    expect(audit.body.data.some((a) => /Koreksi stok galon/.test(a.title))).toBe(true);
+  });
+});

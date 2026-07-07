@@ -41,7 +41,12 @@ const txnSchema = z.object({
   method: z.enum(['lunas', 'bon', 'pelunasan']).optional().default('lunas'),
   note: z.string().max(300).optional().default(''),
   txnDate: DATE,
+  gallonOut: z.number().int().nonnegative().optional(),   // full gallons delivered (default = qty)
+  gallonIn: z.number().int().nonnegative().optional(),    // empty gallons returned
 });
+// Gallon stock: a correction is a SIGNED delta (may be negative); reason required.
+const gallonCorrectionSchema = z.object({ qty: z.number().int(), customerId: z.string().min(1).optional(), reason: z.string().trim().min(1).max(300) });
+const gallonQuery = z.object({ fleet: z.string().max(60).optional() });
 const correctionSchema = z.object({
   reason: z.string().trim().min(1, 'reason is required').max(1000),
   oldValue: z.any().optional(),
@@ -90,9 +95,14 @@ const addCorrection = asyncHandler(async (req, res) => {
 const listAudit = asyncHandler(async (req, res) => res.json(await service.listAudit(req.query, req.user)));
 const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.query.date, req.user, req.query.fleet) }));
 
+// ── gallon stock ──
+const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await service.gallonSummary(req.user, req.query.fleet) }));
+const gallonCorrection = asyncHandler(async (req, res) => { const m = await service.gallonCorrection(req.body, req.user); bcast('gallon', m.id); res.status(201).json({ data: m }); });
+
 module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
-  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, custListQuery, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams },
+  gallonSummary, gallonCorrection,
+  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams },
 };

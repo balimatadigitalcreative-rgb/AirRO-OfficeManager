@@ -89,6 +89,7 @@ model Entry {
   date        String // YYYY-MM-DD (business date, tz-agnostic)
   time        String    @default("00:00") // HH:mm
   status      String    @default("Completed") // Completed | Pending | Failed
+  gallonQty   Int       @default(0) // >0 on a "Pembelian Galon" expense → syncs a purchase movement
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt @default(now()) // bumped on every change (incremental sync)
 
@@ -512,6 +513,31 @@ model Correction {
 
   @@index([transactionId])
   @@index([batchId])
+}
+
+// Append-only gallon-stock ledger (loan/exchange model) — the SINGLE source of truth
+// for all stock numbers (customer balances + depot). Never mutated; a mistake is fixed
+// by appending a `correction`. A purchase movement mirrors a cash-flow expense entry and
+// is deactivated (active=false) if that entry is deleted, so stock never dangles.
+model GallonMovement {
+  id            String   @id @default(cuid())
+  type          String                          // purchase | delivery_out | return_in | correction
+  qty           Int                             // positive; a correction's qty is a signed delta
+  customerId    String?                         // set for delivery_out / return_in / customer correction
+  transactionId String?                         // the DistTransaction that produced a delivery/return
+  cashEntryId   String?                         // the cash-flow Entry a purchase mirrors
+  fleetId       String   @default("")           // fleet scope ('' = global/depot)
+  active        Boolean  @default(true)         // false when a linked cash purchase is removed
+  note          String   @default("")
+  actorId       String?
+  actorRole     String?
+  actorName     String?
+  createdAt     DateTime @default(now())
+
+  @@index([customerId])
+  @@index([cashEntryId])
+  @@index([type])
+  @@index([fleetId])
 }
 
 // Immutable, append-only audit trail for every distribusi write.

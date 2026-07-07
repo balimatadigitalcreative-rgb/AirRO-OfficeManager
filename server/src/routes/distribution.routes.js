@@ -40,5 +40,9 @@ router.post('/transactions/:id/corrections', requireCap('distribusi'), validate(
 router.get('/audit', requireCap('distribusiAudit'), validate({ query: ctrl.schemas.auditQuery }), ctrl.listAudit);
 router.get('/dashboard/summary', requireCap('distribusi'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.dashboardSummary);
 
+// ── Gallon stock (loan/exchange) — read = base module; correction = distribusiCustomers. ──
+router.get('/gallon', requireCap('distribusi'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
+router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);
+
 // NOTE: no DELETE routes anywhere — distribusi records are immutable/append-only.
 module.exports = router;

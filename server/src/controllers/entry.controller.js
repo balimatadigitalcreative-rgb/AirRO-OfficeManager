@@ -23,6 +23,7 @@ const createSchema = z.object({
   acct: z.string().max(60).nullable().optional(),
   proof: z.string().nullable().optional(),           // may be a base64 data URL → large
   meta: z.string().max(4000).nullable().optional(),  // JSON string of extra tags
+  gallonQty: z.number().int().nonnegative().max(1000000).optional(),   // "Pembelian Galon" quantity
   // Legacy relational fields — still accepted (the server-side account-balance
   // endpoint and existing API tests reference categoryKey/accountId). The frontend
   // cash book uses the plain category/acct above instead.
@@ -58,13 +59,13 @@ const getOne = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const entry = await entryService.create(req.body, req.user?.id);
+  const entry = await entryService.create(req.body, req.user);
   bus.broadcast({ entity: 'entry', action: 'create', id: entry.id });
   res.status(201).json({ data: entry });
 });
 
 const update = asyncHandler(async (req, res) => {
-  const entry = await entryService.update(req.params.id, req.body);
+  const entry = await entryService.update(req.params.id, req.body, req.user);
   bus.broadcast({ entity: 'entry', action: 'update', id: entry.id });
   res.json({ data: entry });
 });

@@ -222,6 +222,8 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
   // form
   const [fCust, setFCust] = uSx('');
   const [fQty, setFQty] = uSx(1);
+  const [fGalOut, setFGalOut] = uSx(1);   // galon keluar (default = qty; editable)
+  const [fGalIn, setFGalIn] = uSx(0);     // galon masuk (empties returned)
   const [fMethod, setFMethod] = uSx('lunas');
   const [fDate, setFDate] = uSx(today);
   const [fNote, setFNote] = uSx('');
@@ -248,11 +250,12 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
   const price = selCust ? selCust.masterPrice : 0;
   const total = price * Math.max(0, fQty || 0);
 
+  const setQty = (q) => { const n = Math.max(1, q | 0); setFQty(n); setFGalOut(n); };   // gallon out tracks qty until edited
   const commitTxn = () => {
     if (!selCust || saving) return;
     setSaving(true); setFErr('');
-    window.API.distribusi.transactions.create({ customerId: fCust, qty: Math.max(1, fQty | 0), method: fMethod, note: fNote.trim(), txnDate: staffMode ? today : (fDate || today) })
-      .then((r) => { setSaving(false); setConfirmOpen(false); setNewIds((p) => [r.data.id, ...p]); setView('list'); setFilter('all'); setFCust(''); setFQty(1); setFMethod('lunas'); setFNote(''); flash(trD('dist.txnSaved')); reload(); if (onChanged) onChanged(); })
+    window.API.distribusi.transactions.create({ customerId: fCust, qty: Math.max(1, fQty | 0), method: fMethod, note: fNote.trim(), txnDate: staffMode ? today : (fDate || today), gallonOut: Math.max(0, fGalOut | 0), gallonIn: Math.max(0, fGalIn | 0) })
+      .then((r) => { setSaving(false); setConfirmOpen(false); setNewIds((p) => [r.data.id, ...p]); setView('list'); setFilter('all'); setFCust(''); setFQty(1); setFGalOut(1); setFGalIn(0); setFMethod('lunas'); setFNote(''); flash(trD('dist.txnGalonSaved', { out: r.data.gallonOut, in: r.data.gallonIn, held: r.data.gallonsHeld })); reload(); if (onChanged) onChanged(); })
       .catch((e) => { setSaving(false); setConfirmOpen(false); setFErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
   const commitCorrect = () => {
@@ -286,9 +289,9 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
               <div style={{ flex: 1, minWidth: 150 }}>
                 <label className="fld-label">{trD('dist.fQty')}</label>
                 <div className="dist-stepper">
-                  <button type="button" onClick={() => setFQty((q) => Math.max(1, (q | 0) - 1))}>−</button>
+                  <button type="button" onClick={() => setQty(fQty - 1)}>−</button>
                   <span className="tnum">{fQty}</span>
-                  <button type="button" onClick={() => setFQty((q) => (q | 0) + 1)}>+</button>
+                  <button type="button" onClick={() => setQty(fQty + 1)}>+</button>
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 150 }}>
@@ -299,6 +302,19 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
                 {staffMode && <div className="dist-hint">{trD('dist.staffDateNote')}</div>}
               </div>
             </div>
+
+            {/* Gallon flow (loan/exchange): full gallons out (default = qty) + empties in */}
+            <div className="dist-form-row">
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <label className="fld-label">{trD('dist.fGalOut')}</label>
+                <input className="fld tnum" inputMode="numeric" value={fGalOut} onChange={(e) => setFGalOut(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+              </div>
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <label className="fld-label">{trD('dist.fGalIn')}</label>
+                <input className="fld tnum" inputMode="numeric" value={fGalIn} onChange={(e) => setFGalIn(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+              </div>
+            </div>
+            <div className="dist-hint" style={{ marginTop: 6 }}>{trD('dist.galFlowHint')}</div>
 
             <label className="fld-label">{trD('dist.fMethod')}</label>
             <div className="dist-method">
@@ -555,6 +571,7 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, f
             <div className="dist-cd-stats">
               <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
               <div><div className="dist-cd-slbl">{trD('dist.totalGalon')}</div><div className="dist-cd-sval">{numX(d.totalGalon)}</div></div>
+              <div><div className="dist-cd-slbl">{trD('dist.gallonsHeld')}</div><div className="dist-cd-sval" style={{ color: (d.gallonsHeld || 0) > 0 ? 'var(--warn)' : 'var(--text-mut)' }}>{numX(d.gallonsHeld || 0)}</div></div>
             </div>
             {canCustomers && <button type="button" className="btn btn-ghost dist-cd-edit" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
           </div>
@@ -1061,4 +1078,91 @@ function DistIntegration({ refreshKey, today }) {
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit };
+// ════════════════ STOK GALON (loan/exchange ledger) ════════════════
+// All numbers come from the append-only gallon ledger on the server: stock cards,
+// per-customer balances, and the movement ledger. Corrections (never overwrites) are
+// appended with a required reason and audited.
+const GM_META = {
+  purchase: { l: 'dist.gmPurchase', cls: 'purchase', sign: '+' },
+  delivery_out: { l: 'dist.gmOut', cls: 'out', sign: '−' },
+  return_in: { l: 'dist.gmIn', cls: 'in', sign: '+' },
+  correction: { l: 'dist.gmCorr', cls: 'corr', sign: '' },
+};
+function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, setDistFleet }) {
+  const [data, setData] = uSx(null);
+  const [toast, setToast] = uSx('');
+  const [corr, setCorr] = uSx(null);   // { customerId, name, qty, reason }
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  const ef = effFleet(fleetScope, distFleet);
+  const reload = () => window.API.distribusi.gallon(ef).then((r) => setData(r.data)).catch(() => setData({ stock: {}, balances: [], movements: [] }));
+  uEx(() => { if (window.API && window.API.distribusi) reload(); }, [refreshKey, ef]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+  const commitCorr = () => {
+    if (!corr || saving) return;
+    const qty = parseInt(String(corr.qty).replace(/[^0-9-]/g, ''), 10);
+    if (!qty || !corr.reason.trim()) { setErr(trD('dist.gmCorrErr')); return; }
+    setSaving(true); setErr('');
+    window.API.distribusi.gallonCorrection({ qty, customerId: corr.customerId || undefined, reason: corr.reason.trim() })
+      .then(() => { setSaving(false); setCorr(null); flash(trD('dist.gmCorrSaved')); reload(); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
+  if (!data) return <div className="dist-dash screen-enter">{bar}<div className="card"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div></div>;
+  const st = data.stock || {};
+  return (
+    <div className="dist-dash screen-enter">
+      {bar}
+      <div className="dist-gm-cards">
+        <div className="card stat-box"><span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX('IconDrop', { s: 18 })}</span><div className="tnum dist-gm-val">{numX(st.totalOwned || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmTotal')}</div></div>
+        <div className="card stat-box"><span className="icon-tile" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>{IcX('IconCustomers', { s: 18 })}</span><div className="tnum dist-gm-val" style={{ color: 'var(--warn)' }}>{numX(st.atCustomers || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmAtCust')}</div></div>
+        <div className="card stat-box"><span className="icon-tile" style={{ background: 'var(--pos-bg)', color: 'var(--green-800)' }}>{IcX('IconTruck', { s: 18 })}</span><div className="tnum dist-gm-val" style={{ color: 'var(--green-700)' }}>{numX(st.atDepot || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmAtDepot')}</div></div>
+      </div>
+      <div className="dist-cd-cols">
+        <div className="card dist-card dist-gm-balcard">
+          <div className="dist-card-head"><div className="sec-title">{trD('dist.gmBalances')}</div>{canCustomers && <button type="button" className="dist-link" onClick={() => { setErr(''); setCorr({ customerId: '', name: '', qty: '', reason: '' }); }}>{trD('dist.gmCorrectDepot')}</button>}</div>
+          {(data.balances || []).length === 0 && <div className="dist-empty">{trD('dist.gmNoBal')}</div>}
+          {(data.balances || []).map((b) => (
+            <div key={b.customerId} className="dist-gm-bal">
+              <span className="dist-txn-av sm">{initialsOf(b.name)}</span>
+              <div style={{ flex: 1, minWidth: 0 }}><div className="dist-txn-name">{b.name}</div>{b.armada ? <div className="dist-txn-sub">{b.armada}</div> : null}</div>
+              <b className="tnum dist-gm-held">{numX(b.held)}</b>
+              {canCustomers && <button type="button" className="icon-btn" title={trD('dist.gmCorrect')} onClick={() => { setErr(''); setCorr({ customerId: b.customerId, name: b.name, qty: '', reason: '' }); }}><IconPencil s={14} /></button>}
+            </div>
+          ))}
+        </div>
+        <div className="card dist-card" style={{ flex: 1, minWidth: 280 }}>
+          <div className="sec-title" style={{ marginBottom: 8 }}>{trD('dist.gmLedger')}</div>
+          {(data.movements || []).length === 0 && <div className="dist-empty">{trD('dist.gmNoMov')}</div>}
+          {(data.movements || []).map((m) => { const meta = GM_META[m.type] || GM_META.correction; const disp = meta.sign === '' ? ((m.qty > 0 ? '+' : '') + numX(m.qty)) : (meta.sign + numX(Math.abs(m.qty))); return (
+            <div key={m.id} className="dist-txn">
+              <span className={`dist-gm-mtag ${meta.cls}`}>{trD(meta.l)}</span>
+              <div className="dist-txn-mid"><div className="dist-txn-name">{m.customerName || trD('dist.gmDepot')}</div><div className="dist-txn-sub">{fmtDT(m.createdAt)}{m.actorName ? ' · ' + m.actorName : ''}{m.note && m.type === 'correction' ? ' · ' + m.note : ''}</div></div>
+              <b className={`tnum dist-gm-mqty ${meta.cls}`}>{disp}</b>
+            </div>
+          ); })}
+        </div>
+      </div>
+
+      {corr && (
+        <div className="modal-scrim" onClick={() => setCorr(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.gmCorrT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{corr.customerId ? corr.name : trD('dist.gmDepot')}</div></div><button className="jp-icon" onClick={() => setCorr(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.gmCorrInfo')}</span></div>
+              <label className="fld-label">{trD('dist.gmCorrQty')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <input className="fld tnum" value={corr.qty} inputMode="numeric" placeholder="cth. -1 atau 3" onChange={(e) => setCorr({ ...corr, qty: e.target.value.replace(/[^0-9-]/g, '') })} />
+              <label className="fld-label">{trD('dist.gmCorrReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 70, padding: 12, resize: 'vertical' }} value={corr.reason} placeholder={trD('dist.gmCorrReasonPh')} onChange={(e) => setCorr({ ...corr, reason: e.target.value })} />
+              {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCorr(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commitCorr}>{saving ? '…' : trD('dist.gmCorrSave')}</button></div>
+          </div>
+        </div>
+      )}
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon };
