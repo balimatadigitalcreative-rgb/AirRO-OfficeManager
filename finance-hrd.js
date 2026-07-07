@@ -11,8 +11,15 @@
   const DEPT_KEY = 'airro_departments_v1';
   const DEFAULT_DEPARTMENTS = ['Supervisor Distribution', 'Finance', 'Driver', 'Helper', 'Staff Storage'];
   const DEPARTMENTS = DEFAULT_DEPARTMENTS;   // back-compat alias (seed / fallback)
+  // Single source of truth: the HRD-managed department list now lives in the REST
+  // /settings key 'airro_departments' (the shell caches it in airro_departments_cache_v1).
+  // Read that live cache FIRST so every consumer — add/edit forms, filters, reports —
+  // sees the managed list; fall back to the legacy local key, then the seed defaults.
+  const DEPT_CACHE_KEY = 'airro_departments_cache_v1';
   function loadDepartments() {
-    try { const r = localStorage.getItem(DEPT_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) { const clean = a.filter((x) => typeof x === 'string' && x.trim()); if (clean.length) return clean; } } } catch (e) {}
+    for (const key of [DEPT_CACHE_KEY, DEPT_KEY]) {
+      try { const r = localStorage.getItem(key); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) { const clean = a.filter((x) => typeof x === 'string' && x.trim()); if (clean.length) return clean; } } } catch (e) {}
+    }
     return DEFAULT_DEPARTMENTS.slice();
   }
   function saveDepartments(list) { try { localStorage.setItem(DEPT_KEY, JSON.stringify((list || []).filter((x) => typeof x === 'string' && x.trim()))); } catch (e) {} }

@@ -792,7 +792,7 @@ function OrientationScreen({ staff, setStaff, rates, today, syncTick, canEdit, c
 }
 
 /* ---------- Employee Detail ---------- */
-function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, onAddCashbon, onUpdateCashbon, onDecideCashbon, onRemoveCashbon, canApprove, canReject, canCancelCap, canDeleteCap, currentUserId, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
+function EmployeeDetail({ staff: staffProp, rates, departments, monthKey, today, syncTick, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, onAddCashbon, onUpdateCashbon, onDecideCashbon, onRemoveCashbon, canApprove, canReject, canCancelCap, canDeleteCap, currentUserId, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
   const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
   const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
   // A remote sync (another user edited this employee's attendance) → re-read the
@@ -1049,7 +1049,7 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
             <div className="ed-acc"><span>{trC('co.noBpjsTk')}</span><b className="tnum">{g('noBpjsTk') || '—'}</b></div>
             <div className="ed-acc"><span>{trC('co.bank')}</span><b>{(g('bank') || '—')}{g('account') ? ` · ${g('account')}` : ''}</b></div>
           </div>
-          {identEdit && <PAYROLL.StaffModal staff={staff} rates={rates} variant="identity" onSave={saveIdentity} onClose={() => setIdentEdit(false)} />}
+          {identEdit && <PAYROLL.StaffModal staff={staff} rates={rates} departments={departments} variant="identity" onSave={saveIdentity} onClose={() => setIdentEdit(false)} />}
           {kbAdd && <CashbonModal staff={staff} onSave={saveCashbon} onClose={() => setKbAdd(false)} />}
           {offboard && <OffboardModal staff={staff} rates={rates} cashbons={cashbons} onSave={doOffboard} onClose={() => setOffboard(false)} />}
           {settle && <SettlementSlip staff={staff} rates={rates} cashbons={cashbons} onClose={() => setSettle(false)} />}

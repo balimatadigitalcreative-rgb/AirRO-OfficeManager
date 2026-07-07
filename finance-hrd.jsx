@@ -542,7 +542,7 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
 }
 
 /* ---------------- Main HRD screen ---------------- */
-function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit, cashbons, monthKey }) {
+function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit, cashbons, monthKey, departments }) {
   const [showRates, setShowRates] = uShr(false);
   const [editStaff, setEditStaff] = uShr(null);
   const [payslip, setPayslip] = uShr(null);
@@ -653,7 +653,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
         <IconShield s={15} /> {trH('hrd.disclaimer')}
       </div>
 
-      {editStaff && <StaffModal staff={editStaff} rates={rates} onSave={saveStaff} onClose={() => setEditStaff(null)} />}
+      {editStaff && <StaffModal staff={editStaff} rates={rates} departments={departments} onSave={saveStaff} onClose={() => setEditStaff(null)} />}
       {payslip && <PayslipModal staff={payslip} calc={HRD.compute(payslip, rates, period)} rates={rates} monLabel={monLabel} onClose={() => setPayslip(null)} />}
     </div>
   );
