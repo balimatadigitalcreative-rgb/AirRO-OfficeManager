@@ -41,7 +41,7 @@
   // deleted entry from a stale blob push — the exact data-loss this fixes).
   const SKIP = new Set(['airro_session_v1', 'airro_navopen_v1', 'airro_users_v1', 'airro_jwt_v1', 'airro_setoran_v2', 'airro_setoran_cache_v1', 'airro_cashbook_v4', 'airro_cashbook_cache_v1', 'airro_hrd_staff_v7', 'airro_staff_cache_v1', 'airro_cashbon_v1', 'airro_cashbon_cache_v1', 'airro_approvals_v4', 'airro_approvals_cache_v1', 'airro_calendar_v1', 'airro_calendar_cache_v1', 'airro_accounts_v2', 'airro_accounts_cache_v1', 'airro_cats_v1', 'airro_cats_cache_v1',
     'airro_settings_v1', 'airro_settings_cache_v1', 'airro_hrd_rates_v1', 'airro_hrd_rates_cache_v1', 'airro_hr_budget_v1', 'airro_hr_budget_cache_v1',
-    'airro_departments_v1', 'airro_departments_cache_v1', 'airro_projects_v3', 'airro_projects_cache_v1',
+    'airro_departments_v1', 'airro_departments_cache_v1', 'airro_positions_v1', 'airro_positions_cache_v1', 'airro_projects_v3', 'airro_projects_cache_v1',
     'airro_fleet_v1', 'airro_fleet_cache_v1', 'airro_transfers_v1', 'airro_transfers_cache_v1',
     'airro_attendance_v2', 'airro_oriatt_v1', 'airro_training_v1', 'airro_empacct_v2', 'airro_roles_cache_v1',
     // Per-browser PREFERENCES — never shared via /state (or one user's choice would

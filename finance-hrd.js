@@ -24,6 +24,20 @@
   }
   function saveDepartments(list) { try { localStorage.setItem(DEPT_KEY, JSON.stringify((list || []).filter((x) => typeof x === 'string' && x.trim()))); } catch (e) {} }
 
+  // Positions/jabatan — same pattern as departments: HRD-managed list, single source in
+  // the REST /settings key 'airro_positions' (cached in airro_positions_cache_v1). Read
+  // the live cache first so every consumer (add/edit form dropdown, Kelola Posisi) agrees.
+  const POS_KEY = 'airro_positions_v1';
+  const POS_CACHE_KEY = 'airro_positions_cache_v1';
+  const DEFAULT_POSITIONS = ['Supervisor', 'Sopir', 'Helper', 'Admin', 'Kasir'];
+  function loadPositions() {
+    for (const key of [POS_CACHE_KEY, POS_KEY]) {
+      try { const r = localStorage.getItem(key); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) { const clean = a.filter((x) => typeof x === 'string' && x.trim()); if (clean.length) return clean; } } } catch (e) {}
+    }
+    return DEFAULT_POSITIONS.slice();
+  }
+  function savePositions(list) { try { localStorage.setItem(POS_KEY, JSON.stringify((list || []).filter((x) => typeof x === 'string' && x.trim()))); } catch (e) {} }
+
   // JKK (work-accident) employer rate by occupational risk class
   const JKK = { 'Very Low': 0.0024, 'Low': 0.0054, 'Medium': 0.0089, 'High': 0.0127, 'Very High': 0.0174 };
 
@@ -480,6 +494,7 @@
   window.HRD = {
     RATES_KEY, STAFF_KEY, JKK, DEFAULT_RATES, DEFAULT_STAFF, DEPARTMENTS, DEFAULT_BUDGET,
     DEPT_KEY, DEFAULT_DEPARTMENTS, loadDepartments, saveDepartments,
+    POS_KEY, DEFAULT_POSITIONS, loadPositions, savePositions,
     loadRates, saveRates, resetRates, loadStaff, saveStaff, resetStaff, newStaffId, newStaff, newDedId,
     loadBudget, saveBudget, affordability, simulateHire, thr,
     compute, totals, RISK_LEVELS: Object.keys(JKK), RELIGIONS,

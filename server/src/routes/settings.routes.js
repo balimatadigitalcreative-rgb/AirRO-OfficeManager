@@ -16,6 +16,7 @@ const KEY_WRITE_CAPS = {
   airro_hrd_rates: ['settings', 'payroll', 'attendance'],
   airro_hr_budget: ['settings', 'payroll'],
   airro_departments: ['settings', 'payroll', 'employees'],
+  airro_positions: ['settings', 'payroll', 'employees'],
   airro_projects: ['settings', 'company', 'payroll'],
   airro_fleet: ['settings', 'setoran'],
   airro_attendance: ['attendance', 'payroll', 'employees', 'settings'],

@@ -193,17 +193,31 @@ function RatesPanel({ rates, onChange, onReset }) {
 // salary emphasized) and the Employee Directory / detail (variant="identity",
 // identity emphasized). Both write the SAME fields to one staff object so the
 // single hrdStaff array stays the only source of truth.
-function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
+function StaffModal({ staff, rates, onSave, onClose, variant, departments, positions, setPositions }) {
   const ident = variant === 'identity';
-  // Dept options come from the HRD-managed list; include the staff's current dept
-  // even if it was removed (legacy) so the dropdown never loses their value.
+  // Dept + Position options come from the HRD-managed lists; include the staff's current
+  // value even if it was removed (legacy) so the dropdown never loses it.
   const deptList = (() => { const base = (departments && departments.length ? departments : HRD.loadDepartments()).slice(); if (staff && staff.dept && base.indexOf(staff.dept) < 0) base.push(staff.dept); return base; })();
+  const posList = (() => { const base = (positions && positions.length ? positions : HRD.loadPositions()).slice(); if (staff && staff.pos && base.indexOf(staff.pos) < 0) base.push(staff.pos); return base; })();
+  const ADD_POS = '__add_pos__';
+  const posOptions = [...posList.map((p) => ({ value: p, label: p })), { value: ADD_POS, label: '+ ' + trH('pos.addNew') }];
   const [f, setF] = uShr(staff);
   const [showSalary, setShowSalary] = uShr(!ident);   // identity: salary collapsed
   const [showIdent, setShowIdent] = uShr(true);        // payroll: identity shown below salary
   const [nipBusy, setNipBusy] = uShr(false);
   uEhr(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const set = (patch) => setF({ ...f, ...patch });
+  // Position dropdown with an inline "+ add" — typing a new name saves it to the shared
+  // list (REST-synced via setPositions) and selects it immediately.
+  const onPosChange = (v) => {
+    if (v !== ADD_POS) { set({ pos: v }); return; }
+    const name = ((window.prompt && window.prompt(trH('pos.addPrompt'))) || '').trim();
+    if (!name) return;
+    const existing = posList.find((p) => p.toLowerCase() === name.toLowerCase());
+    if (existing) { set({ pos: existing }); return; }
+    if (setPositions) setPositions([...(positions && positions.length ? positions : HRD.loadPositions()), name]);
+    set({ pos: name });
+  };
   const today = (window.FIN && FIN.TODAY) || new Date().toLocaleDateString('en-CA');
   const dedList = (Array.isArray(f.deductions) ? f.deductions : []).filter((d) => !d.auto);
   const autoDed = (Array.isArray(f.deductions) ? f.deductions : []).filter((d) => d.auto);
@@ -254,7 +268,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments }) {
       <label className="ed-af"><span>{trH('hrd.religion')}</span><UI.Dropdown value={f.religion || 'Islam'} options={HRD.RELIGIONS} onChange={(v) => set({ religion: v })} /></label>
 
       <div className="ed-grp-t">{trH('co.grpContract')}</div>
-      <label className="ed-af"><span>{trH('hrd.position')}</span><input value={f.pos || ''} placeholder="e.g. Sopir" onChange={(e) => set({ pos: e.target.value })} /></label>
+      <label className="ed-af"><span>{trH('hrd.position')}</span><UI.Dropdown value={f.pos || ''} options={posOptions} placeholder={trH('pos.placeholder')} onChange={onPosChange} /></label>
       <label className="ed-af"><span>{trH('hrd.dept')}</span><UI.Dropdown value={f.dept || deptList[0]} options={deptList} onChange={(v) => set({ dept: v })} /></label>
       <label className="ed-af"><span>{trH('co.empStatus')}</span><UI.Dropdown value={f.status || 'Tetap'} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => set({ status: v })} /></label>
       <label className="ed-af"><span>{trH('co.noSurat')}</span><input value={f.noSurat || ''} onChange={(e) => set({ noSurat: e.target.value })} /></label>
@@ -542,7 +556,7 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
 }
 
 /* ---------------- Main HRD screen ---------------- */
-function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit, cashbons, monthKey, departments }) {
+function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit, cashbons, monthKey, departments, positions, setPositions }) {
   const [showRates, setShowRates] = uShr(false);
   const [editStaff, setEditStaff] = uShr(null);
   const [payslip, setPayslip] = uShr(null);
@@ -653,7 +667,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
         <IconShield s={15} /> {trH('hrd.disclaimer')}
       </div>
 
-      {editStaff && <StaffModal staff={editStaff} rates={rates} departments={departments} onSave={saveStaff} onClose={() => setEditStaff(null)} />}
+      {editStaff && <StaffModal staff={editStaff} rates={rates} departments={departments} positions={positions} setPositions={setPositions} onSave={saveStaff} onClose={() => setEditStaff(null)} />}
       {payslip && <PayslipModal staff={payslip} calc={HRD.compute(payslip, rates, period)} rates={rates} monLabel={monLabel} onClose={() => setPayslip(null)} />}
     </div>
   );
@@ -796,7 +810,113 @@ function DeptManager({ departments, setDepartments, staff, setStaff, canEdit }) 
   );
 }
 
-function HrSettings({ rates, setRates, departments, setDepartments, staff, setStaff, canEditDept }) {
+/* ---------------- Position manager (HRD-managed list, mirrors DeptManager) ---------------- */
+function PositionManager({ positions, setPositions, staff, setStaff, canEdit }) {
+  const list = positions && positions.length ? positions : HRD.loadPositions();
+  const [newName, setNewName] = uShr('');
+  const [editIdx, setEditIdx] = uShr(-1);
+  const [editVal, setEditVal] = uShr('');
+  const [reassign, setReassign] = uShr(null);   // { name, idx, target }
+  const usage = (name) => (staff || []).filter((s) => s.pos === name).length;
+  const dup = (name, exceptIdx) => list.some((d, i) => i !== exceptIdx && d.trim().toLowerCase() === name.trim().toLowerCase());
+
+  const add = () => {
+    const nn = newName.trim();
+    if (!nn) return;
+    if (dup(nn, -1)) { alert(trH('pos.dup')); return; }
+    setPositions([...list, nn]); setNewName('');
+  };
+  const startEdit = (i) => { setEditIdx(i); setEditVal(list[i]); };
+  const saveEdit = () => {
+    const nn = editVal.trim(); const oldName = list[editIdx];
+    if (!nn) { alert(trH('pos.emptyName')); return; }
+    if (dup(nn, editIdx)) { alert(trH('pos.dup')); return; }
+    setPositions(list.map((d, i) => (i === editIdx ? nn : d)));
+    // Rename cascade → keep every employee's position pointing at the renamed label.
+    if (oldName !== nn && setStaff) setStaff((prev) => prev.map((s) => (s.pos === oldName ? { ...s, pos: nn } : s)));
+    setEditIdx(-1); setEditVal('');
+  };
+  const move = (i, dir) => { const j = i + dir; if (j < 0 || j >= list.length) return; const next = list.slice(); const t = next[i]; next[i] = next[j]; next[j] = t; setPositions(next); };
+  const remove = (i) => {
+    const name = list[i]; const used = usage(name);
+    if (used > 0) {
+      const others = list.filter((_, k) => k !== i);
+      if (!others.length) { alert(trH('pos.cantDeleteLast')); return; }
+      setReassign({ name, idx: i, target: others[0] });
+      return;
+    }
+    if (!confirm(trH('pos.confirmDelete', { name }))) return;
+    setPositions(list.filter((_, k) => k !== i));
+  };
+  const doReassign = () => {
+    if (!reassign) return;
+    if (setStaff) setStaff((prev) => prev.map((s) => (s.pos === reassign.name ? { ...s, pos: reassign.target } : s)));
+    setPositions(list.filter((_, k) => k !== reassign.idx));
+    setReassign(null);
+  };
+
+  return (
+    <div className="card dept-mgr">
+      <div className="rate-group-title" style={{ marginBottom: 4 }}>{trH('pos.title')}</div>
+      <div className="rate-note" style={{ marginTop: 0, marginBottom: 12 }}>{trH('pos.intro')}</div>
+      <div className="dept-list">
+        {list.map((d, i) => (
+          <div className="dept-row" key={d + i}>
+            {canEdit && (
+              <span className="dept-move">
+                <button className="icon-btn" disabled={i === 0} title={trH('pos.moveUp')} onClick={() => move(i, -1)}><IconArrowUp s={14} /></button>
+                <button className="icon-btn" disabled={i === list.length - 1} title={trH('pos.moveDown')} onClick={() => move(i, 1)}><IconArrowDown s={14} /></button>
+              </span>
+            )}
+            {editIdx === i ? (
+              <input className="fld dept-edit" autoFocus value={editVal} onChange={(e) => setEditVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditIdx(-1); }} />
+            ) : (
+              <span className="dept-name">{d}</span>
+            )}
+            <span className="dept-count">{trH('pos.count', { n: usage(d) })}</span>
+            {canEdit && (editIdx === i ? (
+              <React.Fragment>
+                <button className="icon-btn ok" title={trH('pos.save')} onClick={saveEdit}><IconCheck s={15} /></button>
+                <button className="icon-btn" title={trH('common.cancel')} onClick={() => setEditIdx(-1)}><IconClose s={15} /></button>
+              </React.Fragment>
+            ) : (
+              <React.Fragment>
+                <button className="icon-btn" title={trH('pos.rename')} onClick={() => startEdit(i)}><IconPencil s={14} /></button>
+                <button className="icon-btn del" title={trH('pos.remove')} onClick={() => remove(i)}><IconClose s={15} /></button>
+              </React.Fragment>
+            ))}
+          </div>
+        ))}
+        {list.length === 0 && <div className="ori-empty">{trH('pos.none')}</div>}
+      </div>
+      {canEdit && (
+        <div className="dept-add">
+          <input className="fld" placeholder={trH('pos.addPh')} value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+          <button className="btn btn-primary btn-sm" onClick={add}><IconPlus s={15} />{trH('pos.add')}</button>
+        </div>
+      )}
+
+      {reassign && (
+        <div className="modal-scrim" onClick={() => setReassign(null)}>
+          <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 700 }}>{trH('pos.reassignTitle')}</div><button className="icon-btn" onClick={() => setReassign(null)}><IconClose s={18} /></button></div>
+            <div style={{ padding: '4px 2px 8px' }}>
+              <div style={{ fontSize: 13.5, color: 'var(--text-mut)', marginBottom: 12 }}>{trH('pos.reassignBody', { n: usage(reassign.name), name: reassign.name })}</div>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trH('pos.reassignTo')}</label>
+              <UI.Dropdown value={reassign.target} options={list.filter((d) => d !== reassign.name)} onChange={(v) => setReassign({ ...reassign, target: v })} />
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-ghost" onClick={() => setReassign(null)}>{trH('common.cancel')}</button>
+              <button className="btn btn-primary" onClick={doReassign}>{trH('pos.reassignBtn')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HrSettings({ rates, setRates, departments, setDepartments, positions, setPositions, staff, setStaff, canEditDept }) {
   return (
     <div className="screen-enter">
       <div className="settings-intro card">
@@ -812,8 +932,11 @@ function HrSettings({ rates, setRates, departments, setDepartments, staff, setSt
       <div style={{ marginTop: 16 }}>
         <DeptManager departments={departments} setDepartments={setDepartments} staff={staff} setStaff={setStaff} canEdit={canEditDept !== false} />
       </div>
+      <div style={{ marginTop: 16 }}>
+        <PositionManager positions={positions} setPositions={setPositions} staff={staff} setStaff={setStaff} canEdit={canEditDept !== false} />
+      </div>
     </div>
   );
 }
 
-window.PAYROLL = { PayrollScreen, HrSettings, StaffModal, DeptManager };
+window.PAYROLL = { PayrollScreen, HrSettings, StaffModal, DeptManager, PositionManager };

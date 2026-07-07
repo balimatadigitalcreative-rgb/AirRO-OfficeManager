@@ -113,6 +113,7 @@ function FApp() {
   // instant paint; GET /employees?includeInactive=true is authoritative.
   const [hrdStaff, setHrdStaff] = uSh(() => { try { const c = localStorage.getItem('airro_staff_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [departments, setDepartments] = uSh(() => HRD.loadDepartments());
+  const [positions, setPositions] = uSh(() => HRD.loadPositions());
   const [hrBudget, setHrBudget] = uSh(() => HRD.loadBudget());
   // Approvals now live in the REST per-record Approval table (like kasbon) — submit
   // + approve by different users no longer clobber each other. Seed from a
@@ -505,8 +506,9 @@ function FApp() {
   const ratesSlice = settingSlice('airro_hrd_rates', 'airro_hrd_rates_cache_v1', setHrdRates, !!(p.payroll || p.attendance || p.settings));
   const budgetSlice = settingSlice('airro_hr_budget', 'airro_hr_budget_cache_v1', setHrBudget, !!(p.payroll || p.settings));
   const deptSlice = settingSlice('airro_departments', 'airro_departments_cache_v1', setDepartments, !!(p.payroll || p.employees || p.settings));
+  const posSlice = settingSlice('airro_positions', 'airro_positions_cache_v1', setPositions, !!(p.payroll || p.employees || p.settings));
   const projSlice = settingSlice('airro_projects', 'airro_projects_cache_v1', setProjects, !!(p.company || p.payroll || p.settings));
-  const applySettings = settingsSlice.apply, applyRates = ratesSlice.apply, applyBudget = budgetSlice.apply, applyDepartments = deptSlice.apply, applyProjects = projSlice.apply;
+  const applySettings = settingsSlice.apply, applyRates = ratesSlice.apply, applyBudget = budgetSlice.apply, applyDepartments = deptSlice.apply, applyPositions = posSlice.apply, applyProjects = projSlice.apply;
   // Fleet is a plain string array → a /settings key (write cap: settings|setoran).
   const fleetSlice = settingSlice('airro_fleet', 'airro_fleet_cache_v1', setFleet, !!(p.setoran || p.settings));
   const applyFleet = fleetSlice.apply;
@@ -549,7 +551,7 @@ function FApp() {
       if (r && Array.isArray(r.data) && r.data.length) { FS.setRoles(r.data); setRolesState(r.data); try { localStorage.setItem('airro_roles_cache_v1', JSON.stringify(r.data)); } catch (e) {} }
     }).catch(() => {});
   };
-  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); reloadAtt(); reloadOriAtt(); reloadRoles(); };
+  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); posSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); reloadAtt(); reloadOriAtt(); reloadRoles(); };
   uEh(() => {
     if (!(window.API && window.API.accounts)) return;
     reloadConfig();
@@ -1072,11 +1074,11 @@ function FApp() {
             <COMPANY.HRReport staff={hrdStaff} rates={hrdRates} departments={departments} budget={hrBudget} monthKey={monthKey} today={FIN.TODAY} approvals={approvals} gran={gran} anchor={anchor} setAnchor={setAnchor} range={range} periodLbl={periodLbl} setGran={setGran} />
           )}
 
-          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={applyRates} departments={departments} setDepartments={applyDepartments} staff={hrdStaff} setStaff={applyStaff} canEditDept={p.payroll} />
+          {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={applyRates} departments={departments} setDepartments={applyDepartments} positions={positions} setPositions={applyPositions} staff={hrdStaff} setStaff={applyStaff} canEditDept={p.payroll} />
           )}
 
           {screen === 'employees' && p.employees && (
-            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.employees} seeMoney={p.seeMoney} setStaff={applyStaff} />
+            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.employees} seeMoney={p.seeMoney} setStaff={applyStaff} />
           )}
 
           {screen === 'hrcalendar' && p.employees && (
@@ -1104,7 +1106,7 @@ function FApp() {
           )}
 
           {screen === 'payroll' && p.payroll && (
-            <PAYROLL.PayrollScreen rates={hrdRates} setRates={applyRates} staff={hrdStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} departments={departments} />
+            <PAYROLL.PayrollScreen rates={hrdRates} setRates={applyRates} staff={hrdStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} departments={departments} positions={positions} setPositions={applyPositions} />
           )}
 
           {screen === 'settings' && p.settings && (
@@ -1153,7 +1155,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} departments={departments} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );
