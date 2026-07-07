@@ -361,9 +361,16 @@ function FApp() {
   const onDecideCashbon = (id, status, reason, disbursedDate) => {
     setCashbons((prev) => prev.map((c) => (c.id === id ? { ...c, status, ...(status === 'approved' ? { disbursedDate: disbursedDate || c.disbursedDate || FIN.TODAY } : {}), ...(status === 'rejected' ? { rejectReason: reason || '' } : {}) } : c)));   // optimistic
     const call = status === 'approved' ? window.API.cashbon.approve(id, { disbursedDate: disbursedDate || FIN.TODAY })
-      : status === 'cancelled' ? window.API.cashbon.update(id, { status: 'cancelled' })
+      : status === 'cancelled' ? window.API.cashbon.cancel(id)   // submitter-of-pending OR approver; server enforces
         : window.API.cashbon.reject(id, { reason: reason || '' });
     call.then(reloadCashbons).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadCashbons(); });
+  };
+  // Delete a kasbon (kasbonApprove only). The server refuses to delete an approved/
+  // paid kasbon (must be cancelled first) → surface that as a clear message.
+  const onRemoveCashbon = (id) => {
+    setCashbons((prev) => (prev || []).filter((c) => c.id !== id));   // optimistic
+    if (window.API && window.API.cashbon) window.API.cashbon.remove(id).then(reloadCashbons)
+      .catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : (e && e.status === 400 ? 'kb.delApprovedErr' : 'st.syncErr'))); reloadCashbons(); });
   };
   const onUpdateCashbon = (id, patch) => {
     setCashbons((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));   // optimistic
@@ -1077,7 +1084,7 @@ function FApp() {
           )}
 
           {screen === 'kasbon' && p.kasbon && (
-            <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onDecideCashbon={onDecideCashbon} canApprove={p.kasbonApprove} today={FIN.TODAY} userName={user.name} />
+            <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} currentUserId={user.id} today={FIN.TODAY} userName={user.name} />
           )}
 
           {screen === 'approvals' && p.approvals && (
@@ -1142,7 +1149,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );

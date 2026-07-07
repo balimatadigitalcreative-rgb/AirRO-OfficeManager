@@ -16,7 +16,11 @@ router.get('/', requireCap('kasbon'), validate({ query: ctrl.schemas.listQuery }
 router.get('/:id', requireCap('kasbon'), validate({ params: ctrl.schemas.idParams }), ctrl.getOne);
 router.post('/', requireCap('kasbon'), validate({ body: ctrl.schemas.createSchema }), ctrl.create);
 
-// ── Approving / rejecting / editing → 'kasbonApprove' capability ──
+// ── Cancel → the submitter (own, still pending) OR a kasbonApprove holder. No
+// requireCap here: the controller/service authorises by ownership+status vs capability. ──
+router.post('/:id/cancel', validate({ params: ctrl.schemas.idParams }), ctrl.cancel);
+
+// ── Approving / rejecting / editing / deleting → 'kasbonApprove' capability ──
 router.post('/:id/approve', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.approveSchema }), ctrl.approve);
 router.post('/:id/reject', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.rejectSchema }), ctrl.reject);
 router.patch('/:id', requireCap('kasbonApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.updateSchema }), ctrl.update);

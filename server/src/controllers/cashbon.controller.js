@@ -3,6 +3,7 @@ const { z } = require('zod');
 const service = require('../services/cashbon.service');
 const asyncHandler = require('../utils/asyncHandler');
 const bus = require('../lib/eventbus');
+const { resolvePerms } = require('../config/permissions');
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
 // pending → approved/rejected is the approval flow; active/paid/cancelled kept for
@@ -38,5 +39,12 @@ const update = asyncHandler(async (req, res) => { const c = await service.update
 const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bcast('delete', req.params.id); res.status(204).send(); });
 const approve = asyncHandler(async (req, res) => { const c = await service.decide(req.params.id, 'approved', req.user, null, req.body && req.body.disbursedDate); bcast('update', c.id); res.json({ data: c }); });
 const reject = asyncHandler(async (req, res) => { const c = await service.decide(req.params.id, 'rejected', req.user, req.body.reason); bcast('update', c.id); res.json({ data: c }); });
+// Cancel — the submitter (own, still pending) or a kasbonApprove holder (any status).
+const cancel = asyncHandler(async (req, res) => {
+  const perms = resolvePerms(req.user.role, req.user.permissions);
+  const c = await service.cancel(req.params.id, req.user, !!perms.kasbonApprove);
+  bcast('update', c.id);
+  res.json({ data: c });
+});
 
-module.exports = { list, getOne, create, update, remove, preview, request, approve, reject, schemas: { createSchema, updateSchema, listQuery, idParams, previewSchema, requestSchema, approveSchema, rejectSchema } };
+module.exports = { list, getOne, create, update, remove, preview, request, approve, reject, cancel, schemas: { createSchema, updateSchema, listQuery, idParams, previewSchema, requestSchema, approveSchema, rejectSchema } };

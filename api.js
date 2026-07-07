@@ -92,6 +92,7 @@
       // Approve / reject a pending kasbon (requires kasbonApprove).
       approve: (id, data) => req('POST', '/cashbon/' + id + '/approve', data || {}),
       reject: (id, data) => req('POST', '/cashbon/' + id + '/reject', data),
+      cancel: (id) => req('POST', '/cashbon/' + id + '/cancel', {}),
     }),
     users: collection('users'),
     roles: collection('roles'),

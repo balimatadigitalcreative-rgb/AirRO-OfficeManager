@@ -139,9 +139,33 @@ async function update(id, body) {
   return toClient(r);
 }
 
+// Cancel a kasbon → status 'cancelled'. Its computed payroll deduction disappears
+// automatically (withCashbon only counts approved). Allowed for a kasbonApprove holder
+// (ANY status — e.g. undo an approved kasbon) OR the ORIGINAL submitter while the
+// kasbon is still 'pending'. Records who/when in the trail.
+async function cancel(id, user, isApprover) {
+  const existing = await prisma.cashbon.findUnique({ where: { id } });
+  if (!existing) throw ApiError.notFound('Cashbon not found');
+  const isOwner = !!(user && existing.createdById && user.id === existing.createdById);
+  if (!(isApprover || (isOwner && existing.status === 'pending'))) {
+    throw ApiError.forbidden('Hanya pengaju (saat masih pending) atau pemegang kasbonApprove yang bisa membatalkan kasbon ini.');
+  }
+  let trail = {}; try { trail = existing.data ? JSON.parse(existing.data) : {}; } catch (e) {}
+  trail.cancelledBy = (user && (user.username || user.id)) || '';
+  trail.cancelledAt = Date.now();
+  const r = await prisma.cashbon.update({ where: { id }, data: { status: 'cancelled', data: JSON.stringify(trail) } });
+  return toClient(r);
+}
+
+// Delete (permanent) — only for kasbon that never (or no longer) deducts: pending /
+// rejected / cancelled. An approved/active/paid kasbon must be CANCELLED first (which
+// removes its payroll deduction) before it can be deleted — no dangling deduction.
 async function remove(id) {
-  await getById(id);
+  const c = await getById(id);
+  if (c.status === 'approved' || c.status === 'active' || c.status === 'paid') {
+    throw ApiError.badRequest('Kasbon yang sudah disetujui/memotong gaji tidak bisa dihapus langsung — batalkan dulu.');
+  }
   await prisma.cashbon.delete({ where: { id } });
 }
 
-module.exports = { list, getById, create, update, remove, preview, request, decide, toClient };
+module.exports = { list, getById, create, update, remove, cancel, preview, request, decide, toClient };
