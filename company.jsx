@@ -436,7 +436,7 @@ function KasbonPicker({ staff, onPick, onClose }) {
   );
 }
 
-function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, onRemoveCashbon, canApprove, currentUserId, today, userName }) {
+function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, onRemoveCashbon, canRequest, canApprove, canReject, canCancelCap, canDeleteCap, currentUserId, today, userName }) {
   const [pick, setPick] = uSc(false);        // employee-picker open
   const [reqStaff, setReqStaff] = uSc(null); // staff chosen → CashbonModal
   const [appr, setAppr] = uSc(null);         // kasbon chosen → ApproveKasbonModal
@@ -450,22 +450,30 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, onRemove
   // The kasbon is already persisted by API.cashbon.request → just merge + reload.
   const save = (cb) => { if (onAddCashbon) onAddCashbon(cb); setReqStaff(null); setPick(false); };
   const decide = (id, status) => {
-    // Approve/reject need kasbonApprove; cancel is allowed for the submitter too (the
-    // button is only shown to them, and the server re-checks ownership + status).
-    if ((status === 'approved' || status === 'rejected') && !canApprove) return;
+    // Each action is gated on its own capability (server re-checks). Cancel is also
+    // allowed to the submitter of a still-pending kasbon — that button is only shown
+    // to them, and the server authorises by ownership + status.
+    if (status === 'approved' && !canApprove) return;
+    if (status === 'rejected' && !canReject) return;
     let reason = '';
     if (status === 'rejected') { const r = prompt(trC('kb.rejectReason')); if (r == null) return; reason = r; }
     if (status === 'cancelled' && !confirm(trC('kb.cancelConfirm'))) return;
     if (onDecideCashbon) onDecideCashbon(id, status, reason);
   };
-  const removeKb = (c) => { if (onRemoveCashbon && confirm(trC('kb.delConfirm'))) onRemoveCashbon(c.id); };
+  // Delete: a firmer confirm when the kasbon is currently deducting salary — deleting
+  // it also removes that deduction (computed live from the records).
+  const removeKb = (c) => {
+    const st = c.status || 'pending';
+    const deducts = st === 'approved' || st === 'active' || st === 'paid';
+    if (onRemoveCashbon && confirm(trC(deducts ? 'kb.delDeductConfirm' : 'kb.delConfirm'))) onRemoveCashbon(c.id);
+  };
   const owns = (c) => currentUserId && (c.createdById === currentUserId);
   const pending = rows.filter((c) => (c.status || 'pending') === 'pending').length;
   return (
     <div className="screen-enter">
       <div className="settings-intro card">
         <div><div style={{ fontSize: 16, fontWeight: 700 }}>{trC('nav.kasbon')}</div><div style={{ fontSize: 13, color: 'var(--text-mut)', marginTop: 3 }}>{trC('kb.intro')}</div></div>
-        <button className="btn btn-primary" onClick={() => setPick(true)}><IconPlus s={16} />{trC('kb.request')}</button>
+        {canRequest && <button className="btn btn-primary" onClick={() => setPick(true)}><IconPlus s={16} />{trC('kb.request')}</button>}
       </div>
       <div className="kb-toolbar">
         <UI.Dropdown compact value={fEmp} options={[{ value: 'all', label: trC('kb.allEmp') }, ...active.map((s) => ({ value: s.id, label: s.name }))]} onChange={setFEmp} />
@@ -500,19 +508,23 @@ function KasbonScreen({ staff, cashbons, onAddCashbon, onDecideCashbon, onRemove
               </div>
               {(() => {
                 const st = c.status || 'pending';
-                // Cancel: submitter (own, still pending) OR an approver (any live status,
-                // e.g. undoing an approved kasbon → its deduction disappears).
-                const canCancel = st === 'pending' ? (canApprove || owns(c)) : ((st === 'approved' || st === 'active') && canApprove);
-                // Delete: approver only, and only for kasbon that isn't deducting.
-                const canDelete = !!(onRemoveCashbon && canApprove && (st === 'pending' || st === 'rejected' || st === 'cancelled'));
-                const showApprove = canApprove && st === 'pending';
-                if (!showApprove && !canCancel && !canDelete) return null;
+                // Per-action visibility — each checked against its OWN capability, so a
+                // user only sees the buttons they can actually run (server re-enforces).
+                const showApprove = !!(canApprove && st === 'pending');
+                const showReject = !!(canReject && st === 'pending');
+                // Cancel: submitter of a still-pending kasbon OR a kasbonCancel holder on
+                // a live kasbon (pending/approved/active → its deduction then disappears).
+                const showCancel = st === 'pending' ? (canCancelCap || owns(c)) : ((st === 'approved' || st === 'active') && canCancelCap);
+                // Delete: a kasbonDelete holder, in ANY status now (incl. paid/approved) —
+                // deleting a deducting kasbon also removes its deduction.
+                const showDelete = !!(onRemoveCashbon && canDeleteCap);
+                if (!showApprove && !showReject && !showCancel && !showDelete) return null;
                 return (
                   <div className="kb-actions">
                     {showApprove && <button className="btn btn-lime btn-sm" onClick={() => setAppr(c)}><IconCheck s={15} />{trC('kb.approve')}</button>}
-                    {showApprove && <button className="btn btn-ghost btn-sm kb-btn-danger" onClick={() => decide(c.id, 'rejected')}><IconClose s={15} />{trC('kb.reject')}</button>}
-                    {canCancel && <button className="btn btn-ghost btn-sm" onClick={() => decide(c.id, 'cancelled')}><IconClose s={15} />{trC('kb.cancel')}</button>}
-                    {canDelete && <button className="btn btn-ghost btn-sm kb-btn-danger" onClick={() => removeKb(c)}><IconBackspace s={15} />{trC('kb.delete')}</button>}
+                    {showReject && <button className="btn btn-ghost btn-sm kb-btn-danger" onClick={() => decide(c.id, 'rejected')}><IconClose s={15} />{trC('kb.reject')}</button>}
+                    {showCancel && <button className="btn btn-ghost btn-sm" onClick={() => decide(c.id, 'cancelled')}><IconClose s={15} />{trC('kb.cancel')}</button>}
+                    {showDelete && <button className="btn btn-ghost btn-sm kb-btn-danger" onClick={() => removeKb(c)}><IconBackspace s={15} />{trC('kb.delete')}</button>}
                   </div>
                 );
               })()}
@@ -780,7 +792,7 @@ function OrientationScreen({ staff, setStaff, rates, today, syncTick, canEdit, c
 }
 
 /* ---------- Employee Detail ---------- */
-function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, onAddCashbon, onUpdateCashbon, onDecideCashbon, onRemoveCashbon, canApprove, currentUserId, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
+function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, seeMoney, canEdit, canEditAtt, onEdit, onClose, onSyncDeduct, onSaveStaff, cashbons, onAddCashbon, onUpdateCashbon, onDecideCashbon, onRemoveCashbon, canApprove, canReject, canCancelCap, canDeleteCap, currentUserId, onGraduate, onFailOrientation, onPayOrientation, orientationPaid, canAddEntry }) {
   const [staff, setStaffLocal] = uSc(staffProp);   // local copy so identity edits reflect immediately
   const [att, setAtt] = uSc(() => CO.attendance(staffProp, monthKey, today));
   // A remote sync (another user edited this employee's attendance) → re-read the
@@ -965,8 +977,8 @@ function EmployeeDetail({ staff: staffProp, rates, monthKey, today, syncTick, se
                       </div>
                       {(() => {
                         const st = cb.status || 'pending';
-                        // Cancel a PENDING kasbon (submitter or approver) or an approved one (approver).
-                        const canCancel = st === 'pending' ? (canApprove || ownsKb(cb)) : (st === 'approved' && canApprove);
+                        // Cancel a PENDING kasbon (submitter or kasbonCancel holder) or an approved one (kasbonCancel).
+                        const canCancel = st === 'pending' ? (canCancelCap || ownsKb(cb)) : (st === 'approved' && canCancelCap);
                         return canCancel ? <button className="icon-btn del" title={trC('kb.cancel')} onClick={() => cancelCashbon(cb.id)}><IconClose s={15} /></button> : null;
                       })()}
                     </div>

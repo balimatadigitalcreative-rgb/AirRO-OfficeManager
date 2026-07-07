@@ -82,11 +82,13 @@ async function seedBuiltinRoles() {
         // Preserve admin edits, but ADD any NEW seed capabilities the stored role is
         // missing (e.g. the distribusi caps on an already-seeded DB). Existing values
         // win; only absent keys are filled — so an admin's on/off choices are kept.
+        // Then materialize the split kasbon caps from the (merged) legacy value so the
+        // Role editor shows them as explicit checkboxes, consistent with old behaviour.
         const cur = parsePerms(existing.permissions) || {};
-        const merged = { ...seed, ...cur };
+        const merged = deriveKasbonCaps({ ...seed, ...cur });
         await prisma.role.update({ where: { id }, data: { builtin: true, permissions: JSON.stringify(merged) } });
       } else {
-        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(seed), builtin: true, sortOrder: i } });
+        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveKasbonCaps(seed)), builtin: true, sortOrder: i } });
       }
     }
   } catch (e) { /* table may not exist yet on very first migrate; ignored */ }
@@ -113,11 +115,33 @@ function parsePerms(str) {
   }
 }
 
-// Effective capability map for a user: their per-user override if set, otherwise the
-// role's current defaults (from the live Role table, falling back to the seed).
-function resolvePerms(role, permsStrOrObj) {
-  const override = parsePerms(permsStrOrObj);
-  return override || rolePerms(role) || ROLE_PERMS.finance;
+// Kasbon capabilities used to be TWO coarse caps: `kasbon` (request) and
+// `kasbonApprove` (approve + reject + update + delete lumped together). They are now
+// split PER-ACTION: kasbonRequest / kasbonApprove / kasbonReject / kasbonCancel /
+// kasbonDelete. For backward compatibility every ABSENT granular cap is derived from
+// the legacy pair, so old role rows, per-user overrides, and already-issued tokens all
+// keep working: whoever had `kasbonApprove` can still approve/reject/cancel/delete,
+// whoever had `kasbon` can still request. Explicit granular values are never
+// overridden — an admin can turn any single action off. `kasbon` is kept as a live
+// alias of `kasbonRequest` so legacy checks (nav gating, etc.) stay correct.
+function deriveKasbonCaps(perms) {
+  if (!perms || typeof perms !== 'object') return perms;
+  const p = { ...perms };
+  const legacyApprove = !!p.kasbonApprove;
+  if (p.kasbonRequest === undefined) p.kasbonRequest = !!p.kasbon;
+  if (p.kasbonReject === undefined) p.kasbonReject = legacyApprove;
+  if (p.kasbonCancel === undefined) p.kasbonCancel = legacyApprove;
+  if (p.kasbonDelete === undefined) p.kasbonDelete = legacyApprove;
+  p.kasbon = !!p.kasbonRequest;   // legacy alias, always mirrors the request cap
+  return p;
 }
 
-module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, refreshRoleCache, seedBuiltinRoles };
+// Effective capability map for a user: their per-user override if set, otherwise the
+// role's current defaults (from the live Role table, falling back to the seed). The
+// kasbon granular caps are derived for backward compatibility.
+function resolvePerms(role, permsStrOrObj) {
+  const override = parsePerms(permsStrOrObj);
+  return deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance);
+}
+
+module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, refreshRoleCache, seedBuiltinRoles };

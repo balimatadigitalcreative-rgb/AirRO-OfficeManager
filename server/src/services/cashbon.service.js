@@ -140,15 +140,15 @@ async function update(id, body) {
 }
 
 // Cancel a kasbon → status 'cancelled'. Its computed payroll deduction disappears
-// automatically (withCashbon only counts approved). Allowed for a kasbonApprove holder
+// automatically (withCashbon only counts approved). Allowed for a kasbonCancel holder
 // (ANY status — e.g. undo an approved kasbon) OR the ORIGINAL submitter while the
 // kasbon is still 'pending'. Records who/when in the trail.
-async function cancel(id, user, isApprover) {
+async function cancel(id, user, canCancel) {
   const existing = await prisma.cashbon.findUnique({ where: { id } });
   if (!existing) throw ApiError.notFound('Cashbon not found');
   const isOwner = !!(user && existing.createdById && user.id === existing.createdById);
-  if (!(isApprover || (isOwner && existing.status === 'pending'))) {
-    throw ApiError.forbidden('Hanya pengaju (saat masih pending) atau pemegang kasbonApprove yang bisa membatalkan kasbon ini.');
+  if (!(canCancel || (isOwner && existing.status === 'pending'))) {
+    throw ApiError.forbidden('Hanya pengaju (saat masih pending) atau pemegang kasbonCancel yang bisa membatalkan kasbon ini.');
   }
   let trail = {}; try { trail = existing.data ? JSON.parse(existing.data) : {}; } catch (e) {}
   trail.cancelledBy = (user && (user.username || user.id)) || '';
@@ -157,14 +157,19 @@ async function cancel(id, user, isApprover) {
   return toClient(r);
 }
 
-// Delete (permanent) — only for kasbon that never (or no longer) deducts: pending /
-// rejected / cancelled. An approved/active/paid kasbon must be CANCELLED first (which
-// removes its payroll deduction) before it can be deleted — no dangling deduction.
-async function remove(id) {
-  const c = await getById(id);
-  if (c.status === 'approved' || c.status === 'active' || c.status === 'paid') {
-    throw ApiError.badRequest('Kasbon yang sudah disetujui/memotong gaji tidak bisa dihapus langsung — batalkan dulu.');
-  }
+// Delete (permanent) — allowed in ANY status for a 'kasbonDelete' holder (route-gated),
+// including 'paid'/'approved'. The payroll deduction is COMPUTED live from these rows
+// (withCashbon counts approved/active) — so deleting a deducting kasbon also removes
+// its deduction on the next payroll recompute; nothing dangles. The row is gone after
+// this, so we write an audit line (who/when/what) BEFORE deleting — kasbon has no
+// dedicated audit table, this server log is the permanent record.
+async function remove(id, user) {
+  const c = await prisma.cashbon.findUnique({ where: { id } });
+  if (!c) throw ApiError.notFound('Cashbon not found');
+  const who = (user && (user.username || user.id)) || 'unknown';
+  const deducted = c.status === 'approved' || c.status === 'active' || c.status === 'paid';
+  // eslint-disable-next-line no-console
+  console.log(`[kasbon][audit] delete id=${id} status=${c.status} emp=${c.employeeId} amount=${c.amount} deducted=${deducted} by=${who} at=${new Date().toISOString()}`);
   await prisma.cashbon.delete({ where: { id } });
 }
 

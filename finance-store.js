@@ -152,6 +152,21 @@
   const roleName = (role) => (roleMap()[role] && roleMap()[role].label) || role;
   const roleColor = (role) => (roleMap()[role] && roleMap()[role].color) || ROLE_COLORS[role] || '#22A7A1';
   const perms = (role) => (roleMap()[role] || roleMap().finance || ROLES.finance).perms;
+  // Kasbon caps were split per-action (request/approve/reject/cancel/delete). Mirror
+  // the server's deriveKasbonCaps: fill any ABSENT granular cap from the legacy pair so
+  // old roles/overrides keep working, keep `kasbon` as the request alias, and add a
+  // `kasbonView` convenience (holds ANY kasbon cap → may open/list the Kasbon screen).
+  function normKasbon(perms) {
+    const p = { ...(perms || {}) };
+    const legacyApprove = !!p.kasbonApprove;
+    if (p.kasbonRequest === undefined) p.kasbonRequest = !!p.kasbon;
+    if (p.kasbonReject === undefined) p.kasbonReject = legacyApprove;
+    if (p.kasbonCancel === undefined) p.kasbonCancel = legacyApprove;
+    if (p.kasbonDelete === undefined) p.kasbonDelete = legacyApprove;
+    p.kasbon = !!p.kasbonRequest;
+    p.kasbonView = !!(p.kasbon || p.kasbonApprove || p.kasbonReject || p.kasbonCancel || p.kasbonDelete);
+    return p;
+  }
   const landingScreen = (role) => { const p = perms(role); return p.setoranOnly ? 'setoran' : p.company ? 'company' : p.cashflow ? 'overview' : p.employees ? 'employees' : p.payroll ? 'payroll' : p.kasbon ? 'kasbon' : 'overview'; };
   const initials = (name) => name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   function loadSession() { try { const id = localStorage.getItem(SESSION_KEY); return loadUsers().find((u) => u.id === id) || null; } catch (e) { return null; } }
@@ -210,7 +225,7 @@
 
   window.FS = { KEY, INCOME_CATS, EXPENSE_CATS, CAT, methods, parties, load, save, reset, byNewest, seed,
     CAT_KEY, ICON_CHOICES, loadCats, saveCats, resetCats, buildMap, catInfo, newCatKey,
-    SESSION_KEY, USERS, ROLES, ROLE_COLORS, perms, setRoles, roleList, roleName, roleColor, landingScreen, initials, loadSession, setSession,
+    SESSION_KEY, USERS, ROLES, ROLE_COLORS, perms, normKasbon, setRoles, roleList, roleName, roleColor, landingScreen, initials, loadSession, setSession,
     USERS_KEY, SEED_USERS, loadUsers, saveUsers, newUserId,
     SETTINGS_KEY, DEFAULT_SETTINGS, loadSettings, saveSettings,
     ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance,

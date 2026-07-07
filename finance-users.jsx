@@ -26,8 +26,11 @@ const CAP_GROUPS = [
     ['empDetail', 'Detail Karyawan'],
     ['attendance', 'Absensi'],
     ['payroll', 'Penggajian'],
-    ['kasbon', 'Kasbon (ajukan)'],
-    ['kasbonApprove', 'Setujui Kasbon'],
+    ['kasbonRequest', 'Kasbon — Ajukan'],
+    ['kasbonApprove', 'Kasbon — Setujui'],
+    ['kasbonReject', 'Kasbon — Tolak'],
+    ['kasbonCancel', 'Kasbon — Batalkan'],
+    ['kasbonDelete', 'Kasbon — Hapus'],
   ] },
   { title: 'Perusahaan & Admin', caps: [
     ['company', 'Dashboard Perusahaan'],
@@ -51,8 +54,10 @@ function UserModal({ row, users, onSave, onClose, busy }) {
   const pinOk = f._new ? /^\d{4,}$/.test(f.pin || '') : (!f.pin || /^\d{4,}$/.test(f.pin));
   const valid = f.name.trim() && /^[a-zA-Z0-9._-]{3,}$/.test((f.user || '').trim()) && pinOk && !dupUser;
 
-  // Effective permissions: the per-user override if set, else the role defaults.
-  const eff = f.permissions || FS.perms(f.role);
+  // Effective permissions: the per-user override if set, else the role defaults. The
+  // split kasbon caps are derived from the legacy pair for display (kasbonView is a
+  // computed flag — stripped so it's never persisted as a togglable cap).
+  const { kasbonView: _kv, ...eff } = FS.normKasbon(f.permissions || FS.perms(f.role));
   const custom = !!f.permissions;
   const toggleCap = (key) => set({ permissions: { ...eff, [key]: !eff[key] } });
   const changeRole = (r) => set({ role: r, color: FS.roleColor(r) || f.color, permissions: null }); // reset to new role defaults
@@ -225,7 +230,7 @@ function RoleModal({ row, onSave, onClose, busy, err }) {
   const [f, setF] = uSu(row);
   React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const set = (p) => setF({ ...f, ...p });
-  const perms = f.permissions || {};
+  const { kasbonView: _kv, ...perms } = FS.normKasbon(f.permissions || {});
   const toggleCap = (key) => set({ permissions: { ...perms, [key]: !perms[key] } });
   const valid = (f.name || '').trim();
   return (

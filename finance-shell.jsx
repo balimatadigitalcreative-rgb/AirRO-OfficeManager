@@ -20,7 +20,7 @@ function navForRole(p, role) {
   if (p.payroll) items.push({ id: 'orientation', label: tr('nav.orientation'), icon: 'IconUserCircle', grp: 'hr' });
   if (p.payroll && p.attendance) items.push({ id: 'headcount', label: tr('nav.headcount'), icon: 'IconUsersGroup', grp: 'hr' });
   if (p.payroll) items.push({ id: 'payroll', label: tr('nav.payroll'), icon: 'IconUsersGroup', grp: 'hr' });
-  if (p.kasbon) items.push({ id: 'kasbon', label: tr('nav.kasbon'), icon: 'IconWallet', grp: 'hr' });
+  if (p.kasbonView) items.push({ id: 'kasbon', label: tr('nav.kasbon'), icon: 'IconWallet', grp: 'hr' });
   if (p.payroll) items.push({ id: 'thr', label: tr('nav.thr'), icon: 'IconCoinIn', grp: 'hr' });
   if (p.employees && p.attendance) items.push({ id: 'hrreport', label: tr('nav.hrreport'), icon: 'IconReport', grp: 'hr' });
   if (p.payroll && p.attendance) items.push({ id: 'hrsettings', label: tr('nav.hrsettings'), icon: 'IconSettings', grp: 'hr' });
@@ -145,7 +145,7 @@ function FApp() {
   uEh(() => { FS.saveUsers(users); }, [users]);   // fleet/transfers are REST-loaded (see config slices below)
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
-  const p = (user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier');
+  const p = FS.normKasbon((user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier'));
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // ── Setoran: REST per-record (create/update/delete one record at a time) ──
@@ -348,7 +348,7 @@ function FApp() {
   // ── Kasbon: REST per-record (submit via /request persists as pending; approve/
   // reject via /:id/approve|reject) — gated on the `kasbon` capability. ──
   const reloadCashbons = () => {
-    if (!p.kasbon || !(window.API && window.API.cashbon)) return Promise.resolve();
+    if (!p.kasbonView || !(window.API && window.API.cashbon)) return Promise.resolve();
     return window.API.cashbon.list().then((r) => {
       if (r && Array.isArray(r.data)) { setCashbons(r.data); try { localStorage.setItem('airro_cashbon_cache_v1', JSON.stringify(r.data)); } catch (e) {} }
     }).catch(() => {});
@@ -377,13 +377,13 @@ function FApp() {
     if (window.API && window.API.cashbon) window.API.cashbon.update(id, patch).then(reloadCashbons).catch((e) => { setToast(tr(e && e.status === 403 ? 'toast.noPerm' : 'st.syncErr')); reloadCashbons(); });
   };
   uEh(() => {
-    if (!p.kasbon || !(window.API && window.API.cashbon)) return;
+    if (!p.kasbonView || !(window.API && window.API.cashbon)) return;
     reloadCashbons();
     const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadCashbons(); }, 20000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadCashbons(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
-  }, [p.kasbon]);
+  }, [p.kasbonView]);
 
   // ── Approvals: REST per-record — gated on the `approvals` capability. ──
   const apprRef = uRf(approvals);
@@ -1086,8 +1086,8 @@ function FApp() {
             <COMPANY.OrientationScreen staff={hrdStaff} setStaff={applyStaff} rates={hrdRates} today={FIN.TODAY} syncTick={syncTick} canEdit={p.employees} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
           )}
 
-          {screen === 'kasbon' && p.kasbon && (
-            <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} currentUserId={user.id} today={FIN.TODAY} userName={user.name} />
+          {screen === 'kasbon' && p.kasbonView && (
+            <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canRequest={p.kasbonRequest} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} today={FIN.TODAY} userName={user.name} />
           )}
 
           {screen === 'approvals' && p.approvals && (
@@ -1152,7 +1152,7 @@ function FApp() {
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );
