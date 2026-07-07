@@ -18,8 +18,12 @@ router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.s
 router.post('/customers', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.customerSchema }), ctrl.createCustomer);
 router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.customerUpdateSchema }), ctrl.updateCustomer);
 router.post('/customers/import', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
-// Master-price change is owner-level; writes price_history + audit, leaves old txns.
+// Master-price change is owner-level. Option (a) new-only just writes price_history +
+// audit; option (b) also appends retroactive price adjustments (originals untouched).
+router.post('/customers/:id/price/preview', requireCap('distribusiHargaMaster'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.pricePreviewSchema }), ctrl.pricePreview);
 router.patch('/customers/:id/price', requireCap('distribusiHargaMaster'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.priceSchema }), ctrl.updatePrice);
+// Cancel a whole price-adjustment batch (reverses the effective amounts; originals kept).
+router.delete('/price-adjustments/:batchId', requireCap('distribusiHargaMaster'), validate({ params: ctrl.schemas.batchParams }), ctrl.cancelPriceAdjustment);
 
 // ── Customer types (editable dictionary) ── read = base module; write = distribusiCustomers.
 router.get('/customer-types', requireCap('distribusi'), ctrl.listTypes);

@@ -9,8 +9,27 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const { resolvePerms } = require('../config/permissions');
+const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
 
 const METHODS = ['lunas', 'bon', 'pelunasan'];
+// Retroactive-price-change scopes (option b). Payments (pelunasan) are never re-priced.
+const PRICE_SCOPES = ['all', 'cycle', 'bon'];
+const todayISO = () => new Date().toISOString().slice(0, 10);
+function scopeWhere(scope, today) {
+  if (scope === 'bon') return { method: 'bon' };
+  const sales = { method: { in: ['lunas', 'bon'] } };
+  if (scope === 'cycle') { const c = cycleOf(today); return { ...sales, txnDate: { gte: c.start, lte: c.end } }; }
+  return sales;   // 'all'
+}
+// Net active price-adjustment delta per transaction id, for corrections matching `where`.
+async function activePriceDeltas(where) {
+  const rows = await prisma.correction.findMany({ where: { kind: 'price', active: true, ...where }, select: { transactionId: true, deltaAmount: true } });
+  const m = {}; rows.forEach((r) => { m[r.transactionId] = (m[r.transactionId] || 0) + r.deltaAmount; });
+  return m;
+}
+// Effective amount of a transaction whose `corrections` are loaded = original + Σ active price deltas.
+const priceDelta = (corrections) => (corrections || []).filter((x) => x.kind === 'price' && x.active).reduce((a, x) => a + x.deltaAmount, 0);
+const hasManualCorrection = (corrections) => (corrections || []).some((x) => x.kind !== 'price');
 // Delivery-day codes (Mon…Sun). Stored on the customer as a JSON array of these.
 const DAY_CODES = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 // Seed customer types — ids match the legacy string values so existing rows stay valid.
@@ -115,12 +134,14 @@ function custClient(c) {
 // bon (sisaBon = bon booked − pelunasan collected, floored at 0), last activity.
 async function listCustomers() {
   const rows = await prisma.customer.findMany({ orderBy: { name: 'asc' } });
-  const txns = await prisma.distTransaction.findMany({ select: { customerId: true, qty: true, amount: true, method: true, txnDate: true } });
+  const txns = await prisma.distTransaction.findMany({ select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true } });
+  const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const agg = {};
   txns.forEach((t) => {
     const a = agg[t.customerId] || (agg[t.customerId] = { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 });
+    const eff = t.amount + (deltaMap[t.id] || 0);
     a.totalGalon += t.qty; a.txnCount++;
-    if (t.method === 'bon') a.bon += t.amount; else if (t.method === 'pelunasan') a.pelunasan += t.amount;
+    if (t.method === 'bon') a.bon += eff; else if (t.method === 'pelunasan') a.pelunasan += t.amount;
     if (t.txnDate > a.lastDate) a.lastDate = t.txnDate;
   });
   const data = rows.map((c) => {
@@ -132,13 +153,26 @@ async function listCustomers() {
 async function getCustomer(id) {
   const c = await prisma.customer.findUnique({ where: { id }, include: { priceHistory: { orderBy: { changedAt: 'desc' } } } });
   if (!c) throw ApiError.notFound('Customer not found');
-  const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' }, include: { corrections: { select: { id: true } } } });
+  const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' }, include: { corrections: true } });
   let bon = 0, pelunasan = 0, totalGalon = 0;
   const transactions = txns.map((t) => {
-    totalGalon += t.qty; if (t.method === 'bon') bon += t.amount; else if (t.method === 'pelunasan') pelunasan += t.amount;
-    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: t.corrections.length > 0 };
+    const adj = priceDelta(t.corrections);
+    const eff = t.amount + adj;
+    totalGalon += t.qty;
+    // bon uses the EFFECTIVE (adjusted) amount; a paid txn's adjustment is reported but
+    // does not become a new receivable (money already settled at the old price).
+    if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount;
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0 };
   });
-  return { ...custClient(c), transactions, totalGalon, sisaBon: Math.max(0, bon - pelunasan), txnCount: txns.length };
+  // Active price-adjustment batches (for the "batalkan penyesuaian" UI).
+  const batches = {};
+  txns.forEach((t) => t.corrections.filter((x) => x.kind === 'price' && x.active).forEach((x) => {
+    let nv = {}, ov = {}; try { nv = x.newValue ? JSON.parse(x.newValue) : {}; } catch (e) {} try { ov = x.oldValue ? JSON.parse(x.oldValue) : {}; } catch (e) {}
+    const b = batches[x.batchId] || (batches[x.batchId] = { batchId: x.batchId, count: 0, totalDelta: 0, createdAt: x.createdAt ? new Date(x.createdAt).getTime() : null, oldPrice: ov.oldPrice, newPrice: nv.newPrice, scope: nv.scope, actorName: x.actorName || null });
+    b.count++; b.totalDelta += x.deltaAmount;
+  }));
+  const priceAdjustments = Object.values(batches).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  return { ...custClient(c), transactions, totalGalon, sisaBon: Math.max(0, bon - pelunasan), txnCount: txns.length, priceAdjustments };
 }
 // Sync write columns (type is resolved separately — it needs a DB lookup).
 function customerCols(body) {
@@ -193,18 +227,79 @@ async function importCustomers(list, actor) {
 
 // Owner-only master price change. Appends price_history + audit; does NOT touch any
 // existing transaction (their unit_price_locked stays exactly as sold).
-async function updatePrice(id, newPriceRaw, actor) {
+async function updatePrice(id, newPriceRaw, actor, scopeRaw) {
   const c = await prisma.customer.findUnique({ where: { id } });
   if (!c) throw ApiError.notFound('Customer not found');
   const newPrice = int(newPriceRaw);
   const oldPrice = c.masterPrice;
+  const scope = PRICE_SCOPES.includes(scopeRaw) ? scopeRaw : null;   // null = option (a) new-only
   const snap = await actorSnap(actor);
+  // Both options update master_price + price_history (old transactions' locked price is
+  // never rewritten — new sales use the new price automatically).
   const [updated] = await prisma.$transaction([
     prisma.customer.update({ where: { id }, data: { masterPrice: newPrice } }),
     prisma.priceHistory.create({ data: { customerId: id, oldPrice, newPrice, changedById: snap.actorId, changedByName: snap.actorName, changedByRole: snap.actorRole } }),
   ]);
-  await logAudit('harga', `Harga master: ${c.name}`, `${oldPrice} → ${newPrice}`, snap);
-  return updated;
+
+  let batchId = null, affected = 0, totalDelta = 0;
+  if (scope && newPrice !== oldPrice) {
+    // Option (b): append a numeric price adjustment per in-scope OLD transaction. The
+    // original transaction is NEVER mutated; the effective/reported amount follows the
+    // new price via these adjustments, grouped by batchId so the event can be reversed.
+    const txns = await prisma.distTransaction.findMany({ where: { customerId: id, ...scopeWhere(scope, todayISO()) } });
+    batchId = 'pb' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
+    for (const t of txns) {
+      const delta = (newPrice - oldPrice) * t.qty;
+      if (delta === 0) continue;
+      await prisma.correction.create({ data: {
+        transactionId: t.id, kind: 'price', deltaAmount: delta, batchId, active: true,
+        reason: `Penyesuaian harga master ${oldPrice} → ${newPrice}`,
+        oldValue: JSON.stringify({ oldPrice, unitPriceLocked: t.unitPriceLocked, qty: t.qty, method: t.method }),
+        newValue: JSON.stringify({ newPrice, scope }),
+        actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, byStaff: !!snap.actorStaff,
+      } });
+      affected++; totalDelta += delta;
+    }
+    await logAudit('harga', `Harga master: ${c.name}`, `${oldPrice} → ${newPrice} · cakupan ${scope} · ${affected} transaksi disesuaikan · selisih ${totalDelta}`, snap);
+  } else {
+    await logAudit('harga', `Harga master: ${c.name}`, `${oldPrice} → ${newPrice} · hanya transaksi baru`, snap);
+  }
+  return { ...custClient(updated), batchId, affected, totalDelta, scope, oldPrice, newPrice };
+}
+
+// Preview the retroactive impact of a price change for each scope (no writes) — powers
+// the options modal's "N transaksi · total selisih Rp X" summary.
+async function pricePreview(id, newPriceRaw) {
+  const c = await prisma.customer.findUnique({ where: { id } });
+  if (!c) throw ApiError.notFound('Customer not found');
+  const newPrice = int(newPriceRaw);
+  const oldPrice = c.masterPrice;
+  const cyc = cycleOf(todayISO());
+  const sales = await prisma.distTransaction.findMany({ where: { customerId: id, method: { in: ['lunas', 'bon'] } }, select: { qty: true, method: true, txnDate: true } });
+  const calc = (rows) => rows.reduce((acc, t) => { const d = (newPrice - oldPrice) * t.qty; if (d !== 0) { acc.count++; acc.totalDelta += d; } return acc; }, { count: 0, totalDelta: 0 });
+  return {
+    oldPrice, newPrice,
+    cycle: { start: cyc.start, end: cyc.end },
+    scopes: {
+      all: calc(sales),
+      cycle: calc(sales.filter((t) => t.txnDate >= cyc.start && t.txnDate <= cyc.end)),
+      bon: calc(sales.filter((t) => t.method === 'bon')),
+    },
+  };
+}
+
+// Cancel a whole price-adjustment batch → its adjustments go inactive (effective amounts
+// & bon revert). The original transactions are untouched; the reversal is audited.
+async function cancelPriceAdjustment(batchId, actor) {
+  const rows = await prisma.correction.findMany({ where: { kind: 'price', batchId, active: true } });
+  if (!rows.length) throw ApiError.notFound('Batch penyesuaian tidak ditemukan atau sudah dibatalkan');
+  const totalDelta = rows.reduce((a, r) => a + r.deltaAmount, 0);
+  await prisma.correction.updateMany({ where: { kind: 'price', batchId, active: true }, data: { active: false } });
+  const snap = await actorSnap(actor);
+  let name = '';
+  try { const t = await prisma.distTransaction.findUnique({ where: { id: rows[0].transactionId }, include: { customer: { select: { name: true } } } }); name = t && t.customer ? t.customer.name : ''; } catch (e) {}
+  await logAudit('harga', `Batalkan penyesuaian harga${name ? ': ' + name : ''}`, `batch ${batchId} · ${rows.length} transaksi · selisih ${-totalDelta}`, snap);
+  return { reversed: rows.length, totalDelta };
 }
 
 // ── Transactions ── (immutable; price locked server-side)
@@ -218,7 +313,10 @@ async function listTransactions(q) {
     where, orderBy: { createdAt: 'desc' },
     include: { customer: { select: { name: true, type: true } }, corrections: { orderBy: { createdAt: 'desc' } } },
   });
-  return { data: rows, now: new Date().toISOString() };
+  // Expose the effective (adjusted) amount + flags so reports/Cash Integration follow the
+  // new price while the original `amount` stays intact.
+  const data = rows.map((r) => { const adj = priceDelta(r.corrections); return { ...r, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections) }; });
+  return { data, now: new Date().toISOString() };
 }
 async function createTransaction(body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
@@ -274,16 +372,18 @@ async function dashboardSummary(date) {
   const from = addDays(day, -6);
   const rows = await prisma.distTransaction.findMany({
     where: { txnDate: { gte: from, lte: day } },
-    include: { customer: { select: { name: true, type: true } }, corrections: { select: { id: true } } },
+    include: { customer: { select: { name: true, type: true } }, corrections: { select: { kind: true, deltaAmount: true, active: true } } },
     orderBy: { createdAt: 'desc' },
   });
+  // Amounts follow the EFFECTIVE (adjusted) value so retroactive price changes are reflected.
+  const effOf = (r) => r.amount + priceDelta(r.corrections);
 
   // Today's KPIs. uang masuk = cash actually received (lunas + pelunasan);
   // piutang = new receivables booked as bon.
   const todayRows = rows.filter((r) => r.txnDate === day);
   const byMethod = { lunas: 0, bon: 0, pelunasan: 0 };
   let qty = 0, amount = 0;
-  todayRows.forEach((r) => { qty += r.qty; amount += r.amount; if (byMethod[r.method] != null) byMethod[r.method] += r.amount; });
+  todayRows.forEach((r) => { const e = effOf(r); qty += r.qty; amount += e; if (byMethod[r.method] != null) byMethod[r.method] += e; });
   const uangMasuk = byMethod.lunas + byMethod.pelunasan;
   const piutang = byMethod.bon;
 
@@ -292,20 +392,20 @@ async function dashboardSummary(date) {
   for (let i = 6; i >= 0; i--) {
     const d = addDays(day, -i);
     let lunas = 0, bon = 0;
-    rows.filter((r) => r.txnDate === d).forEach((r) => { if (r.method === 'bon') bon += r.amount; else lunas += r.amount; });
+    rows.filter((r) => r.txnDate === d).forEach((r) => { const e = effOf(r); if (r.method === 'bon') bon += e; else lunas += e; });
     last7.push({ date: d, lunas, bon });
   }
 
   // Most recent transactions across the window.
-  const recent = rows.slice(0, 8).map((r) => ({
+  const recent = rows.slice(0, 8).map((r) => { const adj = priceDelta(r.corrections); return {
     id: r.id, customerName: r.customer ? r.customer.name : '', customerType: r.customer ? r.customer.type : null,
-    qty: r.qty, unitPriceLocked: r.unitPriceLocked, amount: r.amount, method: r.method, txnDate: r.txnDate,
-    createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null, corrected: r.corrections.length > 0,
-  }));
+    qty: r.qty, unitPriceLocked: r.unitPriceLocked, amount: r.amount, adjustAmount: adj, effectiveAmount: r.amount + adj, method: r.method, txnDate: r.txnDate,
+    createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null, corrected: hasManualCorrection(r.corrections), adjusted: adj !== 0,
+  }; });
 
-  // Top customers by amount in the window.
+  // Top customers by (effective) amount in the window.
   const byCust = {};
-  rows.forEach((r) => { const k = r.customerId; if (!byCust[k]) byCust[k] = { id: k, name: r.customer ? r.customer.name : '', type: r.customer ? r.customer.type : null, qty: 0, amount: 0 }; byCust[k].qty += r.qty; byCust[k].amount += r.amount; });
+  rows.forEach((r) => { const k = r.customerId; if (!byCust[k]) byCust[k] = { id: k, name: r.customer ? r.customer.name : '', type: r.customer ? r.customer.type : null, qty: 0, amount: 0 }; byCust[k].qty += r.qty; byCust[k].amount += effOf(r); });
   const topCustomers = Object.values(byCust).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
   const customers = await prisma.customer.count();
@@ -313,8 +413,8 @@ async function dashboardSummary(date) {
 }
 
 module.exports = {
-  METHODS, DAY_CODES,
-  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice,
+  METHODS, DAY_CODES, PRICE_SCOPES,
+  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
 };

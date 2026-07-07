@@ -483,20 +483,32 @@ model DistTransaction {
 // Append-only corrections against a transaction (the transaction itself is never
 // mutated). `reason` is required; `byStaff` flags a correction made by a
 // staff-level actor (distribusi only, no owner caps).
+//
+// Two kinds: `manual` (a hand-written koreksi, deltaAmount 0) and `price` (a master-
+// price change applied retroactively to an old transaction — deltaAmount = (new−old)×qty,
+// grouped by batchId so the whole event can be reversed). Effective/reported amount of
+// a transaction = amount + Σ(active price deltas). `active` flips to false when a batch
+// is cancelled — the original transaction is NEVER touched.
 model Correction {
   id            String   @id @default(cuid())
   transactionId String
   reason        String                          // required
+  kind          String   @default("manual")     // manual | price
+  deltaAmount   Int      @default(0)             // numeric effect for price adjustments
+  batchId       String?                          // groups one price-change event's adjustments
+  active        Boolean  @default(true)          // false once the batch is cancelled/reversed
   oldValue      String?                          // old_value (JSON string)
   newValue      String?                          // new_value (JSON string)
   actorId       String?
   actorRole     String?
+  actorName     String?
   byStaff       Boolean  @default(false)
   createdAt     DateTime @default(now())
 
   transaction DistTransaction @relation(fields: [transactionId], references: [id])
 
   @@index([transactionId])
+  @@index([batchId])
 }
 
 // Immutable, append-only audit trail for every distribusi write.

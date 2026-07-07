@@ -171,3 +171,91 @@ describe('Distribusi — delivery days, fleet, editable customer types', () => {
     expect(moved.body.data.type).toBe('reguler');   // no customer left on a missing type
   });
 });
+
+describe('Distribusi — retroactive master-price change (options + adjustments)', () => {
+  const today = () => new Date().toISOString().slice(0, 10);
+  const mkCust = async (price) => (await request(app).post('/api/v1/distribusi/customers').set(auth(owner)).send({ name: 'Adj-' + Math.round(price) + '-' + Date.now().toString(36).slice(-4), type: 'reguler', masterPrice: price })).body.data.id;
+  const mkTxn = async (cid, qty, method) => (await request(app).post('/api/v1/distribusi/transactions').set(auth(owner)).send({ customerId: cid, qty, method, txnDate: today() })).body.data.id;
+  const getCust = (cid) => request(app).get(`/api/v1/distribusi/customers/${cid}`).set(auth(owner)).then((r) => r.body.data);
+
+  it('preview reports count + total delta per scope, writing nothing', async () => {
+    const cid = await mkCust(12000);
+    await mkTxn(cid, 3, 'lunas'); await mkTxn(cid, 2, 'bon');
+    const p = await request(app).post(`/api/v1/distribusi/customers/${cid}/price/preview`).set(auth(owner)).send({ newPrice: 13000 });
+    expect(p.status).toBe(200);
+    expect(p.body.data.scopes.all).toEqual({ count: 2, totalDelta: 5000 });     // (13000-12000)×(3+2)
+    expect(p.body.data.scopes.cycle).toEqual({ count: 2, totalDelta: 5000 });   // both dated today → in-cycle
+    expect(p.body.data.scopes.bon).toEqual({ count: 1, totalDelta: 2000 });     // only the bon txn
+    const c = await getCust(cid);
+    expect(c.masterPrice).toBe(12000);
+    expect(c.transactions.every((t) => t.adjustAmount === 0)).toBe(true);
+  });
+
+  it('option (a) new-only: master price updates; old transactions keep their effective amount', async () => {
+    const cid = await mkCust(12000);
+    await mkTxn(cid, 3, 'lunas');
+    const r = await request(app).patch(`/api/v1/distribusi/customers/${cid}/price`).set(auth(owner)).send({ newPrice: 13000, scope: null });
+    expect(r.status).toBe(200);
+    expect(r.body.data.masterPrice).toBe(13000);
+    expect(r.body.data.affected).toBe(0);
+    const c = await getCust(cid);
+    expect(c.transactions[0].effectiveAmount).toBe(36000);   // 3 × 12000, unchanged
+    expect(c.transactions[0].adjusted).toBe(false);
+  });
+
+  it('option (b) all: appends +delta per txn; originals intact; bon & audit follow', async () => {
+    const cid = await mkCust(12000);
+    const lunasId = await mkTxn(cid, 3, 'lunas');
+    const bonId = await mkTxn(cid, 2, 'bon');
+    const r = await request(app).patch(`/api/v1/distribusi/customers/${cid}/price`).set(auth(owner)).send({ newPrice: 13000, scope: 'all' });
+    expect(r.status).toBe(200);
+    expect(r.body.data.affected).toBe(2);
+    expect(r.body.data.totalDelta).toBe(5000);
+    const c = await getCust(cid);
+    const L = c.transactions.find((t) => t.id === lunasId), B = c.transactions.find((t) => t.id === bonId);
+    expect(L.amount).toBe(36000);            // ORIGINAL untouched
+    expect(L.adjustAmount).toBe(3000);
+    expect(L.effectiveAmount).toBe(39000);   // 3 × 13000
+    expect(L.adjusted).toBe(true);
+    expect(B.effectiveAmount).toBe(26000);   // 2 × 13000
+    expect(c.sisaBon).toBe(26000);           // receivable follows the new price
+    expect(c.priceAdjustments[0]).toMatchObject({ count: 2, totalDelta: 5000, oldPrice: 12000, newPrice: 13000, scope: 'all' });
+    const audit = await request(app).get('/api/v1/distribusi/audit?kind=harga').set(auth(owner));
+    expect(audit.body.data.some((a) => /cakupan all/.test(a.detail) && /2 transaksi/.test(a.detail) && /selisih 5000/.test(a.detail))).toBe(true);
+  });
+
+  it('cancel the batch → adjustments revert (effective + bon back), audited; originals still intact', async () => {
+    const cid = await mkCust(12000);
+    const bonId = await mkTxn(cid, 2, 'bon');
+    const r = await request(app).patch(`/api/v1/distribusi/customers/${cid}/price`).set(auth(owner)).send({ newPrice: 13000, scope: 'all' });
+    const batchId = r.body.data.batchId;
+    expect((await getCust(cid)).sisaBon).toBe(26000);
+    const cancel = await request(app).delete(`/api/v1/distribusi/price-adjustments/${batchId}`).set(auth(owner));
+    expect(cancel.status).toBe(200);
+    expect(cancel.body.data.reversed).toBe(1);
+    const c = await getCust(cid);
+    expect(c.sisaBon).toBe(24000);           // back to 2 × 12000
+    expect(c.transactions.find((t) => t.id === bonId).adjustAmount).toBe(0);
+    expect(c.transactions.find((t) => t.id === bonId).amount).toBe(24000);   // original never changed
+    expect(c.priceAdjustments.length).toBe(0);
+    expect((await request(app).get('/api/v1/distribusi/audit?kind=harga').set(auth(owner))).body.data.some((a) => /Batalkan penyesuaian/.test(a.title))).toBe(true);
+  });
+
+  it('scope "bon": only unpaid (bon) transactions get adjusted', async () => {
+    const cid = await mkCust(12000);
+    await mkTxn(cid, 3, 'lunas'); await mkTxn(cid, 2, 'bon');
+    const r = await request(app).patch(`/api/v1/distribusi/customers/${cid}/price`).set(auth(owner)).send({ newPrice: 13000, scope: 'bon' });
+    expect(r.body.data.affected).toBe(1);
+    expect(r.body.data.totalDelta).toBe(2000);
+    const c = await getCust(cid);
+    expect(c.transactions.find((t) => t.method === 'lunas').adjusted).toBe(false);
+    expect(c.transactions.find((t) => t.method === 'bon').adjusted).toBe(true);
+  });
+
+  it('preview / retroactive change / cancel require distribusiHargaMaster (staff forbidden)', async () => {
+    const cid = await mkCust(12000);
+    expect((await request(app).post(`/api/v1/distribusi/customers/${cid}/price/preview`).set(auth(staff)).send({ newPrice: 13000 })).status).toBe(403);
+    expect((await request(app).patch(`/api/v1/distribusi/customers/${cid}/price`).set(auth(staff)).send({ newPrice: 13000, scope: 'all' })).status).toBe(403);
+    expect((await request(app).delete('/api/v1/distribusi/price-adjustments/nope').set(auth(staff))).status).toBe(403);
+  });
+});

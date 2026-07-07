@@ -912,6 +912,7 @@ select.fld::-ms-expand { display: none; }
 .dist-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px; margin-top: 4px; }
 .dist-badge.lock { background: var(--card-soft); color: var(--text-faint); }
 .dist-badge.corr { background: var(--warn-bg); color: var(--warn); }
+.dist-badge.adj { background: #EDE9FB; color: #6D50D6; }   /* Disesuaikan (price adjustment) */
 .dist-sumrow { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; color: var(--text-mut); }
 .dist-sumrow:last-child { border-bottom: 0; }
 .dist-quick { padding: 18px; }
@@ -1034,6 +1035,27 @@ select.fld::-ms-expand { display: none; }
 .dist-cd-pricelbl { font-size: 11px; color: var(--text-mut); font-weight: 600; }
 .dist-cd-priceval { font-size: 28px; font-weight: 800; color: var(--ink); margin-top: 4px; }
 .dist-cd-lockednote { display: flex; align-items: center; gap: 8px; background: var(--card-soft); border-radius: 11px; padding: 11px 13px; color: var(--text-faint); font-size: 12px; font-weight: 600; margin-top: 14px; }
+/* active price-adjustment batches in the customer detail */
+.dist-cd-adj { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-soft); }
+.dist-cd-adj-h { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 700; color: #6D50D6; margin-bottom: 8px; }
+.dist-cd-adj-h svg { flex-shrink: 0; }
+.dist-cd-adj-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border-soft); }
+.dist-cd-adj-row:first-of-type { border-top: 0; }
+.dist-cd-adj-txt { min-width: 0; }
+.dist-cd-adj-txt b { display: block; font-size: 13px; color: var(--ink); }
+.dist-cd-adj-txt span { font-size: 11px; color: var(--text-mut); }
+/* price-change options modal */
+.dist-pc-opt, .dist-pc-scope { display: flex; align-items: flex-start; gap: 11px; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: 12px; cursor: pointer; margin-top: 10px; }
+.dist-pc-opt.on, .dist-pc-scope.on { border-color: var(--green-700); background: var(--mint-100); }
+.dist-pc-opt input, .dist-pc-scope input { margin-top: 2px; flex-shrink: 0; accent-color: var(--green-700); }
+.dist-pc-txt { flex: 1; min-width: 0; }
+.dist-pc-txt b { display: block; font-size: 13.5px; color: var(--ink); }
+.dist-pc-txt span { display: block; font-size: 11.5px; color: var(--text-mut); margin-top: 2px; line-height: 1.4; }
+.dist-pc-scopes { margin: 6px 0 0 14px; padding-left: 8px; border-left: 2px solid var(--border-soft); }
+.dist-pc-scope { margin-top: 8px; padding: 10px 12px; }
+.dist-pc-count { flex-shrink: 0; font-size: 12px; font-weight: 800; color: var(--green-800); background: var(--card-soft); border-radius: 8px; padding: 3px 9px; }
+.dist-pc-summary { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px 13px; background: #EDE9FB; border-radius: 11px; font-size: 12.5px; font-weight: 700; color: #5a3fc0; }
+.dist-pc-summary svg { flex-shrink: 0; }
 .dist-cd-bar { width: 4px; height: 38px; border-radius: 3px; flex-shrink: 0; }
 /* add customer modal */
 .dist-typechips { display: flex; gap: 8px; flex-wrap: wrap; }

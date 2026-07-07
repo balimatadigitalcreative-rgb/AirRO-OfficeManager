@@ -132,11 +132,12 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
                     <span className="dist-txn-name">{t.customerName || '—'}</span>
                     <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>
                     {t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
+                    {t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
                   </div>
                   <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)}</div>
                 </div>
                 <div className="dist-txn-right">
-                  <div className="tnum dist-txn-amt">{rpFull(t.amount)}</div>
+                  <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                   <span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>
                 </div>
               </div>
@@ -323,7 +324,7 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
         {txns === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
         {txns !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.noTxn')}</div>}
         {rows.map((t) => {
-          const corrected = (t.corrections || []).length > 0;
+          const corrected = t.correctedManual != null ? t.correctedManual : (t.corrections || []).some((x) => x.kind !== 'price');
           const isNew = newIds.includes(t.id);
           return (
             <div key={t.id} className="dist-txn dist-txn-full">
@@ -334,11 +335,12 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
                   <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>
                   {isNew ? <span className="dist-badge new">{trD('dist.baru')}</span> : null}
                   {corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
+                  {t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
                 </div>
-                <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {numX(t.qty)} × {rpFull(t.unitPriceLocked)}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}</div>
+                <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {numX(t.qty)} × {rpFull(t.unitPriceLocked)}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
               </div>
               <div className="dist-txn-right">
-                <div className="tnum dist-txn-amt">{rpFull(t.amount)}</div>
+                <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                 <span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>
               </div>
               <button type="button" className="dist-corr-btn" onClick={() => { setCorrTxn(t); setCorrReason(''); setCorrValue(''); }}><IconPencil s={13} />{trD('dist.korek')}</button>
@@ -414,6 +416,12 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, o
   };
 
   const openDetail = (id) => { setView('detail'); setDetail(null); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); };
+  const cancelAdj = (batchId) => {
+    if (!confirm(trD('dist.pcCancelConfirm'))) return;
+    window.API.distribusi.customers.cancelPriceAdjustment(batchId)
+      .then(() => { flash(trD('dist.pcCancelled')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
+      .catch(() => {});
+  };
   const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '' }); };
   const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '' }); };
   const toggleDay = (d) => setForm((f) => ({ ...f, deliveryDays: f.deliveryDays.includes(d) ? f.deliveryDays.filter((x) => x !== d) : [...f.deliveryDays, d] }));
@@ -527,6 +535,17 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, o
               {canPrice
                 ? <button type="button" className="btn btn-ghost" style={{ width: '100%', marginTop: 14 }} onClick={onGoHarga}><IconPencil s={14} />{trD('dist.ubahHarga')}</button>
                 : <div className="dist-cd-lockednote"><IconLock s={14} />{trD('dist.hargaOwnerOnly')}</div>}
+              {(d.priceAdjustments || []).length > 0 && (
+                <div className="dist-cd-adj">
+                  <div className="dist-cd-adj-h"><IconInvoice s={13} />{trD('dist.pcActiveT')}</div>
+                  {(d.priceAdjustments || []).map((b) => (
+                    <div key={b.batchId} className="dist-cd-adj-row">
+                      <div className="dist-cd-adj-txt"><b>{rpFull(b.oldPrice)} → {rpFull(b.newPrice)}</b><span>{trD('dist.pcAdjMeta', { n: b.count, d: (b.totalDelta >= 0 ? '+' : '') + rpFull(b.totalDelta) })}</span></div>
+                      {canPrice && <button type="button" className="btn btn-ghost btn-sm" onClick={() => cancelAdj(b.batchId)}>{trD('dist.batalkan')}</button>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="card dist-card" style={{ flex: 1, minWidth: 280 }}>
               <div className="sec-title" style={{ marginBottom: 8 }}>{trD('dist.riwayat')}</div>
@@ -535,10 +554,10 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, o
                 <div key={t.id} className="dist-txn">
                   <span className="dist-cd-bar" style={{ background: t.method === 'bon' ? '#e0a13c' : t.method === 'pelunasan' ? '#2f6fb0' : '#17b083' }} />
                   <div className="dist-txn-mid">
-                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}</div>
-                    <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · {t.txnDate} {hhmm(t.createdAt)}{t.actorName ? ' · ' + t.actorName : ''}</div>
+                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}{t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}</div>
+                    <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · {t.txnDate} {hhmm(t.createdAt)}{t.actorName ? ' · ' + t.actorName : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
                   </div>
-                  <div className="tnum dist-txn-amt">{rpFull(t.amount)}</div>
+                  <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                 </div>
               ))}
             </div>
@@ -723,10 +742,56 @@ function DistLocked() {
   );
 }
 
+// Modal shown when applying a new master price: choose (a) new-only or (b) retroactive,
+// with a scope + a live "N transaksi · total selisih Rp X" summary before confirming.
+function PriceChangeModal({ customer, newPrice, onDone, onClose }) {
+  const [preview, setPreview] = uSx(null);
+  const [mode, setMode] = uSx('new');     // 'new' | 'retro'
+  const [scope, setScope] = uSx('all');   // 'all' | 'cycle' | 'bon'
+  const [busy, setBusy] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { let live = true; window.API.distribusi.customers.pricePreview(customer.id, newPrice).then((r) => { if (live) setPreview(r.data); }).catch(() => {}); return () => { live = false; }; }, [customer.id, newPrice]);
+  const sc = preview && preview.scopes ? preview.scopes[scope] : null;
+  const commit = () => {
+    if (busy) return; setBusy(true); setErr('');
+    window.API.distribusi.customers.setPrice(customer.id, newPrice, mode === 'retro' ? scope : null)
+      .then((r) => { setBusy(false); onDone(r.data); })
+      .catch((e) => { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const scopeRow = (key, label, hint) => (
+    <label key={key} className={`dist-pc-scope ${scope === key ? 'on' : ''}`}>
+      <input type="radio" name="pcscope" checked={scope === key} onChange={() => setScope(key)} />
+      <div className="dist-pc-txt"><b>{label}</b><span>{hint}</span></div>
+      {preview && <span className="dist-pc-count">{preview.scopes[key].count}</span>}
+    </label>
+  );
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 220 }}>
+      <div className="modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.pcTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.name} · {rpFull(customer.masterPrice)} → <b>{rpFull(newPrice)}</b></div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className={`dist-pc-opt ${mode === 'new' ? 'on' : ''}`}><input type="radio" name="pcmode" checked={mode === 'new'} onChange={() => setMode('new')} /><div className="dist-pc-txt"><b>{trD('dist.pcNewOnly')}</b><span>{trD('dist.pcNewOnlyHint')}</span></div></label>
+          <label className={`dist-pc-opt ${mode === 'retro' ? 'on' : ''}`}><input type="radio" name="pcmode" checked={mode === 'retro'} onChange={() => setMode('retro')} /><div className="dist-pc-txt"><b>{trD('dist.pcRetro')}</b><span>{trD('dist.pcRetroHint')}</span></div></label>
+          {mode === 'retro' && (
+            <div className="dist-pc-scopes">
+              {scopeRow('all', trD('dist.pcScopeAll'), trD('dist.pcScopeAllHint'))}
+              {scopeRow('cycle', trD('dist.pcScopeCycle'), preview ? preview.cycle.start + ' – ' + preview.cycle.end : trD('dist.pcScopeCycleHint'))}
+              {scopeRow('bon', trD('dist.pcScopeBon'), trD('dist.pcScopeBonHint'))}
+              <div className="dist-pc-summary"><IconInvoice s={14} />{sc ? trD('dist.pcSummary', { n: sc.count, d: rpFull(sc.totalDelta) }) : (trD('common.loading') || '…')}</div>
+            </div>
+          )}
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={busy} onClick={commit}>{busy ? '…' : trD('dist.pcConfirm')}</button></div>
+      </div>
+    </div>
+  );
+}
+
 function DistPrices({ canPrice, refreshKey, onChanged }) {
   const [custs, setCusts] = uSx(null);
   const [drafts, setDrafts] = uSx({});
-  const [saving, setSaving] = uSx('');
+  const [pcModal, setPcModal] = uSx(null);   // { customer, newPrice }
   const [toast, setToast] = uSx('');
   const reload = () => window.API.distribusi.customers.list().then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
   uEx(() => { if (canPrice && window.API && window.API.distribusi) reload(); }, [refreshKey, canPrice]);
@@ -734,14 +799,17 @@ function DistPrices({ canPrice, refreshKey, onChanged }) {
 
   if (!canPrice) return <DistLocked />;
 
-  const tag = (t) => <span className={`dist-ctag ${CUST_TAG[t] || 'reg'}`}>{typeLabel(t)}</span>;
+  const tag = (t) => <span className={`dist-ctag ${CUST_TAG[t] || 'other'}`}>{typeLabel(t)}</span>;
   const apply = (c) => {
     const num = parseInt(String(drafts[c.id] || '').replace(/[^0-9]/g, ''), 10);
-    if (!num || num === c.masterPrice || saving) return;
-    setSaving(c.id);
-    window.API.distribusi.customers.setPrice(c.id, num)
-      .then(() => { setSaving(''); setDrafts((d) => ({ ...d, [c.id]: '' })); flash(trD('dist.hargaUpdated', { n: c.name })); reload(); if (onChanged) onChanged(); })
-      .catch(() => setSaving(''));
+    if (!num || num === c.masterPrice) return;
+    setPcModal({ customer: c, newPrice: num });   // open the options modal
+  };
+  const onApplied = (cust, data) => {
+    setPcModal(null);
+    setDrafts((d) => ({ ...d, [cust.id]: '' }));
+    flash(data && data.affected ? trD('dist.pcAppliedRetro', { n: data.affected }) : trD('dist.hargaUpdated', { n: cust.name }));
+    reload(); if (onChanged) onChanged();
   };
 
   return (
@@ -763,12 +831,13 @@ function DistPrices({ canPrice, refreshKey, onChanged }) {
               <div className="dist-harga-cust"><span className="dist-txn-av sm">{initialsOf(c.name)}</span><div style={{ minWidth: 0 }}><div className="dist-txn-name">{c.name}</div>{tag(c.type)}</div></div>
               <div className="dist-harga-cur">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
               <div className="dist-harga-new"><input className="fld" value={draft} inputMode="numeric" placeholder={rpFull(c.masterPrice)} onChange={(e) => setDrafts((d) => ({ ...d, [c.id]: e.target.value.replace(/[^0-9]/g, '') }))} onKeyDown={(e) => { if (e.key === 'Enter' && ready) apply(c); }} /></div>
-              <button type="button" className="btn btn-ghost dist-harga-apply" disabled={!ready || saving === c.id} onClick={() => apply(c)}>{saving === c.id ? '…' : trD('dist.terapkan')}</button>
+              <button type="button" className="btn btn-ghost dist-harga-apply" disabled={!ready} onClick={() => apply(c)}>{trD('dist.terapkan')}</button>
             </div>
           );
         })}
       </div>
       <div className="dist-hint" style={{ marginTop: 8 }}><IconLock s={12} /> {trD('dist.hargaFootNote')}</div>
+      {pcModal && <PriceChangeModal customer={pcModal.customer} newPrice={pcModal.newPrice} onDone={(data) => onApplied(pcModal.customer, data)} onClose={() => setPcModal(null)} />}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
   );
@@ -855,11 +924,13 @@ function DistIntegration({ refreshKey, today }) {
   const rows = txns || [];
   let lunas = 0, pelunasan = 0, bon = 0, qty = 0;
   const cnt = { lunas: 0, pelunasan: 0, bon: 0 };
+  // Use the EFFECTIVE amount so retroactive price adjustments flow into the cash mirror.
+  const effOf = (t) => (t.effectiveAmount != null ? t.effectiveAmount : (t.amount + (t.adjustAmount || 0)));
   rows.forEach((t) => {
-    qty += t.qty;
-    if (t.method === 'bon') { bon += t.amount; cnt.bon++; }
-    else if (t.method === 'pelunasan') { pelunasan += t.amount; cnt.pelunasan++; }
-    else { lunas += t.amount; cnt.lunas++; }
+    qty += t.qty; const e = effOf(t);
+    if (t.method === 'bon') { bon += e; cnt.bon++; }
+    else if (t.method === 'pelunasan') { pelunasan += e; cnt.pelunasan++; }
+    else { lunas += e; cnt.lunas++; }
   });
   const masukKas = lunas + pelunasan;
   const adjRows = (audit || []).filter((a) => { if (a.kind !== 'koreksi' && a.kind !== 'harga') return false; const d = isoDay(a.createdAt); return d >= range.from && d <= range.to; });

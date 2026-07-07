@@ -104,7 +104,10 @@
         create: (data) => req('POST', '/distribusi/customers', data),
         update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),
         import: (customers) => req('POST', '/distribusi/customers/import', { customers }),
-        setPrice: (id, newPrice) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice }),
+        // scope: null = new transactions only; 'all'|'cycle'|'bon' = also adjust old ones.
+        setPrice: (id, newPrice, scope) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice, scope: scope || null }),
+        pricePreview: (id, newPrice) => req('POST', '/distribusi/customers/' + id + '/price/preview', { newPrice }),
+        cancelPriceAdjustment: (batchId) => req('DELETE', '/distribusi/price-adjustments/' + batchId),
       },
       // Editable customer-type dictionary (id + label).
       types: {
