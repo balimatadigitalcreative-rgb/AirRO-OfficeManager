@@ -466,6 +466,7 @@ function buildAcctLedger(acct, entries, accounts, transfers, catMap) {
   const nameOf = (id) => (accounts.find((a) => a.id === id) || {}).name || '—';
   const items = [];
   (entries || []).forEach((e) => {
+    if (e.reference) return;   // non-cash reference cost → not an account mutation
     const aid = e.acct && ids.includes(e.acct) ? e.acct : first;
     if (aid !== acct.id) return;
     const inc = e.type === 'income';
@@ -558,7 +559,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
   const thisMonth = (TODAY || '').slice(0, 7);
   const monthMut = (a) => {
     let inc = 0, out = 0; const fid = accounts[0] && accounts[0].id;
-    (entries || []).forEach((e) => { const aid = e.acct && accounts.some((x) => x.id === e.acct) ? e.acct : fid; if (aid === a.id && (e.date || '').slice(0, 7) === thisMonth) { if (e.type === 'income') inc += e.amount; else out += e.amount; } });
+    (entries || []).forEach((e) => { if (e.reference) return; const aid = e.acct && accounts.some((x) => x.id === e.acct) ? e.acct : fid; if (aid === a.id && (e.date || '').slice(0, 7) === thisMonth) { if (e.type === 'income') inc += e.amount; else out += e.amount; } });
     (transfers || []).forEach((t) => { if ((t.date || '').slice(0, 7) === thisMonth) { if (t.to === a.id) inc += +t.amount || 0; if (t.from === a.id) out += +t.amount || 0; } });
     return { inc, out };
   };
@@ -585,7 +586,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
       <div className="ms-grid">
         {accounts.map((a) => {
           const bal = FS.acctBalance(a, entries, accounts, transfers);
-          const txn = entries.filter((e) => (e.acct || accounts[0].id) === a.id).length;
+          const txn = entries.filter((e) => !e.reference && (e.acct || accounts[0].id) === a.id).length;
           const mm = monthMut(a);
           return (
             <div key={a.id} className="ms-card card" onClick={() => setDetail(a)} style={{ cursor: 'pointer' }}>

@@ -203,6 +203,7 @@
     const ids = (accts || []).map((a) => a.id);
     let bal = +acct.opening || 0;
     entries.forEach((e) => {
+      if (e.reference) return;   // non-cash "reference" cost (e.g. production cost in reference mode) never touches a cash balance
       const aid = e.acct && ids.includes(e.acct) ? e.acct : ids[0];   // unassigned → first account
       if (aid === acct.id) bal += (e.type === 'income' ? e.amount : -e.amount);
     });

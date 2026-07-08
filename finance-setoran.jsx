@@ -65,8 +65,9 @@ function SetoranModal({ row, fleet, accounts, depositAcct, onDepositAcctChange, 
   );
 }
 
-function SetoranScreen({ setoran, onAdd, onEdit, onRemove, fleet, setFleet, accounts, canEdit, postedDays, onPost, autoSynced, costPerGalon, onCostChange, depositAcct, onDepositAcctChange, payments, onAddPayment, onDelPayment }) {
+function SetoranScreen({ setoran, onAdd, onEdit, onRemove, fleet, setFleet, accounts, canEdit, postedDays, onPost, autoSynced, costPerGalon, onCostChange, depositAcct, onDepositAcctChange, mfgAcct, onMfgAcctChange, payments, onAddPayment, onDelPayment }) {
   const costPer = +costPerGalon || 0;
+  const defBank = ((accounts || []).find((a) => a.type === 'bank') || (accounts || [])[0] || {}).id;   // legacy default for production cost
   const [fleetMgr, setFleetMgr] = uSt(false);
   const [payModal, setPayModal] = uSt(false);
   const [gran, setGran] = uSt('day');
@@ -125,6 +126,13 @@ function SetoranScreen({ setoran, onAdd, onEdit, onRemove, fleet, setFleet, acco
               <div className="amt-input st-cost-input"><span className="amt-rp" style={{ fontSize: 12 }}>Rp</span>
                 <input inputMode="numeric" value={costPer ? costPer.toLocaleString('id-ID') : ''} placeholder="0"
                   onChange={(e) => onCostChange(+e.target.value.replace(/\D/g, '') || 0)} /></div>
+            </div>
+          )}
+          {onMfgAcctChange && accounts && accounts.length > 0 && (
+            <div className="st-cost-cfg st-mfg-cfg" title={trT('st.mfgAcctHint')}>
+              <IconInvoice s={15} style={{ color: 'var(--green-700)', flexShrink: 0 }} />
+              <span className="st-cost-lbl">{trT('st.mfgAcct')}</span>
+              <div style={{ minWidth: 150 }}><UI.Dropdown value={mfgAcct || defBank} options={[...accounts.map((a) => ({ value: a.id, label: a.name })), { value: '__reference__', label: trT('st.mfgReference') }]} onChange={onMfgAcctChange} /></div>
             </div>
           )}
           <button className="btn btn-ghost" onClick={exportCSV}><IconDownload s={16} />{trT('hrr.csv')}</button>

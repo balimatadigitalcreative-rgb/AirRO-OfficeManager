@@ -281,6 +281,12 @@ function FApp() {
     const supCat = (cats.expense.find((c) => /supplies|produksi|pabrik|bottling|manufact/i.test(c.label)) || cats.expense[0] || {}).key || 'Supplies';
     const cashAcct = (accounts.find((a) => a.id === settings.setoranAcct) || accounts.find((a) => a.type === 'cash') || accounts[0] || {}).id;
     const bankAcct = (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id;
+    // Production-cost treatment (settings.mfgAcct): undefined → charge the bank account
+    // (legacy default); '__reference__' → non-cash reference only (charges NO account,
+    // still counts toward margin/reports); an account id → charge that account.
+    const mfgMode = settings.mfgAcct;
+    const mfgReference = mfgMode === '__reference__';
+    const mfgAcctId = (mfgMode && !mfgReference && accounts.some((a) => a.id === mfgMode)) ? mfgMode : bankAcct;
     const costPer = +settings.costPerGalon || 0;
     const byDay = {};
     setoran.forEach((r) => { (byDay[r.date] = byDay[r.date] || []).push(r); });
@@ -292,11 +298,15 @@ function FApp() {
       if (totalSetoran !== 0) out.push({ id: 'stinc-' + day, type: 'income', category: salesCat, amount: totalSetoran,
         acct: cashAcct, note: tr('st.noteEntry', { d: day, n: galon, c: items.length }), method: 'Cash', date: day, time: '18:00', setoranDay: day, proof: (items.find((r) => r.proof) || {}).proof });
       const mfg = galon * costPer;
-      if (mfg > 0) out.push({ id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg,
-        acct: bankAcct, note: tr('st.mfgNote', { d: day, n: galon, c: FIN.fmt(costPer) }), method: 'Transfer', date: day, time: '18:05', setoranMfg: day });
+      if (mfg > 0) {
+        const note = tr('st.mfgNote', { d: day, n: galon, c: FIN.fmt(costPer) }) + (mfgReference ? ' · ' + (tr('st.mfgRefTag') || 'acuan') : '');
+        out.push(mfgReference
+          ? { id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg, acct: null, reference: true, note, method: 'Reference', date: day, time: '18:05', setoranMfg: day }
+          : { id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg, acct: mfgAcctId, note, method: 'Transfer', date: day, time: '18:05', setoranMfg: day });
+      }
     });
     return out;
-  }, [setoran, settings.costPerGalon, settings.setoranAcct, cats, accounts, lang]);
+  }, [setoran, settings.costPerGalon, settings.setoranAcct, settings.mfgAcct, cats, accounts, lang]);
 
   // The cash book the whole app reads: derived setoran rows + persisted real
   // entries. Every existing consumer (stats, reports, ledger, alerts) keeps using
@@ -696,7 +706,9 @@ function FApp() {
   const stats = uMh(() => {
     let balIn = 0, balOut = 0, pIn = 0, pOut = 0;
     entries.forEach((e) => {
-      if (e.type === 'income') balIn += e.amount; else balOut += e.amount;
+      // Cash balance (balIn/balOut) skips non-cash reference costs; profit (pIn/pOut)
+      // still counts them, so gross margin is identical in both modes — only cash differs.
+      if (!e.reference) { if (e.type === 'income') balIn += e.amount; else balOut += e.amount; }
       if (e.date >= range.start && e.date <= range.end) { if (e.type === 'income') pIn += e.amount; else pOut += e.amount; }
     });
     const profit = pIn - pOut;
@@ -1047,7 +1059,7 @@ function FApp() {
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
-            <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
+            <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} mfgAcct={settings.mfgAcct} onMfgAcctChange={(v) => applySettings((prev) => ({ ...prev, mfgAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
           )}
 
           {screen === 'moneyspots' && p.cashflow && (
