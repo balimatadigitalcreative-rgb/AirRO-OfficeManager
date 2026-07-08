@@ -350,6 +350,13 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
             {items.map((e) => {
               const isInc = e.type === 'income';
               const c = info(e.category);
+              // Setoran-derived rows (stinc-/stmfg-) are recomputed in-memory from the
+              // Setoran table — they cannot be edited/deleted here (the change would just
+              // be reverted on the next recompute). Edit them via Setoran instead. Hiding
+              // the buttons avoids the confusing "account change doesn't save" revert.
+              const derived = /^st(inc|mfg)-/.test(String(e.id || ''));
+              const showEdit = canEdit && !derived;
+              const showDel = canDelete && !derived;
               return (
                 <div key={e.id} className="entry-row">
                   <span className="icon-tile" style={{ width: 38, height: 38, borderRadius: 11, background: isInc ? 'var(--pos-bg)' : '#EAF1F4', color: isInc ? 'var(--green-800)' : '#5E7A88' }}>{Icn(c.icon, { s: 18 })}</span>
@@ -364,9 +371,9 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
                     : <span className="entry-proof empty" aria-hidden="true" />}
                   <span className={`tnum ${isInc ? 'amt-pos' : 'amt-neg'}`} style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>{fmtS(isInc ? e.amount : -e.amount)}</span>
                   <div className="entry-actions">
-                    {canEdit && <button className="edit-btn" title="Edit" aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
-                    {canDelete && <button className="del-btn" title="Delete" aria-label={trF('a11y.delete')} onClick={() => onDelete(e.id)}><IconClose s={15} /></button>}
-                    {!canEdit && !canDelete && <span className="del-spacer" />}
+                    {showEdit && <button className="edit-btn" title="Edit" aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
+                    {showDel && <button className="del-btn" title="Delete" aria-label={trF('a11y.delete')} onClick={() => onDelete(e.id)}><IconClose s={15} /></button>}
+                    {!showEdit && !showDel && <span className="del-spacer" />}
                   </div>
                 </div>
               );
