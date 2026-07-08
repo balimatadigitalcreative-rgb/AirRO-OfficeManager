@@ -101,7 +101,7 @@ function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero }) {
   );
 }
 
-function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, today, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCustomers, today, fleetScope, fleet, distFleet, setDistFleet }) {
   const [sum, setSum] = uSx(null);
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
@@ -182,11 +182,13 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
             <div className="dist-th-avg"><span>{trD('dist.avgNota')}</span><b className="tnum">{rpFull(avgNota)}</b></div>
           </div>
 
+          {canInput && (
           <div className="card dist-quick">
             <div className="dist-quick-t">{trD('dist.quickInput')}</div>
             <div className="dist-quick-s">{trD('dist.quickInputSub')}</div>
             <button className="btn btn-primary" style={{ width: '100%', marginTop: 12 }} onClick={onQuickInput}><IconPlus s={16} />{trD('dist.quickInputBtn')}</button>
           </div>
+          )}
 
           <div className="card dist-card">
             <div className="dist-card-head"><div className="sec-title">{trD('dist.topCust')}</div>{onOpenCustomers && <button className="dist-link" onClick={onOpenCustomers}>{trD('dist.seeAll')}</button>}</div>
@@ -212,7 +214,7 @@ function DistDashboard({ refreshKey, staffMode, onQuickInput, onOpenCustomers, t
 function shortRef(id) { return '#' + String(id || '').slice(-6).toUpperCase(); }
 function hhmm(ms) { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); }
 
-function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet }) {
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -362,7 +364,7 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
       <div className="dist-tx-toolbar">
         <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
-        <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>
+        {canInput && <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
       </div>
       <div className="dist-permbanner"><IconLock s={15} />{trD('dist.permBanner')}</div>
 
@@ -389,7 +391,7 @@ function DistTransactions({ today, staffMode, refreshKey, openFormTick, onChange
                 <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                 <span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>
               </div>
-              <button type="button" className="dist-corr-btn" onClick={() => { setCorrTxn(t); setCorrReason(''); setCorrValue(''); }}><IconPencil s={13} />{trD('dist.korek')}</button>
+              {canKoreksi && <button type="button" className="dist-corr-btn" onClick={() => { setCorrTxn(t); setCorrReason(''); setCorrValue(''); }}><IconPencil s={13} />{trD('dist.korek')}</button>}
             </div>
           );
         })}

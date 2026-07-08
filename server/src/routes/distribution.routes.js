@@ -32,9 +32,12 @@ router.patch('/customer-types/:id', requireCap('distribusiCustomers'), validate(
 router.delete('/customer-types/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, query: ctrl.schemas.typeDeleteQuery }), ctrl.deleteType);
 
 // ── Transactions ── (price locked server-side; append-only)
+// Viewing is base module access ('distribusi' = holds ANY distribusi cap). Creating a
+// transaction needs 'distribusiInput' (helper staff); appending a correction needs the
+// separate 'distribusiKoreksi' — a helper with only input can never correct.
 router.get('/transactions', requireCap('distribusi'), validate({ query: ctrl.schemas.listTxnQuery }), ctrl.listTransactions);
-router.post('/transactions', requireCap('distribusi'), validate({ body: ctrl.schemas.txnSchema }), ctrl.createTransaction);
-router.post('/transactions/:id/corrections', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.addCorrection);
+router.post('/transactions', requireCap('distribusiInput'), validate({ body: ctrl.schemas.txnSchema }), ctrl.createTransaction);
+router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.addCorrection);
 
 // ── Audit (owner) + dashboard ──
 router.get('/audit', requireCap('distribusiAudit'), validate({ query: ctrl.schemas.auditQuery }), ctrl.listAudit);

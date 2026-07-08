@@ -1003,12 +1003,14 @@ function FApp() {
           {screen === 'dist-dashboard' && (
             <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
+              canInput={!!p.distribusiInput}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
-              onQuickInput={() => { go('dist-transactions', !p.distribusi); if (p.distribusi) setDistFormTick((t) => t + 1); }} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
+              onQuickInput={() => { go('dist-transactions', !p.distribusiInput); if (p.distribusiInput) setDistFormTick((t) => t + 1); }} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
           )}
           {screen === 'dist-transactions' && (
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
+              canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}

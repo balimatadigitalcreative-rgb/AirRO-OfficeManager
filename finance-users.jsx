@@ -39,7 +39,8 @@ const CAP_GROUPS = [
     ['reset', 'Kelola User'],
   ] },
   { title: 'Distribusi', caps: [
-    ['distribusi', 'Akses Distribusi (input & koreksi)'],
+    ['distribusiInput', 'Input Transaksi Distribusi'],
+    ['distribusiKoreksi', 'Koreksi Transaksi Distribusi'],
     ['distribusiCustomers', 'Kelola Pelanggan (tambah/impor)'],
     ['distribusiHargaMaster', 'Ubah Harga Master'],
     ['distribusiAudit', 'Lihat Log Audit'],

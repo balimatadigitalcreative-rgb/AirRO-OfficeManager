@@ -10,36 +10,36 @@ const ROLE_PERMS = {
     delete: false, seeMoney: true, allEntries: false, reports: true, advisor: false,
     payroll: false, approvals: false, settings: false, reset: false, setoran: false, setoranOnly: false,
     kasbon: false, kasbonApprove: false,
-    // Distribusi (Pemilik = all four)
-    distribusi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
+    // Distribusi — input & koreksi are now separate caps (Pemilik = all).
+    distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
   },
   gm: {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
     delete: true, seeMoney: true, allEntries: true, reports: true, advisor: true,
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
-    distribusi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
+    distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
   },
   hrd: {
     company: false, cashflow: false, employees: true, empDetail: true, attendance: true, addEntry: false, edit: false,
     delete: false, seeMoney: true, allEntries: false, reports: false, advisor: false,
     payroll: true, approvals: true, settings: false, reset: false, setoran: false, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
-    distribusi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
+    distribusiInput: false, distribusiKoreksi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
   },
   finance: {
     company: false, cashflow: true, employees: false, empDetail: false, attendance: false, addEntry: true, edit: true,
     delete: true, seeMoney: true, allEntries: true, reports: true, advisor: true,
     payroll: true, approvals: true, settings: true, reset: false, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: false,
-    distribusi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
+    distribusiInput: false, distribusiKoreksi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
   },
   adminfin: {
     company: false, cashflow: true, employees: false, empDetail: false, attendance: false, addEntry: false, edit: false,
     delete: false, seeMoney: true, allEntries: true, reports: false, advisor: false,
     payroll: false, approvals: false, settings: false, reset: false, setoran: true, setoranOnly: true,
     kasbon: false, kasbonApprove: false,
-    distribusi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
+    distribusiInput: false, distribusiKoreksi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false,
   },
 };
 // Display metadata used when seeding the built-in roles into the Role table.
@@ -85,10 +85,10 @@ async function seedBuiltinRoles() {
         // Then materialize the split kasbon caps from the (merged) legacy value so the
         // Role editor shows them as explicit checkboxes, consistent with old behaviour.
         const cur = parsePerms(existing.permissions) || {};
-        const merged = deriveKasbonCaps({ ...seed, ...cur });
+        const merged = deriveDistribusiCaps(deriveKasbonCaps({ ...seed, ...cur }));
         await prisma.role.update({ where: { id }, data: { builtin: true, permissions: JSON.stringify(merged) } });
       } else {
-        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveKasbonCaps(seed)), builtin: true, sortOrder: i } });
+        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveDistribusiCaps(deriveKasbonCaps(seed))), builtin: true, sortOrder: i } });
       }
     }
   } catch (e) { /* table may not exist yet on very first migrate; ignored */ }
@@ -136,12 +136,31 @@ function deriveKasbonCaps(perms) {
   return p;
 }
 
+// Distribusi used to be ONE coarse cap: `distribusi` (input + koreksi + module view
+// lumped together). It is now split into `distribusiInput` (create transactions + open
+// the module — given to helper staff) and `distribusiKoreksi` (append corrections). For
+// backward compatibility every ABSENT split cap is derived from the legacy value, so old
+// role rows, per-user overrides, and already-issued tokens keep working: whoever had
+// `distribusi` can still BOTH input and correct. Explicit split values are never
+// overridden — an admin can turn either action off. `distribusi` is kept as a live alias
+// meaning "may open the module" = holds ANY distribusi capability (input/koreksi/
+// customers/harga/audit), which is what the module-view routes and nav gate on.
+function deriveDistribusiCaps(perms) {
+  if (!perms || typeof perms !== 'object') return perms;
+  const p = { ...perms };
+  const legacy = !!p.distribusi;
+  if (p.distribusiInput === undefined) p.distribusiInput = legacy;
+  if (p.distribusiKoreksi === undefined) p.distribusiKoreksi = legacy;
+  p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster || p.distribusiAudit);
+  return p;
+}
+
 // Effective capability map for a user: their per-user override if set, otherwise the
 // role's current defaults (from the live Role table, falling back to the seed). The
 // kasbon granular caps are derived for backward compatibility.
 function resolvePerms(role, permsStrOrObj) {
   const override = parsePerms(permsStrOrObj);
-  return deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance);
+  return deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance));
 }
 
-module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, refreshRoleCache, seedBuiltinRoles };
+module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, deriveDistribusiCaps, refreshRoleCache, seedBuiltinRoles };
