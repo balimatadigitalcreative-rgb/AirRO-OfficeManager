@@ -351,11 +351,12 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
               const isInc = e.type === 'income';
               const c = info(e.category);
               // Setoran-derived rows (stinc-/stmfg-) are recomputed in-memory from the
-              // Setoran table — they cannot be edited/deleted here (the change would just
-              // be reverted on the next recompute). Edit them via Setoran instead. Hiding
-              // the buttons avoids the confusing "account change doesn't save" revert.
+              // Setoran table. The edit button still shows (so authorized users always see
+              // it), but for a derived row onEdit routes to the Setoran screen instead of
+              // the per-entry modal — editing there persists, avoiding the old "account
+              // won't save" revert. Delete stays hidden (remove the Setoran row instead).
               const derived = /^st(inc|mfg)-/.test(String(e.id || ''));
-              const showEdit = canEdit && !derived;
+              const showEdit = canEdit;
               const showDel = canDelete && !derived;
               return (
                 <div key={e.id} className="entry-row">
@@ -371,7 +372,7 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
                     : <span className="entry-proof empty" aria-hidden="true" />}
                   <span className={`tnum ${isInc ? 'amt-pos' : 'amt-neg'}`} style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>{fmtS(isInc ? e.amount : -e.amount)}</span>
                   <div className="entry-actions">
-                    {showEdit && <button className="edit-btn" title="Edit" aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
+                    {showEdit && <button className="edit-btn" title={derived ? (trF('entries.editSetoran') || 'Kelola di Setoran') : (trF('a11y.edit') || 'Edit')} aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
                     {showDel && <button className="del-btn" title="Delete" aria-label={trF('a11y.delete')} onClick={() => onDelete(e.id)}><IconClose s={15} /></button>}
                     {!showEdit && !showDel && <span className="del-spacer" />}
                   </div>

@@ -265,7 +265,7 @@
       'recent.title': 'Recent Entries', 'common.viewall': 'View all', 'common.seeall': 'See all',
       // entries list
       'entries.search': 'Search entries…', 'entries.all': 'all', 'entries.income': 'income',
-      'entries.expense': 'expense', 'entries.none': 'No entries found.', 'entries.titleMonth': 'Entries · {m}',
+      'entries.expense': 'expense', 'entries.none': 'No entries found.', 'entries.titleMonth': 'Entries · {m}', 'entries.editSetoran': 'Auto from Setoran — manage there', 'entries.derivedInfo': 'This entry is auto-generated from Setoran — edit it in the Setoran screen.',
       // tips
       'tip.label': 'Jernih suggests', 'tip.ask': 'Ask Jernih about this', 'tip.next': 'Another tip',
       'tip.status': 'Online · reading your books', 'tip.minimize': 'Minimize',
@@ -607,7 +607,7 @@
       'cat.title': 'Pengeluaran per Kategori', 'cat.none': 'Belum ada pengeluaran tercatat.',
       'recent.title': 'Catatan Terbaru', 'common.viewall': 'Lihat semua', 'common.seeall': 'Lihat semua',
       'entries.search': 'Cari catatan…', 'entries.all': 'semua', 'entries.income': 'pemasukan',
-      'entries.expense': 'pengeluaran', 'entries.none': 'Catatan tidak ditemukan.', 'entries.titleMonth': 'Catatan · {m}',
+      'entries.expense': 'pengeluaran', 'entries.none': 'Catatan tidak ditemukan.', 'entries.titleMonth': 'Catatan · {m}', 'entries.editSetoran': 'Otomatis dari Setoran — kelola di sana', 'entries.derivedInfo': 'Catatan ini otomatis dari Setoran — ubah di layar Setoran.',
       'tip.label': 'Saran Jernih', 'tip.ask': 'Tanya Jernih soal ini', 'tip.next': 'Saran lain',
       'tip.status': 'Online · membaca pembukuan Anda', 'tip.minimize': 'Perkecil',
       'tip.greeting': 'Halo! Saya memantau keuangan Anda. Ada hal yang perlu dilihat:',

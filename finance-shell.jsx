@@ -675,6 +675,15 @@ function FApp() {
   };
   const del = (id) => { if (!p.delete) { setToast(tr('toast.onlyOwnerDelete')); return; } const e = entries.find((x) => x.id === id); if (e && !confirm(tr('toast.deleteConfirm', { n: e.note || '', amt: FIN.fmt(e.amount || 0) }))) return; removeEntry(id); setToast(tr('toast.deleted')); };
   const saveEdit = (upd) => { editEntry(upd); setEditing(null); setToast(tr('toast.updated')); };
+  // Edit dispatcher for the entry lists. A normal entry opens the per-entry modal. A
+  // Setoran-derived row (stinc-/stmfg-) is an auto-generated summary of the Setoran
+  // table — it can't be edited here (the change would be recomputed away, the old
+  // "account won't save" revert), so its edit button takes the user to the Setoran
+  // screen where the source lives (or explains it if they have no setoran access).
+  const editEntryRow = (e) => {
+    if (isDerivedEntry(e.id)) { if (p.setoran) setScreen('setoran'); else setToast(tr('entries.derivedInfo')); return; }
+    setEditing(e);
+  };
   // Demo reset now clears the REST cash book (real entries only; derived setoran
   // rows regenerate). Deletes each persisted entry, then repaints empty.
   const resetData = () => { if (!p.reset) return; if (!confirm('Hapus SEMUA catatan kas (kembali kosong)?')) return; realEntries.forEach((e) => { if (window.API && window.API.entries) window.API.entries.remove(e.id).catch(() => {}); }); setRealEntries([]); try { localStorage.setItem('airro_cashbook_cache_v1', '[]'); } catch (e) {} setTimeout(reloadEntries, 400); setToast(tr('toast.demoRestored')); };
@@ -1052,7 +1061,7 @@ function FApp() {
               <div className="fin-grid">
                 <div className="fin-col">
                   {p.addEntry ? <FIN.AddEntry onAdd={add} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} /> : null}
-                  <FIN.EntriesList entries={recent} onDelete={del} onEdit={setEditing} title={tr('recent.title')} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
+                  <FIN.EntriesList entries={recent} onDelete={del} onEdit={editEntryRow} title={tr('recent.title')} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
                 </div>
                 <div className="fin-col">
                   <FIN.TodayCard today={today} seeMoney={p.seeMoney} />
@@ -1067,7 +1076,7 @@ function FApp() {
             <div className="screen-enter">
               <FIN.StatRow stats={stats} seeMoney={p.seeMoney} deltas={deltas} />
               <div style={{ marginTop: 16 }}>
-                <FIN.EntriesList entries={periodEntries} onDelete={del} onEdit={setEditing} filterable title={tr('entries.titleMonth', { m: periodLbl })} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
+                <FIN.EntriesList entries={periodEntries} onDelete={del} onEdit={editEntryRow} filterable title={tr('entries.titleMonth', { m: periodLbl })} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
               </div>
             </div>
           )}
