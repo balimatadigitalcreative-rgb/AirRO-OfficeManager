@@ -1165,7 +1165,7 @@ function FApp() {
       )}
       <PROOFMOUNT />
       {editing && p.edit && (
-        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} onSave={saveEdit} onClose={() => setEditing(null)} />
+        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {empDetail && p.empDetail && (
         <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />

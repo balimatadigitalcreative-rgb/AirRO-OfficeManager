@@ -804,6 +804,10 @@ select.fld::-ms-expand { display: none; }
 /* Header & footer sit outside the scroll area and stay visible. */
 .modal-head, .modal-foot { flex-shrink: 0; }
 .modal-card input, .modal-card select, .modal-card textarea, .modal-card .ui-dd, .modal-card .amt-input { max-width: 100%; }   /* no child wider than the modal */
+/* Edit Entry packs a lot (type, amount, category, account, gallons, date/note, proof).
+   Tighten the label rhythm so the whole form fits on a normal laptop without a scrollbar;
+   the shared .modal-body still scrolls as a safety on short/phone viewports. */
+.entry-edit-modal .fld-label { margin-top: 11px; }
 .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .modal-head > div:first-child { flex: 1; min-width: 0; }
 /* Keep the title + close (X) pinned while a tall form scrolls inside the card. The

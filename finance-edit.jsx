@@ -2,10 +2,12 @@
 const { useState: uSe, useEffect: uEe } = React;
 function IcE(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
-function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
+function EntryModal({ entry, incomeCats, expenseCats, accounts, onSave, onClose }) {
+  const ACCTS = accounts && accounts.length ? accounts : [{ id: 'cash', name: 'Cash', type: 'cash' }];
   const [type, setType] = uSe(entry.type);
   const [amount, setAmount] = uSe(entry.amount);
   const [cat, setCat] = uSe(entry.category);
+  const [acct, setAcct] = uSe(entry.acct || (ACCTS[0] && ACCTS[0].id));   // money spot; default first if unset
   const [date, setDate] = uSe(entry.date);
   const [note, setNote] = uSe(entry.note);
   const [proof, setProof] = uSe(entry.proof || null);
@@ -23,13 +25,16 @@ function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
   const label = (k) => { const c = cats.find((x) => x.key === k); return c ? c.label : k; };
   const save = () => {
     if (!amount || amount <= 0) return;
-    onSave({ ...entry, type, category: cat, amount, date, note: note.trim() || label(cat), proof, gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0 });
+    // Persist the chosen money spot + a consistent method (cash→'Cash', else→'Transfer')
+    // exactly like the Add form, so each account's balance in Money Spots stays correct.
+    const a = ACCTS.find((x) => x.id === acct);
+    onSave({ ...entry, type, category: cat, amount, date, note: note.trim() || label(cat), proof, acct, method: a ? (a.type === 'cash' ? 'Cash' : 'Transfer') : (entry.method || 'Cash'), gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0 });
   };
   const disp = amount ? amount.toLocaleString('id-ID') : '';
 
   return (
     <div className="modal-scrim" onMouseDown={onClose}>
-      <div className="modal-card" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal-card entry-edit-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div>
             <div style={{ fontSize: 17, fontWeight: 800 }}>Edit Entry</div>
@@ -38,6 +43,7 @@ function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
           <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
         </div>
 
+        <div className="modal-body">
         <div className="type-toggle">
           <button className={`tt-btn ${type === 'income' ? 'on inc' : ''}`} onClick={() => setType('income')}><IconCoinIn s={17} />Income</button>
           <button className={`tt-btn ${type === 'expense' ? 'on exp' : ''}`} onClick={() => setType('expense')}><IconCoinOut s={17} />Expense</button>
@@ -55,6 +61,15 @@ function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
           {cats.map((c) => (
             <button key={c.key} className={`cat-chip ${cat === c.key ? 'on' : ''}`} onClick={() => setCat(c.key)}>
               {IcE(c.icon, { s: 15 })}{c.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="fld-label">{((window.t && window.t('add.acct')) || 'Akun') + (type === 'income' ? ' →' : ' ←')}</label>
+        <div className="cat-chips">
+          {ACCTS.map((a) => (
+            <button key={a.id} className={`cat-chip ${acct === a.id ? 'on' : ''}`} onClick={() => setAcct(a.id)}>
+              {IcE(a.type === 'cash' ? 'IconWallet' : 'IconStore', { s: 15 })}{a.name}
             </button>
           ))}
         </div>
@@ -84,6 +99,7 @@ function EntryModal({ entry, incomeCats, expenseCats, onSave, onClose }) {
 
         <label className="fld-label">{(window.t && window.t('att.proof')) || 'Proof'}</label>
         <UI.FileAttach value={proof} onChange={setProof} />
+        </div>
 
         <div className="modal-foot">
           <button className="btn btn-ghost" style={{ height: 44 }} onClick={onClose}>Cancel</button>
