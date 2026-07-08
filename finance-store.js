@@ -213,8 +213,18 @@
   // ---- delivery setoran (per-armada daily deposit) ----
   const SETORAN_KEY = 'airro_setoran_v2';   // trial: starts empty
   const FLEET_KEY = 'airro_fleet_v1';
-  const DEFAULT_FLEET = ['L-281', 'L-294', 'L-257', 'L-224', 'L-311'];
-  function loadFleet() { try { const r = localStorage.getItem(FLEET_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a) && a.length) return a; } } catch (e) {} saveFleet(DEFAULT_FLEET); return DEFAULT_FLEET.slice(); }
+  const FLEET_CACHE_KEY = 'airro_fleet_cache_v1';   // live REST-synced fleet (the single source of truth)
+  // SINGLE SOURCE for the fleet list everywhere. The authoritative value is the
+  // REST setting `airro_fleet` (managed in Setoran → Kelola Armada), mirrored to
+  // FLEET_CACHE_KEY. Read that first, fall back to the legacy local key, then empty.
+  // NEVER inject placeholder fleets — a fresh install has no fleets until the user
+  // adds them, so no stale "L-xxx" defaults can leak into any picker.
+  function loadFleet() {
+    for (const k of [FLEET_CACHE_KEY, FLEET_KEY]) {
+      try { const r = localStorage.getItem(k); if (r) { const a = JSON.parse(r); if (Array.isArray(a) && a.length) return a; } } catch (e) {}
+    }
+    return [];
+  }
   function saveFleet(a) { try { localStorage.setItem(FLEET_KEY, JSON.stringify(a)); } catch (e) {} }
   function loadSetoran() { try { const r = localStorage.getItem(SETORAN_KEY); if (r) { const a = JSON.parse(r); if (Array.isArray(a)) return a; } } catch (e) {} const s = seedSetoran(); saveSetoran(s); return s; }
   function saveSetoran(a) { try { localStorage.setItem(SETORAN_KEY, JSON.stringify(a)); } catch (e) {} }

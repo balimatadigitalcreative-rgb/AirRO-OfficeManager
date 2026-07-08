@@ -150,7 +150,7 @@
       'nav.settings': 'Settings', 'nav.signout': 'Sign out', 'nav.home': 'Home', 'nav.activity': 'Activity', 'nav.add': 'Add', 'nav.users': 'Users', 'nav.orientation': 'Orientation', 'nav.more': 'Menu',
       't.users': 'User Management', 's.users': 'Create & edit user accounts and roles',
       'um.add': 'Add User', 'um.edit': 'Edit User', 'um.name': 'Full name', 'um.role': 'Role', 'um.username': 'Username', 'um.password': 'Password (PIN)', 'um.note': 'Note', 'um.notePh': 'e.g. Finance · Keuangan', 'um.save': 'Save User', 'um.remove': 'Remove', 'um.removeConfirm': 'Remove this user account?', 'um.dup': 'Username already taken.', 'um.intro': '{n} user accounts', 'um.you': 'you',
-      'um.fleetScope': 'Fleet Access (Distribution)', 'um.fleetScopeHint': 'Which distribution fleets this user may see & manage. “All” = every fleet.', 'um.fleetAll': 'All', 'um.fleetNone': 'No fleets defined yet (manage them in Setoran).',
+      'um.fleetScope': 'Fleet Access (Distribution)', 'um.fleetScopeHint': 'Which distribution fleets this user may see & manage. “All” = every fleet.', 'um.fleetAll': 'All', 'um.fleetNone': 'No fleets defined yet (manage them in Setoran).', 'um.fleetInactive': '(inactive)',
       'um.tabUsers': 'Users', 'um.tabRoles': 'Manage Roles',
       'rm.intro': '{n} roles', 'rm.add': 'Add Role', 'rm.edit': 'Edit Role', 'rm.name': 'Role name', 'rm.namePh': 'e.g. Cashier / Warehouse Supervisor', 'rm.color': 'Colour', 'rm.caps': 'Capabilities', 'rm.delete': 'Delete Role', 'rm.save': 'Save Role', 'rm.deleteConfirm': 'Delete the role “{n}”?', 'rm.builtin': 'built-in', 'rm.capsN': '{n} caps', 'rm.dupName': 'A role with that name already exists.',
       // roles
@@ -503,7 +503,7 @@
       'nav.settings': 'Pengaturan', 'nav.signout': 'Keluar', 'nav.home': 'Beranda', 'nav.activity': 'Aktivitas', 'nav.add': 'Tambah', 'nav.users': 'Pengguna', 'nav.orientation': 'Orientasi', 'nav.more': 'Lainnya',
       't.users': 'Manajemen Pengguna', 's.users': 'Buat & ubah akun pengguna dan peran',
       'um.add': 'Tambah Pengguna', 'um.edit': 'Ubah Pengguna', 'um.name': 'Nama lengkap', 'um.role': 'Peran', 'um.username': 'Username', 'um.password': 'Password (PIN)', 'um.note': 'Catatan', 'um.notePh': 'cth. Finance · Keuangan', 'um.save': 'Simpan Pengguna', 'um.remove': 'Hapus', 'um.removeConfirm': 'Hapus akun pengguna ini?', 'um.dup': 'Username sudah dipakai.', 'um.intro': '{n} akun pengguna', 'um.you': 'Anda',
-      'um.fleetScope': 'Akses Armada (Distribusi)', 'um.fleetScopeHint': 'Armada distribusi yang boleh dilihat & dikelola user ini. “Semua” = semua armada.', 'um.fleetAll': 'Semua', 'um.fleetNone': 'Belum ada armada (kelola di Setoran).',
+      'um.fleetScope': 'Akses Armada (Distribusi)', 'um.fleetScopeHint': 'Armada distribusi yang boleh dilihat & dikelola user ini. “Semua” = semua armada.', 'um.fleetAll': 'Semua', 'um.fleetNone': 'Belum ada armada (kelola di Setoran).', 'um.fleetInactive': '(non-aktif)',
       'um.tabUsers': 'Pengguna', 'um.tabRoles': 'Kelola Peran',
       'rm.intro': '{n} peran', 'rm.add': 'Tambah Peran', 'rm.edit': 'Ubah Peran', 'rm.name': 'Nama peran', 'rm.namePh': 'mis. Kasir / Supervisor Gudang', 'rm.color': 'Warna', 'rm.caps': 'Hak Akses', 'rm.delete': 'Hapus Peran', 'rm.save': 'Simpan Peran', 'rm.deleteConfirm': 'Hapus peran “{n}”?', 'rm.builtin': 'bawaan', 'rm.capsN': '{n} akses', 'rm.dupName': 'Peran dengan nama itu sudah ada.',
       'role.owner': 'Pemilik', 'role.manager': 'Pengelola', 'role.cashier': 'Kasir',

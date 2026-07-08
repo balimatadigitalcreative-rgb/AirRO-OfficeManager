@@ -1123,7 +1123,7 @@ function FApp() {
           )}
 
           {screen === 'users' && (p.reset || user.role === 'owner' || user.role === 'gm') && (
-            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={user.role === 'owner' || user.role === 'gm' || p.reset} />
+            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={user.role === 'owner' || user.role === 'gm' || p.reset} fleet={fleet} />
           )}
 
           <footer className="app-footer">

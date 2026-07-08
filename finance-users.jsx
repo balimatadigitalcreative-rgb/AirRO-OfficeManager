@@ -46,7 +46,7 @@ const CAP_GROUPS = [
   ] },
 ];
 
-function UserModal({ row, users, onSave, onClose, busy }) {
+function UserModal({ row, users, onSave, onClose, busy, fleet }) {
   const [f, setF] = uSu(row);
   React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const set = (p) => setF({ ...f, ...p });
@@ -116,9 +116,15 @@ function UserModal({ row, users, onSave, onClose, busy }) {
 
           {/* ---- Distribusi fleet access (data scope) ---- */}
           {(() => {
-            const fleet = (window.FS && FS.loadFleet && FS.loadFleet()) || [];
+            // SINGLE SOURCE: the live fleet list (REST `airro_fleet`, managed in Setoran →
+            // Kelola Armada), passed in as a prop. No hardcoded/placeholder fleets.
+            const active = Array.isArray(fleet) ? fleet : ((window.FS && FS.loadFleet && FS.loadFleet()) || []);
             const isAll = f.fleetScope === 'all' || f.fleetScope == null;
             const arr = Array.isArray(f.fleetScope) ? f.fleetScope : [];
+            // A scoped fleet that has since been deleted is kept as an "inactive" chip so
+            // the scope is never silently lost — the GM can still see and untick it.
+            const extras = arr.filter((n) => !active.includes(n));
+            const chips = [...active.map((n) => ({ name: n, inactive: false })), ...extras.map((n) => ({ name: n, inactive: true }))];
             const toggleFleet = (name) => { const cur = Array.isArray(f.fleetScope) ? f.fleetScope : []; const next = cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name]; set({ fleetScope: next.length ? next : 'all' }); };
             return (
               <div style={{ marginTop: 14 }}>
@@ -126,10 +132,10 @@ function UserModal({ row, users, onSave, onClose, busy }) {
                 <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '2px 0 8px' }}>{trU('um.fleetScopeHint')}</div>
                 <div className="cat-chips">
                   <button type="button" className={`cat-chip ${isAll ? 'on' : ''}`} onClick={() => set({ fleetScope: 'all' })}>{isAll ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{trU('um.fleetAll')}</button>
-                  {fleet.map((name) => { const on = !isAll && arr.includes(name); return (
-                    <button key={name} type="button" className={`cat-chip ${on ? 'on' : ''}`} onClick={() => toggleFleet(name)}>{on ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{name}</button>
+                  {chips.map(({ name, inactive }) => { const on = !isAll && arr.includes(name); return (
+                    <button key={name} type="button" className={`cat-chip ${on ? 'on' : ''}`} onClick={() => toggleFleet(name)}>{on ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{name}{inactive ? ' ' + trU('um.fleetInactive') : ''}</button>
                   ); })}
-                  {fleet.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{trU('um.fleetNone')}</span>}
+                  {chips.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{trU('um.fleetNone')}</span>}
                 </div>
               </div>
             );
@@ -145,7 +151,7 @@ function UserModal({ row, users, onSave, onClose, busy }) {
   );
 }
 
-function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, canManageRoles }) {
+function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, canManageRoles, fleet }) {
   const cloud = !!(window.CLOUD && window.CLOUD.active && window.API);
   const [rows, setRows] = uSu(cloud ? null : (users || []));
   const [edit, setEdit] = uSu(null);
@@ -239,7 +245,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
           </div>
         ))}
       </div>
-      {edit && <UserModal row={edit} users={list} onSave={save} onClose={() => setEdit(null)} busy={busy} />}
+      {edit && <UserModal row={edit} users={list} onSave={save} onClose={() => setEdit(null)} busy={busy} fleet={fleet} />}
     </div>
   );
 }
