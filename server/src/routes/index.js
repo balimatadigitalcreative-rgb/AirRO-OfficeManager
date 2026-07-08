@@ -24,6 +24,7 @@ router.use('/approvals', require('./approval.routes'));
 router.use('/training', require('./training.routes'));
 router.use('/calendar', require('./calendar.routes'));
 router.use('/payroll', require('./payroll.routes'));
+router.use('/attachments', require('./attachment.routes'));   // proof photos, out of the record payload
 router.use('/settings', require('./settings.routes'));
 router.use('/reports', require('./report.routes'));
 router.use('/state', require('./state.routes'));   // shared app-state document store

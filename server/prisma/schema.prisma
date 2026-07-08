@@ -556,3 +556,20 @@ model DistAuditLog {
   @@index([kind])
   @@index([createdAt])
 }
+
+// Proof photos / PDFs stored OUT of the record payload. Records (Entry/Setoran) keep
+// only a tiny reference ({"ref":"<id>","name":..,"isImg":..}) in their `proof` column,
+// so hydrate/login never drags the base64 bytes. The bytes live here and are fetched
+// lazily (GET /attachments/:id) only when a proof is actually opened.
+model Attachment {
+  id          String   @id @default(cuid())
+  name        String   @default("")
+  mime        String   @default("")
+  isImg       Boolean  @default(true)
+  data        String                              // base64 data URL (the actual bytes)
+  size        Int      @default(0)                // char length of `data` (rough bytes)
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdById])
+}

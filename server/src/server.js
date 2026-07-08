@@ -4,6 +4,7 @@ const config = require('./config/env');
 const prisma = require('./lib/prisma');
 const { seedBuiltinRoles } = require('./config/permissions');
 const distribution = require('./services/distribution.service');
+const attachments = require('./services/attachment.service');
 
 const app = createApp();
 // Ensure built-in roles exist + warm the permission cache (idempotent). resolvePerms
@@ -11,6 +12,9 @@ const app = createApp();
 seedBuiltinRoles().catch(() => {});
 // Ensure the seed customer types (reguler/kos/cafe/bulk) exist (idempotent).
 distribution.seedCustomerTypes().catch(() => {});
+// One-time: move any inline base64 proofs out of Entry/Setoran into the Attachment
+// table so old records stop dragging photos through the sync payload (idempotent).
+attachments.migrateInlineProofs().catch(() => {});
 
 const server = app.listen(config.port, config.host, () => {
   // eslint-disable-next-line no-console

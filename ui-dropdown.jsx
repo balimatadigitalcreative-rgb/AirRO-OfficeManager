@@ -132,32 +132,41 @@ function TimePicker({ value, onChange, compact, color, menuColor, placeholder })
 // odd/mislabelled MIME types (e.g. iPhone HEIC) are handled, not passed through raw.
 const tA = (k) => (window.t ? window.t(k) : k);
 const MAX_SRC_BYTES = 30 * 1024 * 1024;     // hard guard on the original file (memory)
-const TARGET_CHARS = 520 * 1024;            // ~380 KB actual → tiny payload, still legible
+const TARGET_CHARS = 340 * 1024;            // ~250 KB actual → tiny payload, still legible as proof
 const MAX_PDF_CHARS = 1.6 * 1024 * 1024;    // ~1.1 MB PDF (can't be canvas-compressed)
 const readDataURL = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('read')); r.readAsDataURL(file); });
 const loadImage = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('decode')); i.src = src; });
 function shrinkToJpeg(img) {
-  let maxDim = 1280;
+  let maxDim = 1024;   // proof needs to be legible, not print-quality → cap the long side
   for (let attempt = 0; attempt < 7; attempt++) {
     let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
     if (w > maxDim || h > maxDim) { const r = Math.min(maxDim / w, maxDim / h); w = Math.max(1, Math.round(w * r)); h = Math.max(1, Math.round(h * r)); }
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);   // white bg so transparent PNGs aren't black
-    const q = Math.max(0.4, 0.72 - attempt * 0.08);
+    const q = Math.max(0.4, 0.62 - attempt * 0.08);
     const data = c.toDataURL('image/jpeg', q);
-    if (data.length <= TARGET_CHARS || (maxDim <= 720 && q <= 0.4)) return data;   // good enough
+    if (data.length <= TARGET_CHARS || (maxDim <= 640 && q <= 0.4)) return data;   // good enough
     maxDim = Math.round(maxDim * 0.82);   // still too big → shrink dimensions and retry
   }
-  const c = document.createElement('canvas'); const s = 720 / Math.max(img.naturalWidth || img.width, 1);
+  const c = document.createElement('canvas'); const s = 640 / Math.max(img.naturalWidth || img.width, 1);
   c.width = Math.max(1, Math.round((img.naturalWidth || img.width) * Math.min(1, s))); c.height = Math.max(1, Math.round((img.naturalHeight || img.height) * Math.min(1, s)));
   const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.4);
 }
 
+// A proof value is EITHER a light reference { ref, name, isImg } (bytes live in the
+// Attachment store, fetched lazily) OR a legacy/offline inline { name, isImg, data }.
+// FileAttach uploads to the attachment store when the cloud is active so the record it
+// is saved into never carries the base64; offline it embeds inline (no sync anyway).
 function FileAttach({ value, onChange, compact }) {
   const inputRef = uRd(null);
   const [busy, setBusy] = uSd(false);
   const [err, setErr] = uSd('');
+  const [preview, setPreview] = uSd(null);   // local data URL for an instant thumbnail this session
+  const cloud = !!(window.CLOUD && window.CLOUD.active && window.API && window.API.attachments);
+  // keep the preview in step with an externally-provided inline value; drop it on clear
+  uEd(() => { if (value && value.data) setPreview(value.data); else if (!value) setPreview(null); }, [value]);
+
   const onPick = async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -168,19 +177,36 @@ function FileAttach({ value, onChange, compact }) {
     setBusy(true);
     try {
       const src = await readDataURL(file);
+      let obj;
       if (isPdf) {
-        if (src.length > MAX_PDF_CHARS) { setErr(tA('att.pdfBig')); return; }
-        onChange({ name: file.name, type: file.type, isImg: false, data: src });
+        if (src.length > MAX_PDF_CHARS) { setErr(tA('att.pdfBig')); setBusy(false); return; }
+        obj = { name: file.name, mime: file.type || 'application/pdf', isImg: false, data: src };
       } else {
         const img = await loadImage(src);   // throws for non-image / undecodable formats
         const data = shrinkToJpeg(img);
         const base = (file.name || 'foto').replace(/\.[^.]+$/, '');
-        onChange({ name: base + '.jpg', type: 'image/jpeg', isImg: true, data });
+        obj = { name: base + '.jpg', mime: 'image/jpeg', isImg: true, data };
+      }
+      setPreview(obj.data);
+      if (cloud) {
+        // Upload OUT of the record payload → store only a ref. On failure fall back to
+        // inline so a proof is never lost (mid-session offline).
+        try {
+          const r = await window.API.attachments.create({ data: obj.data, name: obj.name, mime: obj.mime, isImg: obj.isImg });
+          const id = r && r.data && r.data.id;
+          onChange(id ? { ref: id, name: obj.name, isImg: obj.isImg, mime: obj.mime } : { name: obj.name, type: obj.mime, isImg: obj.isImg, data: obj.data });
+        } catch (ux) {
+          onChange({ name: obj.name, type: obj.mime, isImg: obj.isImg, data: obj.data });
+        }
+      } else {
+        onChange({ name: obj.name, type: obj.mime, isImg: obj.isImg, data: obj.data });
       }
     } catch (ex) {
       setErr(tA('att.badImg'));
     } finally { setBusy(false); }
   };
+
+  const thumb = preview || (value && value.data) || null;   // an inline image we can show now
   return (
     <div className={`ui-attach ${compact ? 'compact' : ''}`}>
       <input ref={inputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={onPick} />
@@ -192,10 +218,10 @@ function FileAttach({ value, onChange, compact }) {
         </button>
       ) : (
         <div className="ui-attach-prev">
-          {value.isImg ? <img src={value.data} alt="proof" onClick={() => window.UI._viewProof(value)} />
+          {value.isImg && thumb ? <img src={thumb} alt="proof" onClick={() => window.UI._viewProof(value)} />
             : <span className="ui-attach-file" onClick={() => window.UI._viewProof(value)}><IconInvoice s={18} /></span>}
-          <span className="ui-attach-name" title={value.name}>{value.name}</span>
-          <button type="button" className="ui-attach-x" onClick={() => onChange(null)}><IconClose s={14} /></button>
+          <span className="ui-attach-name" title={value.name}>{value.name || 'bukti'}</span>
+          <button type="button" className="ui-attach-x" onClick={() => { setPreview(null); onChange(null); }}><IconClose s={14} /></button>
         </div>
       )}
       {err && <div className="login-err" style={{ marginTop: 6 }}><IconClose s={13} />{err}</div>}
@@ -203,21 +229,39 @@ function FileAttach({ value, onChange, compact }) {
   );
 }
 
-/* lightbox viewer for a saved proof */
+/* lightbox viewer for a saved proof — lazily fetches the bytes for a ref proof so nothing
+   is downloaded until a proof is actually opened. Inline (legacy) proofs render at once. */
 function ProofViewer({ proof, onClose }) {
+  const [data, setData] = uSd(proof && proof.data ? proof.data : null);
+  const [loading, setLoading] = uSd(false);
+  const [err, setErr] = uSd(false);
   uEd(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  uEd(() => {
+    let live = true;
+    if (proof && proof.data) { setData(proof.data); return () => { live = false; }; }
+    if (proof && proof.ref && window.API && window.API.attachments) {
+      setLoading(true); setErr(false);
+      window.API.attachments.get(proof.ref)
+        .then((r) => { if (live) { setData(r && r.data ? r.data.data : null); setLoading(false); } })
+        .catch(() => { if (live) { setErr(true); setLoading(false); } });
+    }
+    return () => { live = false; };
+  }, [proof && (proof.ref || proof.data)]);
   if (!proof) return null;
   return (
     <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
       <div className="proof-view" onClick={(e) => e.stopPropagation()}>
-        <div className="proof-view-head"><span className="proof-view-name">{proof.name}</span>
+        <div className="proof-view-head"><span className="proof-view-name">{proof.name || 'bukti'}</span>
           <span style={{ display: 'flex', gap: 6 }}>
-            <a className="icon-btn" href={proof.data} download={proof.name} title="Download"><IconDownload s={17} /></a>
+            {data && <a className="icon-btn" href={data} download={proof.name || 'bukti'} title="Download"><IconDownload s={17} /></a>}
             <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
           </span>
         </div>
-        {proof.isImg ? <img src={proof.data} alt={proof.name} className="proof-view-img" />
-          : <iframe src={proof.data} title={proof.name} className="proof-view-frame" />}
+        {loading ? <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}><span className="ui-attach-spin" /> {tA('att.loading') || 'Memuat…'}</div>
+          : err ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}>{tA('att.loadErr') || 'Gagal memuat bukti'}</div>
+          : !data ? null
+          : proof.isImg ? <img src={data} alt={proof.name} className="proof-view-img" />
+          : <iframe src={data} title={proof.name} className="proof-view-frame" />}
       </div>
     </div>
   );

@@ -96,6 +96,13 @@
     }),
     users: collection('users'),
     roles: collection('roles'),
+    // Proof attachments live out of the record payload. `create` uploads a compressed
+    // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes
+    // (only when a proof is actually opened).
+    attachments: {
+      create: (data) => req('POST', '/attachments', data),
+      get: (id) => req('GET', '/attachments/' + id),
+    },
     // Distribusi module (separate from the cash book). Append-only: no update/delete.
     distribusi: {
       // A `fleet` filter ('Merah'/'Biru'/…) narrows a full-access user to one fleet;

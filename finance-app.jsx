@@ -360,7 +360,7 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
                   </div>
                   <span className="tnum entry-time" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{e.time}</span>
                   {e.proof
-                    ? <button className="entry-proof" title={trF('att.view')} onClick={() => window.UI._viewProof(e.proof)}>{e.proof.isImg ? <img src={e.proof.data} alt="" /> : <IconInvoice s={15} />}</button>
+                    ? <button className="entry-proof" title={trF('att.view')} onClick={() => window.UI._viewProof(e.proof)}>{e.proof.isImg && e.proof.data ? <img src={e.proof.data} alt="" /> : <IconInvoice s={15} />}</button>
                     : <span className="entry-proof empty" aria-hidden="true" />}
                   <span className={`tnum ${isInc ? 'amt-pos' : 'amt-neg'}`} style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>{fmtS(isInc ? e.amount : -e.amount)}</span>
                   <div className="entry-actions">

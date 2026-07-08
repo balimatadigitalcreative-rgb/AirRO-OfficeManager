@@ -164,7 +164,9 @@ function FApp() {
   const proofFromApi = (s) => {
     if (s == null || s === '') return undefined;
     if (typeof s === 'object') return s;
-    try { const o = JSON.parse(s); if (o && typeof o === 'object' && 'data' in o) return o; } catch (e) {}
+    // A record now stores EITHER a light ref {ref,name,isImg} (bytes in the Attachment
+    // store, fetched lazily) OR a legacy inline {…,data} / raw data-URL string.
+    try { const o = JSON.parse(s); if (o && typeof o === 'object' && ('ref' in o || 'data' in o)) return o; } catch (e) {}
     return /^data:/.test(s) ? { name: 'bukti', isImg: /^data:image\//.test(s), data: s } : undefined;
   };
   const setoranToApi = (r) => ({ id: r.id, date: r.date, armada: r.armada || '', galon: +r.galon || 0, cash: +r.cash || 0, bon: +r.bon || 0, bonPay: +r.bonPay || 0, expense: +r.expense || 0, note: r.note || '', proof: proofToApi(r.proof) });
