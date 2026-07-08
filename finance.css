@@ -158,11 +158,36 @@
 .ms-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .ms-card-top { display: flex; align-items: center; justify-content: space-between; }
 .ms-ic { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: #fff; }
-.ms-edit { color: var(--text-faint); }
+.ms-edit { color: var(--text-faint); background: none; border: none; padding: 4px; margin: -4px; cursor: pointer; border-radius: 8px; }
+.ms-edit:hover { color: var(--green-700); background: var(--card-soft); }
 .ms-name { font-family: 'Poppins'; font-size: 16px; font-weight: 700; margin-top: 12px; }
 .ms-sub { font-size: 12px; color: var(--text-mut); }
 .ms-bal { font-family: 'Poppins'; font-size: 21px; font-weight: 800; margin-top: 10px; }
-.ms-txn { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.ms-flow { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; font-weight: 700; }
+.ms-flow .amt-pos::before, .ms-flow .amt-neg::before { content: ''; }
+.ms-txn { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
+
+/* ── Account mutation detail (buku rekening) ── */
+.acct-detail-modal { max-width: 820px; }
+.acct-detail-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.acct-detail-totals { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.acct-detail-totals > div { flex: 1; min-width: 120px; background: var(--card-soft); border: 1px solid var(--border); border-radius: 12px; padding: 9px 13px; display: flex; flex-direction: column; gap: 2px; }
+.acct-detail-totals > div span { font-size: 11px; font-weight: 600; color: var(--text-mut); text-transform: uppercase; letter-spacing: .04em; }
+.acct-detail-totals > div b { font-size: 15px; }
+/* The rows keep a min width so the 5 columns never squash; on a phone the ledger scrolls
+   horizontally inside itself (no page/modal horizontal scroll, no double vertical bar). */
+.acct-ledger { border: 1px solid var(--border); border-radius: 13px; overflow-x: auto; }
+.acct-ledger-row { display: grid; grid-template-columns: 92px minmax(120px, 1fr) 96px 96px 108px; align-items: center; gap: 8px; padding: 9px 13px; border-top: 1px solid var(--border-soft); font-size: 12.5px; min-width: 470px; }
+.acct-ledger-row:first-child { border-top: none; }
+.acct-ledger-row .r { text-align: right; white-space: nowrap; }
+.acct-ledger-row .mut { color: var(--text-mut); font-size: 11.5px; }
+.acct-ledger-row .adesc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-ledger-row.head { background: var(--card-soft); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-mut); }
+.acct-ledger-row.opening { background: var(--mint-50, var(--card-soft)); font-weight: 600; }
+.acct-ledger-row.opening span:nth-child(2) { color: var(--text-mut); }
+.acct-ledger-row.clickable { cursor: pointer; }
+.acct-ledger-row.clickable:hover { background: var(--card-soft); }
+.acct-ledger-empty { padding: 26px 14px; text-align: center; color: var(--text-mut); font-size: 13px; }
 .hrr-period { display: flex; align-items: center; gap: 8px; font-family: 'Poppins'; font-size: 16px; font-weight: 700; }
 .hrr-period svg { color: var(--green-700); }
 .hrr-trend { display: flex; align-items: flex-end; gap: 10px; height: 150px; }

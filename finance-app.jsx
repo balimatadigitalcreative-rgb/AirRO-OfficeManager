@@ -455,9 +455,113 @@ function XferModal({ accounts, onSave, onClose }) {
   );
 }
 
-function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, canEdit }) {
+// Build the full chronological ledger (passbook) for ONE account, with a running balance
+// that reconciles exactly to FS.acctBalance. Same attribution as acctBalance: income entry
+// = credit (Masuk), expense = debit (Keluar); an entry with no/unknown acct falls to the
+// first account; a transfer TO this account = Masuk, FROM = Keluar. Ordered oldest→newest
+// so the LAST row's running balance is the current balance.
+function buildAcctLedger(acct, entries, accounts, transfers, catMap) {
+  const ids = accounts.map((a) => a.id);
+  const first = ids[0];
+  const nameOf = (id) => (accounts.find((a) => a.id === id) || {}).name || '—';
+  const items = [];
+  (entries || []).forEach((e) => {
+    const aid = e.acct && ids.includes(e.acct) ? e.acct : first;
+    if (aid !== acct.id) return;
+    const inc = e.type === 'income';
+    const cat = FS.catInfo(catMap, e.category);
+    const label = (cat && cat.label) || e.category || '';
+    const note = e.note && e.note !== label ? e.note : '';
+    const desc = (label + (note ? ' — ' + note : '')) || e.note || '—';
+    items.push({ key: e.id, date: e.date || '', time: e.time || '00:00', desc, credit: inc ? e.amount : 0, debit: inc ? 0 : e.amount, entry: e });
+  });
+  (transfers || []).forEach((t) => {
+    if (t.to === acct.id) items.push({ key: 'xi' + t.id, date: t.date || '', time: '12:00', desc: (trF('ms.xferFrom') || 'Transfer dari') + ' ' + nameOf(t.from), credit: +t.amount || 0, debit: 0 });
+    if (t.from === acct.id) items.push({ key: 'xo' + t.id, date: t.date || '', time: '12:00', desc: (trF('ms.xferTo') || 'Transfer ke') + ' ' + nameOf(t.to), credit: 0, debit: +t.amount || 0 });
+  });
+  items.sort((a, b) => (a.date + a.time + a.key).localeCompare(b.date + b.time + b.key));
+  let bal = +acct.opening || 0;
+  items.forEach((it) => { bal += it.credit - it.debit; it.balance = bal; });
+  return { opening: +acct.opening || 0, items, current: bal };   // current === FS.acctBalance
+}
+
+// Account mutation detail (buku rekening). Opening/carried row on top, then Masuk/Keluar
+// with a running balance; the last row equals the account's current balance. Period +
+// search filter; row click opens the source transaction. Single-scroll modal.
+function AcctDetail({ acct, accounts, entries, transfers, catMap, canEdit, onEdit, onOpenEntry, onClose }) {
+  const [period, setPeriod] = uS(() => (TODAY || '').slice(0, 7));   // 'YYYY-MM' | 'all'
+  const [q, setQ] = uS('');
+  uE(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const ledger = buildAcctLedger(acct, entries, accounts, transfers, catMap);
+  const months = [...new Set(ledger.items.map((it) => (it.date || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  const monthLabel = (m) => { const [y, mo] = m.split('-'); return (MONTHS[+mo - 1] || mo) + ' ' + y; };
+  const carried = period === 'all' ? ledger.opening
+    : (ledger.items.filter((it) => (it.date || '').slice(0, 7) < period).slice(-1)[0] || { balance: ledger.opening }).balance;
+  let rows = ledger.items.filter((it) => period === 'all' || (it.date || '').slice(0, 7) === period);
+  if (q) rows = rows.filter((it) => it.desc.toLowerCase().includes(q.toLowerCase()));
+  const totalIn = rows.reduce((s, it) => s + it.credit, 0);
+  const totalOut = rows.reduce((s, it) => s + it.debit, 0);
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card wide acct-detail-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
+            <span className="ms-ic" style={{ background: acct.color, width: 38, height: 38 }}>{acct.type === 'cash' ? <IconWallet s={19} /> : <IconStore s={19} />}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 17, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{acct.name}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{trF('ms.running') || 'Saldo'}: <b className="tnum">{fmt(ledger.current)}</b></div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {canEdit && <button className="icon-btn" title={trF('ms.edit')} onClick={() => onEdit(acct)}><IconPencil s={16} /></button>}
+            <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
+          </div>
+        </div>
+        <div className="modal-body">
+          <div className="acct-detail-toolbar">
+            <div style={{ minWidth: 150 }}><UI.Dropdown value={period} options={[{ value: 'all', label: trF('ms.allPeriods') || 'Semua' }, ...months.map((m) => ({ value: m, label: monthLabel(m) }))]} onChange={setPeriod} /></div>
+            <div className="tx-search" style={{ flex: 1, minWidth: 130 }}><IconSearch s={16} style={{ color: 'var(--text-faint)' }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={trF('ms.searchMut') || 'Cari keterangan…'} /></div>
+          </div>
+          <div className="acct-detail-totals">
+            <div><span>{trF('ms.in') || 'Masuk'}</span><b className="tnum amt-pos">{fmt(totalIn)}</b></div>
+            <div><span>{trF('ms.out') || 'Keluar'}</span><b className="tnum amt-neg">{fmt(totalOut)}</b></div>
+            <div><span>{trF('ms.running') || 'Saldo'}</span><b className="tnum">{fmt(ledger.current)}</b></div>
+          </div>
+          <div className="acct-ledger">
+            <div className="acct-ledger-row head">
+              <span>{trF('ms.date') || 'Tanggal'}</span><span>{trF('ms.desc') || 'Keterangan'}</span><span className="r">{trF('ms.in') || 'Masuk'}</span><span className="r">{trF('ms.out') || 'Keluar'}</span><span className="r">{trF('ms.running') || 'Saldo'}</span>
+            </div>
+            <div className="acct-ledger-row opening">
+              <span className="mut">—</span><span>{period === 'all' ? (trF('ms.opening') || 'Saldo awal') : (trF('ms.openingPeriod') || 'Saldo awal periode')}</span><span className="r" /><span className="r" /><span className="r tnum">{fmt(carried)}</span>
+            </div>
+            {rows.map((it) => (
+              <div key={it.key} className={`acct-ledger-row ${it.entry && onOpenEntry ? 'clickable' : ''}`} onClick={() => it.entry && onOpenEntry && onOpenEntry(it.entry)}>
+                <span className="tnum mut">{it.date}</span>
+                <span className="adesc" title={it.desc}>{it.desc}</span>
+                <span className="r tnum amt-pos">{it.credit ? fmt(it.credit) : ''}</span>
+                <span className="r tnum amt-neg">{it.debit ? fmt(it.debit) : ''}</span>
+                <span className="r tnum">{fmt(it.balance)}</span>
+              </div>
+            ))}
+            {rows.length === 0 && <div className="acct-ledger-empty">{trF('ms.noMut') || 'Tidak ada mutasi pada periode ini.'}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, canEdit, catMap, onOpenEntry }) {
   const [edit, setEdit] = uS(null);
+  const [detail, setDetail] = uS(null);
   const [xfer, setXfer] = uS(false);
+  const thisMonth = (TODAY || '').slice(0, 7);
+  const monthMut = (a) => {
+    let inc = 0, out = 0; const fid = accounts[0] && accounts[0].id;
+    (entries || []).forEach((e) => { const aid = e.acct && accounts.some((x) => x.id === e.acct) ? e.acct : fid; if (aid === a.id && (e.date || '').slice(0, 7) === thisMonth) { if (e.type === 'income') inc += e.amount; else out += e.amount; } });
+    (transfers || []).forEach((t) => { if ((t.date || '').slice(0, 7) === thisMonth) { if (t.to === a.id) inc += +t.amount || 0; if (t.from === a.id) out += +t.amount || 0; } });
+    return { inc, out };
+  };
   const total = accounts.reduce((s, a) => s + FS.acctBalance(a, entries, accounts, transfers), 0);
   const save = (a, remove) => {
     if (remove) { if (accounts.length <= 1) { setEdit(null); return; } if (!confirm(trF('ms.removeConfirm'))) return; setAccounts((p) => p.filter((x) => x.id !== a.id)); setEdit(null); return; }
@@ -482,16 +586,18 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
         {accounts.map((a) => {
           const bal = FS.acctBalance(a, entries, accounts, transfers);
           const txn = entries.filter((e) => (e.acct || accounts[0].id) === a.id).length;
+          const mm = monthMut(a);
           return (
-            <div key={a.id} className="ms-card card" onClick={() => canEdit && setEdit(a)} style={{ cursor: canEdit ? 'pointer' : 'default' }}>
+            <div key={a.id} className="ms-card card" onClick={() => setDetail(a)} style={{ cursor: 'pointer' }}>
               <div className="ms-card-top">
                 <span className="ms-ic" style={{ background: a.color }}>{a.type === 'cash' ? <IconWallet s={20} /> : <IconStore s={20} />}</span>
-                {canEdit && <span className="ms-edit"><IconPencil s={14} /></span>}
+                {canEdit && <button type="button" className="ms-edit" title={trF('ms.edit')} onClick={(ev) => { ev.stopPropagation(); setEdit(a); }}><IconPencil s={14} /></button>}
               </div>
               <div className="ms-name">{a.name}</div>
               <div className="ms-sub">{a.type === 'bank' ? (a.number || trF('ms.bank')) : trF('ms.cash')}</div>
               <div className="tnum ms-bal">{fmt(bal)}</div>
-              <div className="ms-txn">{txn} {trF('ms.txns')}</div>
+              <div className="ms-flow"><span className="amt-pos tnum">+{fmt(mm.inc)}</span><span className="amt-neg tnum">−{fmt(mm.out)}</span></div>
+              <div className="ms-txn">{txn} {trF('ms.txns')} · {trF('ms.thisMonth') || 'bulan ini'}</div>
             </div>
           );
         })}
@@ -516,6 +622,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
         </div>
       )}
 
+      {detail && <AcctDetail acct={detail} accounts={accounts} entries={entries} transfers={transfers} catMap={catMap} canEdit={canEdit} onEdit={(a) => { setDetail(null); setEdit(a); }} onOpenEntry={(e) => { setDetail(null); if (onOpenEntry) onOpenEntry(e); }} onClose={() => setDetail(null)} />}
       {edit && <AcctModal acct={edit} onSave={save} onClose={() => setEdit(null)} />}
       {xfer && <XferModal accounts={accounts} onSave={doXfer} onClose={() => setXfer(false)} />}
     </div>
