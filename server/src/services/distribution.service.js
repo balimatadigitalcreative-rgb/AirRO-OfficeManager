@@ -420,22 +420,39 @@ const addDays = (dateStr, n) => { const d = new Date(dateStr + 'T00:00:00Z'); d.
 async function dashboardSummary(date, user, qFleet) {
   const day = date || new Date().toISOString().slice(0, 10);
   const from = addDays(day, -6);
+  const fleetFilter = fleetWhere(user, 'fleetId', qFleet);
   const rows = await prisma.distTransaction.findMany({
-    where: { txnDate: { gte: from, lte: day }, ...fleetWhere(user, 'fleetId', qFleet) },
+    where: { txnDate: { gte: from, lte: day }, ...fleetFilter },
     include: { customer: { select: { name: true, type: true } }, corrections: { select: { kind: true, deltaAmount: true, active: true } } },
     orderBy: { createdAt: 'desc' },
   });
   // Amounts follow the EFFECTIVE (adjusted) value so retroactive price changes are reflected.
   const effOf = (r) => r.amount + priceDelta(r.corrections);
 
-  // Today's KPIs. uang masuk = cash actually received (lunas + pelunasan);
-  // piutang = new receivables booked as bon.
+  // ── PERIOD (last 7 days) headline KPIs — computed from the SAME `rows` that power the
+  // chart, the recent list and the top-customers list, so the headline numbers can never
+  // disagree with what is shown right below them. Gallons sold = Σ qty; Money in = cash
+  // actually received in the window (lunas sales + pelunasan payments). ──
+  let periodQty = 0, periodIn = 0;
+  rows.forEach((r) => { periodQty += r.qty; if (r.method === 'lunas') periodIn += effOf(r); else if (r.method === 'pelunasan') periodIn += r.amount; });
+
+  // ── TODAY — powers the "today" rail + the "Transactions today" KPI. ──
   const todayRows = rows.filter((r) => r.txnDate === day);
   const byMethod = { lunas: 0, bon: 0, pelunasan: 0 };
-  let qty = 0, amount = 0;
-  todayRows.forEach((r) => { const e = effOf(r); qty += r.qty; amount += e; if (byMethod[r.method] != null) byMethod[r.method] += e; });
+  let amount = 0;
+  todayRows.forEach((r) => { const e = effOf(r); amount += e; if (byMethod[r.method] != null) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e); });
   const uangMasuk = byMethod.lunas + byMethod.pelunasan;
   const piutang = byMethod.bon;
+
+  // ── RUNNING RECEIVABLES — outstanding bon across ALL time (fleet-scoped), computed
+  // per-customer and floored at 0, identical to the Customers screen's sisaBon so the
+  // dashboard total and the customer list can never disagree. This is a live balance,
+  // NOT a 7-day figure, so a bon booked last month still shows as a receivable today. ──
+  const allTxns = await prisma.distTransaction.findMany({ where: { ...fleetFilter }, select: { id: true, customerId: true, amount: true, method: true } });
+  const rcvDelta = await activePriceDeltas({});
+  const bonByCust = {};
+  allTxns.forEach((t) => { const c = bonByCust[t.customerId] || (bonByCust[t.customerId] = { bon: 0, pel: 0 }); if (t.method === 'bon') c.bon += t.amount + (rcvDelta[t.id] || 0); else if (t.method === 'pelunasan') c.pel += t.amount; });
+  const receivable = Object.values(bonByCust).reduce((s, c) => s + Math.max(0, c.bon - c.pel), 0);
 
   // 7-day stacked series: cash bucket (lunas + pelunasan) vs bon.
   const last7 = [];
@@ -459,7 +476,13 @@ async function dashboardSummary(date, user, qFleet) {
   const topCustomers = Object.values(byCust).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
   const customers = await prisma.customer.count({ where: fleetWhere(user, 'armada', qFleet) });
-  return { date: day, count: todayRows.length, qty, amount, byMethod, uangMasuk, piutang, customers, last7, recent, topCustomers };
+  return {
+    date: day, periodDays: 7,
+    periodQty, periodIn,            // last-7-days headline KPIs (same source as chart/recent/top)
+    receivable,                     // all-time outstanding bon (running balance)
+    count: todayRows.length, amount, byMethod, uangMasuk, piutang,   // TODAY (rail + "Transactions today")
+    customers, last7, recent, topCustomers,
+  };
 }
 
 // ── Gallon stock (loan/exchange) — the append-only ledger is the SINGLE source of
