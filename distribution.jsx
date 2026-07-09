@@ -1630,6 +1630,18 @@ function DistDeliveries({ refreshKey, today, canOrder, fleetScope, fleet, distFl
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   const mark = (id, status, transactionId) => window.API.distribusi.deliveries.mark(id, transactionId ? { status, transactionId } : { status })
     .then(() => { reload(); if (onChanged) onChanged(); }).catch(() => flash(trD('dist.loadErr')));
+  // ── route reorder: ↑/↓ buttons (work everywhere, incl. mobile) + HTML5 drag (bonus). ──
+  // Optimistic: reorder locally, then PUT the new id order; the saved seq drives the list.
+  const dragIdx = React.useRef(null);
+  const persistOrder = (list) => window.API.distribusi.deliveries.reorder({ date, fleet: ef, order: list.map((r) => r.id) })
+    .then(() => { if (onChanged) onChanged(); }).catch(() => flash(trD('dist.loadErr')));
+  const reorder = (from, to) => {
+    if (from == null || to == null || from === to || to < 0) return;
+    const next = (board || []).slice();
+    if (to >= next.length) return;
+    const [it] = next.splice(from, 1); next.splice(to, 0, it);
+    setBoard(next); persistOrder(next);
+  };
   const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   const rows = board || [];
   const srcBadge = (s) => <span className={`dist-src ${s}`}>{trD(s === 'tambahan' ? 'dist.srcTambahan' : 'dist.srcJadwal')}</span>;
@@ -1645,11 +1657,18 @@ function DistDeliveries({ refreshKey, today, canOrder, fleetScope, fleet, distFl
       <div className="card dist-card" style={{ padding: '6px 18px' }}>
         {board === null && <div className="dist-empty dist-loading"><span className="dist-spin" />{trD('common.loading')}</div>}
         {board !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.delivEmpty')}</div>}
-        {rows.map((s) => (
-          <div key={s.id} className={`dist-cust-row dist-deliv-row st-${s.status}`}>
+        {rows.map((s, i) => (
+          <div key={s.id} className={`dist-cust-row dist-deliv-row st-${s.status}`}
+            draggable onDragStart={(e) => { dragIdx.current = i; e.dataTransfer.effectAllowed = 'move'; }}
+            onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const from = dragIdx.current; dragIdx.current = null; reorder(from, i); }}>
+            <span className="dist-deliv-reorder no-print">
+              <span className="dist-deliv-grip" title={trD('dist.dragHint')}><IconMenu s={15} /></span>
+              <button type="button" className="icon-btn dist-deliv-mv" title={trD('dist.moveUp')} disabled={i === 0} onClick={() => reorder(i, i - 1)}><IconArrowUp s={14} /></button>
+              <button type="button" className="icon-btn dist-deliv-mv" title={trD('dist.moveDown')} disabled={i === rows.length - 1} onClick={() => reorder(i, i + 1)}><IconArrowDown s={14} /></button>
+            </span>
             <span className="dist-txn-av">{initialsOf(s.customerName)}</span>
             <div className="dist-cust-main">
-              <div className="dist-txn-line1"><span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
+              <div className="dist-txn-line1"><span className="dist-deliv-seq">{i + 1}.</span><span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
               <div className="dist-txn-sub">{s.phone || '—'}{s.deliveryDays && s.deliveryDays.length ? ' · ' + fmtDays(s.deliveryDays) : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}{s.note ? ' · ' + s.note : ''}</div>
             </div>
             {s.status === 'pending' && (

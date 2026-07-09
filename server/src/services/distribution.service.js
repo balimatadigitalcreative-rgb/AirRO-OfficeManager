@@ -752,7 +752,7 @@ async function deliveryBoard(user, date, qFleet) {
   }
   const rows = await prisma.delivery.findMany({
     where: { date, ...fleetWhere(user, 'fleetId', qFleet) },
-    include: { customer: true }, orderBy: [{ source: 'asc' }, { seq: 'asc' }, { createdAt: 'asc' }],
+    include: { customer: true }, orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
   });
   const bon = await bonMapFor([...new Set(rows.map((r) => r.customerId))]);
   return { data: rows.map((r) => deliveryClient(r, bon[r.customerId])) };
@@ -789,6 +789,17 @@ async function markDelivery(id, body, actor) {
   const sisa = (await bonMapFor([row.customerId]))[row.customerId];
   return { data: deliveryClient(row, sisa) };
 }
+// Persist a new route order for a board: `order` is the ordered list of delivery ids;
+// each gets seq = its position. Every referenced stop must be within the user's scope.
+async function reorderDeliveries(user, body) {
+  const ids = Array.isArray(body.order) ? body.order : [];
+  const rows = await prisma.delivery.findMany({ where: { id: { in: ids } } });
+  const byId = {}; rows.forEach((r) => { byId[r.id] = r; });
+  for (const r of rows) { if (!fleetAllows(user, r.fleetId)) throw ApiError.forbidden('Pengiriman di luar akses Anda.'); }
+  let seq = 0;
+  for (const id of ids) { if (byId[id]) { await prisma.delivery.update({ where: { id }, data: { seq } }); seq++; } }
+  return { ok: true, count: seq };
+}
 
 // Cash Integration view — one authorized read (gated distribusiCashIntegrasi) that
 // composes exactly the datasets the screen needs: transactions in the range, all
@@ -810,5 +821,5 @@ module.exports = {
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
-  deliveryBoard, addOrder, markDelivery,
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries,
 };

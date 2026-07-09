@@ -75,6 +75,7 @@ const cashIntegQuery = z.object({ dateFrom: DATE.optional(), dateTo: DATE.option
 const boardQuery = z.object({ date: DATE, fleet: z.string().max(60).optional() });
 const orderSchema = z.object({ customerId: z.string().min(1), date: DATE, qty: z.number().int().nonnegative().optional(), note: z.string().max(300).optional() });
 const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), transactionId: z.string().min(1).optional() });
+const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), order: z.array(z.string().min(1)).max(2000) });
 const custListQuery = z.object({ fleet: z.string().max(60).optional() });
 const idParams = z.object({ id: z.string().min(1) });
 const batchParams = z.object({ batchId: z.string().min(1) });
@@ -135,6 +136,7 @@ const addOrder = asyncHandler(async (req, res) => {
   res.status(201).json({ data: delivery });
 });
 const markDelivery = asyncHandler(async (req, res) => { const r = await service.markDelivery(req.params.id, req.body, req.user); bcast('delivery', req.params.id); res.json(r); });
+const reorderDeliveries = asyncHandler(async (req, res) => { const r = await service.reorderDeliveries(req.user, req.body); bcast('delivery', 'reorder'); res.json({ data: r }); });
 
 // ── gallon stock ──
 const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await service.gallonSummary(req.user, req.query.fleet) }));
@@ -145,6 +147,6 @@ module.exports = {
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
-  deliveryBoard, addOrder, markDelivery,
-  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries,
+  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

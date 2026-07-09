@@ -1049,6 +1049,13 @@ select.fld::-ms-expand { display: none; }
 
 /* ── Delivery board ── */
 .dist-deliv-row { cursor: default; }
+.dist-deliv-row[draggable="true"] { cursor: grab; }
+.dist-deliv-reorder { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.dist-deliv-grip { display: inline-flex; color: var(--text-faint); cursor: grab; padding: 2px; }
+.dist-deliv-mv { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; color: var(--text-mut); }
+.dist-deliv-mv:hover:not(:disabled) { background: var(--card-soft); color: var(--ink); }
+.dist-deliv-mv:disabled { opacity: .3; cursor: default; }
+.dist-deliv-seq { font-size: 12px; font-weight: 700; color: var(--text-faint); margin-right: 6px; }
 .dist-deliv-row.st-terkirim { opacity: .62; }
 .dist-deliv-row.st-batal { opacity: .5; }
 .dist-deliv-actions { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }

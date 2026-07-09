@@ -144,6 +144,7 @@
         board: (date, fleet) => { const p = ['date=' + encodeURIComponent(date)]; if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/deliveries?' + p.join('&')); },
         addOrder: (data) => req('POST', '/distribusi/deliveries/order', data),
         mark: (id, data) => req('PATCH', '/distribusi/deliveries/' + id, data),
+        reorder: (data) => req('PUT', '/distribusi/deliveries/reorder', data),   // { date, fleet, order:[ids] }
       },
       // Gallon stock (loan/exchange): summary + per-customer balances + ledger; correction.
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
