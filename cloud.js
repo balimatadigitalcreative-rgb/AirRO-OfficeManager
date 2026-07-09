@@ -284,17 +284,24 @@
     startPoll();
     startEvents();
     emit();
-    try {
-      await hydrate();
-    } catch (e) {
-      // Server briefly unreachable → DO NOT kill the session. Poll keeps pulling
-      // and the flush below queues local edits; both retry until the server is back.
-      hadError = true;
-      console.warn('[cloud] hydrate failed; session stays active, will retry:', e.message);
+    // Hydrate the full snapshot (API.state.all — can be large: every doc incl. base64 photos)
+    // in the BACKGROUND so login returns instantly instead of blocking on the whole payload.
+    // The session is already armed above, so write-through has no dead window: any local save
+    // made before the snapshot lands is still pushed, never dropped. When the data arrives we
+    // flush dirty keys, emit, and poke the shell (onSync) so the UI re-reads its slices.
+    (async () => {
+      try {
+        await hydrate();
+      } catch (e) {
+        // Server briefly unreachable → DO NOT kill the session. Poll keeps pulling
+        // and the flush below queues local edits; both retry until the server is back.
+        hadError = true;
+        console.warn('[cloud] hydrate failed; session stays active, will retry:', e.message);
+      }
+      flushDirty();
       emit();
-    }
-    flushDirty();
-    emit();
+      if (typeof window.CLOUD.onSync === 'function') window.CLOUD.onSync();
+    })();
     return frontendUser(user);
   }
 
