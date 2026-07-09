@@ -137,6 +137,8 @@
         get: (id) => req('GET', '/distribusi/invoices/' + id),
       },
       audit: (qs) => req('GET', '/distribusi/audit' + (qs ? '?' + qs : '')),
+      // Cash Integration — one gated read (distribusiCashIntegrasi) returning { transactions, customers, audit }.
+      cashIntegration: (qs) => req('GET', '/distribusi/cash-integration' + (qs ? '?' + qs : '')),
       // Gallon stock (loan/exchange): summary + per-customer balances + ledger; correction.
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),

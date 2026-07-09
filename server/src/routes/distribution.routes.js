@@ -45,13 +45,18 @@ router.get('/invoices/:id', requireCap('distribusi'), validate({ params: ctrl.sc
 router.get('/customers/:id/invoices', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.listInvoices);
 router.post('/customers/:id/invoices', requireAnyCap(['distribusiInput', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.invoiceCreateSchema }), ctrl.createInvoice);
 
-// ── Audit (owner) + dashboard ──
+// ── Audit (owner) + dashboard ── each view now has its OWN capability (the UI hides the
+// menu without it; the server rejects the request regardless of what the UI shows).
 router.get('/audit', requireCap('distribusiAudit'), validate({ query: ctrl.schemas.auditQuery }), ctrl.listAudit);
-router.get('/dashboard/summary', requireCap('distribusi'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.dashboardSummary);
-router.get('/billing-reminders', requireCap('distribusi'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.billingReminders);
+router.get('/dashboard/summary', requireCap('distribusiDashboard'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.dashboardSummary);
+router.get('/billing-reminders', requireCap('distribusiDashboard'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.billingReminders);
 
-// ── Gallon stock (loan/exchange) — read = base module; correction = distribusiCustomers. ──
-router.get('/gallon', requireCap('distribusi'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
+// ── Cash Integration — its own capability. Composes the datasets the view needs
+// (transactions in range + customers + adjustment audit) behind a single gate. ──
+router.get('/cash-integration', requireCap('distribusiCashIntegrasi'), validate({ query: ctrl.schemas.cashIntegQuery }), ctrl.cashIntegration);
+
+// ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──
+router.get('/gallon', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
 router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);
 
 // NOTE: no DELETE routes anywhere — distribusi records are immutable/append-only.

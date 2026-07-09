@@ -27,21 +27,19 @@ function navForRole(p, role) {
   if (p.approvals) items.push({ id: 'approvals', label: tr('nav.approvals'), icon: 'IconInvoice', grp: 'admin' });
   if (p.settings) items.push({ id: 'settings', label: tr('nav.settings'), icon: 'IconSettings', grp: 'admin' });
   if (canAdmin) items.push({ id: 'users', label: tr('nav.users'), icon: 'IconUserCircle', grp: 'admin' });
-  // DISTRIBUSI — a separate module. Items are shown to everyone (discoverability);
-  // ones the role can't access render LOCKED (gembok), never hidden, per the spec.
-  // `cap` = the capability that unlocks the item; the server enforces it regardless.
+  // DISTRIBUSI — a separate module. Each item shows ONLY if the user holds a capability
+  // for that view (HIDDEN when they don't — never a padlock). The DISTRIBUSI group
+  // therefore appears iff they hold ANY distribusi cap (p.distribusi). The server enforces
+  // every cap regardless of what the sidebar shows.
   [
-    { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', cap: 'distribusi' },
-    { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', cap: 'distribusi' },
-    { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', cap: 'distribusi' },
-    { id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', cap: 'distribusi' },
-    { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', cap: 'distribusi' },
-    { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', cap: 'distribusiHargaMaster' },
-    { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', cap: 'distribusiAudit' },
-    // `locked` (padlock) = missing the item's own cap; `blocked` (no nav) = missing
-    // base distribusi entirely. A staff (has distribusi, not the owner caps) CAN open
-    // Harga/Audit — the screen itself shows a "Terkunci untuk Staff" panel.
-  ].forEach((it) => items.push({ ...it, grp: 'distribusi', locked: !p[it.cap], blocked: !p.distribusi }));
+    { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', caps: ['distribusiDashboard'] },
+    { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', caps: ['distribusiCustomers'] },
+    { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi'] },
+    { id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', caps: ['distribusiGallon'] },
+    { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', caps: ['distribusiCashIntegrasi'] },
+    { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', caps: ['distribusiHargaMaster'] },
+    { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', caps: ['distribusiAudit'] },
+  ].forEach((it) => { if (it.caps.some((c) => p[c])) items.push({ id: it.id, label: it.label, icon: it.icon, grp: 'distribusi' }); });
   return items;
 }
 const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'admin'];
@@ -149,6 +147,14 @@ function FApp() {
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
   const p = FS.normKasbon((user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier'));
+  // If the active screen isn't one the user may access (perms changed, a stale landing, or
+  // a deep-linked feature), fall back to their first available screen — never render a
+  // feature they don't have. Applies to EVERY menu group, not just distribusi.
+  uEh(() => {
+    if (!user) return;
+    const nav = navForRole(p, user.role);
+    if (nav.length && !nav.some((n) => n.id === screen)) setScreen(nav[0].id);
+  }, [screen, user]);
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // ── Setoran: REST per-record (create/update/delete one record at a time) ──
@@ -913,7 +919,10 @@ function FApp() {
   if (!user) return <AUTH.LoginScreen onLogin={login} lang={lang} onLang={changeLang} users={users} />;
 
   const NAV = navForRole(p, user ? user.role : '');
-  const go = (id, locked) => { if (locked) { setToast(tr('dist.lockedToast')); return; } if (NAV.find((n) => n.id === id)) setScreen(id); setDrawer(false); };
+  // NAV only ever contains screens the user may access, so navigating is just "go if it's
+  // in NAV". A cross-screen button targeting something the user lacks silently no-ops (its
+  // own control is already hidden). The 2nd arg is legacy/ignored.
+  const go = (id) => { if (NAV.find((n) => n.id === id)) setScreen(id); setDrawer(false); };
   // Admin/settings shortcuts inside the profile menu — already perm-filtered by NAV,
   // so a non-admin simply sees none.
   const pmShortcuts = NAV.filter((n) => n.id === 'users' || n.id === 'settings' || n.id === 'hrsettings');
@@ -931,8 +940,8 @@ function FApp() {
               <span>{tr('navgrp.' + g)}</span><IconCaret s={13} />
             </button>
             {!collapsed && items.map((n) => (
-              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''} ${n.locked ? 'locked' : ''}`} onClick={() => go(n.id, n.blocked)} title={n.locked ? tr('dist.locked') : ''}>
-                {Ish(n.icon, { s: 20 })}<span>{n.label}</span>{n.locked && <IconLock s={13} className="nav-lock" />}
+              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>
+                {Ish(n.icon, { s: 20 })}<span>{n.label}</span>
               </button>
             ))}
           </div>
@@ -1023,37 +1032,37 @@ function FApp() {
             </div>
           </header>
 
-          {screen === 'dist-dashboard' && (
+          {screen === 'dist-dashboard' && p.distribusiDashboard && (
             <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               canInput={!!p.distribusiInput}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onQuickInput={() => { go('dist-transactions', !p.distribusiInput); if (p.distribusiInput) setDistFormTick((t) => t + 1); }} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
           )}
-          {screen === 'dist-transactions' && (
+          {screen === 'dist-transactions' && (p.distribusiInput || p.distribusiKoreksi) && (
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen === 'dist-customers' && (
+          {screen === 'dist-customers' && p.distribusiCustomers && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen === 'dist-gallon' && (
+          {screen === 'dist-gallon' && p.distribusiGallon && (
             <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
-          {screen === 'dist-prices' && (
+          {screen === 'dist-prices' && p.distribusiHargaMaster && (
             <DIST.Prices refreshKey={distTick} canPrice={!!p.distribusiHargaMaster} onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen === 'dist-integration' && (
+          {screen === 'dist-integration' && p.distribusiCashIntegrasi && (
             <DIST.Integration refreshKey={distTick} today={FIN.TODAY} />
           )}
-          {screen === 'dist-audit' && (
+          {screen === 'dist-audit' && p.distribusiAudit && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}

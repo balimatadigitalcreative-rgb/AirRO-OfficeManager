@@ -10,8 +10,9 @@ const ROLE_PERMS = {
     delete: false, seeMoney: true, allEntries: false, reports: true, advisor: false,
     payroll: false, approvals: false, settings: false, reset: false, setoran: false, setoranOnly: false,
     kasbon: false, kasbonApprove: false,
-    // Distribusi — input & koreksi are now separate caps (Pemilik = all).
+    // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true,
   },
   gm: {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
@@ -19,6 +20,7 @@ const ROLE_PERMS = {
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true,
   },
   hrd: {
     company: false, cashflow: false, employees: true, empDetail: true, attendance: true, addEntry: false, edit: false,
@@ -145,13 +147,22 @@ function deriveKasbonCaps(perms) {
 // overridden — an admin can turn either action off. `distribusi` is kept as a live alias
 // meaning "may open the module" = holds ANY distribusi capability (input/koreksi/
 // customers/harga/audit), which is what the module-view routes and nav gate on.
+// The module view is now split further into per-view caps: distribusiDashboard,
+// distribusiCashIntegrasi, distribusiGallon (alongside input/koreksi/customers/harga/
+// audit). Every ABSENT cap is derived from the legacy `distribusi` value, so a user/role
+// that had the old combined access keeps ALL views. `distribusi` = "may open the module"
+// = holds ANY distribusi capability (used only to show the sidebar group).
 function deriveDistribusiCaps(perms) {
   if (!perms || typeof perms !== 'object') return perms;
   const p = { ...perms };
   const legacy = !!p.distribusi;
   if (p.distribusiInput === undefined) p.distribusiInput = legacy;
   if (p.distribusiKoreksi === undefined) p.distribusiKoreksi = legacy;
-  p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster || p.distribusiAudit);
+  if (p.distribusiDashboard === undefined) p.distribusiDashboard = legacy;
+  if (p.distribusiCashIntegrasi === undefined) p.distribusiCashIntegrasi = legacy;
+  if (p.distribusiGallon === undefined) p.distribusiGallon = legacy;
+  p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
+    || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon);
   return p;
 }
 

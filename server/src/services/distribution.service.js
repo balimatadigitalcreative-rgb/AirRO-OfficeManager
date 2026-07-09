@@ -711,11 +711,24 @@ async function retractPurchaseMovement(entryId) {
   await prisma.gallonMovement.updateMany({ where: { cashEntryId: entryId, type: 'purchase', active: true }, data: { active: false } });
 }
 
+// Cash Integration view — one authorized read (gated distribusiCashIntegrasi) that
+// composes exactly the datasets the screen needs: transactions in the range, all
+// customers (for outstanding bon), and the adjustment audit rows for the counts.
+async function cashIntegration(user, query) {
+  const q = query || {};
+  const [t, c, a] = await Promise.all([
+    listTransactions({ dateFrom: q.dateFrom, dateTo: q.dateTo, fleet: q.fleet }, user),
+    listCustomers(user, q.fleet),
+    listAudit({ limit: 500, fleet: q.fleet }, user),
+  ]);
+  return { transactions: t.data, customers: c.data, audit: a.data };
+}
+
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
-  createInvoice, listInvoices, getInvoice, billingReminders,
+  createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
 };

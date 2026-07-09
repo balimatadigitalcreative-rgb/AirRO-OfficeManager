@@ -1335,11 +1335,11 @@ function DistIntegration({ refreshKey, today }) {
   uEx(() => {
     if (!(window.API && window.API.distribusi)) { setTxns([]); return; }
     let live = true; setTxns(null);
-    Promise.all([
-      window.API.distribusi.transactions.list('dateFrom=' + range.from + '&dateTo=' + range.to).then((r) => r.data || []).catch(() => []),
-      window.API.distribusi.audit('limit=500').then((r) => r.data || []).catch(() => []),
-      window.API.distribusi.customers.list().then((r) => r.data || []).catch(() => []),
-    ]).then(([t, a, c]) => { if (!live) return; setTxns(t); setAudit(a); setCusts(c); });
+    // One gated read (distribusiCashIntegrasi) returns everything the view composes:
+    // transactions in range + customers (outstanding bon) + adjustment audit.
+    window.API.distribusi.cashIntegration('dateFrom=' + range.from + '&dateTo=' + range.to)
+      .then((r) => { if (!live) return; const d = (r && r.data) || {}; setTxns(d.transactions || []); setAudit(d.audit || []); setCusts(d.customers || []); })
+      .catch(() => { if (live) { setTxns([]); setAudit([]); setCusts([]); } });
     return () => { live = false; };
   }, [refreshKey, period]);
 
