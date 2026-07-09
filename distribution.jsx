@@ -325,7 +325,9 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
                 <label className="fld-label">{trD('dist.fQty')}</label>
                 <div className="dist-stepper">
                   <button type="button" onClick={() => setQty(fQty - 1)}>−</button>
-                  <span className="tnum">{fQty}</span>
+                  <input className="tnum" inputMode="numeric" value={fQty} aria-label={trD('dist.fQty')}
+                    onChange={(e) => setQty(parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0)}
+                    onFocus={(e) => e.target.select()} />
                   <button type="button" onClick={() => setQty(fQty + 1)}>+</button>
                 </div>
               </div>
