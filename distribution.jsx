@@ -335,7 +335,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
                 <label className="fld-label">{trD('dist.fDate')}</label>
                 {staffMode
                   ? <div className="dist-datelocked"><span><IconCalendar s={15} />{trD('dist.todayWord')} · {today}</span><IconLock s={13} /></div>
-                  : <input type="date" className="fld" value={fDate} onChange={(e) => setFDate(e.target.value)} />}
+                  : <DP.DateField value={fDate} onChange={setFDate} max={today} />}
                 {staffMode && <div className="dist-hint">{trD('dist.staffDateNote')}</div>}
               </div>
             </div>
@@ -497,7 +497,7 @@ function PaymentModal({ customers, staffMode, today, onClose, onSaved, presetCus
           <div className="cat-chips">
             {['cash', 'transfer'].map((m) => <button key={m} type="button" className={`cat-chip ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{trD('dist.pay_' + m)}</button>)}
           </div>
-          {!staffMode && (<><label className="fld-label">{trD('dist.fDate')}</label><input type="date" className="fld" value={date} max={today} onChange={(e) => setDate(e.target.value)} /></>)}
+          {!staffMode && (<><label className="fld-label">{trD('dist.fDate')}</label><DP.DateField value={date} onChange={setDate} max={today} /></>)}
           <label className="fld-label">{trD('dist.note')}</label>
           <input className="fld" value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.notePh')} />
           {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
@@ -520,6 +520,7 @@ function InvoiceBuilder({ customer, onClose, onCreated }) {
   const [note, setNote] = uSx('');
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
+  const today = (window.FIN && FIN.TODAY) || new Date().toISOString().slice(0, 10);
   uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const txns = (customer.transactions || []).filter((t) => t.method !== 'pelunasan');
   const preview = txns.filter((t) => {
@@ -548,12 +549,12 @@ function InvoiceBuilder({ customer, onClose, onCreated }) {
           <div className="cat-chips">{scopes.map(([k, l]) => <button key={k} type="button" className={`cat-chip ${scope === k ? 'on' : ''}`} onClick={() => setScope(k)}>{l}</button>)}</div>
           {scope === 'period' && (
             <div className="dist-form-row" style={{ marginTop: 10 }}>
-              <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.from')}</label><input type="date" className="fld" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
-              <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.to')}</label><input type="date" className="fld" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
+              <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.from')}</label><DP.DateField value={dateFrom} onChange={setDateFrom} max={dateTo || today} /></div>
+              <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.to')}</label><DP.DateField value={dateTo} onChange={setDateTo} min={dateFrom || undefined} max={today} /></div>
             </div>
           )}
           <label className="fld-label">{trD('dist.dueDate')}</label>
-          <input type="date" className="fld" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          <DP.DateField value={dueDate} onChange={setDueDate} min={today} allowFuture placeholder={trD('dist.dueDate')} />
           <label className="fld-label">{trD('dist.note')}</label>
           <input className="fld" value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.notePh')} />
           <div className="dist-lockrow" style={{ marginTop: 12 }}><span className="dist-lockrow-l"><IconInvoice s={14} />{trD('dist.invPreview', { n: preview.length })}</span><span className="dist-lockrow-r">{rpFull(total)}</span></div>
@@ -666,7 +667,7 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
         <div className="dist-hist-filter no-print">
           <span className="dist-hist-flabel">{trD('dist.period')}:</span>
           {[['all', 'dist.periodAll'], ['range', 'dist.periodRange'], ['month', 'dist.periodMonth']].map(([k, l]) => <button key={k} type="button" className={`cat-chip ${mode === k ? 'on' : ''}`} onClick={() => setMode(k)}>{trD(l)}</button>)}
-          {mode === 'range' && (<><input type="date" className="fld dist-hist-date" value={from} onChange={(e) => setFrom(e.target.value)} /><span>–</span><input type="date" className="fld dist-hist-date" value={to} onChange={(e) => setTo(e.target.value)} /></>)}
+          {mode === 'range' && (<><DP.DateField value={from} onChange={setFrom} max={to || stamp} /><span>–</span><DP.DateField value={to} onChange={setTo} min={from || undefined} max={stamp} /></>)}
           {mode === 'month' && <input type="month" className="fld dist-hist-date" value={month} onChange={(e) => setMonth(e.target.value)} />}
         </div>
         <div className="inv-meta">
