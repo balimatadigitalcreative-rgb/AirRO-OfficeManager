@@ -899,10 +899,12 @@ select.fld::-ms-expand { display: none; }
 /* KPI row — 4 equal cards. align-items:stretch (grid default, stated for clarity) so
    every card matches the tallest; wraps 4→2×2→1 as the row narrows. Each card is a
    `stat-box` (same padding/size); the hero differs by COLOUR only, never size. */
-.dist-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; align-items: stretch; }
+.dist-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 16px; align-items: stretch; }
 .dist-kpi { display: block; min-width: 0; }
 .dist-kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.dist-kpi-val { font-size: 24px; font-weight: 800; margin-top: 16px; white-space: nowrap; letter-spacing: -.5px; }
+/* Full rupiah ("Rp 500.000") can be long — allow it to wrap at the space after "Rp"
+   (the number itself never breaks) instead of overflowing/clipping the card. */
+.dist-kpi-val { font-size: 21px; font-weight: 800; margin-top: 16px; white-space: normal; overflow-wrap: normal; line-height: 1.15; letter-spacing: -.3px; }
 .dist-kpi-unit { font-size: 14px; font-weight: 600; color: var(--text-faint); }
 .dist-kpi-lbl { font-size: 12.5px; color: var(--text-mut); margin-top: 3px; }
 .dist-kpi-pill { font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 8px; white-space: nowrap; background: var(--card-soft); color: var(--text-mut); }
@@ -920,9 +922,9 @@ select.fld::-ms-expand { display: none; }
 .dist-today-hero { background: linear-gradient(150deg,#0B7EB1,#053F66); border: none; box-shadow: 0 14px 30px -16px rgba(6,51,79,.6); padding: 20px; color: #fff; }
 .dist-th-top { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 700; }
 .dist-th-count { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.7); }
-.dist-th-metrics { display: flex; gap: 22px; margin-top: 18px; }
+.dist-th-metrics { display: flex; flex-wrap: wrap; gap: 14px 20px; margin-top: 18px; }
 .dist-th-lbl { font-size: 11px; color: rgba(255,255,255,.7); margin-bottom: 4px; }
-.dist-th-val { font-size: 18px; font-weight: 800; }
+.dist-th-val { font-size: 17px; font-weight: 800; white-space: nowrap; }
 .dist-th-val.pos { color: #8fe0c0; } .dist-th-val.warn { color: #f4c874; }
 .dist-th-avg { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.14); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: rgba(255,255,255,.7); }
 .dist-th-avg b { font-size: 15px; color: #fff; }
@@ -1044,8 +1046,8 @@ select.fld::-ms-expand { display: none; }
 .dist-cust-priceval { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 700; color: var(--ink); white-space: nowrap; }
 .dist-cust-priceval svg { color: var(--text-faint); }
 .dist-cust-pricecap { font-size: 10px; color: var(--text-faint); font-weight: 600; margin-top: 1px; }
-.dist-cust-bon { flex-shrink: 0; width: 92px; text-align: right; }
-.dist-bonpill { display: inline-block; font-size: 11.5px; font-weight: 700; color: var(--warn); background: var(--warn-bg); padding: 3px 9px; border-radius: 7px; }
+.dist-cust-bon { flex-shrink: 0; width: 112px; text-align: right; }
+.dist-bonpill { display: inline-block; font-size: 11.5px; font-weight: 700; color: var(--warn); background: var(--warn-bg); padding: 3px 9px; border-radius: 7px; white-space: nowrap; }
 .dist-bonmuted { font-size: 11.5px; font-weight: 600; color: var(--text-faint); }
 .dist-ctag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 .dist-ctag.reg { background: var(--card-soft); color: var(--text-mut); }

@@ -3,9 +3,9 @@
    all data comes from the /distribusi REST endpoints (never the AirRO Entry tables). */
 const { useState: uSx, useEffect: uEx } = React;
 const trD = (k, v) => window.t(k, v);
-const AX = window.AIRRO;
 function IcX(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
-const rpX = (n) => (AX && AX.fmtCompact ? AX.fmtCompact(n) : String(n));
+// Money in the Distribusi module uses the FULL format ("Rp 500.000") — never the
+// ambiguous compact form ("500rb"). Non-money counts (galon, txn count) use numX.
 const rpFull = (n) => (window.FIN && FIN.fmt ? FIN.fmt(n) : String(n));
 const numX = (n) => (n || 0).toLocaleString('id-ID');
 const DW_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
@@ -141,8 +141,8 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
         <div className="dist-main">
           <div className="dist-kpis">
             <Kpi hero icon="IconDrop" value={numX(sum.periodQty)} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={trD('dist.pill7d')} pillCls="hero" />
-            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpX(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={trD('dist.pill7d')} pillCls="pos" />
-            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpX(sum.receivable)} label={trD('dist.kpiBon')} pill={trD('dist.pillRunning')} pillCls="warn" />
+            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpFull(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={trD('dist.pill7d')} pillCls="pos" />
+            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpFull(sum.receivable)} label={trD('dist.kpiBon')} pill={trD('dist.pillRunning')} pillCls="warn" />
             <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={trD('dist.pillToday')} pillCls="blue" />
           </div>
 
@@ -205,8 +205,8 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
           <div className="card dist-today-hero">
             <div className="dist-th-top"><span>{trD('dist.today')}</span><span className="dist-th-count">{numX(sum.count)} {trD('dist.notaWord')}</span></div>
             <div className="dist-th-metrics">
-              <div><div className="dist-th-lbl">{trD('dist.kpiIn')}</div><div className="dist-th-val pos">{rpX(sum.uangMasuk)}</div></div>
-              <div><div className="dist-th-lbl">{trD('dist.bonBaru')}</div><div className="dist-th-val warn">{rpX(sum.piutang)}</div></div>
+              <div><div className="dist-th-lbl">{trD('dist.kpiIn')}</div><div className="dist-th-val pos">{rpFull(sum.uangMasuk)}</div></div>
+              <div><div className="dist-th-lbl">{trD('dist.bonBaru')}</div><div className="dist-th-val warn">{rpFull(sum.piutang)}</div></div>
             </div>
             <div className="dist-th-avg"><span>{trD('dist.avgNota')}</span><b className="tnum">{rpFull(avgNota)}</b></div>
           </div>
@@ -226,7 +226,7 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
               <div key={c.id} className="dist-topc">
                 <span className="dist-topc-rank">{i + 1}</span>
                 <div style={{ minWidth: 0, flex: 1 }}><div className="dist-topc-name">{c.name || '—'}</div><div className="dist-topc-sub">{numX(c.qty)} galon</div></div>
-                <b className="tnum dist-topc-amt">{rpX(c.amount)}</b>
+                <b className="tnum dist-topc-amt">{rpFull(c.amount)}</b>
               </div>
             ))}
           </div>
@@ -1035,7 +1035,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
                 <div className="dist-cust-priceval">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
                 <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
               </div>
-              <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpX(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
+              <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpFull(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
               <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
             </div>
           );
