@@ -12,7 +12,7 @@ const ROLE_PERMS = {
     kasbon: false, kasbonApprove: false,
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true,
   },
   gm: {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
@@ -20,7 +20,7 @@ const ROLE_PERMS = {
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true,
   },
   hrd: {
     company: false, cashflow: false, employees: true, empDetail: true, attendance: true, addEntry: false, edit: false,
@@ -161,8 +161,11 @@ function deriveDistribusiCaps(perms) {
   if (p.distribusiDashboard === undefined) p.distribusiDashboard = legacy;
   if (p.distribusiCashIntegrasi === undefined) p.distribusiCashIntegrasi = legacy;
   if (p.distribusiGallon === undefined) p.distribusiGallon = legacy;
+  if (p.distribusiPengiriman === undefined) p.distribusiPengiriman = legacy;
+  if (p.distribusiOrder === undefined) p.distribusiOrder = legacy;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
-    || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon);
+    || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
+    || p.distribusiPengiriman || p.distribusiOrder);
   return p;
 }
 

@@ -72,6 +72,9 @@ const listTxnQuery = z.object({
 const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan']).optional(), limit: z.coerce.number().int().positive().max(2000).optional(), fleet: z.string().max(60).optional() });
 const summaryQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
 const cashIntegQuery = z.object({ dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
+const boardQuery = z.object({ date: DATE, fleet: z.string().max(60).optional() });
+const orderSchema = z.object({ customerId: z.string().min(1), date: DATE, qty: z.number().int().nonnegative().optional(), note: z.string().max(300).optional() });
+const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), transactionId: z.string().min(1).optional() });
 const custListQuery = z.object({ fleet: z.string().max(60).optional() });
 const idParams = z.object({ id: z.string().min(1) });
 const batchParams = z.object({ batchId: z.string().min(1) });
@@ -122,6 +125,17 @@ const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await
 const billingReminders = asyncHandler(async (req, res) => res.json(await service.billingReminders(req.user, req.query.fleet, req.query.date)));
 const cashIntegration = asyncHandler(async (req, res) => res.json({ data: await service.cashIntegration(req.user, req.query) }));
 
+// ── Delivery board ──
+const deliveryBoard = asyncHandler(async (req, res) => res.json(await service.deliveryBoard(req.user, req.query.date, req.query.fleet)));
+const addOrder = asyncHandler(async (req, res) => {
+  const { delivery, fleetId } = await service.addOrder(req.body, req.user);
+  // Notify the fleet's crew (AlertBell) + refresh open boards — carry fleetId so a scoped
+  // helper's client can tell whether the new order is for them.
+  bus.broadcast({ entity: 'distribusi', action: 'order', id: delivery.id, fleetId });
+  res.status(201).json({ data: delivery });
+});
+const markDelivery = asyncHandler(async (req, res) => { const r = await service.markDelivery(req.params.id, req.body, req.user); bcast('delivery', req.params.id); res.json(r); });
+
 // ── gallon stock ──
 const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await service.gallonSummary(req.user, req.query.fleet) }));
 const gallonCorrection = asyncHandler(async (req, res) => { const m = await service.gallonCorrection(req.body, req.user); bcast('gallon', m.id); res.status(201).json({ data: m }); });
@@ -131,5 +145,6 @@ module.exports = {
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
-  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  deliveryBoard, addOrder, markDelivery,
+  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

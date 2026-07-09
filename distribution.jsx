@@ -1541,4 +1541,132 @@ function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, se
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon };
+// ════════════════ PENGIRIMAN (delivery board) ════════════════
+// One board per (armada, tanggal): scheduled stops (from deliveryDays) + extra orders.
+function DeliveryOrderModal({ date, customers, onClose, onSaved }) {
+  const [cust, setCust] = uSx('');
+  const [qty, setQty] = uSx('');
+  const [note, setNote] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const opts = (customers || []).filter((c) => (c.armada || '').trim()).map((c) => ({ value: c.id, label: c.name + ' · ' + armadaFull(c.armada) }));
+  const save = () => {
+    if (!cust) { setErr(trD('dist.orderCustReq')); return; }
+    if (saving) return;
+    setSaving(true); setErr('');
+    window.API.distribusi.deliveries.addOrder({ customerId: cust, date, qty: qty ? +String(qty).replace(/[^0-9]/g, '') : undefined, note: note.trim() })
+      .then(() => onSaved())
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.addOrder')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.orderCust')}</label>
+          <UI.Dropdown value={cust} options={opts} placeholder={trD('dist.orderCustPh')} onChange={setCust} fluid />
+          <label className="fld-label">{trD('dist.orderQty')}</label>
+          <input className="fld tnum" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value.replace(/[^0-9]/g, ''))} placeholder="—" />
+          <label className="fld-label">{trD('dist.orderNote')}</label>
+          <input className="fld" value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.orderNotePh')} />
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={save}>{saving ? '…' : trD('dist.orderSave')}</button></div>
+      </div>
+    </div>
+  );
+}
+// Make a transaction directly from a stop; on success the caller marks the stop terkirim + links it.
+function DeliveryTxnModal({ stop, today, onClose, onCreated }) {
+  const [qty, setQty] = uSx(stop.qty || 1);
+  const [method, setMethod] = uSx('lunas');
+  const [note, setNote] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const q = Math.max(1, qty | 0);
+  const total = (stop.masterPrice || 0) * q;
+  const save = () => {
+    if (saving) return;
+    setSaving(true); setErr('');
+    window.API.distribusi.transactions.create({ customerId: stop.customerId, qty: q, method, note: note.trim(), txnDate: today, gallonOut: q, gallonIn: 0 })
+      .then((r) => onCreated(r.data))
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.delivMakeTxn')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{stop.customerName}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fQty')}</label>
+          <div className="dist-stepper"><button type="button" onClick={() => setQty((n) => Math.max(1, (n | 0) - 1))}>−</button><input className="tnum" inputMode="numeric" value={qty} onChange={(e) => setQty(parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0)} onFocus={(e) => e.target.select()} /><button type="button" onClick={() => setQty((n) => (n | 0) + 1)}>+</button></div>
+          <label className="fld-label">{trD('dist.fMethod')}</label>
+          <div className="cat-chips">{['lunas', 'bon'].map((m) => <button key={m} type="button" className={`cat-chip ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{methodLabel(m)}</button>)}</div>
+          <label className="fld-label">{trD('dist.note')}</label>
+          <input className="fld" value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
+          <div className="dist-lockrow" style={{ marginTop: 12 }}><span className="dist-lockrow-l"><IconLock s={14} />{numX(q)} × {rpFull(stop.masterPrice || 0)}</span><span className="dist-lockrow-r">{rpFull(total)}</span></div>
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={save}>{saving ? '…' : trD('dist.fSave')}</button></div>
+      </div>
+    </div>
+  );
+}
+function DistDeliveries({ refreshKey, today, canOrder, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+  const [date, setDate] = uSx(today);
+  const [board, setBoard] = uSx(null);
+  const [custs, setCusts] = uSx([]);
+  const [toast, setToast] = uSx('');
+  const [orderOpen, setOrderOpen] = uSx(false);
+  const [txnStop, setTxnStop] = uSx(null);
+  const ef = effFleet(fleetScope, distFleet);
+  const reload = () => {
+    if (!(window.API && window.API.distribusi)) return;
+    window.API.distribusi.deliveries.board(date, ef).then((r) => setBoard(r.data || [])).catch(() => setBoard([]));
+    window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => {});
+  };
+  uEx(() => { setBoard(null); reload(); }, [refreshKey, ef, date]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+  const mark = (id, status, transactionId) => window.API.distribusi.deliveries.mark(id, transactionId ? { status, transactionId } : { status })
+    .then(() => { reload(); if (onChanged) onChanged(); }).catch(() => flash(trD('dist.loadErr')));
+  const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
+  const rows = board || [];
+  const srcBadge = (s) => <span className={`dist-src ${s}`}>{trD(s === 'tambahan' ? 'dist.srcTambahan' : 'dist.srcJadwal')}</span>;
+  const statBadge = (s) => <span className={`dist-dstat ${s}`}>{trD('dist.dstat_' + s)}</span>;
+  return (
+    <div className="dist-dash screen-enter">
+      {bar}
+      <div className="dist-tx-toolbar">
+        <div style={{ minWidth: 190 }}><DP.DateField value={date} onChange={setDate} allowFuture /></div>
+        <div style={{ flex: 1 }} />
+        {canOrder && <button type="button" className="btn btn-primary" onClick={() => setOrderOpen(true)}><IconPlus s={16} />{trD('dist.addOrder')}</button>}
+      </div>
+      <div className="card dist-card" style={{ padding: '6px 18px' }}>
+        {board === null && <div className="dist-empty dist-loading"><span className="dist-spin" />{trD('common.loading')}</div>}
+        {board !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.delivEmpty')}</div>}
+        {rows.map((s) => (
+          <div key={s.id} className={`dist-cust-row dist-deliv-row st-${s.status}`}>
+            <span className="dist-txn-av">{initialsOf(s.customerName)}</span>
+            <div className="dist-cust-main">
+              <div className="dist-txn-line1"><span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
+              <div className="dist-txn-sub">{s.phone || '—'}{s.deliveryDays && s.deliveryDays.length ? ' · ' + fmtDays(s.deliveryDays) : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}{s.note ? ' · ' + s.note : ''}</div>
+            </div>
+            {s.status === 'pending' && (
+              <div className="dist-deliv-actions">
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => setTxnStop(s)}><IconPlus s={13} />{trD('dist.delivMakeTxn')}</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => mark(s.id, 'terkirim')}><IconCheck s={13} />{trD('dist.delivMarkSent')}</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => mark(s.id, 'batal')}><IconClose s={13} />{trD('dist.delivCancel')}</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {orderOpen && <DeliveryOrderModal date={date} customers={custs} onClose={() => setOrderOpen(false)} onSaved={() => { setOrderOpen(false); flash(trD('dist.orderSaved')); reload(); if (onChanged) onChanged(); }} />}
+      {txnStop && <DeliveryTxnModal stop={txnStop} today={date} onClose={() => setTxnStop(null)} onCreated={(txn) => { const st = txnStop; setTxnStop(null); mark(st.id, 'terkirim', txn.id); flash(trD('dist.delivSentTxn')); }} />}
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries };

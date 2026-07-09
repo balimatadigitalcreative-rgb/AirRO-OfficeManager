@@ -711,6 +711,85 @@ async function retractPurchaseMovement(entryId) {
   await prisma.gallonMovement.updateMany({ where: { cashEntryId: entryId, type: 'purchase', active: true }, data: { active: false } });
 }
 
+// ── Delivery board ──────────────────────────────────────────────────────────
+// One stop per fleet per date: 'jadwal' rows generated (idempotent) from each
+// customer's deliveryDays, plus 'tambahan' orders added by an admin.
+const DOW = (date) => DAY_CODES[(new Date(date + 'T00:00').getDay() + 6) % 7];   // Mon=Sen … Sun=Min
+function deliveryClient(r, sisaBon) {
+  const c = r.customer || {};
+  let days = []; try { days = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
+  return {
+    id: r.id, date: r.date, fleetId: r.fleetId, customerId: r.customerId, source: r.source, seq: r.seq,
+    status: r.status, qty: r.qty, note: r.note || '', transactionId: r.transactionId || null,
+    createdByName: r.createdByName || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
+    customerName: c.name || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
+    deliveryDays: Array.isArray(days) ? days : [], sisaBon: sisaBon || 0,
+  };
+}
+async function bonMapFor(custIds) {
+  const map = {};
+  if (!custIds.length) return map;
+  const txns = await prisma.distTransaction.findMany({ where: { customerId: { in: custIds } }, select: { customerId: true, amount: true, method: true } });
+  txns.forEach((t) => { const b = map[t.customerId] || (map[t.customerId] = { bon: 0, pel: 0 }); if (t.method === 'bon') b.bon += t.amount; else if (t.method === 'pelunasan') b.pel += t.amount; });
+  const out = {}; Object.keys(map).forEach((k) => { out[k] = Math.max(0, map[k].bon - map[k].pel); });
+  return out;
+}
+async function deliveryBoard(user, date, qFleet) {
+  const dow = DOW(date);
+  // customers scheduled today AND within the user's fleet scope; a stop needs a fleet.
+  const custs = await prisma.customer.findMany({ where: fleetWhere(user, 'armada', qFleet) });
+  const scheduled = custs.filter((c) => {
+    let d = []; try { d = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
+    return Array.isArray(d) && d.includes(dow) && (c.armada || '').trim();
+  });
+  // idempotent generation — one jadwal row per scheduled customer per day.
+  for (const c of scheduled) {
+    await prisma.delivery.upsert({
+      where: { date_customerId_source: { date, customerId: c.id, source: 'jadwal' } },
+      update: { fleetId: c.armada || '' },
+      create: { date, customerId: c.id, source: 'jadwal', fleetId: c.armada || '', status: 'pending', seq: 0 },
+    });
+  }
+  const rows = await prisma.delivery.findMany({
+    where: { date, ...fleetWhere(user, 'fleetId', qFleet) },
+    include: { customer: true }, orderBy: [{ source: 'asc' }, { seq: 'asc' }, { createdAt: 'asc' }],
+  });
+  const bon = await bonMapFor([...new Set(rows.map((r) => r.customerId))]);
+  return { data: rows.map((r) => deliveryClient(r, bon[r.customerId])) };
+}
+// Add a 'tambahan' order (admin). fleetId comes from the chosen customer. Idempotent per
+// customer/day. Returns the row + fleetId so the controller can notify that fleet.
+async function addOrder(body, actor) {
+  const c = await prisma.customer.findUnique({ where: { id: String(body.customerId || '') } });
+  if (!c) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, c.armada)) throw ApiError.forbidden('Pelanggan di luar akses Anda.');
+  if (!(c.armada || '').trim()) throw ApiError.badRequest('Pelanggan belum punya armada.');
+  const snap = await actorSnap(actor);
+  const qty = body.qty != null ? Math.max(0, int(body.qty)) : null;
+  const note = String(body.note || '').slice(0, 300);
+  const row = await prisma.delivery.upsert({
+    where: { date_customerId_source: { date: body.date, customerId: c.id, source: 'tambahan' } },
+    update: { qty, note, status: 'pending' },
+    create: { date: body.date, customerId: c.id, source: 'tambahan', fleetId: c.armada, status: 'pending', seq: 999, qty, note, createdById: snap.actorId, createdByName: snap.actorName },
+    include: { customer: true },
+  });
+  await logAudit('pengiriman', `Orderan tambahan: ${c.name}`, `Tanggal ${body.date} · armada ${c.armada}`, snap, c.armada);
+  const sisa = (await bonMapFor([c.id]))[c.id];
+  return { delivery: deliveryClient(row, sisa), fleetId: c.armada };
+}
+// Update a stop's status (terkirim/batal/pending) and optionally link a transaction.
+async function markDelivery(id, body, actor) {
+  const d = await prisma.delivery.findUnique({ where: { id }, include: { customer: true } });
+  if (!d) throw ApiError.notFound('Delivery not found');
+  if (!fleetAllows(actor, d.fleetId)) throw ApiError.forbidden('Pengiriman di luar akses Anda.');
+  const status = ['pending', 'terkirim', 'batal'].includes(body.status) ? body.status : d.status;
+  const data = { status };
+  if (body.transactionId) data.transactionId = String(body.transactionId);
+  const row = await prisma.delivery.update({ where: { id }, data, include: { customer: true } });
+  const sisa = (await bonMapFor([row.customerId]))[row.customerId];
+  return { data: deliveryClient(row, sisa) };
+}
+
 // Cash Integration view — one authorized read (gated distribusiCashIntegrasi) that
 // composes exactly the datasets the screen needs: transactions in the range, all
 // customers (for outstanding bon), and the adjustment audit rows for the counts.
@@ -731,4 +810,5 @@ module.exports = {
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
+  deliveryBoard, addOrder, markDelivery,
 };

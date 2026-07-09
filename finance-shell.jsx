@@ -35,6 +35,7 @@ function navForRole(p, role) {
     { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', caps: ['distribusiDashboard'] },
     { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', caps: ['distribusiCustomers'] },
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi'] },
+    { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
     { id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', caps: ['distribusiGallon'] },
     { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', caps: ['distribusiCashIntegrasi'] },
     { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', caps: ['distribusiHargaMaster'] },
@@ -97,6 +98,7 @@ function FApp() {
   const [toast, setToast] = uSh(null);
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
   const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard/transaksi re-fetch
+  const [deliveryAlerts, setDeliveryAlerts] = uSh([]);   // AlertBell: extra orders on today's board for the user's fleet
   const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
   const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
@@ -155,6 +157,19 @@ function FApp() {
     const nav = navForRole(p, user.role);
     if (nav.length && !nav.some((n) => n.id === screen)) setScreen(nav[0].id);
   }, [screen, user]);
+  // Delivery notification: when an admin adds an extra order, the SSE 'order' event bumps
+  // distTick; re-read today's board (scoped to the user's fleet) and surface pending extras
+  // in the AlertBell — so a fleet's helper is notified even without seeMoney.
+  uEh(() => {
+    if (!user || !p.distribusiPengiriman || !(window.API && window.API.distribusi)) { setDeliveryAlerts([]); return; }
+    let live = true;
+    window.API.distribusi.deliveries.board(FIN.TODAY, 'all').then((r) => {
+      if (!live) return;
+      const extra = (r.data || []).filter((d) => d.source === 'tambahan' && d.status === 'pending');
+      setDeliveryAlerts(extra.length ? [{ id: 'deliv-extra', level: 'warn', icon: 'IconTruck', title: tr('nav.distDeliveries'), msg: tr('dist.newOrderAlert', { n: extra.length }) }] : []);
+    }).catch(() => { if (live) setDeliveryAlerts([]); });
+    return () => { live = false; };
+  }, [user, p.distribusiPengiriman, distTick]);
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // ── Setoran: REST per-record (create/update/delete one record at a time) ──
@@ -1026,7 +1041,7 @@ function FApp() {
                 </span>
               )}
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
-              {p.seeMoney && <ALERTS.AlertBell alerts={alerts} />}
+              {(p.seeMoney || p.distribusiPengiriman) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts]} />}
               <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []} activity={myActivity}
                 onChangePassword={() => setPwModal(true)} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
@@ -1052,6 +1067,11 @@ function FApp() {
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
+          {screen === 'dist-deliveries' && p.distribusiPengiriman && (
+            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
+              onChanged={() => setDistTick((t) => t + 1)} />
+          )}
           {screen === 'dist-gallon' && p.distribusiGallon && (
             <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
@@ -1065,7 +1085,7 @@ function FApp() {
           {screen === 'dist-audit' && p.distribusiAudit && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} mfgAcct={settings.mfgAcct} onMfgAcctChange={(v) => applySettings((prev) => ({ ...prev, mfgAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />

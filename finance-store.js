@@ -124,9 +124,9 @@
   const ROLE_COLORS = { owner: '#065489', gm: '#0B7EB1', hrd: '#138FB3', finance: '#22A7A1', adminfin: '#3FB8B2' };
   const ROLES = {
     owner:   { label: 'Owner',           blurb: 'Executive read-only overview', readonly: true,
-      perms: { company: true,  cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: true,  advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, kasbon: false, kasbonApprove: false, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true } },
+      perms: { company: true,  cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: true,  advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, kasbon: false, kasbonApprove: false, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true } },
     gm:      { label: 'General Manager', blurb: 'Full access to everything',
-      perms: { company: true,  cashflow: true,  employees: true,  empDetail: true,  attendance: true,  addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: true, kasbon: true, kasbonApprove: true, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true } },
+      perms: { company: true,  cashflow: true,  employees: true,  empDetail: true,  attendance: true,  addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: true, kasbon: true, kasbonApprove: true, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true } },
     hrd:     { label: 'HRD',             blurb: 'People, payroll & attendance',
       perms: { company: false, cashflow: false, employees: true,  empDetail: true,  attendance: true,  addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: false, advisor: false, payroll: true,  approvals: true,  delete: false, settings: false, reset: false, kasbon: true, kasbonApprove: true, distribusiInput: false, distribusiKoreksi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false } },
     finance: { label: 'Finance',         blurb: 'Cash book, reports & payroll posting',
@@ -180,8 +180,11 @@
     if (p.distribusiDashboard === undefined) p.distribusiDashboard = legacyDist;
     if (p.distribusiCashIntegrasi === undefined) p.distribusiCashIntegrasi = legacyDist;
     if (p.distribusiGallon === undefined) p.distribusiGallon = legacyDist;
+    if (p.distribusiPengiriman === undefined) p.distribusiPengiriman = legacyDist;
+    if (p.distribusiOrder === undefined) p.distribusiOrder = legacyDist;
     p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
-      || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon);
+      || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
+      || p.distribusiPengiriman || p.distribusiOrder);
     return p;
   }
   const landingScreen = (role) => { const p = perms(role); return p.setoranOnly ? 'setoran' : p.company ? 'company' : p.cashflow ? 'overview' : p.employees ? 'employees' : p.payroll ? 'payroll' : p.kasbon ? 'kasbon' : 'overview'; };

@@ -430,6 +430,7 @@ model Customer {
 
   transactions DistTransaction[]
   priceHistory PriceHistory[]
+  deliveries   Delivery[]
 
   @@index([type])
 }
@@ -483,6 +484,29 @@ model DistTransaction {
   @@index([txnDate])
   @@index([customerId])
   @@index([fleetId])
+}
+
+// Delivery board — one row per stop, per fleet, per date. `jadwal` rows are generated
+// (idempotent) from a customer's deliveryDays; `tambahan` rows are added by an admin.
+model Delivery {
+  id            String   @id @default(cuid())
+  date          String                          // YYYY-MM-DD
+  fleetId       String   @default("")           // armada — copied from the customer at creation
+  customerId    String
+  source        String   @default("jadwal")     // jadwal | tambahan
+  seq           Int      @default(0)            // route order
+  status        String   @default("pending")    // pending | terkirim | batal
+  qty           Int?                             // optional planned qty
+  note          String   @default("")
+  transactionId String?                          // set when a txn is created from this stop
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([date, customerId, source])           // idempotent generation (1 jadwal + 1 tambahan / cust / day)
+  @@index([date, fleetId])
 }
 
 // Append-only corrections against a transaction (the transaction itself is never
