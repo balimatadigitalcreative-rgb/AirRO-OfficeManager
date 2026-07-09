@@ -1640,29 +1640,20 @@ select.fld::-ms-expand { display: none; }
 @media (max-width: 620px) { .invoice-sheet { padding: 18px; } }
 
 /* ── Transaction-history document (evidence print) ── */
-.dist-hist-sheet { max-width: 860px; }
+.dist-hist-sheet { max-width: 720px; }
 .dist-hist-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 .dist-hist-flabel { font-size: 12px; font-weight: 600; color: var(--text-mut); }
 .dist-hist-date { width: auto; padding: 5px 9px; font-size: 12.5px; }
-.dist-hist-table { min-width: 640px; font-size: 12px; }
-.dist-hist-table th, .dist-hist-table td { padding: 6px 7px; vertical-align: top; }
-.dist-hist-time { color: var(--text-faint); font-size: 11px; }
-.dist-hist-old { text-decoration: line-through; color: var(--text-faint); margin-right: 5px; }
-.dist-hist-corr td { background: var(--warn-bg, #fff7ed); }
-.dist-hist-stat { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); }
-.dist-hist-stat.lock { color: var(--green-700); border-color: var(--green-700); }
-.dist-hist-stat.corr { color: #b45309; border-color: #b45309; }
-.dist-hist-stat.adj { color: #2f6fb0; border-color: #2f6fb0; }
-.dist-hist-delta { font-size: 11px; color: var(--text-mut); white-space: nowrap; }
+.dist-hist-table { min-width: 440px; font-size: 12.5px; }
+.dist-hist-table th, .dist-hist-table td { padding: 6px 8px; vertical-align: top; }
 .dist-hist-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 2px solid var(--green-800); }
 .dist-hist-summary > div { display: flex; flex-direction: column; gap: 2px; }
 .dist-hist-summary span { font-size: 11px; color: var(--text-mut); }
 .dist-hist-summary b { font-size: 15px; }
 @media (max-width: 620px) { .dist-hist-summary { grid-template-columns: 1fr 1fr; } }
 @media print {
-  body.invoice-open .dist-hist-table { min-width: 0 !important; font-size: 10.5px !important; }
-  body.invoice-open .dist-hist-table th, body.invoice-open .dist-hist-table td { padding: 4px 5px !important; }
-  body.invoice-open .dist-hist-corr td { background: #fff7ed !important; }
+  body.invoice-open .dist-hist-table { min-width: 0 !important; font-size: 11px !important; }
+  body.invoice-open .dist-hist-table th, body.invoice-open .dist-hist-table td { padding: 4px 6px !important; }
   body.invoice-open .dist-hist-table tr { break-inside: avoid; }
   body.invoice-open .dist-hist-summary { break-inside: avoid; }
 }

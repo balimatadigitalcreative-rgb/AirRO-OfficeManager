@@ -642,7 +642,6 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
   const stampTime = pad(now.getHours()) + ':' + pad(now.getMinutes());
   const docNo = 'RWT-' + String(customer.id || '').slice(-6).toUpperCase() + '-' + stamp.replace(/-/g, '');
   const periodLabel = mode === 'range' ? ((from || '…') + ' – ' + (to || '…')) : mode === 'month' ? month : trD('dist.periodAll');
-  const statusOf = (t) => (t.corrected ? trD('dist.statCorrected') : t.adjusted ? trD('dist.statAdjusted') : trD('dist.statLocked'));
   const share = () => {
     const lines = ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + customer.name, trD('dist.period') + ': ' + periodLabel, '',
       trD('dist.totalGalon') + ': ' + numX(galon), trD('dist.histTotalValue') + ': ' + rpFull(nilai), trD('dist.histTotalPaid') + ': ' + rpFull(terbayar), trD('dist.sisaBon') + ': ' + rpFull(customer.sisaBon || 0),
@@ -675,21 +674,20 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
         <div className="inv-dates"><span>{trD('dist.issueDate')}: <b>{stamp}</b></span><span>{trD('dist.period')}: <b>{periodLabel}</b></span></div>
         <div className="inv-table-wrap">
           <table className="inv-table dist-hist-table">
-            <thead><tr><th>{trD('dist.docNoShort')}</th><th>{trD('dist.date')}</th><th>{trD('dist.method')}</th><th className="r">Qty × {trD('dist.hargaPerGalon')}</th><th className="r">{trD('dist.amount')}</th><th>{trD('dist.status')}</th><th>{trD('dist.inputBy')}</th></tr></thead>
+            <thead><tr><th>{trD('dist.docNoShort')}</th><th>{trD('dist.date')}</th><th>{trD('dist.method')}</th><th className="r">Qty × {trD('dist.hargaPerGalon')}</th><th className="r">{trD('dist.amount')}</th></tr></thead>
             <tbody>{rows.length === 0
-              ? <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('dist.noTxn')}</td></tr>
+              ? <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('dist.noTxn')}</td></tr>
               : rows.map((t) => {
+                // Always the EFFECTIVE amount (corrections/adjustments folded in) so totals are
+                // accurate — no status/koreksi markers, just the correct number.
                 const eff = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
-                const changed = t.adjusted && t.amount !== eff;
                 return (
-                  <tr key={t.id} className={t.corrected || t.adjusted ? 'dist-hist-corr' : ''}>
+                  <tr key={t.id}>
                     <td className="tnum">{shortRef(t.id)}</td>
-                    <td className="tnum">{t.txnDate}<span className="dist-hist-time"> {hhmm(t.createdAt)}</span></td>
+                    <td className="tnum">{t.txnDate}</td>
                     <td>{methodLabel(t.method)}</td>
                     <td className="r tnum">{t.method === 'pelunasan' ? '—' : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}</td>
-                    <td className="r tnum">{changed ? <span className="dist-hist-old">{rpFull(t.amount)}</span> : null}{rpFull(eff)}</td>
-                    <td><span className={`dist-hist-stat ${t.corrected ? 'corr' : t.adjusted ? 'adj' : 'lock'}`}>{statusOf(t)}</span>{t.adjusted ? <span className="dist-hist-delta"> ({t.adjustAmount >= 0 ? '+' : ''}{rpFull(t.adjustAmount)})</span> : null}</td>
-                    <td>{t.actorName || '—'}</td>
+                    <td className="r tnum">{rpFull(eff)}</td>
                   </tr>
                 );
               })}</tbody>
