@@ -7,7 +7,9 @@ const EXP_PAL = ['#065489', '#0B7EB1', '#138FB3', '#8DD3D0', '#3FB8B2', '#DDF7F6
 const INC_PAL = ['#065489', '#22A7A1', '#8DD3D0', '#3FB8B2', '#DDF7F6'];
 const P = () => window.PERIOD;
 const GRAN_KEYS = P().GRAN_KEYS;
-const niceDate = (s) => P().niceDate(s);
+// niceDate is provided globally by finance-setoran.jsx, which loads after this file so its
+// `function niceDate` already wins at runtime today. Do NOT redeclare it here — a top-level
+// `const niceDate` collides once all files are concatenated into one build (dist/app.js).
 const resolveRange = (g, a, cs, ce) => P().resolveRange(g, a, cs, ce);
 const stepAnchor = (a, g, d) => P().stepAnchor(a, g, d);
 const periodLabel = (g, a, r) => P().periodLabel(g, a, r);

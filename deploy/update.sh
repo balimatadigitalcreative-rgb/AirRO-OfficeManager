@@ -22,6 +22,17 @@ echo "==> 2/6  Pull latest code..."
 git fetch origin
 git reset --hard origin/master
 
+echo "==> 2b/6  Build frontend bundle (dist/app.js)..."
+# The committed dist/app.js is already correct, so this is a belt-and-suspenders rebuild
+# from source. Non-fatal: if node/esbuild aren't available we simply serve the committed
+# bundle. (Frontend JSX is compiled at build time now — no in-browser Babel.)
+if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
+  npm install --no-audit --no-fund >/dev/null 2>&1 && npm run build \
+    || echo "   (skipped rebuild — serving committed dist/app.js)"
+else
+  echo "   (no root package.json / npm — serving committed dist/app.js)"
+fi
+
 echo "==> 3/6  Install dependencies..."
 cd server
 npm install --omit=dev

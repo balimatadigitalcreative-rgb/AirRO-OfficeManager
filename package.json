@@ -1,0 +1,13 @@
+{
+  "name": "airro-frontend-build",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build step for the AirRO web client: transform each JSX/JS source with esbuild and CONCATENATE (not bundle) into dist/app.js. Preserves the existing global-scope, no-module architecture — no import/export, no tree-shaking, no ESM, no identifier renaming.",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:dev": "node build.mjs --no-minify"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

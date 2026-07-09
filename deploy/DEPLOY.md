@@ -41,16 +41,52 @@ Open `https://yourdomain.com` → log in with `owner` / your seeded password.
 | What you change | How users get it | Downtime |
 |---|---|---|
 | **Data** (users, transactions, accounts, settings) | Edit inside the app (e.g. Pengguna). Saves to the DB instantly. | None |
-| **Frontend** (HTML/JSX/CSS — look, screens, features) | Edit the file on the VPS (or re-upload), then bump the `?v=l7` number in the HTML. Users get it on next refresh (no-cache headers already make this immediate). | None |
+| **Frontend** (HTML/JSX/CSS — look, screens, features) | Edit the source, run **`npm run build`**, bump the `?v=lNN` number in the HTML, commit + push. `bash deploy/update.sh` on the VPS pulls & serves it. Users get it on next refresh (no-cache headers make it immediate). | None |
 | **Backend** (API logic) | Edit `server/...`, then `pm2 restart airro-api`. | ~1 second blip |
 | **Database shape** (new fields) | `cd server && npx prisma db push` then `pm2 restart airro-api`. | ~1 second blip |
 
 Tips:
-- The frontend has **no build step** (JSX compiles in the browser), so editing a
-  `.jsx` file on the server *is* the deploy — just bump the cache version.
+- The frontend is now **built once with esbuild** — JSX is no longer compiled in the browser, so
+  the login and every page load are much faster. See **[Frontend build](#frontend-build-esbuild)** below.
 - Use **git** so you can roll back: commit before changes, `git pull` on the VPS to update.
 - Back up the DB regularly: `cp server/prod.db ~/airro-backup-$(date +%F).db` (or `pg_dump` for Postgres).
 - For zero-downtime backend reloads: `pm2 reload airro-api` instead of `restart`.
+
+## Frontend build (esbuild)
+
+The web client used to compile JSX **in the browser** via `@babel/standalone` — a ~3 MB download
+plus a full compile of ~26 files on *every* page load (slow login, slow first paint). It is now
+**built once** with esbuild into a single `dist/app.js`, and the HTML loads that one file with the
+**production** React builds. No Babel, no in-browser compile.
+
+**What the build does** (`build.mjs`): for each source file, in the *exact* `<script>` order the HTML
+used, it runs esbuild's JSX transform (`loader: jsx`, `target: es2018`) and **concatenates** the
+outputs into `dist/app.js` (+ a `dist/app.js.map` sourcemap). It deliberately **does not bundle,
+tree-shake, convert to ESM, or rename identifiers** — the app has no modules and shares state through
+globals (`window.FS`, `window.API`, bare cross-file names, …), so the single concatenated script keeps
+the *identical* global scope and load order. Only whitespace/syntax are minified (never identifiers).
+
+**Deploy flow:**
+
+```bash
+# on your machine, after editing any .js/.jsx source:
+npm install        # once — installs esbuild (devDependency)
+npm run build      # regenerates dist/app.js (+ .map)   ~150 ms
+# bump the ?v=lNN number in "AirRO Water - Daily Finance Manager.html"
+git add -A && git commit -m "..." && git push
+```
+
+Then on the VPS: `cd /var/www/airrooffice && bash deploy/update.sh` — it pulls, rebuilds `dist/app.js`
+from source if node is present (otherwise serves the committed `dist/app.js`), and reloads the backend.
+
+- **`npm run build`** — production build (safe minify).
+- **`npm run build:dev`** — unminified, easier to debug.
+- `dist/` **is committed** so the VPS works even without a Node build step. `node_modules/` is not.
+- **If you add/remove/reorder a `<script>`**, update the `FILES` array in `build.mjs` to match.
+- **Rollback:** `git revert` the build commit (the old Babel HTML is in history), or restore the
+  local `*.babel.html.bak` backup created alongside this change.
+
+## Safe updates (no data loss)
 
 ## Safe updates (no data loss)
 

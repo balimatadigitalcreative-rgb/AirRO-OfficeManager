@@ -12,3 +12,9 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# Local rollback backups (durable backup is git history)
+*.html.bak
+_built-test.html
+
+# NOTE: dist/ IS committed on purpose — it is the built frontend bundle the VPS serves.
