@@ -1550,7 +1550,7 @@ function DeliveryOrderModal({ date, customers, onClose, onSaved }) {
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
   uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  const opts = (customers || []).filter((c) => (c.armada || '').trim()).map((c) => ({ value: c.id, label: c.name + ' · ' + armadaFull(c.armada) }));
+  const opts = (customers || []).filter((c) => (c.armada || '').trim()).map((c) => ({ value: c.id, label: c.name + ' · ' + c.armada }));
   const save = () => {
     if (!cust) { setErr(trD('dist.orderCustReq')); return; }
     if (saving) return;

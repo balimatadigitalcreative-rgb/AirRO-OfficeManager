@@ -1229,6 +1229,30 @@ select.fld::-ms-expand { display: none; }
   .dist-harga-apply { width: 100%; }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   RESPONSIVE — "info + action buttons" card rows on phones (<640px).
+   The action buttons drop to their own full-width, wrapping row BELOW the
+   customer info (never overlapping/clipping the name, HP, hari-kirim, sisa
+   bon). Tap targets are >= 44px for the primary actions.
+   ───────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Delivery board stop: reorder + avatar + info on top; actions wrap below. */
+  .dist-deliv-row { flex-wrap: wrap; align-items: flex-start; row-gap: 9px; }
+  .dist-deliv-row .dist-cust-main { flex: 1 1 55%; min-width: 0; }
+  .dist-deliv-reorder { align-self: center; }
+  .dist-deliv-grip { display: none; }                 /* drag is desktop-only; ↑/↓ remain */
+  .dist-deliv-mv { width: 40px; height: 40px; }        /* easy to tap */
+  .dist-deliv-actions { flex-basis: 100%; width: 100%; justify-content: flex-start; margin-top: 2px; }
+  .dist-deliv-actions .btn { min-height: 44px; flex: 1 1 30%; justify-content: center; }
+  /* Customer-detail header actions (Buat Invoice / Cetak Riwayat / Bayar Bon / Ubah). */
+  .dist-cd-head { flex-wrap: wrap; }
+  .dist-cd-actions { width: 100%; }
+  .dist-cd-actions .btn { min-height: 44px; flex: 1 1 auto; justify-content: center; }
+  /* Any distribusi list row that mixes text + trailing buttons: allow the buttons
+     to wrap under the text instead of squeezing it. */
+  .dist-txn { flex-wrap: wrap; }
+}
+
 /* ---- Distribusi Log Audit (immutable timeline) ---- */
 .dist-immutable { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: var(--text-mut); background: var(--card-soft); padding: 7px 12px; border-radius: 9px; }
 .dist-immutable svg { flex-shrink: 0; }
@@ -1778,6 +1802,9 @@ img, svg, canvas, video { max-width: 100%; }
   .modal-card .fld, .modal-card .amt-input, .modal-card .ui-dd, .modal-card .ui-dd-control { width: 100%; }
   .modal-foot { flex-wrap: wrap; }
   .modal-foot .btn { min-height: 44px; flex: 1 1 auto; }
+  /* iOS safe-area: keep the footer buttons clear of the home indicator. */
+  .modal-card { padding-bottom: max(20px, calc(16px + env(safe-area-inset-bottom))); }
+  .modal-scrim { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
 }
 
 /* Small phones (≤380px, e.g. iPhone SE / mini): tighten chrome */
