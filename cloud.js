@@ -146,6 +146,11 @@
   // Server timestamp of the last pull; sent back as `since` so each poll only
   // fetches keys changed since then (incremental — cheap even at 3s).
   let lastPollAt = null;
+  // The first hydrate establishes lastPollAt. Until it does, poll() must NOT run — a
+  // poll with lastPollAt still null issues a FULL /state pull, so the SSE-onopen poll
+  // and the 5s-interval poll would each duplicate the (large) hydrate at load. Gating
+  // poll on this flag collapses the load to a single full /state request.
+  let hydrated = false;
 
   // ---- hydrate localStorage from the server (full snapshot) ----
   // Same protection as poll(): never overwrite a key that holds an unsynced local
@@ -177,12 +182,13 @@
       }
     });
     lastPollAt = (r && r.now) || lastPollAt;
+    hydrated = true;   // cursor set → poll() may now run (incrementally)
   }
 
   // ---- poll for remote changes (near real-time, incremental) ----
   let pollTimer = null;
   async function poll() {
-    if (!state.active) return;
+    if (!state.active || !hydrated) return;   // wait for the first hydrate to set the cursor
     try {
       const r = await API.state.all(lastPollAt);   // only keys changed since last pull
       const docs = (r && r.data) || {};
@@ -281,6 +287,7 @@
     state.active = true;
     state.user = user;
     state.sessionExpired = false;   // fresh session — clear any prior expiry
+    hydrated = false;               // gate poll() until this session's first hydrate sets the cursor
     startPoll();
     startEvents();
     emit();
@@ -296,6 +303,7 @@
         // Server briefly unreachable → DO NOT kill the session. Poll keeps pulling
         // and the flush below queues local edits; both retry until the server is back.
         hadError = true;
+        hydrated = true;   // let poll() take over as the fallback (one full retry, not a race)
         console.warn('[cloud] hydrate failed; session stays active, will retry:', e.message);
       }
       flushDirty();
@@ -312,7 +320,7 @@
 
   function logout() {
     try { API.logout(); } catch (e) {}
-    state.active = false; state.user = null; state.sessionExpired = false; stopPoll(); stopEvents();
+    state.active = false; state.user = null; state.sessionExpired = false; hydrated = false; stopPoll(); stopEvents();
     Object.keys(timers).forEach((k) => clearTimeout(timers[k]));
     Object.keys(retries).forEach((k) => clearTimeout(retries[k]));
   }

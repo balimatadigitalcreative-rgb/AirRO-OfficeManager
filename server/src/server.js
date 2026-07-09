@@ -15,6 +15,10 @@ distribution.seedCustomerTypes().catch(() => {});
 // One-time: move any inline base64 proofs out of Entry/Setoran into the Attachment
 // table so old records stop dragging photos through the sync payload (idempotent).
 attachments.migrateInlineProofs().catch(() => {});
+// One-time: also strip inline base64 out of the /state Document blobs (attendance,
+// cashbon, legacy setoran, …) so GET /state stops shipping megabytes of photos. Runs
+// after inline-proofs; both are idempotent and safe to run on every boot.
+attachments.migrateStateBlobProofs().catch(() => {});
 
 const server = app.listen(config.port, config.host, () => {
   // eslint-disable-next-line no-console

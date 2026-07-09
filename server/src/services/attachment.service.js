@@ -75,4 +75,66 @@ async function migrateInlineProofs() {
   return summary;
 }
 
-module.exports = { create, getOne, migrateInlineProofs };
+// ── One-time migration of inline proofs stuck inside /state Document blobs ───────────
+// Entry/Setoran moved to REST, but their old localStorage blobs (attendance, setoran,
+// cashbon, …) still sit in the Document table with base64 photos baked in, so GET /state
+// ships megabytes on every hydrate/poll. This deep-walks each blob, moves every base64
+// `data:` payload into an Attachment, and swaps it for a tiny { ref } — shrinking /state
+// without losing a single proof. Idempotent: a ref has no `data:`, so a re-run is a no-op.
+const DATA_MIN = 200;   // ignore trivially-short data: URLs; real photos are far larger
+const isDataUrl = (s) => typeof s === 'string' && s.slice(0, 5) === 'data:' && s.length > DATA_MIN;
+const mimeOf = (s) => (s.match(/^data:([^;]+)/) || [])[1] || '';
+
+// Returns the transformed node; accumulates moved-payload stats into ctx.
+async function moveDataUrls(node, ctx) {
+  if (node == null || typeof node === 'number' || typeof node === 'boolean') return node;
+  if (typeof node === 'string') {
+    if (!isDataUrl(node)) return node;
+    const att = await prisma.attachment.create({ data: { name: 'bukti', mime: mimeOf(node), isImg: /^data:image\//.test(node), data: node, size: node.length, createdById: null } });
+    ctx.moved++; ctx.bytes += node.length;
+    return { ref: att.id, name: 'bukti', isImg: /^data:image\//.test(node) };
+  }
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) node[i] = await moveDataUrls(node[i], ctx);
+    return node;
+  }
+  if (typeof node === 'object') {
+    // A proof object { data:'data:…', name?, isImg?, type?/mime? } → move as one unit so we
+    // don't also process its `.data` string separately (which would drop name/isImg).
+    if (isDataUrl(node.data)) {
+      const raw = node.data;
+      const isImg = node.isImg !== false;
+      const att = await prisma.attachment.create({ data: { name: String(node.name || 'bukti').slice(0, 200), mime: node.type || node.mime || mimeOf(raw), isImg, data: raw, size: raw.length, createdById: null } });
+      ctx.moved++; ctx.bytes += raw.length;
+      return { ref: att.id, name: node.name || 'bukti', isImg, mime: node.type || node.mime || mimeOf(raw) };
+    }
+    for (const k of Object.keys(node)) node[k] = await moveDataUrls(node[k], ctx);
+    return node;
+  }
+  return node;
+}
+
+async function migrateStateBlobProofs() {
+  const summary = { docs: 0, photos: 0, bytesSaved: 0 };
+  let rows;
+  try { rows = await prisma.document.findMany(); } catch (e) { return summary; }
+  for (const r of rows) {
+    if (!r.value || r.value.indexOf('data:') === -1) continue;   // fast skip: no inline payload
+    let parsed;
+    try { parsed = JSON.parse(r.value); } catch (e) { continue; } // non-JSON blob → leave untouched
+    const ctx = { moved: 0, bytes: 0 };
+    const next = await moveDataUrls(parsed, ctx);
+    if (ctx.moved > 0) {
+      const newVal = JSON.stringify(next);
+      await prisma.document.update({ where: { key: r.key }, data: { value: newVal } });
+      summary.docs++; summary.photos += ctx.moved; summary.bytesSaved += (r.value.length - newVal.length);
+    }
+  }
+  if (summary.photos) {
+    // eslint-disable-next-line no-console
+    console.log(`[attachments] state-blob proof migration → docs:${summary.docs} photos:${summary.photos} bytesSaved:${summary.bytesSaved}`);
+  }
+  return summary;
+}
+
+module.exports = { create, getOne, migrateInlineProofs, migrateStateBlobProofs };
