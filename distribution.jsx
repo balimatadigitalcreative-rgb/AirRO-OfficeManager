@@ -616,6 +616,7 @@ function InvoiceViewer({ invoice, onClose }) {
 function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
+  const [loadErr, setLoadErr] = uSx('');   // customer-list load failure → message + retry (never a silent hang)
   const [types, setTypes] = uSx([]);
   const [detail, setDetail] = uSx(null);
   const [invoices, setInvoices] = uSx([]);       // this customer's invoice history
@@ -634,11 +635,31 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
   const [typesOpen, setTypesOpen] = uSx(false);
 
   const ef = effFleet(fleetScope, distFleet);
-  const reload = () => window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
+  // Load the customer list. Never hangs: a stalled request is bounded by a 20s timeout, and any
+  // failure surfaces as an error message + "coba lagi" (retry) instead of a perpetual spinner or a
+  // misleading empty-state. On retry we reset to the loading state so the spinner reappears.
+  const reload = () => {
+    if (!(window.API && window.API.distribusi)) return Promise.resolve();
+    setLoadErr('');   // keep any current list visible while refreshing; only retry() resets to the spinner
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000));
+    return Promise.race([window.API.distribusi.customers.list(ef), timeout])
+      .then((r) => { setCusts(r.data || []); setLoadErr(''); })
+      .catch((e) => { setLoadErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
+  const retry = () => { setCusts(null); setLoadErr(''); reload(); };
   const reloadTypes = () => window.API.distribusi.types.list().then((r) => setTypes(r.data || [])).catch(() => {});
   uEx(() => {
-    if (!(window.API && window.API.distribusi)) return;
-    reload(); reloadTypes();
+    // window.API may attach a tick after this component mounts (async script/JSX compile); poll briefly
+    // instead of bailing forever, and fall to an error (not an endless spinner) if it never arrives.
+    let cancelled = false;
+    const tryLoad = (n) => {
+      if (cancelled) return;
+      if (window.API && window.API.distribusi) { reload(); reloadTypes(); return; }
+      if (n <= 0) { setLoadErr(trD('common.loadFail')); return; }
+      setTimeout(() => tryLoad(n - 1), 150);
+    };
+    tryLoad(40);   // ~6s grace for the API to become ready
+    return () => { cancelled = true; };
   }, [refreshKey, ef]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
@@ -888,8 +909,14 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
       </div>
 
       <div className="card dist-card" style={{ padding: '6px 18px' }}>
-        {custs === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
-        {custs !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.noCust')}</div>}
+        {loadErr && custs === null && (
+          <div className="dist-empty dist-load-err">
+            <span>{loadErr}</span>
+            <button type="button" className="btn btn-ghost dist-retry" onClick={retry}><IconRefresh s={15} />{trD('common.retry')}</button>
+          </div>
+        )}
+        {!loadErr && custs === null && <div className="dist-empty dist-loading"><span className="dist-spin" />{trD('common.loading')}</div>}
+        {custs !== null && rows.length === 0 && <div className="dist-empty">{loadErr ? loadErr : trD('dist.noCust')}</div>}
         {rows.map((c) => {
           const days = fmtDays(c.deliveryDays);
           return (

@@ -966,6 +966,10 @@ select.fld::-ms-expand { display: none; }
 .dist-topc-sub { font-size: 11px; color: var(--text-faint); }
 .dist-topc-amt { font-size: 12.5px; font-weight: 700; }
 .dist-empty { padding: 24px 0; text-align: center; color: var(--text-mut); font-size: 13px; }
+.dist-loading { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.dist-spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border, #d8dde3); border-top-color: var(--brand, #2b6cb0); animation: attSpin .7s linear infinite; flex: none; }
+.dist-load-err { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--neg, #c0392b); }
+.dist-load-err .dist-retry { color: var(--text); }
 .dist-link { font-size: 12px; font-weight: 700; color: var(--green-800); }
 @media (max-width: 1024px) { .dist-grid { grid-template-columns: 1fr; } }
 
