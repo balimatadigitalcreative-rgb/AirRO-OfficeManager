@@ -609,11 +609,109 @@ function InvoiceViewer({ invoice, onClose }) {
   );
 }
 
+// Printable FULL transaction-history document — evidence for when a customer disputes a
+// transaction. Reuses the invoice PRINT machinery (invoice-open body class + .invoice-overlay
+// / .no-print) and window.print, plus an optional period filter (all / date range / month).
+// Corrected & adjusted transactions are shown WITH their status + delta (never hidden) so the
+// record is credible; every row carries who recorded it (actorName) + when, and the footer
+// stamps who printed it and when.
+function TxnHistoryDoc({ customer, userName, onClose }) {
+  uEx(() => { document.body.classList.add('invoice-open'); const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => { document.body.classList.remove('invoice-open'); window.removeEventListener('keydown', o); }; }, []);
+  const [mode, setMode] = uSx('all');
+  const [from, setFrom] = uSx('');
+  const [to, setTo] = uSx('');
+  const [month, setMonth] = uSx(new Date().toISOString().slice(0, 7));
+  // Oldest → newest reads like a ledger on paper.
+  const all = (customer.transactions || []).slice().sort((a, b) => (a.txnDate < b.txnDate ? -1 : a.txnDate > b.txnDate ? 1 : (a.createdAt || 0) - (b.createdAt || 0)));
+  const inPeriod = (t) => {
+    if (mode === 'range') return (!from || t.txnDate >= from) && (!to || t.txnDate <= to);
+    if (mode === 'month') return (t.txnDate || '').slice(0, 7) === month;
+    return true;
+  };
+  const rows = all.filter(inPeriod);
+  let galon = 0, nilai = 0, terbayar = 0;
+  rows.forEach((t) => {
+    galon += t.qty || 0;
+    const eff = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
+    if (t.method === 'lunas') { nilai += eff; terbayar += eff; }
+    else if (t.method === 'bon') { nilai += eff; }
+    else if (t.method === 'pelunasan') { terbayar += t.amount; }
+  });
+  const now = new Date(); const pad = (n) => String(n).padStart(2, '0');
+  const stamp = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  const stampTime = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  const docNo = 'RWT-' + String(customer.id || '').slice(-6).toUpperCase() + '-' + stamp.replace(/-/g, '');
+  const periodLabel = mode === 'range' ? ((from || '…') + ' – ' + (to || '…')) : mode === 'month' ? month : trD('dist.periodAll');
+  const statusOf = (t) => (t.corrected ? trD('dist.statCorrected') : t.adjusted ? trD('dist.statAdjusted') : trD('dist.statLocked'));
+  const share = () => {
+    const lines = ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + customer.name, trD('dist.period') + ': ' + periodLabel, '',
+      trD('dist.totalGalon') + ': ' + numX(galon), trD('dist.histTotalValue') + ': ' + rpFull(nilai), trD('dist.histTotalPaid') + ': ' + rpFull(terbayar), trD('dist.sisaBon') + ': ' + rpFull(customer.sisaBon || 0),
+      '', trD('dist.txnCount', { n: rows.length }) + ' · ' + docNo];
+    const raw = (customer.phone || '').replace(/[^0-9]/g, '');
+    const phone = raw ? (raw.startsWith('0') ? '62' + raw.slice(1) : raw) : '';
+    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
+  };
+  return (
+    <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 210 }}>
+      <div className="invoice-sheet dist-hist-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="inv-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><Logo s={34} /><div><div className="inv-biz">{BIZ_NAME}</div><div className="inv-biz-sub">{BIZ_SUB}</div></div></div>
+          <div className="inv-actions no-print">
+            <button className="btn btn-ghost" onClick={() => window.print()}><IconDownload s={16} />{trD('dist.print')}</button>
+            {customer.phone ? <button className="btn btn-ghost" onClick={share}><IconInvoice s={16} />WhatsApp</button> : null}
+            <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+          </div>
+        </div>
+        <div className="dist-hist-filter no-print">
+          <span className="dist-hist-flabel">{trD('dist.period')}:</span>
+          {[['all', 'dist.periodAll'], ['range', 'dist.periodRange'], ['month', 'dist.periodMonth']].map(([k, l]) => <button key={k} type="button" className={`cat-chip ${mode === k ? 'on' : ''}`} onClick={() => setMode(k)}>{trD(l)}</button>)}
+          {mode === 'range' && (<><input type="date" className="fld dist-hist-date" value={from} onChange={(e) => setFrom(e.target.value)} /><span>–</span><input type="date" className="fld dist-hist-date" value={to} onChange={(e) => setTo(e.target.value)} /></>)}
+          {mode === 'month' && <input type="month" className="fld dist-hist-date" value={month} onChange={(e) => setMonth(e.target.value)} />}
+        </div>
+        <div className="inv-meta">
+          <div><div className="inv-title">{trD('dist.histTitle')}</div><div className="inv-num">{docNo}</div></div>
+          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{customer.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{customer.phone || '—'}{customer.armada ? ' · ' + customer.armada : ''}</div></div>
+        </div>
+        <div className="inv-dates"><span>{trD('dist.issueDate')}: <b>{stamp}</b></span><span>{trD('dist.period')}: <b>{periodLabel}</b></span></div>
+        <div className="inv-table-wrap">
+          <table className="inv-table dist-hist-table">
+            <thead><tr><th>{trD('dist.docNoShort')}</th><th>{trD('dist.date')}</th><th>{trD('dist.method')}</th><th className="r">Qty × {trD('dist.hargaPerGalon')}</th><th className="r">{trD('dist.amount')}</th><th>{trD('dist.status')}</th><th>{trD('dist.inputBy')}</th></tr></thead>
+            <tbody>{rows.length === 0
+              ? <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('dist.noTxn')}</td></tr>
+              : rows.map((t) => {
+                const eff = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
+                const changed = t.adjusted && t.amount !== eff;
+                return (
+                  <tr key={t.id} className={t.corrected || t.adjusted ? 'dist-hist-corr' : ''}>
+                    <td className="tnum">{shortRef(t.id)}</td>
+                    <td className="tnum">{t.txnDate}<span className="dist-hist-time"> {hhmm(t.createdAt)}</span></td>
+                    <td>{methodLabel(t.method)}</td>
+                    <td className="r tnum">{t.method === 'pelunasan' ? '—' : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}</td>
+                    <td className="r tnum">{changed ? <span className="dist-hist-old">{rpFull(t.amount)}</span> : null}{rpFull(eff)}</td>
+                    <td><span className={`dist-hist-stat ${t.corrected ? 'corr' : t.adjusted ? 'adj' : 'lock'}`}>{statusOf(t)}</span>{t.adjusted ? <span className="dist-hist-delta"> ({t.adjustAmount >= 0 ? '+' : ''}{rpFull(t.adjustAmount)})</span> : null}</td>
+                    <td>{t.actorName || '—'}</td>
+                  </tr>
+                );
+              })}</tbody>
+          </table>
+        </div>
+        <div className="dist-hist-summary">
+          <div><span>{trD('dist.totalGalon')}</span><b className="tnum">{numX(galon)}</b></div>
+          <div><span>{trD('dist.histTotalValue')}</span><b className="tnum">{rpFull(nilai)}</b></div>
+          <div><span>{trD('dist.histTotalPaid')}</span><b className="tnum">{rpFull(terbayar)}</b></div>
+          <div><span>{trD('dist.sisaBon')}</span><b className="tnum" style={{ color: (customer.sisaBon || 0) > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{rpFull(customer.sisaBon || 0)}</b></div>
+        </div>
+        <div className="inv-by">{trD('dist.printedBy', { u: userName || '—', t: stamp + ' ' + stampTime })} · {trD('dist.txnCount', { n: rows.length })}</div>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════ PELANGGAN (list + detail + add + import) ════════════════
 // `fleet` is the SINGLE app-wide armada source (shell state ← /settings airro_fleet,
 // the same list managed in Setoran → Kelola Armada). Distribusi never keeps its own
 // copy — changing a plate there is reflected here immediately.
-function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged }) {
+function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [loadErr, setLoadErr] = uSx('');   // customer-list load failure → message + retry (never a silent hang)
@@ -622,6 +720,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
   const [invoices, setInvoices] = uSx([]);       // this customer's invoice history
   const [invBuilder, setInvBuilder] = uSx(false); // Buat Invoice modal
   const [invView, setInvView] = uSx(null);        // printable invoice viewer
+  const [histOpen, setHistOpen] = uSx(false);     // printable full transaction-history doc
   const [payFor, setPayFor] = uSx(null);          // standalone Pelunasan Bon for this customer
   const [q, setQ] = uSx('');
   const [filter, setFilter] = uSx('all');
@@ -822,6 +921,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
             </div>
             <div className="dist-cd-actions">
               {(canInput || canCustomers) && <button type="button" className="btn btn-primary btn-sm" onClick={() => setInvBuilder(true)}><IconInvoice s={14} />{trD('dist.makeInvoice')}</button>}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={14} />{trD('dist.printHistory')}</button>
               {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
               {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
             </div>
@@ -878,6 +978,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
         </>)}
         {invBuilder && d && <InvoiceBuilder customer={d} onClose={() => setInvBuilder(false)} onCreated={(iv) => { setInvBuilder(false); setInvView(iv); loadInvoices(d.id); if (onChanged) onChanged(); }} />}
         {invView && <InvoiceViewer invoice={invView} onClose={() => setInvView(null)} />}
+        {histOpen && d && <TxnHistoryDoc customer={d} userName={userName} onClose={() => setHistOpen(false)} />}
         {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {renderForm()}
         {typesModal()}
