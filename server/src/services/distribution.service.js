@@ -159,7 +159,21 @@ async function logAudit(kind, title, detail, snap, fleetId) {
 // the column default to [] / '' → they render as "—" on the client.
 function custClient(c) {
   let days = []; try { days = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
-  return { ...c, deliveryDays: Array.isArray(days) ? days : [], armada: c.armada || '' };
+  let reminder = null; try { reminder = c.reminder ? JSON.parse(c.reminder) : null; } catch (e) {}
+  return { ...c, deliveryDays: Array.isArray(days) ? days : [], armada: c.armada || '', reminder };
+}
+// Normalise + serialise a billing-reminder config. Any combination of modes; empty → ''.
+function cleanReminder(r) {
+  if (!r || typeof r !== 'object') return '';
+  const out = {
+    enabled: !!r.enabled,
+    dueDay: Math.max(0, Math.min(31, Math.round(+r.dueDay || 0))),           // remind on this calendar day (0 = off)
+    weekday: DAY_CODES.includes(r.weekday) ? r.weekday : '',                 // remind on this weekday ('' = off)
+    overdueDays: Math.max(0, Math.round(+r.overdueDays || 0)),               // remind if oldest unpaid bon ≥ N days old (0 = off)
+    gallonThreshold: Math.max(0, Math.round(+r.gallonThreshold || 0)),       // remind if gallons held ≥ N (0 = off)
+    bonThreshold: Math.max(0, Math.round(+r.bonThreshold || 0)),             // remind if sisa bon ≥ N (0 = off)
+  };
+  return JSON.stringify(out);
 }
 // Per-customer rollups from the (immutable) transactions: total gallons, running
 // bon (sisaBon = bon booked − pelunasan collected, floored at 0), last activity.
@@ -216,6 +230,7 @@ function customerCols(body) {
     masterPrice: int(body.masterPrice != null ? body.masterPrice : body.master_price),
     deliveryDays: JSON.stringify(cleanDays(body.deliveryDays)),
     armada: body.armada != null ? String(body.armada).trim() : '',
+    reminder: cleanReminder(body.reminder),
   };
 }
 async function createCustomer(body, actor) {
@@ -240,6 +255,7 @@ async function updateCustomer(id, body, actor) {
   if (body.phone != null) data.phone = String(body.phone).trim();
   if (body.deliveryDays !== undefined) data.deliveryDays = JSON.stringify(cleanDays(body.deliveryDays));
   if (body.armada !== undefined) data.armada = resolveWriteFleet(actor, body.armada);   // can't move out of scope
+  if (body.reminder !== undefined) data.reminder = cleanReminder(body.reminder);        // billing-reminder settings
   if (body.type != null) data.type = await validTypeId(body.type);
   const c = await prisma.customer.update({ where: { id }, data });
   const snap = await actorSnap(actor);
@@ -359,17 +375,47 @@ async function listTransactions(q, user) {
   const data = rows.map((r) => { const adj = priceDelta(r.corrections); return { ...r, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections) }; });
   return { data, now: new Date().toISOString() };
 }
+// Current outstanding bon (piutang) for a customer: Σ effective bon − Σ pelunasan,
+// floored at 0 — identical to the sisaBon shown on the customer list/detail.
+async function customerBonBalance(customerId) {
+  const txns = await prisma.distTransaction.findMany({ where: { customerId }, include: { corrections: true } });
+  let bon = 0, pel = 0;
+  txns.forEach((t) => { if (t.method === 'bon') bon += t.amount + priceDelta(t.corrections); else if (t.method === 'pelunasan') pel += t.amount; });
+  return Math.max(0, bon - pel);
+}
+
 async function createTransaction(body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
   if (!customer) throw ApiError.badRequest('customerId does not reference an existing customer');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');   // cross-fleet write blocked
+  const method = METHODS.includes(body.method) ? body.method : 'lunas';
+  const fleetId = customer.armada || '';   // fleet is COPIED from the customer (not client-set)
+
+  // ── Standalone BON PAYMENT (Pelunasan) — no water sold, qty 0, no gallon movement.
+  // Reduces the customer's outstanding bon; recorded permanently + audited. Partial
+  // (installment) payments are allowed; the payment can never exceed the current bon.
+  if (method === 'pelunasan') {
+    const payAmount = int(body.payAmount != null ? body.payAmount : body.amount);
+    if (payAmount <= 0) throw ApiError.badRequest('Jumlah pembayaran harus lebih dari 0.');
+    const sisaBon = await customerBonBalance(customer.id);
+    if (sisaBon <= 0) throw ApiError.badRequest('Pelanggan ini tidak punya sisa bon.');
+    if (payAmount > sisaBon) throw ApiError.badRequest(`Pembayaran (${payAmount}) melebihi sisa bon (${sisaBon}).`, { sisaBon });
+    const payMethod = (body.payMethod === 'transfer') ? 'Transfer' : 'Cash';
+    const snap = await actorSnap(actor);
+    const note = [(body.note || '').trim(), payMethod].filter(Boolean).join(' · ');
+    const txn = await prisma.distTransaction.create({ data: {
+      customerId: customer.id, fleetId, qty: 0, unitPriceLocked: 0, amount: payAmount, method: 'pelunasan', note,
+      txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    } });
+    await logAudit('input', `Pelunasan bon: ${customer.name}`, `bayar ${payAmount} (${payMethod}) · sisa bon ${Math.max(0, sisaBon - payAmount)}`, snap, fleetId);
+    return { ...txn, gallonOut: 0, gallonIn: 0, gallonsHeld: await gallonBalanceOf(customer.id), sisaBon: Math.max(0, sisaBon - payAmount), isPayment: true };
+  }
+
   const qty = int(body.qty);
   if (qty <= 0) throw ApiError.badRequest('qty must be a positive integer');
-  const method = METHODS.includes(body.method) ? body.method : 'lunas';
   // PRICE LOCK: always the customer's current master_price — the client cannot set it.
   const unitPriceLocked = customer.masterPrice;
   const amount = qty * unitPriceLocked;
-  const fleetId = customer.armada || '';   // fleet is COPIED from the customer (not client-set)
   const snap = await actorSnap(actor);
   const txn = await prisma.distTransaction.create({ data: {
     customerId: customer.id, fleetId, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
@@ -404,6 +450,65 @@ async function addCorrection(txnId, body, actor, isStaff) {
   return corr;
 }
 
+// ── Invoices / Notas ── (documents; NEVER mutate transactions)
+function invoiceClient(inv, customer) {
+  let items = []; try { items = JSON.parse(inv.items); } catch (e) {}
+  return {
+    id: inv.id, number: inv.number, customerId: inv.customerId, fleetId: inv.fleetId,
+    issueDate: inv.issueDate, dueDate: inv.dueDate, items, total: inv.total, sisaBon: inv.sisaBon, note: inv.note,
+    createdByName: inv.createdByName, createdByRole: inv.createdByRole, createdAt: inv.createdAt ? new Date(inv.createdAt).getTime() : null,
+    customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone, type: customer.type, armada: customer.armada || '' } : null,
+  };
+}
+// Create an invoice from selected transactions (or a scope). Snapshots items + totals.
+// scope: 'unpaidBon' (default, all bon sales) | 'period' (dateFrom..dateTo sales) | 'selected'
+// (explicit transactionIds). Only SALES (lunas/bon) are billable — never pelunasan/payments.
+async function createInvoice(customerId, body, actor) {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');
+  const where = { customerId, method: { in: ['lunas', 'bon'] } };
+  const scope = body.scope || 'unpaidBon';
+  if (scope === 'period') { where.txnDate = {}; if (body.dateFrom) where.txnDate.gte = body.dateFrom; if (body.dateTo) where.txnDate.lte = body.dateTo; }
+  let txns = await prisma.distTransaction.findMany({ where, orderBy: [{ txnDate: 'asc' }, { createdAt: 'asc' }], include: { corrections: true } });
+  if (Array.isArray(body.transactionIds) && body.transactionIds.length) {
+    const set = new Set(body.transactionIds);
+    txns = txns.filter((t) => set.has(t.id));
+  } else if (scope === 'unpaidBon') {
+    txns = txns.filter((t) => t.method === 'bon');   // "outstanding bon" bill = the bon sales
+  }
+  if (!txns.length) throw ApiError.badRequest('Tidak ada transaksi untuk ditagih pada pilihan ini.');
+  const items = txns.map((t) => { const amt = t.amount + priceDelta(t.corrections); return { txnId: t.id, date: t.txnDate, qty: t.qty, unitPrice: t.unitPriceLocked, amount: amt, method: t.method }; });
+  const total = items.reduce((s, it) => s + it.amount, 0);
+  const sisaBon = await customerBonBalance(customerId);
+  const issueDate = todayISO();
+  const prefix = 'INV-' + issueDate.replace(/-/g, '') + '-';
+  const cnt = await prisma.distInvoice.count({ where: { number: { startsWith: prefix } } });
+  const number = prefix + String(cnt + 1).padStart(4, '0');
+  const snap = await actorSnap(actor);
+  const inv = await prisma.distInvoice.create({ data: {
+    number, customerId, fleetId: customer.armada || '', issueDate, dueDate: (body.dueDate || '').trim(),
+    items: JSON.stringify(items), total, sisaBon, note: (body.note || '').trim(),
+    createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
+  } });
+  await logAudit('pelanggan', `Invoice ${number}: ${customer.name}`, `${items.length} item · total ${total} · jatuh tempo ${body.dueDate || '-'}`, snap, customer.armada);
+  return invoiceClient(inv, customer);
+}
+async function listInvoices(customerId, user) {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(user, customer.armada)) throw ApiError.notFound('Customer not found');
+  const rows = await prisma.distInvoice.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' } });
+  return { data: rows.map((r) => invoiceClient(r, customer)) };
+}
+async function getInvoice(id, user) {
+  const inv = await prisma.distInvoice.findUnique({ where: { id } });
+  if (!inv) throw ApiError.notFound('Invoice not found');
+  const customer = await prisma.customer.findUnique({ where: { id: inv.customerId } });
+  if (customer && !fleetAllows(user, customer.armada)) throw ApiError.notFound('Invoice not found');
+  return invoiceClient(inv, customer);
+}
+
 // ── Audit + dashboard ──
 async function listAudit(q, user) {
   const where = { ...fleetWhere(user, 'fleetId', q && q.fleet) };
@@ -413,6 +518,46 @@ async function listAudit(q, user) {
 }
 
 const addDays = (dateStr, n) => { const d = new Date(dateStr + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+// Evaluate each customer's billing-reminder settings and return those that need billing
+// today, with the reason(s), outstanding bon, gallons held, and since when. Fleet-scoped.
+// Modes (any combination): dueDay (calendar day), weekly (weekday), overdueDays (aging of
+// the oldest unpaid bon), gallonThreshold (gallons held), bonThreshold (sisa bon).
+const DOW_CODE = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];   // JS getUTCDay() 0=Sun → code
+async function billingReminders(user, qFleet, dateStr) {
+  const today = dateStr || todayISO();
+  const customers = await prisma.customer.findMany({ where: fleetWhere(user, 'armada', qFleet) });
+  const active = customers.filter((c) => { try { const r = JSON.parse(c.reminder || ''); return r && r.enabled; } catch (e) { return false; } });
+  if (!active.length) return { data: [], date: today };
+  const txns = await prisma.distTransaction.findMany({ where: fleetWhere(user, 'fleetId', qFleet), select: { customerId: true, method: true, amount: true, txnDate: true, corrections: { select: { kind: true, deltaAmount: true, active: true } } } });
+  const agg = {};
+  txns.forEach((t) => {
+    const a = agg[t.customerId] || (agg[t.customerId] = { bon: 0, pel: 0, oldestBon: null });
+    if (t.method === 'bon') { a.bon += t.amount + priceDelta(t.corrections); if (!a.oldestBon || t.txnDate < a.oldestBon) a.oldestBon = t.txnDate; }
+    else if (t.method === 'pelunasan') a.pel += t.amount;
+  });
+  const held = await gallonBalances(user, qFleet);
+  const dow = DOW_CODE[new Date(today + 'T00:00:00Z').getUTCDay()];
+  const dom = +today.slice(8, 10);
+  const out = [];
+  active.forEach((c) => {
+    let rem = {}; try { rem = JSON.parse(c.reminder); } catch (e) { return; }
+    const a = agg[c.id] || { bon: 0, pel: 0, oldestBon: null };
+    const sisaBon = Math.max(0, a.bon - a.pel);
+    const gallons = held[c.id] || 0;
+    const since = sisaBon > 0 ? a.oldestBon : null;
+    const ageDays = since ? Math.max(0, Math.floor((Date.parse(today) - Date.parse(since)) / 86400000)) : 0;
+    const reasons = [];
+    if (rem.bonThreshold > 0 && sisaBon >= rem.bonThreshold) reasons.push({ type: 'bon', value: sisaBon, threshold: rem.bonThreshold });
+    if (rem.gallonThreshold > 0 && gallons >= rem.gallonThreshold) reasons.push({ type: 'gallon', value: gallons, threshold: rem.gallonThreshold });
+    if (rem.overdueDays > 0 && sisaBon > 0 && ageDays >= rem.overdueDays) reasons.push({ type: 'overdue', days: ageDays, threshold: rem.overdueDays });
+    if (rem.dueDay > 0 && dom === rem.dueDay && sisaBon > 0) reasons.push({ type: 'dueDay', day: rem.dueDay });
+    if (rem.weekday && dow === rem.weekday && sisaBon > 0) reasons.push({ type: 'weekly', weekday: rem.weekday });
+    if (reasons.length) out.push({ customerId: c.id, name: c.name, phone: c.phone || '', armada: c.armada || '', sisaBon, gallonsHeld: gallons, since, ageDays, reasons });
+  });
+  out.sort((a, b) => b.sisaBon - a.sisaBon);
+  return { data: out, date: today };
+}
 
 // Everything the Distribusi dashboard needs in ONE call (NOT posted to AirRO cash —
 // informational): today's KPIs, a 7-day stacked series (lunas vs bon), the most
@@ -476,12 +621,13 @@ async function dashboardSummary(date, user, qFleet) {
   const topCustomers = Object.values(byCust).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
   const customers = await prisma.customer.count({ where: fleetWhere(user, 'armada', qFleet) });
+  const reminders = (await billingReminders(user, qFleet, day)).data;   // "Perlu ditagih" list
   return {
     date: day, periodDays: 7,
     periodQty, periodIn,            // last-7-days headline KPIs (same source as chart/recent/top)
     receivable,                     // all-time outstanding bon (running balance)
     count: todayRows.length, amount, byMethod, uangMasuk, piutang,   // TODAY (rail + "Transactions today")
-    customers, last7, recent, topCustomers,
+    customers, last7, recent, topCustomers, reminders,
   };
 }
 
@@ -571,4 +717,5 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
+  createInvoice, listInvoices, getInvoice, billingReminders,
 };

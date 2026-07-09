@@ -130,11 +130,18 @@
         create: (data) => req('POST', '/distribusi/transactions', data),
         correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),
       },
+      // Customer invoices / notas (documents). create/list are per-customer; get by id.
+      invoices: {
+        create: (customerId, data) => req('POST', '/distribusi/customers/' + customerId + '/invoices', data || {}),
+        list: (customerId) => req('GET', '/distribusi/customers/' + customerId + '/invoices'),
+        get: (id) => req('GET', '/distribusi/invoices/' + id),
+      },
       audit: (qs) => req('GET', '/distribusi/audit' + (qs ? '?' + qs : '')),
       // Gallon stock (loan/exchange): summary + per-customer balances + ledger; correction.
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),
       summary: (date, fleet) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/dashboard/summary' + (p.length ? '?' + p.join('&') : '')); },
+      billingReminders: (fleet) => req('GET', '/distribusi/billing-reminders' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
     },
     settings: {
       all: () => req('GET', '/settings'),

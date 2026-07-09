@@ -1602,6 +1602,68 @@ select.fld::-ms-expand { display: none; }
   @page { margin: 14mm; }
 }
 
+/* ── Customer detail: invoice actions + history ── */
+.dist-cd-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dist-inv-row { cursor: pointer; }
+.dist-inv-row:hover { background: var(--card-soft); }
+
+/* ── Invoice / Nota (printable document) ── */
+.invoice-overlay { align-items: flex-start; padding: 30px 16px; overflow-y: auto; }
+.invoice-sheet { background: #fff; width: 100%; max-width: 660px; border-radius: 18px; box-shadow: var(--shadow-lg); padding: 26px; color: var(--ink); }
+.inv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 2px solid var(--green-800); flex-wrap: wrap; }
+.inv-biz { font-family: 'Poppins'; font-size: 18px; font-weight: 800; }
+.inv-biz-sub { font-size: 12px; color: var(--text-mut); }
+.inv-actions { display: flex; align-items: center; gap: 8px; }
+.inv-meta { display: flex; justify-content: space-between; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+.inv-title { font-family: 'Poppins'; font-size: 15px; font-weight: 800; letter-spacing: .04em; color: var(--green-800); }
+.inv-num { font-size: 13px; color: var(--text-mut); font-variant-numeric: tabular-nums; }
+.inv-to { text-align: right; }
+.inv-to .inv-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.inv-to b { font-size: 15px; }
+.inv-dates { display: flex; gap: 20px; margin-top: 12px; font-size: 12.5px; color: var(--text-mut); flex-wrap: wrap; }
+.inv-table-wrap { overflow-x: auto; margin-top: 14px; }
+.inv-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 460px; }
+.inv-table th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); padding: 8px 8px; border-bottom: 1px solid var(--border); }
+.inv-table td { padding: 8px 8px; border-bottom: 1px solid var(--border-soft); }
+.inv-table .r { text-align: right; white-space: nowrap; }
+.inv-table tfoot td { border-top: 2px solid var(--green-800); border-bottom: none; padding-top: 10px; font-size: 14px; }
+.inv-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+.inv-sisa { display: flex; align-items: center; gap: 10px; background: var(--sand-soft, var(--card-soft)); border: 1px dashed var(--border); border-radius: 11px; padding: 10px 14px; }
+.inv-sisa span { font-size: 12px; color: var(--text-mut); font-weight: 600; }
+.inv-sisa b { font-size: 15px; color: var(--warn); }
+.inv-note { flex: 1; min-width: 160px; font-size: 12.5px; color: var(--text-mut); }
+.inv-by { margin-top: 14px; font-size: 11.5px; color: var(--text-faint); }
+@media (max-width: 620px) { .invoice-sheet { padding: 18px; } }
+
+/* ── Billing reminder settings (customer form) ── */
+.dist-reminder { margin-top: 14px; border: 1px solid var(--border); border-radius: 13px; padding: 12px 13px; background: var(--card-soft); }
+.dist-reminder-toggle { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
+.dist-reminder-toggle input { margin-top: 3px; }
+.dist-reminder-toggle span { display: flex; flex-direction: column; }
+.dist-reminder-toggle b { font-size: 13.5px; }
+.dist-reminder-toggle em { font-style: normal; font-size: 11.5px; color: var(--text-mut); }
+.dist-reminder-body { margin-top: 10px; }
+
+/* ── Dashboard "Perlu ditagih" ── */
+.dist-remind-card { border: 1px solid var(--warn); }
+.dist-remind-count { display: inline-flex; min-width: 20px; height: 20px; padding: 0 6px; align-items: center; justify-content: center; border-radius: 999px; background: var(--warn); color: #fff; font-size: 11.5px; font-weight: 700; margin-left: 6px; }
+.dist-remind-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-top: 1px solid var(--border-soft); flex-wrap: wrap; }
+.dist-remind-row:first-of-type { border-top: none; }
+.dist-remind-mid { flex: 1; min-width: 180px; }
+.dist-remind-name { font-weight: 700; font-size: 13.5px; display: flex; align-items: center; gap: 7px; }
+.dist-remind-fleet { font-size: 10.5px; font-weight: 600; color: var(--text-mut); background: var(--card-soft); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+.dist-remind-sub { font-size: 12px; color: var(--text-mut); margin-top: 2px; }
+.dist-remind-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+@media print {
+  body.invoice-open * { visibility: hidden !important; }
+  body.invoice-open .invoice-overlay, body.invoice-open .invoice-overlay * { visibility: visible !important; }
+  body.invoice-open .invoice-overlay { position: fixed !important; inset: 0 !important; z-index: 99999 !important; display: block !important; background: #fff !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+  body.invoice-open .invoice-sheet { box-shadow: none !important; max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  body.invoice-open .no-print { display: none !important; }
+  body.invoice-open * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  @page { margin: 14mm; }
+}
+
 .print-only { display: none; }
 
 @media print {

@@ -15,6 +15,8 @@ const METHOD_META = {
   pelunasan: { cls: 'pelunasan', label: 'dist.pelunasan' },
 };
 const methodLabel = (m) => trD(METHOD_META[m] ? METHOD_META[m].label : 'dist.lunas') || m;
+const BIZ_NAME = 'AirRO Reverse Osmosis';
+const BIZ_SUB = 'Air Minum Reverse Osmosis';
 // Colour class per seed type id; anything else (custom types) uses the neutral 'other'.
 const CUST_TAG = { reguler: 'reg', kos: 'kos', cafe: 'cafe', bulk: 'bulk' };
 const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Reguler');
@@ -105,14 +107,21 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
   const [sum, setSum] = uSx(null);
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
+  const [bump, setBump] = uSx(0);
+  const [payCust, setPayCust] = uSx(null);   // Perlu-ditagih → catat Pelunasan
+  const [invCust, setInvCust] = uSx(null);    // Perlu-ditagih → buat Invoice (fetched detail)
+  const [invView, setInvView] = uSx(null);
   const ef = effFleet(fleetScope, distFleet);
+  const refetch = () => setBump((b) => b + 1);
+  const openInvoice = (id) => { window.API.distribusi.customers.get(id).then((r) => setInvCust(r.data)).catch(() => {}); };
+  const reasonLabel = (x) => x.type === 'bon' ? trD('dist.rlBon') : x.type === 'gallon' ? trD('dist.rlGallon', { n: x.value }) : x.type === 'overdue' ? trD('dist.rlOverdue', { n: x.days }) : x.type === 'dueDay' ? trD('dist.rlDueDay', { n: x.day }) : x.type === 'weekly' ? trD('dist.rlWeekly', { d: x.weekday }) : x.type;
   uEx(() => {
     let live = true; setErr(false);
     if (!(window.API && window.API.distribusi)) { setLoading(false); setErr(true); return; }
     window.API.distribusi.summary(today, ef).then((r) => { if (live) { setSum(r.data); setLoading(false); } })
       .catch(() => { if (live) { setErr(true); setLoading(false); } });
     return () => { live = false; };
-  }, [refreshKey, today, ef]);
+  }, [refreshKey, today, ef, bump]);
 
   const fleetBar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   if (loading) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div></div>;
@@ -136,6 +145,26 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
             <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpX(sum.receivable)} label={trD('dist.kpiBon')} pill={trD('dist.pillRunning')} pillCls="warn" />
             <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={trD('dist.pillToday')} pillCls="blue" />
           </div>
+
+          {(sum.reminders || []).length > 0 && (
+            <div className="card dist-card dist-remind-card">
+              <div className="dist-card-head"><div className="sec-title"><IconInvoice s={15} style={{ marginRight: 6, verticalAlign: '-2px', color: 'var(--warn)' }} />{trD('dist.needBilling')} <span className="dist-remind-count">{sum.reminders.length}</span></div></div>
+              {sum.reminders.map((rm) => (
+                <div key={rm.customerId} className="dist-remind-row">
+                  <div className="dist-remind-mid">
+                    <div className="dist-remind-name">{rm.name}{rm.armada ? <span className="dist-remind-fleet">{rm.armada}</span> : null}</div>
+                    <div className="dist-remind-sub"><b className="amt-neg">{rpFull(rm.sisaBon)}</b>{rm.since ? ' · ' + trD('dist.since') + ' ' + rm.since + ' (' + trD('dist.daysAgo', { n: rm.ageDays }) + ')' : ''} · {rm.reasons.map(reasonLabel).join(', ')}</div>
+                  </div>
+                  {canInput && (
+                    <div className="dist-remind-actions">
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => openInvoice(rm.customerId)}><IconInvoice s={13} />{trD('dist.makeInvoice')}</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayCust({ id: rm.customerId, name: rm.name, sisaBon: rm.sisaBon })}><IconCoinIn s={13} />{trD('dist.payBon')}</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="card dist-card">
             <div className="dist-card-head">
@@ -203,6 +232,9 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
           </div>
         </div>
       </div>
+      {payCust && <PaymentModal customers={[payCust]} presetCustomer={payCust.id} staffMode={staffMode} today={today} onClose={() => setPayCust(null)} onSaved={() => { setPayCust(null); refetch(); }} />}
+      {invCust && <InvoiceBuilder customer={invCust} onClose={() => setInvCust(null)} onCreated={(iv) => { setInvCust(null); setInvView(iv); refetch(); }} />}
+      {invView && <InvoiceViewer invoice={invView} onClose={() => setInvView(null)} />}
     </div>
   );
 }
@@ -232,6 +264,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
   const [confirmOpen, setConfirmOpen] = uSx(false);
   const [saving, setSaving] = uSx(false);
   const [fErr, setFErr] = uSx('');
+  const [payOpen, setPayOpen] = uSx(false);   // standalone Pelunasan Bon
   // correction
   const [corrTxn, setCorrTxn] = uSx(null);
   const [corrReason, setCorrReason] = uSx('');
@@ -364,7 +397,10 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
       <div className="dist-tx-toolbar">
         <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
-        {canInput && <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {canInput && <button type="button" className="btn btn-ghost dist-paybtn" onClick={() => setPayOpen(true)}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
+          {canInput && <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
+        </div>
       </div>
       <div className="dist-permbanner"><IconLock s={15} />{trD('dist.permBanner')}</div>
 
@@ -385,7 +421,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
                   {corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
                   {t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
                 </div>
-                <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {numX(t.qty)} × {rpFull(t.unitPriceLocked)}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
+                <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {t.method === 'pelunasan' ? trD('dist.payLine') : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
               </div>
               <div className="dist-txn-right">
                 <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
@@ -415,7 +451,160 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
           </div>
         </div>
       )}
+      {payOpen && <PaymentModal customers={customers} staffMode={staffMode} today={today} onClose={() => setPayOpen(false)}
+        onSaved={(d) => { setPayOpen(false); setNewIds((p) => [d.id, ...p]); flash(trD('dist.paySaved', { amt: rpFull(d.amount), sisa: rpFull(d.sisaBon || 0) })); reload(); if (onChanged) onChanged(); }} />}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+// Standalone Pelunasan Bon — record a bon payment without selling water (galon 0).
+function PaymentModal({ customers, staffMode, today, onClose, onSaved, presetCustomer }) {
+  const [cust, setCust] = uSx(presetCustomer || '');
+  const [amount, setAmount] = uSx(0);
+  const [method, setMethod] = uSx('cash');
+  const [date, setDate] = uSx(today);
+  const [note, setNote] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const withBon = (customers || []).filter((c) => (c.sisaBon || 0) > 0);
+  const sel = (customers || []).find((c) => c.id === cust) || null;
+  const sisa = sel ? (sel.sisaBon || 0) : 0;
+  const valid = sel && sisa > 0 && amount > 0 && amount <= sisa;
+  const save = () => {
+    if (!valid || saving) return;
+    setSaving(true); setErr('');
+    window.API.distribusi.transactions.create({ customerId: cust, method: 'pelunasan', payAmount: amount, payMethod: method, note: note.trim(), txnDate: staffMode ? today : (date || today) })
+      .then((r) => { setSaving(false); onSaved(r.data); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.payBonT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.payBonSub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fCust')}</label>
+          {withBon.length === 0 ? <div className="dist-note">{trD('dist.noBonCust')}</div>
+            : <UI.Dropdown value={cust} options={withBon.map((c) => ({ value: c.id, label: c.name + ' · ' + trD('dist.sisaBon') + ' ' + rpFull(c.sisaBon) }))} placeholder={trD('dist.fCustPh')} onChange={(v) => { setCust(v); setAmount(0); }} fluid />}
+          {sel && <div className="dist-lockrow" style={{ marginTop: 10 }}><span className="dist-lockrow-l"><IconInvoice s={14} />{trD('dist.sisaBon')}</span><span className="dist-lockrow-r">{rpFull(sisa)}</span></div>}
+          <label className="fld-label">{trD('dist.payAmount')}</label>
+          <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={amount ? amount.toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setAmount(Math.min(sisa, +e.target.value.replace(/\D/g, '') || 0))} /></div>
+          <div className="dist-hint" style={{ marginTop: 6 }}>{trD('dist.payHint')}{sel ? ' · ' + trD('dist.payAfter', { sisa: rpFull(Math.max(0, sisa - amount)) }) : ''}</div>
+          <label className="fld-label">{trD('dist.payMethod')}</label>
+          <div className="cat-chips">
+            {['cash', 'transfer'].map((m) => <button key={m} type="button" className={`cat-chip ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{trD('dist.pay_' + m)}</button>)}
+          </div>
+          {!staffMode && (<><label className="fld-label">{trD('dist.fDate')}</label><input type="date" className="fld" value={date} max={today} onChange={(e) => setDate(e.target.value)} /></>)}
+          <label className="fld-label">{trD('dist.note')}</label>
+          <input className="fld" value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.notePh')} />
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!valid || saving} onClick={save}>{saving ? '…' : trD('dist.paySave')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+window.DISTPAY = { PaymentModal };
+
+// Build an invoice from a customer's transactions: pick a scope (unpaid bon / period /
+// all sales), a due date + note, preview the billed items + total, then create.
+function InvoiceBuilder({ customer, onClose, onCreated }) {
+  const [scope, setScope] = uSx('unpaidBon');
+  const [dateFrom, setDateFrom] = uSx('');
+  const [dateTo, setDateTo] = uSx('');
+  const [dueDate, setDueDate] = uSx('');
+  const [note, setNote] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const txns = (customer.transactions || []).filter((t) => t.method !== 'pelunasan');
+  const preview = txns.filter((t) => {
+    if (scope === 'unpaidBon') return t.method === 'bon';
+    if (scope === 'period') return (!dateFrom || t.txnDate >= dateFrom) && (!dateTo || t.txnDate <= dateTo);
+    return true;   // 'selected'/all sales
+  });
+  const total = preview.reduce((s, t) => s + (t.effectiveAmount != null ? t.effectiveAmount : t.amount), 0);
+  const create = () => {
+    if (saving || !preview.length) return;
+    setSaving(true); setErr('');
+    const body = { scope, dueDate: dueDate || '', note: note.trim() };
+    if (scope === 'period') { if (dateFrom) body.dateFrom = dateFrom; if (dateTo) body.dateTo = dateTo; }
+    if (scope === 'selected') body.transactionIds = preview.map((t) => t.id);
+    window.API.distribusi.invoices.create(customer.id, body)
+      .then((r) => { setSaving(false); onCreated(r.data); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const scopes = [['unpaidBon', trD('dist.invScopeBon')], ['period', trD('dist.invScopePeriod')], ['selected', trD('dist.invScopeAll')]];
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.makeInvoice')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.invScope')}</label>
+          <div className="cat-chips">{scopes.map(([k, l]) => <button key={k} type="button" className={`cat-chip ${scope === k ? 'on' : ''}`} onClick={() => setScope(k)}>{l}</button>)}</div>
+          {scope === 'period' && (
+            <div className="dist-form-row" style={{ marginTop: 10 }}>
+              <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.from')}</label><input type="date" className="fld" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
+              <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.to')}</label><input type="date" className="fld" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
+            </div>
+          )}
+          <label className="fld-label">{trD('dist.dueDate')}</label>
+          <input type="date" className="fld" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          <label className="fld-label">{trD('dist.note')}</label>
+          <input className="fld" value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.notePh')} />
+          <div className="dist-lockrow" style={{ marginTop: 12 }}><span className="dist-lockrow-l"><IconInvoice s={14} />{trD('dist.invPreview', { n: preview.length })}</span><span className="dist-lockrow-r">{rpFull(total)}</span></div>
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!preview.length || saving} onClick={create}>{saving ? '…' : trD('dist.invCreate')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// Printable invoice / nota. Print (window.print) + WhatsApp share; a document only.
+function InvoiceViewer({ invoice, onClose }) {
+  uEx(() => { document.body.classList.add('invoice-open'); const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => { document.body.classList.remove('invoice-open'); window.removeEventListener('keydown', o); }; }, []);
+  const iv = invoice; const cust = iv.customer || {};
+  const share = () => {
+    const lines = ['*Invoice ' + iv.number + '*', BIZ_NAME, trD('dist.invTo') + ': ' + cust.name, '',
+      ...iv.items.map((it) => it.date + ' · ' + it.qty + ' ' + trD('dist.galonUnit') + ' · ' + rpFull(it.amount)),
+      '', trD('dist.total') + ': ' + rpFull(iv.total), trD('dist.sisaBon') + ': ' + rpFull(iv.sisaBon),
+      iv.dueDate ? trD('dist.dueDate') + ': ' + iv.dueDate : ''].filter(Boolean);
+    const raw = (cust.phone || '').replace(/[^0-9]/g, '');
+    const phone = raw ? (raw.startsWith('0') ? '62' + raw.slice(1) : raw) : '';
+    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
+  };
+  return (
+    <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 210 }}>
+      <div className="invoice-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="inv-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><Logo s={34} /><div><div className="inv-biz">{BIZ_NAME}</div><div className="inv-biz-sub">{BIZ_SUB}</div></div></div>
+          <div className="inv-actions no-print">
+            <button className="btn btn-ghost" onClick={() => window.print()}><IconDownload s={16} />{trD('dist.print')}</button>
+            {cust.phone ? <button className="btn btn-ghost" onClick={share}><IconInvoice s={16} />WhatsApp</button> : null}
+            <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+          </div>
+        </div>
+        <div className="inv-meta">
+          <div><div className="inv-title">INVOICE / NOTA</div><div className="inv-num">{iv.number}</div></div>
+          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{cust.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{cust.phone || ''}</div></div>
+        </div>
+        <div className="inv-dates"><span>{trD('dist.issueDate')}: <b>{iv.issueDate}</b></span>{iv.dueDate ? <span>{trD('dist.dueDate')}: <b>{iv.dueDate}</b></span> : null}</div>
+        <div className="inv-table-wrap">
+          <table className="inv-table">
+            <thead><tr><th>{trD('dist.date')}</th><th>{trD('dist.item')}</th><th className="r">Qty</th><th className="r">{trD('dist.hargaPerGalon')}</th><th className="r">Subtotal</th></tr></thead>
+            <tbody>{iv.items.map((it, i) => (<tr key={i}><td className="tnum">{it.date}</td><td>{trD('dist.galonUnit')} · {methodLabel(it.method)}</td><td className="r tnum">{numX(it.qty)}</td><td className="r tnum">{rpFull(it.unitPrice)}</td><td className="r tnum">{rpFull(it.amount)}</td></tr>))}</tbody>
+            <tfoot><tr><td colSpan="4" className="r"><b>{trD('dist.total')}</b></td><td className="r tnum"><b>{rpFull(iv.total)}</b></td></tr></tfoot>
+          </table>
+        </div>
+        <div className="inv-foot">
+          <div className="inv-sisa"><span>{trD('dist.sisaBon')}</span><b className="tnum">{rpFull(iv.sisaBon)}</b></div>
+          {iv.note ? <div className="inv-note">{iv.note}</div> : null}
+        </div>
+        <div className="inv-by no-print">{trD('dist.invBy')}: {iv.createdByName || '—'} · {iv.issueDate}</div>
+      </div>
     </div>
   );
 }
@@ -424,11 +613,15 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
 // `fleet` is the SINGLE app-wide armada source (shell state ← /settings airro_fleet,
 // the same list managed in Setoran → Kelola Armada). Distribusi never keeps its own
 // copy — changing a plate there is reflected here immediately.
-function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged }) {
+function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [types, setTypes] = uSx([]);
   const [detail, setDetail] = uSx(null);
+  const [invoices, setInvoices] = uSx([]);       // this customer's invoice history
+  const [invBuilder, setInvBuilder] = uSx(false); // Buat Invoice modal
+  const [invView, setInvView] = uSx(null);        // printable invoice viewer
+  const [payFor, setPayFor] = uSx(null);          // standalone Pelunasan Bon for this customer
   const [q, setQ] = uSx('');
   const [filter, setFilter] = uSx('all');
   const [toast, setToast] = uSx('');
@@ -464,15 +657,18 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, f
     return opts;
   };
 
-  const openDetail = (id) => { setView('detail'); setDetail(null); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); };
+  const loadInvoices = (id) => window.API.distribusi.invoices.list(id).then((r) => setInvoices(r.data || [])).catch(() => setInvoices([]));
+  const openDetail = (id) => { setView('detail'); setDetail(null); setInvoices([]); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); loadInvoices(id); };
   const cancelAdj = (batchId) => {
     if (!confirm(trD('dist.pcCancelConfirm'))) return;
     window.API.distribusi.customers.cancelPriceAdjustment(batchId)
       .then(() => { flash(trD('dist.pcCancelled')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
       .catch(() => {});
   };
-  const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '' }); };
-  const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '' }); };
+  const defReminder = () => ({ enabled: false, dueDay: 0, weekday: '', overdueDays: 0, gallonThreshold: 0, bonThreshold: 0 });
+  const remOf = (r) => (r && typeof r === 'object') ? { ...defReminder(), ...r, enabled: !!r.enabled } : defReminder();
+  const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '', reminder: defReminder() }); };
+  const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '', reminder: remOf(d.reminder) }); };
   const toggleDay = (d) => setForm((f) => ({ ...f, deliveryDays: f.deliveryDays.includes(d) ? f.deliveryDays.filter((x) => x !== d) : [...f.deliveryDays, d] }));
 
   const commitForm = () => {
@@ -485,10 +681,10 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, f
     if (!form.id) {
       const price = parseInt(String(form.price).replace(/[^0-9]/g, ''), 10);
       if (!price) { setSaving(false); setFormErr(trD('dist.cfPriceReq')); return; }
-      window.API.distribusi.customers.create({ name, phone: form.phone.trim(), type: form.type, masterPrice: price, deliveryDays: form.deliveryDays, armada: form.armada })
+      window.API.distribusi.customers.create({ name, phone: form.phone.trim(), type: form.type, masterPrice: price, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder })
         .then(() => finish(trD('dist.custAdded'))).catch(onErr);
     } else {
-      window.API.distribusi.customers.update(form.id, { name, phone: form.phone.trim(), type: form.type, deliveryDays: form.deliveryDays, armada: form.armada })
+      window.API.distribusi.customers.update(form.id, { name, phone: form.phone.trim(), type: form.type, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder })
         .then((r) => finish(trD('dist.custSaved'), r.data)).catch(onErr);
     }
   };
@@ -539,6 +735,34 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, f
           <div className="dist-typechips">{DAY_CODES.map((dd) => <button type="button" key={dd} className={`dist-typechip ${form.deliveryDays.includes(dd) ? 'on' : ''}`} onClick={() => toggleDay(dd)}>{dd}</button>)}</div>
           <label className="fld-label">{trD('dist.cfArmada')}</label>
           <UI.Dropdown value={form.armada} options={fleetOptsFor(form.armada)} placeholder={trD('dist.noArmada')} onChange={(v) => setForm({ ...form, armada: v })} fluid />
+          {(() => {
+            const r = form.reminder || {};
+            const setR = (p) => setForm((f) => ({ ...f, reminder: { ...(f.reminder || {}), ...p } }));
+            const numF = (e) => Math.max(0, parseInt((e.target.value || '').replace(/[^0-9]/g, ''), 10) || 0);
+            return (
+              <div className="dist-reminder">
+                <label className="dist-reminder-toggle"><input type="checkbox" checked={!!r.enabled} onChange={(e) => setR({ enabled: e.target.checked })} /><span><b>{trD('dist.remTitle')}</b><em>{trD('dist.remSub')}</em></span></label>
+                {r.enabled && (
+                  <div className="dist-reminder-body">
+                    <div className="dist-form-row">
+                      <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.remBon')}</label><div className="amt-input" style={{ padding: '6px 11px' }}><span className="amt-rp" style={{ fontSize: 12 }}>Rp</span><input inputMode="numeric" value={r.bonThreshold ? (+r.bonThreshold).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setR({ bonThreshold: numF(e) })} /></div></div>
+                      <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.remGallon')}</label><input className="fld tnum" inputMode="numeric" value={r.gallonThreshold || ''} placeholder="0" onChange={(e) => setR({ gallonThreshold: numF(e) })} /></div>
+                    </div>
+                    <div className="dist-form-row">
+                      <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.remOverdue')}</label><input className="fld tnum" inputMode="numeric" value={r.overdueDays || ''} placeholder="0" onChange={(e) => setR({ overdueDays: numF(e) })} /></div>
+                      <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.remDueDay')}</label><input className="fld tnum" inputMode="numeric" value={r.dueDay || ''} placeholder="0" onChange={(e) => setR({ dueDay: Math.min(31, numF(e)) })} /></div>
+                    </div>
+                    <label className="fld-label">{trD('dist.remWeekly')}</label>
+                    <div className="dist-typechips">
+                      <button type="button" className={`dist-typechip ${!r.weekday ? 'on' : ''}`} onClick={() => setR({ weekday: '' })}>{trD('dist.remOff')}</button>
+                      {DAY_CODES.map((dd) => <button type="button" key={dd} className={`dist-typechip ${r.weekday === dd ? 'on' : ''}`} onClick={() => setR({ weekday: dd })}>{dd}</button>)}
+                    </div>
+                    <div className="dist-hint" style={{ marginTop: 6 }}>{trD('dist.remHint')}</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {!form.id ? (<>
             <label className="fld-label">{trD('dist.cfPrice')} <span style={{ color: 'var(--neg)' }}>*</span></label>
             <div className="dist-priceinput"><IconLock s={15} /><input value={form.price} inputMode="numeric" placeholder="cth. 12000" onChange={(e) => setForm({ ...form, price: e.target.value.replace(/[^0-9]/g, '') })} /></div>
@@ -575,7 +799,11 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, f
               <div><div className="dist-cd-slbl">{trD('dist.totalGalon')}</div><div className="dist-cd-sval">{numX(d.totalGalon)}</div></div>
               <div><div className="dist-cd-slbl">{trD('dist.gallonsHeld')}</div><div className="dist-cd-sval" style={{ color: (d.gallonsHeld || 0) > 0 ? 'var(--warn)' : 'var(--text-mut)' }}>{numX(d.gallonsHeld || 0)}</div></div>
             </div>
-            {canCustomers && <button type="button" className="btn btn-ghost dist-cd-edit" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
+            <div className="dist-cd-actions">
+              {(canInput || canCustomers) && <button type="button" className="btn btn-primary btn-sm" onClick={() => setInvBuilder(true)}><IconInvoice s={14} />{trD('dist.makeInvoice')}</button>}
+              {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
+              {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
+            </div>
           </div>
           <div className="dist-cd-cols">
             <div className="card dist-cd-price">
@@ -612,7 +840,24 @@ function DistCustomers({ canCustomers, canPrice, staffMode, refreshKey, fleet, f
               ))}
             </div>
           </div>
+          <div className="card dist-card" style={{ marginTop: 16 }}>
+            <div className="dist-card-head"><div className="sec-title">{trD('dist.invHistory')}</div>{(canInput || canCustomers) && <button type="button" className="dist-link" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button>}</div>
+            {invoices.length === 0 && <div className="dist-empty">{trD('dist.noInvoice')}</div>}
+            {invoices.map((iv) => (
+              <div key={iv.id} className="dist-txn dist-inv-row" onClick={() => setInvView(iv)}>
+                <span className="dist-cd-bar" style={{ background: '#5b7cff' }} />
+                <div className="dist-txn-mid">
+                  <div className="dist-txn-line1"><span className="dist-txn-name">{iv.number}</span></div>
+                  <div className="dist-txn-sub">{iv.issueDate} · {iv.items.length} item{iv.dueDate ? ' · ' + trD('dist.dueDate') + ' ' + iv.dueDate : ''}{iv.createdByName ? ' · ' + iv.createdByName : ''}</div>
+                </div>
+                <div className="tnum dist-txn-amt">{rpFull(iv.total)}</div>
+              </div>
+            ))}
+          </div>
         </>)}
+        {invBuilder && d && <InvoiceBuilder customer={d} onClose={() => setInvBuilder(false)} onCreated={(iv) => { setInvBuilder(false); setInvView(iv); loadInvoices(d.id); if (onChanged) onChanged(); }} />}
+        {invView && <InvoiceViewer invoice={invView} onClose={() => setInvView(null)} />}
+        {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {renderForm()}
         {typesModal()}
         {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}

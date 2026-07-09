@@ -10,6 +10,14 @@ const bcast = (action, id) => bus.broadcast({ entity: 'distribusi', action, id }
 
 // ── validation schemas ──
 const DAYS = z.array(z.string().max(4)).max(7);   // day codes; the service canonicalises them
+const reminderSchema = z.object({
+  enabled: z.boolean().optional(),
+  dueDay: z.number().int().min(0).max(31).optional(),
+  weekday: z.string().max(4).optional(),
+  overdueDays: z.number().int().min(0).max(3650).optional(),
+  gallonThreshold: z.number().int().min(0).optional(),
+  bonThreshold: z.number().int().min(0).optional(),
+}).nullable();
 const customerSchema = z.object({
   name: z.string().trim().min(1).max(120),
   phone: z.string().max(40).optional().default(''),
@@ -17,6 +25,7 @@ const customerSchema = z.object({
   masterPrice: z.number().int().nonnegative().optional().default(0),
   deliveryDays: DAYS.optional(),
   armada: z.string().max(40).optional(),
+  reminder: reminderSchema.optional(),
 });
 // Edit: every field optional; masterPrice is NOT accepted here (owner-gated price route).
 const customerUpdateSchema = z.object({
@@ -25,6 +34,7 @@ const customerUpdateSchema = z.object({
   type: z.string().trim().min(1).max(60).optional(),
   deliveryDays: DAYS.optional(),
   armada: z.string().max(40).optional(),
+  reminder: reminderSchema.optional(),
 });
 const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000) });
 // scope null/omitted = option (a) new-only; 'all'|'cycle'|'bon' = option (b) retroactive.
@@ -37,12 +47,14 @@ const typeDeleteQuery = z.object({ reassignTo: z.string().min(1).optional() });
 // NOTE: no unitPrice/amount here — the server locks the price from master_price.
 const txnSchema = z.object({
   customerId: z.string().min(1),
-  qty: z.number().int().positive(),
+  qty: z.number().int().nonnegative().optional().default(0),   // 0 allowed for a standalone bon payment
   method: z.enum(['lunas', 'bon', 'pelunasan']).optional().default('lunas'),
   note: z.string().max(300).optional().default(''),
   txnDate: DATE,
   gallonOut: z.number().int().nonnegative().optional(),   // full gallons delivered (default = qty)
   gallonIn: z.number().int().nonnegative().optional(),    // empty gallons returned
+  payAmount: z.number().int().nonnegative().optional(),   // method='pelunasan': bon payment amount
+  payMethod: z.enum(['cash', 'transfer']).optional(),     // method='pelunasan': how it was paid
 });
 // Gallon stock: a correction is a SIGNED delta (may be negative); reason required.
 const gallonCorrectionSchema = z.object({ qty: z.number().int(), customerId: z.string().min(1).optional(), reason: z.string().trim().min(1).max(300) });
@@ -62,6 +74,13 @@ const summaryQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60)
 const custListQuery = z.object({ fleet: z.string().max(60).optional() });
 const idParams = z.object({ id: z.string().min(1) });
 const batchParams = z.object({ batchId: z.string().min(1) });
+const invoiceCreateSchema = z.object({
+  scope: z.enum(['unpaidBon', 'period', 'selected']).optional(),
+  transactionIds: z.array(z.string().min(1)).max(2000).optional(),
+  dateFrom: DATE.optional(), dateTo: DATE.optional(),
+  dueDate: z.union([DATE, z.literal('')]).optional(),
+  note: z.string().max(500).optional(),
+});
 
 // ── customers ──
 const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet)));
@@ -91,9 +110,15 @@ const addCorrection = asyncHandler(async (req, res) => {
   res.status(201).json({ data: c });
 });
 
+// ── invoices / notas ──
+const createInvoice = asyncHandler(async (req, res) => { const inv = await service.createInvoice(req.params.id, req.body, req.user); bcast('invoice', inv.id); res.status(201).json({ data: inv }); });
+const listInvoices = asyncHandler(async (req, res) => res.json(await service.listInvoices(req.params.id, req.user)));
+const getInvoice = asyncHandler(async (req, res) => res.json({ data: await service.getInvoice(req.params.id, req.user) }));
+
 // ── audit + dashboard ──
 const listAudit = asyncHandler(async (req, res) => res.json(await service.listAudit(req.query, req.user)));
 const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.query.date, req.user, req.query.fleet) }));
+const billingReminders = asyncHandler(async (req, res) => res.json(await service.billingReminders(req.user, req.query.fleet, req.query.date)));
 
 // ── gallon stock ──
 const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await service.gallonSummary(req.user, req.query.fleet) }));
@@ -103,6 +128,6 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
-  gallonSummary, gallonCorrection,
-  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams },
+  gallonSummary, gallonCorrection, createInvoice, listInvoices, getInvoice, billingReminders,
+  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

@@ -422,6 +422,7 @@ model Customer {
   masterPrice   Int      @default(0)          // master_price (IDR per unit)
   deliveryDays  String   @default("[]")       // JSON array of day codes, e.g. ["Sen","Rab","Jum"]
   armada        String   @default("")         // delivery fleet plate (reuses the Setoran fleet list)
+  reminder      String   @default("")         // JSON billing-reminder settings ({enabled,dueDay,weekday,overdueDays,gallonThreshold,bonThreshold})
   createdById   String?                        // created_by (identity)
   createdByName String?
   createdByRole String?
@@ -555,6 +556,29 @@ model DistAuditLog {
 
   @@index([kind])
   @@index([createdAt])
+}
+
+// Customer invoice / nota (a DOCUMENT — never mutates transactions). Snapshots the
+// billed items + totals at issue time so the archived invoice stays stable even if
+// later corrections/price changes happen. Kept per-customer for archive & audit.
+model DistInvoice {
+  id            String   @id @default(cuid())
+  number        String   @unique                 // INV-YYYYMMDD-xxxx
+  customerId    String
+  fleetId       String   @default("")
+  issueDate     String                            // YYYY-MM-DD
+  dueDate       String   @default("")             // YYYY-MM-DD (from reminder setting or explicit)
+  items         String   @default("[]")           // JSON snapshot: [{txnId,date,qty,unitPrice,amount,method}]
+  total         Int      @default(0)              // Σ billed items
+  sisaBon       Int      @default(0)              // outstanding bon snapshot at issue
+  note          String   @default("")
+  createdById   String?
+  createdByName String?
+  createdByRole String?
+  createdAt     DateTime @default(now())
+
+  @@index([customerId])
+  @@index([fleetId])
 }
 
 // Proof photos / PDFs stored OUT of the record payload. Records (Entry/Setoran) keep

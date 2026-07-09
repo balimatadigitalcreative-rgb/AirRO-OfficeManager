@@ -2,7 +2,7 @@
 const { Router } = require('express');
 const ctrl = require('../controllers/distribution.controller');
 const validate = require('../middleware/validate');
-const { requireAuth, requireCap } = require('../middleware/auth');
+const { requireAuth, requireCap, requireAnyCap } = require('../middleware/auth');
 
 const router = Router();
 router.use(requireAuth);
@@ -39,9 +39,16 @@ router.get('/transactions', requireCap('distribusi'), validate({ query: ctrl.sch
 router.post('/transactions', requireCap('distribusiInput'), validate({ body: ctrl.schemas.txnSchema }), ctrl.createTransaction);
 router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.addCorrection);
 
+// ── Invoices / notas ── (documents; never mutate transactions). Any distribusi user can
+// view; creating one needs input or customer-management (so staff can bill on the spot).
+router.get('/invoices/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getInvoice);
+router.get('/customers/:id/invoices', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.listInvoices);
+router.post('/customers/:id/invoices', requireAnyCap(['distribusiInput', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.invoiceCreateSchema }), ctrl.createInvoice);
+
 // ── Audit (owner) + dashboard ──
 router.get('/audit', requireCap('distribusiAudit'), validate({ query: ctrl.schemas.auditQuery }), ctrl.listAudit);
 router.get('/dashboard/summary', requireCap('distribusi'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.dashboardSummary);
+router.get('/billing-reminders', requireCap('distribusi'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.billingReminders);
 
 // ── Gallon stock (loan/exchange) — read = base module; correction = distribusiCustomers. ──
 router.get('/gallon', requireCap('distribusi'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
