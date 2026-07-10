@@ -1613,17 +1613,19 @@ function DeliveryTxnModal({ stop, today, onClose, onCreated }) {
     </div>
   );
 }
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
+  const [closeouts, setCloseouts] = uSx([]);
   const [custs, setCusts] = uSx([]);
   const [toast, setToast] = uSx('');
   const [orderOpen, setOrderOpen] = uSx(false);
   const [txnStop, setTxnStop] = uSx(null);
+  const [closeOpen, setCloseOpen] = uSx(false);
   const ef = effFleet(fleetScope, distFleet);
   const reload = () => {
     if (!(window.API && window.API.distribusi)) return;
-    window.API.distribusi.deliveries.board(date, ef).then((r) => setBoard(r.data || [])).catch(() => setBoard([]));
+    window.API.distribusi.deliveries.board(date, ef).then((r) => { setBoard(r.data || []); setCloseouts(r.closeouts || []); }).catch(() => { setBoard([]); setCloseouts([]); });
     window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => {});
   };
   uEx(() => { setBoard(null); reload(); }, [refreshKey, ef, date]);
@@ -1644,16 +1646,33 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, fleetScope, fle
   };
   const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   const rows = board || [];
+  // The day is closed per (date, armada). Determine the fleet the board is showing: a
+  // single-fleet board (scoped helper) → its fleetId; a full-access user must pick a fleet.
+  const fleetIds = [...new Set(rows.map((r) => r.fleetId))];
+  const closeFleet = fleetIds.length === 1 ? fleetIds[0] : (distFleet && distFleet !== 'all' ? distFleet : null);
+  const closedFor = closeFleet ? closeouts.find((c) => c.fleetId === closeFleet) : null;
+  const pendingStops = closeFleet ? rows.filter((s) => s.status === 'pending' && s.fleetId === closeFleet) : [];
   const srcBadge = (s) => <span className={`dist-src ${s}`}>{trD(s === 'tambahan' ? 'dist.srcTambahan' : 'dist.srcJadwal')}</span>;
   const statBadge = (s) => <span className={`dist-dstat ${s}`}>{trD('dist.dstat_' + s)}</span>;
+  const hhmm2 = (ms) => { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); };
   return (
     <div className="dist-dash screen-enter">
       {bar}
       <div className="dist-tx-toolbar">
         <div style={{ minWidth: 190 }}><DP.DateField value={date} onChange={setDate} allowFuture /></div>
         <div style={{ flex: 1 }} />
-        {canOrder && <button type="button" className="btn btn-primary" onClick={() => setOrderOpen(true)}><IconPlus s={16} />{trD('dist.addOrder')}</button>}
+        {canOrder && <button type="button" className="btn btn-ghost" onClick={() => setOrderOpen(true)}><IconPlus s={16} />{trD('dist.addOrder')}</button>}
+        {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
+      {closeouts.map((c) => (
+        <div key={c.id} className="card dist-closed-banner">
+          <span className="dist-closed-ic"><IconCheck s={17} /></span>
+          <div className="dist-closed-main">
+            <b>{trD('dist.closedBy', { who: c.closedByName || '—', t: hhmm2(c.closedAt) })}{fleetIds.length !== 1 ? ' · ' + c.fleetId : ''}</b>
+            <span className="dist-closed-sum">{trD('dist.closeSummary', { x: c.delivered, y: c.pending, z: c.cancelled })}{c.generalNote ? ' · ' + c.generalNote : ''}</span>
+          </div>
+        </div>
+      ))}
       <div className="card dist-card" style={{ padding: '6px 18px' }}>
         {board === null && <div className="dist-empty dist-loading"><span className="dist-spin" />{trD('common.loading')}</div>}
         {board !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.delivEmpty')}</div>}
@@ -1672,6 +1691,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, fleetScope, fle
             <div className="dist-cust-main">
               <div className="dist-txn-line1"><span className="dist-deliv-seq">{i + 1}.</span><span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
               <div className="dist-txn-sub">{s.phone || '—'}{s.deliveryDays && s.deliveryDays.length ? ' · ' + fmtDays(s.deliveryDays) : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}{s.note ? ' · ' + s.note : ''}</div>
+              {s.pendingReason ? <div className="dist-deliv-reason"><IconInvoice s={11} />{trD('dist.pendingReason')}: {s.pendingReason}</div> : null}
             </div>
             {s.status === 'pending' && (
               <div className="dist-deliv-actions">
@@ -1685,7 +1705,49 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, fleetScope, fle
       </div>
       {orderOpen && <DeliveryOrderModal date={date} customers={custs} onClose={() => setOrderOpen(false)} onSaved={() => { setOrderOpen(false); flash(trD('dist.orderSaved')); reload(); if (onChanged) onChanged(); }} />}
       {txnStop && <DeliveryTxnModal stop={txnStop} today={date} onClose={() => setTxnStop(null)} onCreated={(txn) => { const st = txnStop; setTxnStop(null); mark(st.id, 'terkirim', txn.id); flash(trD('dist.delivSentTxn')); }} />}
+      {closeOpen && closeFleet && <CloseoutModal date={date} fleet={closeFleet} pendingStops={pendingStops} onClose={() => setCloseOpen(false)} onClosed={() => { setCloseOpen(false); flash(trD('dist.closeDone')); reload(); if (onChanged) onChanged(); }} />}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+// Day-closeout report. All delivered → optional note only. Any pending → a required
+// reason per undelivered stop before the day can be closed (kept as 'ditunda').
+function CloseoutModal({ date, fleet, pendingStops, onClose, onClosed }) {
+  const [reasons, setReasons] = uSx({});
+  const [note, setNote] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const allFilled = pendingStops.every((s) => String(reasons[s.id] || '').trim());
+  const save = () => {
+    if (!allFilled || saving) return;
+    setSaving(true); setErr('');
+    window.API.distribusi.deliveries.close({ date, fleet, generalNote: note.trim(), reasons })
+      .then(() => onClosed())
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.closeDay')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{fleet} · {date}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {pendingStops.length > 0 ? (<>
+            <div className="dist-close-warn"><IconInvoice s={15} />{trD('dist.closePendingWarn', { n: pendingStops.length })}</div>
+            {pendingStops.map((s) => (
+              <div key={s.id} className="dist-close-prow">
+                <div className="dist-close-pname">{s.customerName}</div>
+                <input className="fld" value={reasons[s.id] || ''} placeholder={trD('dist.closeReasonPh')} onChange={(e) => setReasons((r) => ({ ...r, [s.id]: e.target.value }))} />
+              </div>
+            ))}
+          </>) : (
+            <div className="dist-close-ok"><IconCheck s={16} />{trD('dist.closeAllDone')}</div>
+          )}
+          <label className="fld-label">{trD('dist.closeNote')}</label>
+          <input className="fld" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.closeNotePh')} />
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving || !allFilled} onClick={save}>{saving ? '…' : trD('dist.closeConfirm')}</button></div>
+      </div>
     </div>
   );
 }

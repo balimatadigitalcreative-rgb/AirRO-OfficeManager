@@ -720,7 +720,7 @@ function deliveryClient(r, sisaBon) {
   let days = []; try { days = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
   return {
     id: r.id, date: r.date, fleetId: r.fleetId, customerId: r.customerId, source: r.source, seq: r.seq,
-    status: r.status, qty: r.qty, note: r.note || '', transactionId: r.transactionId || null,
+    status: r.status, qty: r.qty, note: r.note || '', pendingReason: r.pendingReason || '', transactionId: r.transactionId || null,
     createdByName: r.createdByName || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
     customerName: c.name || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
     deliveryDays: Array.isArray(days) ? days : [], sisaBon: sisaBon || 0,
@@ -755,7 +755,45 @@ async function deliveryBoard(user, date, qFleet) {
     include: { customer: true }, orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
   });
   const bon = await bonMapFor([...new Set(rows.map((r) => r.customerId))]);
-  return { data: rows.map((r) => deliveryClient(r, bon[r.customerId])) };
+  const cos = await prisma.deliveryCloseout.findMany({ where: { date, ...fleetWhere(user, 'fleetId', qFleet) } });
+  return { data: rows.map((r) => deliveryClient(r, bon[r.customerId])), closeouts: cos.map(closeoutClient) };
+}
+function closeoutClient(c) {
+  return { id: c.id, date: c.date, fleetId: c.fleetId, closedByName: c.closedByName || null, closedAt: c.closedAt ? new Date(c.closedAt).getTime() : null, generalNote: c.generalNote || '', delivered: c.delivered, pending: c.pending, cancelled: c.cancelled };
+}
+// Close the delivery day for (date, armada). Every stop still 'pending' must carry a
+// reason (reasons[deliveryId]); those move to status 'ditunda' with the reason recorded
+// (kept, never dropped). Writes an accountable DeliveryCloseout {who, when, counts}.
+async function closeDay(user, body) {
+  const date = body.date;
+  const fleetId = resolveWriteFleet(user, body.fleet);   // scoped → their fleet; full-access must pass one
+  if (!fleetId) throw ApiError.badRequest('Pilih armada yang ditutup.');
+  const stops = await prisma.delivery.findMany({ where: { date, fleetId } });
+  const reasons = (body.reasons && typeof body.reasons === 'object') ? body.reasons : {};
+  const pending = stops.filter((s) => s.status === 'pending');
+  const missing = pending.filter((s) => !String(reasons[s.id] || '').trim());
+  if (missing.length) throw ApiError.badRequest('Isi alasan untuk setiap pengiriman yang belum tuntas.');
+  const snap = await actorSnap(user);
+  for (const s of pending) await prisma.delivery.update({ where: { id: s.id }, data: { status: 'ditunda', pendingReason: String(reasons[s.id]).slice(0, 300) } });
+  const delivered = stops.filter((s) => s.status === 'terkirim').length;
+  const cancelled = stops.filter((s) => s.status === 'batal').length;
+  const pendingCount = pending.length;   // now 'ditunda'
+  const co = await prisma.deliveryCloseout.upsert({
+    where: { date_fleetId: { date, fleetId } },
+    update: { closedById: snap.actorId, closedByName: snap.actorName, closedAt: new Date(), generalNote: String(body.generalNote || '').slice(0, 500), delivered, pending: pendingCount, cancelled },
+    create: { date, fleetId, closedById: snap.actorId, closedByName: snap.actorName, generalNote: String(body.generalNote || '').slice(0, 500), delivered, pending: pendingCount, cancelled },
+  });
+  const reasonList = pending.map((s) => ({ customerId: s.customerId, reason: String(reasons[s.id]).slice(0, 300) }));
+  await logAudit('pengiriman', `Tutup pengiriman: ${fleetId}`, `Tanggal ${date} · terkirim ${delivered}, belum ${pendingCount}, batal ${cancelled}`, snap, fleetId);
+  return { closeout: closeoutClient(co), fleetId, pending: pendingCount, reasons: reasonList };
+}
+// Admin report: closeouts within the user's scope (optionally by date).
+async function listCloseouts(user, query) {
+  const q = query || {};
+  const where = { ...fleetWhere(user, 'fleetId', q.fleet) };
+  if (q.date) where.date = q.date;
+  const rows = await prisma.deliveryCloseout.findMany({ where, orderBy: { closedAt: 'desc' }, take: 500 });
+  return { data: rows.map(closeoutClient) };
 }
 // Add a 'tambahan' order (admin). fleetId comes from the chosen customer. Idempotent per
 // customer/day. Returns the row + fleetId so the controller can notify that fleet.
@@ -821,5 +859,5 @@ module.exports = {
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
-  deliveryBoard, addOrder, markDelivery, reorderDeliveries,
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
 };

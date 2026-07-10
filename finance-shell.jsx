@@ -157,19 +157,22 @@ function FApp() {
     const nav = navForRole(p, user.role);
     if (nav.length && !nav.some((n) => n.id === screen)) setScreen(nav[0].id);
   }, [screen, user]);
-  // Delivery notification: when an admin adds an extra order, the SSE 'order' event bumps
-  // distTick; re-read today's board (scoped to the user's fleet) and surface pending extras
-  // in the AlertBell — so a fleet's helper is notified even without seeMoney.
+  // Delivery notifications (AlertBell), refreshed whenever a distribusi SSE event bumps
+  // distTick: (a) helpers with the board cap → today's new extra orders; (b) admins with
+  // the dashboard cap → any fleet that CLOSED the day with undelivered stops (+reason).
   uEh(() => {
-    if (!user || !p.distribusiPengiriman || !(window.API && window.API.distribusi)) { setDeliveryAlerts([]); return; }
-    let live = true;
-    window.API.distribusi.deliveries.board(FIN.TODAY, 'all').then((r) => {
-      if (!live) return;
+    if (!user || !(window.API && window.API.distribusi) || !(p.distribusiPengiriman || p.distribusiDashboard)) { setDeliveryAlerts([]); return; }
+    let live = true; const acc = []; const jobs = [];
+    if (p.distribusiPengiriman) jobs.push(window.API.distribusi.deliveries.board(FIN.TODAY, 'all').then((r) => {
       const extra = (r.data || []).filter((d) => d.source === 'tambahan' && d.status === 'pending');
-      setDeliveryAlerts(extra.length ? [{ id: 'deliv-extra', level: 'warn', icon: 'IconTruck', title: tr('nav.distDeliveries'), msg: tr('dist.newOrderAlert', { n: extra.length }) }] : []);
-    }).catch(() => { if (live) setDeliveryAlerts([]); });
+      if (extra.length) acc.push({ id: 'deliv-extra', level: 'warn', icon: 'IconTruck', title: tr('nav.distDeliveries'), msg: tr('dist.newOrderAlert', { n: extra.length }) });
+    }).catch(() => {}));
+    if (p.distribusiDashboard) jobs.push(window.API.distribusi.deliveries.closeouts('date=' + FIN.TODAY).then((r) => {
+      (r.data || []).filter((c) => c.pending > 0).forEach((c) => acc.push({ id: 'deliv-close-' + c.id, level: 'warn', icon: 'IconInvoice', title: tr('dist.closeDay'), msg: tr('dist.closeAlert', { fleet: c.fleetId, y: c.pending }) }));
+    }).catch(() => {}));
+    Promise.all(jobs).then(() => { if (live) setDeliveryAlerts(acc); });
     return () => { live = false; };
-  }, [user, p.distribusiPengiriman, distTick]);
+  }, [user, p.distribusiPengiriman, p.distribusiDashboard, distTick]);
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // ── Setoran: REST per-record (create/update/delete one record at a time) ──
@@ -1068,7 +1071,7 @@ function FApp() {
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-deliveries' && p.distribusiPengiriman && (
-            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute}
+            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}

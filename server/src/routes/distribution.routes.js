@@ -60,6 +60,10 @@ router.get('/cash-integration', requireCap('distribusiCashIntegrasi'), validate(
 router.get('/deliveries', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.boardQuery }), ctrl.deliveryBoard);
 router.post('/deliveries/order', requireCap('distribusiOrder'), validate({ body: ctrl.schemas.orderSchema }), ctrl.addOrder);
 router.put('/deliveries/reorder', requireCap('distribusiRute'), validate({ body: ctrl.schemas.reorderSchema }), ctrl.reorderDeliveries);
+// Close the day (helper who ran the deliveries). Undelivered stops need a reason.
+router.post('/deliveries/close', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.closeSchema }), ctrl.closeDay);
+// Admin report of closeouts across the (scoped) fleets.
+router.get('/closeouts', requireCap('distribusiDashboard'), validate({ query: ctrl.schemas.closeoutQuery }), ctrl.listCloseouts);
 router.patch('/deliveries/:id', requireCap('distribusiPengiriman'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.markSchema }), ctrl.markDelivery);
 
 // ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──

@@ -495,9 +495,10 @@ model Delivery {
   customerId    String
   source        String   @default("jadwal")     // jadwal | tambahan
   seq           Int      @default(0)            // route order
-  status        String   @default("pending")    // pending | terkirim | batal
+  status        String   @default("pending")    // pending | terkirim | batal | ditunda
   qty           Int?                             // optional planned qty
   note          String   @default("")
+  pendingReason String   @default("")            // why NOT delivered, recorded at day-closeout
   transactionId String?                          // set when a txn is created from this stop
   createdById   String?
   createdByName String?
@@ -507,6 +508,25 @@ model Delivery {
 
   @@unique([date, customerId, source])           // idempotent generation (1 jadwal + 1 tambahan / cust / day)
   @@index([date, fleetId])
+}
+
+// Daily delivery closeout — a helper closes the day for (date, armada) with a report.
+// One per (date, fleetId). Undelivered stops carry their reason on Delivery.pendingReason
+// and are moved to status 'ditunda' at closeout (kept, not lost).
+model DeliveryCloseout {
+  id           String   @id @default(cuid())
+  date         String
+  fleetId      String   @default("")
+  closedById   String?
+  closedByName String?
+  closedAt     DateTime @default(now())
+  generalNote  String   @default("")
+  delivered    Int      @default(0)
+  pending      Int      @default(0)
+  cancelled    Int      @default(0)
+
+  @@unique([date, fleetId])
+  @@index([date])
 }
 
 // Append-only corrections against a transaction (the transaction itself is never

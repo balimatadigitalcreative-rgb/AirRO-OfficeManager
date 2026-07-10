@@ -145,6 +145,8 @@
         addOrder: (data) => req('POST', '/distribusi/deliveries/order', data),
         mark: (id, data) => req('PATCH', '/distribusi/deliveries/' + id, data),
         reorder: (data) => req('PUT', '/distribusi/deliveries/reorder', data),   // { date, fleet, order:[ids] }
+        close: (data) => req('POST', '/distribusi/deliveries/close', data),      // { date, fleet, generalNote, reasons:{id:reason} }
+        closeouts: (qs) => req('GET', '/distribusi/closeouts' + (qs ? '?' + qs : '')),
       },
       // Gallon stock (loan/exchange): summary + per-customer balances + ledger; correction.
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),

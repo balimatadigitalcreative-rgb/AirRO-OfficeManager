@@ -1066,6 +1066,21 @@ select.fld::-ms-expand { display: none; }
 .dist-dstat.pending { color: #b45309; border-color: #b45309; }
 .dist-dstat.terkirim { color: var(--green-700); border-color: var(--green-700); }
 .dist-dstat.batal { color: var(--neg); border-color: var(--neg); }
+.dist-dstat.ditunda { color: #7c3aed; border-color: #7c3aed; }
+.dist-deliv-row.st-ditunda { opacity: .78; }
+.dist-deliv-reason { font-size: 11.5px; color: #7c3aed; margin-top: 3px; display: flex; align-items: center; gap: 5px; }
+/* Day closeout */
+.dist-closed-banner { display: flex; align-items: flex-start; gap: 11px; padding: 12px 16px; border: 1px solid var(--green-700); background: var(--pos-bg); }
+.dist-closed-ic { display: inline-flex; color: var(--green-700); flex-shrink: 0; margin-top: 1px; }
+.dist-closed-main { display: flex; flex-direction: column; min-width: 0; }
+.dist-closed-main b { font-size: 13.5px; }
+.dist-closed-sum { font-size: 12px; color: var(--text-mut); margin-top: 2px; }
+.dist-close-warn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: #b45309; background: var(--warn-bg, #fff7ed); border-radius: 9px; padding: 9px 12px; margin-bottom: 10px; }
+.dist-close-prow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border-soft); }
+.dist-close-pname { flex: 0 0 38%; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dist-close-prow .fld { flex: 1; }
+.dist-close-ok { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--green-700); background: var(--pos-bg); border-radius: 9px; padding: 11px 13px; }
+@media (max-width: 640px) { .dist-close-prow { flex-direction: column; align-items: stretch; gap: 5px; } .dist-close-pname { flex: none; } }
 .dist-cust-price { text-align: right; flex-shrink: 0; }
 .dist-cust-priceval { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 700; color: var(--ink); white-space: nowrap; }
 .dist-cust-priceval svg { color: var(--text-faint); }
