@@ -13,6 +13,8 @@ const ROLE_PERMS = {
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true,
+    // Gudang (warehouse) — view / manage stock / write-off damage / report.
+    gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
   },
   gm: {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
@@ -21,6 +23,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true,
+    gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
   },
   hrd: {
     company: false, cashflow: false, employees: true, empDetail: true, attendance: true, addEntry: false, edit: false,

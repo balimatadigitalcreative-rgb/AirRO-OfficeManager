@@ -161,6 +161,16 @@
       summary: (date, fleet) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/dashboard/summary' + (p.length ? '?' + p.join('&') : '')); },
       billingReminders: (fleet) => req('GET', '/distribusi/billing-reminders' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
     },
+    // Gudang (warehouse) — ledger-based inventory.
+    gudang: {
+      summary: () => req('GET', '/gudang/summary'),
+      report: () => req('GET', '/gudang/report'),
+      item: (id) => req('GET', '/gudang/items/' + id),
+      createItem: (data) => req('POST', '/gudang/items', data),          // { name, kind?, unit?, bufferMin? }
+      updateItem: (id, data) => req('PATCH', '/gudang/items/' + id, data), // { name?, unit?, bufferMin? }
+      addStock: (id, data) => req('POST', '/gudang/items/' + id + '/stock', data),   // { type:in|purchase|opening|correction, qty, reason }
+      addDamage: (id, data) => req('POST', '/gudang/items/' + id + '/damage', data), // { type:damage|loss, qty, reason }
+    },
     settings: {
       all: () => req('GET', '/settings'),
       get: (key) => req('GET', '/settings/' + key),

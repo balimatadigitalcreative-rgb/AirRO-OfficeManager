@@ -52,6 +52,7 @@ const FILES = [
   'finance-setoran.jsx',
   'finance-users.jsx',
   'distribution.jsx',
+  'gudang.jsx',
   'finance-shell.jsx',
 ];
 

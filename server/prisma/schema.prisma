@@ -650,3 +650,44 @@ model Attachment {
 
   @@index([createdById])
 }
+
+// ── GUDANG (warehouse inventory) ─────────────────────────────────────────────
+// A generic, ledger-based inventory: one InventoryItem per goods type, its stock is
+// ALWAYS the sum of its StockMovement rows (append-only) — never a stored number. New
+// item types are added just by inserting a row. GALON is the one exception: its stock is
+// read from the existing GallonMovement ledger (Distribusi > Stok Galon) so there is only
+// ONE authoritative gallon number; the Galon item here carries only its buffer threshold.
+model InventoryItem {
+  id        String   @id                          // stable slug (galon|sticker|tutup|segel) or a cuid for custom
+  name      String
+  kind      String                                // galon | sticker | tutup | segel | lainnya
+  unit      String   @default("pcs")              // pcs | galon | roll | …
+  bufferMin Int      @default(0)                  // safe-stock threshold; stock ≤ bufferMin (and >0) ⇒ "perlu restock"
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  movements StockMovement[]
+  @@index([kind])
+}
+
+// Append-only stock ledger for every non-galon item. Directional types (in/purchase/opening
+// add; out/damage/loss/sale subtract) store a positive qty; `correction` stores a signed
+// delta. Each row carries who/when/why — the ledger IS the audit trail.
+model StockMovement {
+  id        String   @id @default(cuid())
+  itemId    String
+  type      String                                // opening | purchase | in | out | damage | loss | sale | correction
+  qty       Int                                   // positive for directional types; signed delta for correction
+  fleetId   String   @default("")                 // optional fleet scope ('' = global)
+  refId     String?                               // optional link to another record (cashflow entry, delivery, …)
+  reason    String   @default("")
+  actorId   String?
+  actorName String?
+  actorRole String?
+  createdAt DateTime @default(now())
+
+  item InventoryItem @relation(fields: [itemId], references: [id])
+  @@index([itemId])
+  @@index([type])
+}

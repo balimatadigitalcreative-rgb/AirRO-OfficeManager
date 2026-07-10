@@ -52,6 +52,12 @@ const CAP_GROUPS = [
     ['distribusiCustomerDelete', 'Hapus / Nonaktifkan Pelanggan'],
     ['distribusiAudit', 'Lihat Log Audit'],
   ] },
+  { title: 'Gudang', caps: [
+    ['gudangView', 'Lihat Gudang'],
+    ['gudangKelola', 'Kelola Stok (tambah/koreksi/buffer)'],
+    ['gudangDamage', 'Catat Rusak / Hilang'],
+    ['gudangReport', 'Lihat Laporan Gudang'],
+  ] },
 ];
 
 function UserModal({ row, users, onSave, onClose, busy, fleet }) {

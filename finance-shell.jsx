@@ -41,9 +41,11 @@ function navForRole(p, role) {
     { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', caps: ['distribusiHargaMaster'] },
     { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', caps: ['distribusiAudit'] },
   ].forEach((it) => { if (it.caps.some((c) => p[c])) items.push({ id: it.id, label: it.label, icon: it.icon, grp: 'distribusi' }); });
+  // GUDANG — warehouse inventory. One screen; shown iff the user may view it.
+  if (p.gudangView) items.push({ id: 'gudang', label: tr('nav.gudang'), icon: 'IconStore', grp: 'gudang' });
   return items;
 }
-const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'admin'];
+const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'];
 
 function FToast({ msg, onDone }) {
   uEh(() => { const t = setTimeout(onDone, 2400); return () => clearTimeout(t); }, [msg]);
@@ -1089,6 +1091,10 @@ function FApp() {
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+
+          {screen === 'gudang' && p.gudangView && (
+            <GUDANG.Dept refreshKey={distTick} canManage={!!p.gudangKelola} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} />
+          )}
 
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} mfgAcct={settings.mfgAcct} onMfgAcctChange={(v) => applySettings((prev) => ({ ...prev, mfgAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />

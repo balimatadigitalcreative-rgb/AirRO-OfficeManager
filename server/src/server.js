@@ -4,6 +4,7 @@ const config = require('./config/env');
 const prisma = require('./lib/prisma');
 const { seedBuiltinRoles } = require('./config/permissions');
 const distribution = require('./services/distribution.service');
+const gudang = require('./services/gudang.service');
 const attachments = require('./services/attachment.service');
 
 const app = createApp();
@@ -12,6 +13,8 @@ const app = createApp();
 seedBuiltinRoles().catch(() => {});
 // Ensure the seed customer types (reguler/kos/cafe/bulk) exist (idempotent).
 distribution.seedCustomerTypes().catch(() => {});
+// Ensure the seed warehouse items (Galon/Sticker/Tutup/Segel) exist (idempotent).
+gudang.seedInventoryItems().catch(() => {});
 // One-time: move any inline base64 proofs out of Entry/Setoran into the Attachment
 // table so old records stop dragging photos through the sync payload (idempotent).
 attachments.migrateInlineProofs().catch(() => {});

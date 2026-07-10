@@ -1166,6 +1166,42 @@ select.fld::-ms-expand { display: none; }
 .dist-gm-mqty.purchase, .dist-gm-mqty.in { color: var(--green-700); }
 .dist-gm-mqty.out { color: var(--warn); }
 .dist-gm-mqty.corr, .dist-gm-mqty.opening { color: #5b6ed6; }
+/* ── Gudang (warehouse) ── */
+.gud-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.gud-restock { padding: 12px 16px; margin-bottom: 14px; border: 1px solid var(--warn); background: var(--warn-bg, #fff7ed); }
+.gud-restock-h { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 800; color: var(--warn); margin-bottom: 8px; }
+.gud-restock-items { display: flex; flex-wrap: wrap; gap: 7px; }
+.gud-restock-pill { font-size: 11.5px; font-weight: 600; color: var(--text); background: var(--card); border: 1px solid var(--warn); border-radius: 7px; padding: 3px 9px; }
+.gud-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.gud-card { padding: 15px 16px; display: flex; flex-direction: column; gap: 10px; }
+.gud-card.low { border-color: var(--warn); }
+.gud-card-top { display: flex; align-items: center; gap: 11px; }
+.gud-card-name { font-size: 14.5px; font-weight: 800; color: var(--text); }
+.gud-card-unit { font-size: 11px; color: var(--text-mut); margin-top: 1px; }
+.gud-card-stock { display: flex; align-items: baseline; gap: 6px; }
+.gud-card-num { font-size: 30px; font-weight: 800; letter-spacing: -.5px; }
+.gud-card-numunit { font-size: 12px; color: var(--text-mut); }
+.gud-card-buffer { font-size: 12px; color: var(--text-mut); }
+.gud-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.gud-card-actions .btn { flex: 1 1 auto; justify-content: center; min-height: 34px; }
+.gud-card-note { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-mut); background: var(--card-soft, #f1f5f9); border-radius: 8px; padding: 7px 10px; }
+.gud-dmg { color: var(--danger, #dc2626); }
+.gud-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 800; border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+.gud-badge.ok { background: var(--pos-bg); color: var(--green-800); }
+.gud-badge.low { background: var(--warn-bg, #fff7ed); color: var(--warn); border: 1px solid var(--warn); }
+.gud-badge.none { background: var(--card-soft, #f1f5f9); color: var(--text-mut); }
+.gud-ledger { padding: 14px 18px; }
+.gud-mtag { font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 7px; white-space: nowrap; flex-shrink: 0; }
+.gud-mtag.in { background: var(--pos-bg); color: var(--green-800); }
+.gud-mtag.out { background: #E7F1F5; color: #0B7EB1; }
+.gud-mtag.dmg { background: var(--danger-bg, #fef2f2); color: var(--danger, #dc2626); }
+.gud-mtag.corr { background: #EDE9FB; color: #6D50D6; }
+.gud-mqty { font-size: 14.5px; white-space: nowrap; }
+.gud-mqty.in { color: var(--green-700); }
+.gud-mqty.out { color: #0B7EB1; }
+.gud-mqty.dmg { color: var(--danger, #dc2626); }
+.gud-mqty.corr { color: #6D50D6; }
+.gud-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .dist-gm-note { display: flex; align-items: flex-start; gap: 7px; font-size: 11.5px; line-height: 1.5; color: var(--text-mut); margin: -4px 2px 12px; }
 .dist-gm-note svg { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
 /* opening-stock summary row */

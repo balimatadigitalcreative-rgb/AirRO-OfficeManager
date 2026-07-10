@@ -19,8 +19,12 @@ async function resetDb() {
   await prisma.distAuditLog.deleteMany();
   await prisma.distTransaction.deleteMany();
   await prisma.priceHistory.deleteMany();
+  await prisma.gallonMovement.deleteMany();   // gallon ledger (also feeds the Gudang galon card)
   await prisma.customer.deleteMany();
   await prisma.customerType.deleteMany();
+  // Gudang (children before parents): stock movements → inventory items.
+  await prisma.stockMovement.deleteMany();
+  await prisma.inventoryItem.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.user.deleteMany();
   await prisma.setting.deleteMany();
