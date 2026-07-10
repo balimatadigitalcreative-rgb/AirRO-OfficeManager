@@ -1161,10 +1161,18 @@ select.fld::-ms-expand { display: none; }
 .dist-gm-mtag.out { background: var(--warn-bg); color: var(--warn); }
 .dist-gm-mtag.in { background: #E7F1F5; color: #0B7EB1; }
 .dist-gm-mtag.corr { background: #EDE9FB; color: #6D50D6; }
+.dist-gm-mtag.opening { background: #EEF2FF; color: #5b6ed6; }
 .dist-gm-mqty { font-size: 14.5px; white-space: nowrap; }
 .dist-gm-mqty.purchase, .dist-gm-mqty.in { color: var(--green-700); }
 .dist-gm-mqty.out { color: var(--warn); }
-.dist-gm-mqty.corr { color: #6D50D6; }
+.dist-gm-mqty.corr, .dist-gm-mqty.opening { color: #5b6ed6; }
+/* opening-stock summary row */
+.dist-gm-opening { display: flex; align-items: center; gap: 13px; padding: 13px 16px; margin-bottom: 14px; }
+.dist-gm-opening-main { flex: 1; min-width: 0; }
+.dist-gm-opening-lbl { font-size: 13.5px; font-weight: 800; color: var(--text); }
+.dist-gm-opening-sub { font-size: 11.5px; color: var(--text-mut); margin-top: 2px; }
+.dist-gm-opening-val { font-size: 22px; font-weight: 800; letter-spacing: -.5px; margin-right: 4px; }
+@media (max-width: 560px) { .dist-gm-opening { flex-wrap: wrap; } .dist-gm-opening-main { flex-basis: 60%; } .dist-gm-opening .btn { flex: 1 1 100%; justify-content: center; min-height: 42px; } }
 /* cash-flow "Pembelian Galon" field */
 .gal-buy { margin-top: 4px; }
 .gal-buy-row { display: flex; align-items: center; gap: 9px; border: 1.5px solid var(--border); border-radius: 11px; padding: 0 13px; }

@@ -751,7 +751,9 @@ async function dashboardSummary(date, user, qFleet) {
 // is stored loose. delivery_out moves a gallon depot→customer, return_in the reverse,
 // purchase adds to the depot, correction is a signed adjustment (customer or depot).
 const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'return_in' ? -m.qty : (m.type === 'correction' && m.customerId) ? m.qty : 0);
-const totalEffect = (m) => (m.type === 'purchase' ? m.qty : (m.type === 'correction' && !m.customerId) ? m.qty : 0);
+// 'opening' is a depot baseline (owned + at depot, never at a customer). Its qty is a signed
+// delta so an adjustment (nilai_baru − nilai_lama) is another append, never an overwrite.
+const totalEffect = (m) => (m.type === 'purchase' || m.type === 'opening' ? m.qty : (m.type === 'correction' && !m.customerId) ? m.qty : 0);
 
 // Per-customer held balance (fleet-scoped): Σ(delivery_out − return_in ± customer correction).
 async function gallonBalances(user, qFleet) {
@@ -769,9 +771,47 @@ async function gallonStock(user, qFleet) {
   rows.forEach((r) => { totalOwned += totalEffect(r); atCustomers += custEffect(r); });
   return { totalOwned, atCustomers, atDepot: totalOwned - atCustomers };
 }
+// Opening-stock rollup (fleet-scoped): the physical gallons owned at go-live, kept as its
+// own movement type so it shows separately from purchases/deliveries and its provenance is
+// clear. total = Σ opening deltas; first entry = when/who set it, last = when/who last tuned it.
+async function openingInfo(user, qFleet) {
+  const rows = await prisma.gallonMovement.findMany({ where: { active: true, type: 'opening', ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'asc' } });
+  if (!rows.length) return { set: false, total: 0, adjustCount: 0 };
+  const total = rows.reduce((a, r) => a + r.qty, 0);
+  const first = rows[0], last = rows[rows.length - 1];
+  return {
+    set: true, total, adjustCount: rows.length - 1,
+    setAt: first.createdAt ? new Date(first.createdAt).getTime() : null, setByName: first.actorName || null,
+    lastAt: last.createdAt ? new Date(last.createdAt).getTime() : null, lastByName: last.actorName || null,
+  };
+}
+// Set / adjust the opening gallon stock. Approach (b): never overwrites — records a single
+// 'opening' movement whose qty is the DELTA (target − current), so the ledger stays
+// append-only and every change is traceable. First call sets the baseline; later calls tune
+// it by the difference. The stock number is always recomputed from the ledger (no loose value).
+async function setOpeningStock(body, actor) {
+  const target = Math.round(+body.qty);
+  if (!Number.isFinite(target) || target < 0) throw ApiError.badRequest('Jumlah stok awal tidak valid.');
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan/catatan wajib diisi.');
+  const chosen = (body.fleet && body.fleet !== 'all') ? body.fleet : '';
+  const fleetId = resolveWriteFleet(actor, chosen);   // scoped staff forced to their fleet; else global depot ''
+  const existing = await prisma.gallonMovement.findMany({ where: { active: true, type: 'opening', fleetId }, select: { qty: true } });
+  const current = existing.reduce((a, r) => a + r.qty, 0);
+  const isFirst = existing.length === 0;
+  const delta = target - current;
+  if (delta === 0) throw ApiError.badRequest('Stok awal tidak berubah (nilai sama dengan saat ini).');
+  const snap = await actorSnap(actor);
+  const note = isFirst ? reason : `${reason} · penyesuaian ${current} → ${target}`;
+  const mov = await prisma.gallonMovement.create({ data: { type: 'opening', qty: delta, fleetId, active: true, note, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+  await logAudit('koreksi', isFirst ? 'Set stok galon awal' : 'Penyesuaian stok galon awal',
+    `${isFirst ? '' : current + ' → '}${target} galon (${delta >= 0 ? '+' : ''}${delta}) · ${reason}`, snap, fleetId);
+  return { movement: mov, opening: { total: target, previous: current, delta, isFirst } };
+}
 // Everything the "Stok Galon" screen needs: stock cards, per-customer balances, ledger.
 async function gallonSummary(user, qFleet) {
   const stock = await gallonStock(user, qFleet);
+  const opening = await openingInfo(user, qFleet);
   const balMap = await gallonBalances(user, qFleet);
   const rows = await prisma.gallonMovement.findMany({ where: { active: true, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'desc' }, take: 300 });
   const ids = [...new Set([...Object.keys(balMap).filter((id) => balMap[id] !== 0), ...rows.map((r) => r.customerId).filter(Boolean)])];
@@ -781,7 +821,7 @@ async function gallonSummary(user, qFleet) {
     .map((id) => ({ customerId: id, name: (info[id] && info[id].name) || '—', armada: (info[id] && info[id].armada) || '', held: balMap[id] }))
     .sort((a, b) => b.held - a.held);
   const movements = rows.map((r) => ({ id: r.id, type: r.type, qty: r.qty, customerId: r.customerId, customerName: r.customerId ? ((info[r.customerId] && info[r.customerId].name) || '—') : null, fleetId: r.fleetId, note: r.note, actorName: r.actorName, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null }));
-  return { stock, balances, movements };
+  return { stock, opening, balances, movements };
 }
 // Record a delivery's gallon flow (called from createTransaction). out = full gallons
 // delivered, in_ = empty gallons returned. Tied to the transaction + customer.
@@ -971,7 +1011,7 @@ async function cashIntegration(user, query) {
 
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
-  gallonSummary, gallonCorrection, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
+  gallonSummary, gallonCorrection, setOpeningStock, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,

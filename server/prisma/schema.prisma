@@ -575,7 +575,7 @@ model Correction {
 // is deactivated (active=false) if that entry is deleted, so stock never dangles.
 model GallonMovement {
   id            String   @id @default(cuid())
-  type          String                          // purchase | delivery_out | return_in | correction
+  type          String                          // purchase | delivery_out | return_in | correction | opening
   qty           Int                             // positive; a correction's qty is a signed delta
   customerId    String?                         // set for delivery_out / return_in / customer correction
   transactionId String?                         // the DistTransaction that produced a delivery/return

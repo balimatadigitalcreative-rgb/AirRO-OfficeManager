@@ -1677,15 +1677,17 @@ const GM_META = {
   delivery_out: { l: 'dist.gmOut', cls: 'out', sign: '−' },
   return_in: { l: 'dist.gmIn', cls: 'in', sign: '+' },
   correction: { l: 'dist.gmCorr', cls: 'corr', sign: '' },
+  opening: { l: 'dist.gmOpening', cls: 'opening', sign: '' },
 };
 function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);
   const [toast, setToast] = uSx('');
   const [corr, setCorr] = uSx(null);   // { customerId, name, qty, reason }
+  const [opening, setOpening] = uSx(null);   // opening-stock modal: { qty, reason }
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
   const ef = effFleet(fleetScope, distFleet);
-  const reload = () => window.API.distribusi.gallon(ef).then((r) => setData(r.data)).catch(() => setData({ stock: {}, balances: [], movements: [] }));
+  const reload = () => window.API.distribusi.gallon(ef).then((r) => setData(r.data)).catch(() => setData({ stock: {}, opening: {}, balances: [], movements: [] }));
   uEx(() => { if (window.API && window.API.distribusi) reload(); }, [refreshKey, ef]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   const commitCorr = () => {
@@ -1695,6 +1697,17 @@ function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, se
     setSaving(true); setErr('');
     window.API.distribusi.gallonCorrection({ qty, customerId: corr.customerId || undefined, reason: corr.reason.trim() })
       .then(() => { setSaving(false); setCorr(null); flash(trD('dist.gmCorrSaved')); reload(); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const op = (data && data.opening) || {};
+  const openOpening = () => { setErr(''); setOpening({ qty: op.set ? String(op.total) : '', reason: '' }); };
+  const commitOpening = () => {
+    if (!opening || saving) return;
+    const qty = parseInt(String(opening.qty).replace(/[^0-9]/g, ''), 10);
+    if (!(qty >= 0) || !opening.reason.trim()) { setErr(trD('dist.goErr')); return; }
+    setSaving(true); setErr('');
+    window.API.distribusi.setOpeningStock({ qty, fleet: ef, reason: opening.reason.trim() })
+      .then(() => { setSaving(false); setOpening(null); flash(trD('dist.goSaved')); reload(); })
       .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
   const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
@@ -1707,6 +1720,17 @@ function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, se
         <div className="card stat-box"><span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX('IconDrop', { s: 18 })}</span><div className="tnum dist-gm-val">{numX(st.totalOwned || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmTotal')}</div></div>
         <div className="card stat-box"><span className="icon-tile" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>{IcX('IconCustomers', { s: 18 })}</span><div className="tnum dist-gm-val" style={{ color: 'var(--warn)' }}>{numX(st.atCustomers || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmAtCust')}</div></div>
         <div className="card stat-box"><span className="icon-tile" style={{ background: 'var(--pos-bg)', color: 'var(--green-800)' }}>{IcX('IconTruck', { s: 18 })}</span><div className="tnum dist-gm-val" style={{ color: 'var(--green-700)' }}>{numX(st.atDepot || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmAtDepot')}</div></div>
+      </div>
+      <div className="card dist-gm-opening">
+        <span className="icon-tile" style={{ background: '#EEF2FF', color: '#5b6ed6' }}>{IcX('IconWallet', { s: 17 })}</span>
+        <div className="dist-gm-opening-main">
+          <div className="dist-gm-opening-lbl">{trD('dist.gmOpeningTitle')}</div>
+          {op.set
+            ? <div className="dist-gm-opening-sub">{trD('dist.gmOpeningSet', { d: fmtDT(op.setAt), who: op.setByName || '—' })}{op.adjustCount > 0 ? ' · ' + trD('dist.gmOpeningAdj', { n: op.adjustCount, d: fmtDT(op.lastAt) }) : ''}</div>
+            : <div className="dist-gm-opening-sub">{trD('dist.gmOpeningNone')}</div>}
+        </div>
+        <div className="tnum dist-gm-opening-val">{numX(op.total || 0)}</div>
+        {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={openOpening}><IconPencil s={14} />{op.set ? trD('dist.gmOpeningAdjust') : trD('dist.gmOpeningBtn')}</button>}
       </div>
       <div className="dist-cd-cols">
         <div className="card dist-card dist-gm-balcard">
@@ -1727,7 +1751,7 @@ function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, se
           {(data.movements || []).map((m) => { const meta = GM_META[m.type] || GM_META.correction; const disp = meta.sign === '' ? ((m.qty > 0 ? '+' : '') + numX(m.qty)) : (meta.sign + numX(Math.abs(m.qty))); return (
             <div key={m.id} className="dist-txn">
               <span className={`dist-gm-mtag ${meta.cls}`}>{trD(meta.l)}</span>
-              <div className="dist-txn-mid"><div className="dist-txn-name">{m.customerName || trD('dist.gmDepot')}</div><div className="dist-txn-sub">{fmtDT(m.createdAt)}{m.actorName ? ' · ' + m.actorName : ''}{m.note && m.type === 'correction' ? ' · ' + m.note : ''}</div></div>
+              <div className="dist-txn-mid"><div className="dist-txn-name">{m.type === 'opening' ? trD('dist.gmOpening') : (m.customerName || trD('dist.gmDepot'))}</div><div className="dist-txn-sub">{fmtDT(m.createdAt)}{m.actorName ? ' · ' + m.actorName : ''}{m.note && (m.type === 'correction' || m.type === 'opening') ? ' · ' + m.note : ''}</div></div>
               <b className={`tnum dist-gm-mqty ${meta.cls}`}>{disp}</b>
             </div>
           ); })}
@@ -1747,6 +1771,26 @@ function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, se
               {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
             </div>
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCorr(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commitCorr}>{saving ? '…' : trD('dist.gmCorrSave')}</button></div>
+          </div>
+        </div>
+      )}
+
+      {opening && (
+        <div className="modal-scrim" onClick={() => setOpening(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{op.set ? trD('dist.gmOpeningAdjust') : trD('dist.gmOpeningBtn')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.gmOpeningModalSub')}</div></div><button className="jp-icon" onClick={() => setOpening(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-infobox"><IconInvoice s={16} /><span>{op.set ? trD('dist.gmOpeningInfoAdj', { cur: numX(op.total) }) : trD('dist.gmOpeningInfoNew')}</span></div>
+              <label className="fld-label">{trD('dist.gmOpeningQty')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <input className="fld tnum" value={opening.qty} inputMode="numeric" placeholder="cth. 500" onChange={(e) => setOpening({ ...opening, qty: e.target.value.replace(/[^0-9]/g, '') })} />
+              {op.set && opening.qty !== '' && parseInt(opening.qty, 10) !== op.total && (
+                <div className="dist-hint" style={{ marginTop: 6 }}>{trD('dist.gmOpeningDelta', { d: (parseInt(opening.qty, 10) - op.total >= 0 ? '+' : '') + numX(parseInt(opening.qty, 10) - op.total) })}</div>
+              )}
+              <label className="fld-label">{trD('dist.gmOpeningReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 66, padding: 12, resize: 'vertical' }} value={opening.reason} placeholder={trD('dist.gmOpeningReasonPh')} onChange={(e) => setOpening({ ...opening, reason: e.target.value })} />
+              {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setOpening(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commitOpening}>{saving ? '…' : trD('dist.gmOpeningSave')}</button></div>
           </div>
         </div>
       )}

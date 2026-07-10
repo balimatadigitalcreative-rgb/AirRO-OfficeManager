@@ -69,6 +69,7 @@ const txnSchema = z.object({
 });
 // Gallon stock: a correction is a SIGNED delta (may be negative); reason required.
 const gallonCorrectionSchema = z.object({ qty: z.number().int(), customerId: z.string().min(1).optional(), reason: z.string().trim().min(1).max(300) });
+const openingStockSchema = z.object({ qty: z.number().int().min(0), fleet: z.string().max(60).optional(), reason: z.string().trim().min(1).max(300) });
 const gallonQuery = z.object({ fleet: z.string().max(60).optional() });
 const correctionSchema = z.object({
   reason: z.string().trim().min(1, 'reason is required').max(1000),
@@ -167,13 +168,14 @@ const listCloseouts = asyncHandler(async (req, res) => res.json(await service.li
 // ── gallon stock ──
 const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await service.gallonSummary(req.user, req.query.fleet) }));
 const gallonCorrection = asyncHandler(async (req, res) => { const m = await service.gallonCorrection(req.body, req.user); bcast('gallon', m.id); res.status(201).json({ data: m }); });
+const setOpeningStock = asyncHandler(async (req, res) => { const r = await service.setOpeningStock(req.body, req.user); bcast('gallon', 'opening'); res.status(201).json({ data: r }); });
 
 module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, setLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
-  gallonSummary, gallonCorrection, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
+  gallonSummary, gallonCorrection, setOpeningStock, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
-  schemas: { customerSchema, customerUpdateSchema, locationSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { customerSchema, customerUpdateSchema, locationSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

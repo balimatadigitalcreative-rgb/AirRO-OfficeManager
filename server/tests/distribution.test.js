@@ -389,6 +389,45 @@ describe('Distribusi — gallon stock (loan/exchange ledger)', () => {
     const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(gm));
     expect(audit.body.data.some((a) => /Koreksi stok galon/.test(a.title))).toBe(true);
   });
+
+  it('opening stock: set 500 raises owned+depot by 500 (recorded as an "opening" movement w/ actor)', async () => {
+    const b = await stock();
+    expect((await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(gm)).send({ qty: 500 })).status).toBe(400);   // reason required
+    const r = await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(gm)).send({ qty: 500, reason: 'Stok awal go-live' });
+    expect(r.status).toBe(201);
+    expect(r.body.data.opening).toMatchObject({ total: 500, previous: 0, delta: 500, isFirst: true });
+    const g = await request(app).get('/api/v1/distribusi/gallon').set(auth(gm));
+    expect(g.body.data.stock.totalOwned).toBe(b.totalOwned + 500);
+    expect(g.body.data.stock.atDepot).toBe(b.atDepot + 500);
+    expect(g.body.data.opening).toMatchObject({ set: true, total: 500, adjustCount: 0 });
+    expect(g.body.data.opening.setByName).toBe('GM');
+    const mv = g.body.data.movements.find((m) => m.type === 'opening');
+    expect(mv).toMatchObject({ type: 'opening', qty: 500 });
+  });
+
+  it('opening stock: adjust to 480 appends a −20 delta (never overwrites); all numbers stay ledger-consistent', async () => {
+    const b = await stock();
+    const r = await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(gm)).send({ qty: 480, reason: 'hitung ulang' });
+    expect(r.status).toBe(201);
+    expect(r.body.data.opening).toMatchObject({ total: 480, previous: 500, delta: -20, isFirst: false });
+    const g = await request(app).get('/api/v1/distribusi/gallon').set(auth(gm));
+    expect(g.body.data.opening).toMatchObject({ set: true, total: 480, adjustCount: 1 });
+    expect(g.body.data.stock.totalOwned).toBe(b.totalOwned - 20);
+    expect(g.body.data.stock.atDepot).toBe(b.atDepot - 20);
+    // two opening rows now (baseline + adjustment) — append-only, nothing rewritten
+    const openings = g.body.data.movements.filter((m) => m.type === 'opening').map((m) => m.qty).sort((a, c) => c - a);
+    expect(openings).toEqual([500, -20]);
+    // no-change is rejected (delta 0)
+    expect((await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(gm)).send({ qty: 480, reason: 'x' })).status).toBe(400);
+  });
+
+  it('opening stock is gated by the stock-management cap (distribusiCustomers) — server-enforced', async () => {
+    const u = await reg({ name: 'ViewOnly', username: 'view_g', password: 'secret123', role: 'finance' });
+    await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(gm)).send({ permissions: { distribusiGallon: true, distribusiCustomers: false } });
+    const t = await login('view_g', 'secret123');
+    expect((await request(app).get('/api/v1/distribusi/gallon').set(auth(t))).status).toBe(200);           // may view
+    expect((await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(t)).send({ qty: 100, reason: 'x' })).status).toBe(403);   // may NOT set
+  });
 });
 
 describe('Distribusi — customer deactivate / reactivate / permanent delete', () => {

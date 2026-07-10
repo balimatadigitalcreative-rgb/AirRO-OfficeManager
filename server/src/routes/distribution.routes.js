@@ -77,6 +77,9 @@ router.patch('/deliveries/:id', requireCap('distribusiPengiriman'), validate({ p
 // ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──
 router.get('/gallon', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
 router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);
+// Opening (go-live) depot stock — same stock-management cap as a correction. Append-only:
+// records the delta as an 'opening' movement, never overwrites the ledger.
+router.post('/gallon/opening', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.openingStockSchema }), ctrl.setOpeningStock);
 
 // NOTE: no DELETE routes anywhere — distribusi records are immutable/append-only.
 module.exports = router;
