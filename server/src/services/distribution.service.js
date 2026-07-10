@@ -171,6 +171,8 @@ function custClient(c) {
     lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, address: c.address || '',
     mapsUrl: c.mapsUrl || '', mapsLink, hasLocation: !!mapsLink,
     locationSetAt: c.locationSetAt ? new Date(c.locationSetAt).getTime() : null, locationSetByName: c.locationSetByName || null,
+    active: c.active !== false,   // deactivated customers are hidden from active list + new txn/delivery selection
+    deactivatedAt: c.deactivatedAt ? new Date(c.deactivatedAt).getTime() : null, deactivatedByName: c.deactivatedByName || null,
   };
 }
 // Normalise + serialise a billing-reminder config. Any combination of modes; empty → ''.
@@ -188,8 +190,11 @@ function cleanReminder(r) {
 }
 // Per-customer rollups from the (immutable) transactions: total gallons, running
 // bon (sisaBon = bon booked − pelunasan collected, floored at 0), last activity.
-async function listCustomers(user, qFleet) {
-  const rows = await prisma.customer.findMany({ where: fleetWhere(user, 'armada', qFleet), orderBy: { name: 'asc' } });
+async function listCustomers(user, qFleet, status) {
+  // status: 'active' (default) hides deactivated · 'inactive' shows only deactivated · 'all' shows both.
+  const st = status === 'inactive' || status === 'all' ? status : 'active';
+  const activeWhere = st === 'active' ? { active: { not: false } } : st === 'inactive' ? { active: false } : {};
+  const rows = await prisma.customer.findMany({ where: { ...fleetWhere(user, 'armada', qFleet), ...activeWhere }, orderBy: { name: 'asc' } });
   const txns = await prisma.distTransaction.findMany({ where: fleetWhere(user, 'fleetId', qFleet), select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true } });
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const agg = {};
@@ -328,6 +333,63 @@ async function importCustomers(list, actor) {
   return { data: out, imported: created, received: rows.length };
 }
 
+// Small rollup used by both the deactivate flow and the delete-warning modal: how much
+// history is attached to a customer (so the UI/audit can say "N transaksi & sisa bon Rp X").
+async function customerImpact(id) {
+  const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, include: { corrections: true } });
+  let bon = 0, pelunasan = 0;
+  txns.forEach((t) => { const eff = t.amount + priceDelta(t.corrections); if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; });
+  return { txnCount: txns.length, sisaBon: Math.max(0, bon - pelunasan) };
+}
+
+// Mode (a) — Nonaktifkan: soft-hide the customer. ALL history (transactions, sisa bon,
+// price history, deliveries) is kept and remains viewable; the customer just drops out of
+// the active list + new txn/delivery selection. Reversible via reactivateCustomer.
+async function deactivateCustomer(id, actor) {
+  const c = await prisma.customer.findUnique({ where: { id } });
+  if (!c) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, c.armada)) throw ApiError.notFound('Customer not found');   // out of scope
+  const snap = await actorSnap(actor);
+  if (c.active === false) return custClient(c);   // already inactive — idempotent
+  const updated = await prisma.customer.update({ where: { id }, data: { active: false, deactivatedAt: new Date(), deactivatedByName: snap.actorName } });
+  const imp = await customerImpact(id);
+  await logAudit('pelanggan', `Nonaktifkan pelanggan: ${c.name}`, `Riwayat tetap · ${imp.txnCount} transaksi · sisa bon ${imp.sisaBon}`, snap, c.armada);
+  return custClient(updated);
+}
+// Restore a deactivated customer back to the active list.
+async function reactivateCustomer(id, actor) {
+  const c = await prisma.customer.findUnique({ where: { id } });
+  if (!c) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, c.armada)) throw ApiError.notFound('Customer not found');   // out of scope
+  const snap = await actorSnap(actor);
+  const updated = await prisma.customer.update({ where: { id }, data: { active: true, deactivatedAt: null, deactivatedByName: null } });
+  await logAudit('pelanggan', `Aktifkan kembali pelanggan: ${c.name}`, `Kembali ke daftar aktif`, snap, c.armada);
+  return custClient(updated);
+}
+// Mode (b) — Hapus permanen: delete the customer AND every related record in one
+// transaction. FK relations default RESTRICT, so children are deleted first, deepest
+// first: corrections (via their transaction) → transactions → deliveries → price history
+// → invoices → gallon movements → the customer. Irreversible; the impact is audited BEFORE
+// the wipe so the log survives (audit rows are not tied to the customer by FK).
+async function deleteCustomer(id, actor) {
+  const c = await prisma.customer.findUnique({ where: { id } });
+  if (!c) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, c.armada)) throw ApiError.notFound('Customer not found');   // out of scope
+  const snap = await actorSnap(actor);
+  const imp = await customerImpact(id);
+  await prisma.$transaction([
+    prisma.correction.deleteMany({ where: { transaction: { customerId: id } } }),
+    prisma.distTransaction.deleteMany({ where: { customerId: id } }),
+    prisma.delivery.deleteMany({ where: { customerId: id } }),
+    prisma.priceHistory.deleteMany({ where: { customerId: id } }),
+    prisma.distInvoice.deleteMany({ where: { customerId: id } }),
+    prisma.gallonMovement.deleteMany({ where: { customerId: id } }),
+    prisma.customer.delete({ where: { id } }),
+  ]);
+  await logAudit('pelanggan', `Hapus permanen pelanggan: ${c.name}`, `${imp.txnCount} transaksi & sisa bon ${imp.sisaBon} ikut terhapus · tidak bisa dikembalikan`, snap, c.armada);
+  return { ok: true, deleted: { id, name: c.name }, impact: imp };
+}
+
 // Owner-only master price change. Appends price_history + audit; does NOT touch any
 // existing transaction (their unit_price_locked stays exactly as sold).
 async function updatePrice(id, newPriceRaw, actor, scopeRaw) {
@@ -439,6 +501,9 @@ async function createTransaction(body, actor) {
   if (!customer) throw ApiError.badRequest('customerId does not reference an existing customer');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');   // cross-fleet write blocked
   const method = METHODS.includes(body.method) ? body.method : 'lunas';
+  // Deactivated customer: no new SALES (water out), but still allow pelunasan so any
+  // outstanding bon can be collected. Restore the customer to sell to them again.
+  if (customer.active === false && method !== 'pelunasan') throw ApiError.badRequest('Pelanggan nonaktif — aktifkan kembali untuk transaksi baru.');
   const fleetId = customer.armada || '';   // fleet is COPIED from the customer (not client-set)
 
   // ── Standalone BON PAYMENT (Pelunasan) — no water sold, qty 0, no gallon movement.
@@ -788,7 +853,7 @@ async function bonMapFor(custIds) {
 async function deliveryBoard(user, date, qFleet) {
   const dow = DOW(date);
   // customers scheduled today AND within the user's fleet scope; a stop needs a fleet.
-  const custs = await prisma.customer.findMany({ where: fleetWhere(user, 'armada', qFleet) });
+  const custs = await prisma.customer.findMany({ where: { ...fleetWhere(user, 'armada', qFleet), active: { not: false } } });
   const scheduled = custs.filter((c) => {
     let d = []; try { d = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
     return Array.isArray(d) && d.includes(dow) && (c.armada || '').trim();
@@ -852,6 +917,7 @@ async function addOrder(body, actor) {
   const c = await prisma.customer.findUnique({ where: { id: String(body.customerId || '') } });
   if (!c) throw ApiError.notFound('Customer not found');
   if (!fleetAllows(actor, c.armada)) throw ApiError.forbidden('Pelanggan di luar akses Anda.');
+  if (c.active === false) throw ApiError.badRequest('Pelanggan nonaktif — aktifkan kembali untuk menambah orderan.');
   if (!(c.armada || '').trim()) throw ApiError.badRequest('Pelanggan belum punya armada.');
   const snap = await actorSnap(actor);
   const qty = body.qty != null ? Math.max(0, int(body.qty)) : null;
@@ -897,7 +963,7 @@ async function cashIntegration(user, query) {
   const q = query || {};
   const [t, c, a] = await Promise.all([
     listTransactions({ dateFrom: q.dateFrom, dateTo: q.dateTo, fleet: q.fleet }, user),
-    listCustomers(user, q.fleet),
+    listCustomers(user, q.fleet, 'all'),   // include deactivated — they may still carry outstanding bon
     listAudit({ limit: 500, fleet: q.fleet }, user),
   ]);
   return { transactions: t.data, customers: c.data, audit: a.data };
@@ -907,6 +973,7 @@ module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
+  deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,

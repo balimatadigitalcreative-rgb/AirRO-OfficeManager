@@ -755,13 +755,68 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
   );
 }
 
+// Two-option customer removal modal. Option (a) Nonaktifkan is the safe default (history
+// kept, reversible); option (b) Hapus permanen is destructive and requires a firm confirm —
+// the checkbox always, plus typing the exact name when the customer carries transactions or
+// sisa bon (so an accidental wipe of real data can't happen with one click).
+function DeleteCustomerModal({ customer, busy, onDeactivate, onDelete, onClose }) {
+  const [mode, setMode] = uSx('deactivate');       // 'deactivate' (default, highlighted) | 'delete'
+  const [understand, setUnderstand] = uSx(false);
+  const [typed, setTyped] = uSx('');
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const txnCount = customer.txnCount || 0;
+  const sisaBon = customer.sisaBon || 0;
+  const hasHistory = txnCount > 0 || sisaBon > 0;
+  const nameOk = typed.trim().toLowerCase() === String(customer.name || '').trim().toLowerCase();
+  const canDeleteNow = mode === 'delete' && understand && (!hasHistory || nameOk);
+  const primary = () => { if (busy) return; if (mode === 'deactivate') onDeactivate(); else if (canDeleteNow) onDelete(); };
+  const opt = (key, title, desc, cls) => (
+    <button type="button" className={`dist-del-opt ${cls} ${mode === key ? 'on' : ''}`} onClick={() => setMode(key)}>
+      <span className="dist-del-radio">{mode === key ? <IconCheck s={13} /> : null}</span>
+      <span className="dist-del-opt-body"><span className="dist-del-opt-title">{title}{key === 'deactivate' && <span className="dist-del-safe">{trD('dist.delSafer')}</span>}</span><span className="dist-del-opt-desc">{desc}</span></span>
+    </button>
+  );
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 260 }}>
+      <div className="modal-card dist-del-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.delTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.delSubtitle', { name: customer.name })}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {opt('deactivate', trD('dist.delOptDeactivate'), trD('dist.delOptDeactivateDesc'), 'safe')}
+          {opt('delete', trD('dist.delOptDelete'), trD('dist.delOptDeleteDesc'), 'danger')}
+          {mode === 'delete' && (
+            <div className="dist-del-confirm">
+              {hasHistory && <div className="dist-del-warn"><IconWarn s={16} />{trD('dist.delWarnHistory', { n: txnCount, rp: rpFull(sisaBon) })}</div>}
+              <label className="dist-del-check"><input type="checkbox" checked={understand} onChange={(e) => setUnderstand(e.target.checked)} /><span>{trD('dist.delUnderstand')}</span></label>
+              {hasHistory && (
+                <div className="dist-del-typebox">
+                  <div className="dist-del-typelbl">{trD('dist.delTypeName')}</div>
+                  <input className="fld" value={typed} placeholder={customer.name} onChange={(e) => setTyped(e.target.value)} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
+          {mode === 'deactivate'
+            ? <button className="btn btn-primary" disabled={busy} onClick={primary}>{busy ? '…' : trD('dist.delConfirmDeactivate')}</button>
+            : <button className="btn dist-btn-danger" disabled={busy || !canDeleteNow} onClick={primary}>{busy ? '…' : trD('dist.delConfirmDelete')}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════ PELANGGAN (list + detail + add + import) ════════════════
 // `fleet` is the SINGLE app-wide armada source (shell state ← /settings airro_fleet,
 // the same list managed in Setoran → Kelola Armada). Distribusi never keeps its own
 // copy — changing a plate there is reflected here immediately.
-function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
+function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
+  const [statusFilter, setStatusFilter] = uSx('active');   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
+  const [delFor, setDelFor] = uSx(null);                   // customer being removed → opens the 2-option DeleteCustomerModal
+  const [delBusy, setDelBusy] = uSx(false);
   const [loadErr, setLoadErr] = uSx('');   // customer-list load failure → message + retry (never a silent hang)
   const [types, setTypes] = uSx([]);
   const [detail, setDetail] = uSx(null);
@@ -794,7 +849,9 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
     if (!(window.API && window.API.distribusi)) return Promise.resolve();
     setLoadErr('');   // keep any current list visible while refreshing; only retry() resets to the spinner
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000));
-    return Promise.race([window.API.distribusi.customers.list(ef), timeout])
+    // Only cap holders may view the Nonaktif list; everyone else is forced to 'active'.
+    const st = (canDelete && statusFilter === 'inactive') ? 'inactive' : 'active';
+    return Promise.race([window.API.distribusi.customers.list(ef, st), timeout])
       .then((r) => { setCusts(r.data || []); setLoadErr(''); })
       .catch((e) => { setLoadErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
@@ -812,7 +869,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
     };
     tryLoad(40);   // ~6s grace for the API to become ready
     return () => { cancelled = true; };
-  }, [refreshKey, ef]);
+  }, [refreshKey, ef, statusFilter]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
   const typeMap = {}; types.forEach((t) => { typeMap[t.id] = t; });
@@ -837,6 +894,28 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
     window.API.distribusi.customers.cancelPriceAdjustment(batchId)
       .then(() => { flash(trD('dist.pcCancelled')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
       .catch(() => {});
+  };
+  // Customer removal (gated distribusiCustomerDelete). Deactivate = soft (history kept,
+  // restorable); reactivate = restore; deletePermanent = irreversible wipe. The modal drives
+  // which path runs; every result refreshes the list + notifies the shell.
+  const doDeactivate = () => {
+    if (!delFor) return; setDelBusy(true);
+    window.API.distribusi.customers.deactivate(delFor.id)
+      .then(() => { flash(trD('dist.delDeactivated', { name: delFor.name })); setDelFor(null); setView('list'); setDetail(null); reload(); if (onChanged) onChanged(); })
+      .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')))
+      .finally(() => setDelBusy(false));
+  };
+  const doDeletePermanent = () => {
+    if (!delFor) return; setDelBusy(true);
+    window.API.distribusi.customers.remove(delFor.id)
+      .then(() => { flash(trD('dist.delDeleted', { name: delFor.name })); setDelFor(null); setView('list'); setDetail(null); reload(); if (onChanged) onChanged(); })
+      .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')))
+      .finally(() => setDelBusy(false));
+  };
+  const doReactivate = (c) => {
+    window.API.distribusi.customers.reactivate(c.id)
+      .then(() => { flash(trD('dist.delReactivated', { name: c.name })); if (detail && detail.id === c.id) openDetail(c.id); reload(); if (onChanged) onChanged(); })
+      .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
   };
   const defReminder = () => ({ enabled: false, dueDay: 0, weekday: '', overdueDays: 0, gallonThreshold: 0, bonThreshold: 0 });
   const remOf = (r) => (r && typeof r === 'object') ? { ...defReminder(), ...r, enabled: !!r.enabled } : defReminder();
@@ -1019,7 +1098,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
           <div className="card dist-cd-head">
             <span className="dist-cd-av">{initialsOf(d.name)}</span>
             <div style={{ flex: 1, minWidth: 180 }}>
-              <div className="dist-cd-namerow"><h2 className="dist-cd-name">{d.name}</h2>{tag(d.type)}</div>
+              <div className="dist-cd-namerow"><h2 className="dist-cd-name">{d.name}</h2>{tag(d.type)}{d.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
               <div className="dist-cd-phone">{d.phone || '—'}</div>
               <div className="dist-cd-meta">
                 <span><IconCalendar s={13} />{trD('dist.kirimHari')}: <b>{days || '—'}</b></span>
@@ -1041,6 +1120,8 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
               {(canInput || canCustomers) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => tagLocation(d.id, d.hasLocation, () => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }, (m) => flash(m))}><IconPin s={14} />{d.hasLocation ? trD('dist.locUpdate') : trD('dist.locTag')}</button>}
               {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
               {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
+              {canDelete && d.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={() => doReactivate(d)}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
+              {canDelete && <button type="button" className="btn btn-ghost btn-sm dist-del-btn" onClick={() => setDelFor(d)}><IconTrash s={14} />{trD('dist.delCust')}</button>}
             </div>
           </div>
           <div className="dist-cd-cols">
@@ -1099,6 +1180,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
         {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {renderForm()}
         {typesModal()}
+        {delFor && <DeleteCustomerModal customer={delFor} busy={delBusy} onDeactivate={doDeactivate} onDelete={doDeletePermanent} onClose={() => setDelFor(null)} />}
         {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
       </div>
     );
@@ -1116,6 +1198,12 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
       <div className="dist-tx-toolbar">
         <div className="dist-search"><IconSearch s={16} /><input value={q} placeholder={trD('dist.searchCust')} onChange={(e) => setQ(e.target.value)} /></div>
         <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
+        {canDelete && (
+          <div className="dist-chips dist-status-chips">
+            <button type="button" className={`dist-chip ${statusFilter === 'active' ? 'on' : ''}`} onClick={() => setStatusFilter('active')}>{trD('dist.stActive')}</button>
+            <button type="button" className={`dist-chip ${statusFilter === 'inactive' ? 'on' : ''}`} onClick={() => setStatusFilter('inactive')}>{trD('dist.stInactive')}</button>
+          </div>
+        )}
         <div style={{ flex: 1 }} />
         {canCustomers ? (
           <div className="dist-cust-actions">
@@ -1138,10 +1226,10 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
         {rows.map((c) => {
           const days = fmtDays(c.deliveryDays);
           return (
-            <div key={c.id} className="dist-cust-row" onClick={() => openDetail(c.id)}>
+            <div key={c.id} className={`dist-cust-row ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetail(c.id)}>
               <span className="dist-txn-av">{initialsOf(c.name)}</span>
               <div className="dist-cust-main">
-                <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}{!c.hasLocation && <span className="dist-noloc-badge"><IconPin s={10} />{trD('dist.locNotSet')}</span>}</div>
+                <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}{c.active !== false && !c.hasLocation && <span className="dist-noloc-badge"><IconPin s={10} />{trD('dist.locNotSet')}</span>}</div>
                 <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
                 {(days || c.armada) && (
                   <div className="dist-cust-meta">
@@ -1155,6 +1243,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
                 <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
               </div>
               <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpFull(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
+              {canDelete && c.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={(e) => { e.stopPropagation(); doReactivate(c); }}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
               <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
             </div>
           );
@@ -1163,6 +1252,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
 
       {renderForm()}
       {typesModal()}
+      {delFor && <DeleteCustomerModal customer={delFor} busy={delBusy} onDeactivate={doDeactivate} onDelete={doDeletePermanent} onClose={() => setDelFor(null)} />}
 
       {impOpen && (
         <div className="modal-scrim" onClick={() => setImpOpen(false)} style={{ zIndex: 200 }}>

@@ -12,7 +12,7 @@ const ROLE_PERMS = {
     kasbon: false, kasbonApprove: false,
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true,
   },
   gm: {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
@@ -20,7 +20,7 @@ const ROLE_PERMS = {
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true,
   },
   hrd: {
     company: false, cashflow: false, employees: true, empDetail: true, attendance: true, addEntry: false, edit: false,
@@ -163,13 +163,14 @@ function deriveDistribusiCaps(perms) {
   if (p.distribusiGallon === undefined) p.distribusiGallon = legacy;
   if (p.distribusiPengiriman === undefined) p.distribusiPengiriman = legacy;
   if (p.distribusiOrder === undefined) p.distribusiOrder = legacy;
-  // Route-ordering is derived ONLY from the old combined `distribusi` (so a user who had
-  // full distribusi access keeps it) — NOT from distribusiPengiriman. That's the safe
-  // default: a plain "view/run the board" user does not silently gain reorder rights.
+  // Route-ordering + customer-delete derive ONLY from the old combined `distribusi` (so a
+  // user who had full distribusi access keeps them) — NOT from distribusiPengiriman/
+  // Customers. Safe default: a plain view/run/manage user doesn't silently gain them.
   if (p.distribusiRute === undefined) p.distribusiRute = legacy;
+  if (p.distribusiCustomerDelete === undefined) p.distribusiCustomerDelete = legacy;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete);
   return p;
 }
 

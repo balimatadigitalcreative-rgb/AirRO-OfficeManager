@@ -1074,6 +1074,36 @@ select.fld::-ms-expand { display: none; }
 .dist-deliv-loc .dist-link, .dist-cd-meta .dist-link { display: inline-flex; align-items: center; gap: 4px; }
 .dist-noloc { color: var(--warn); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
 .dist-noloc-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--warn); background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn); border-radius: 6px; padding: 1px 6px; }
+/* ── Customer deactivate / delete ── */
+.dist-inactive-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--text-mut); background: var(--card-soft, #f1f5f9); border: 1px solid var(--border-soft); border-radius: 6px; padding: 1px 6px; }
+.dist-cust-row.is-inactive { opacity: .62; }
+.dist-cust-row.is-inactive .dist-txn-name { text-decoration: line-through; text-decoration-color: var(--text-faint); }
+.dist-status-chips { margin-left: 4px; }
+.dist-del-btn { color: var(--danger, #dc2626); }
+.dist-del-btn:hover { background: var(--danger-bg, #fef2f2); }
+.dist-reactivate { color: var(--green-700); flex-shrink: 0; }
+.dist-btn-danger { background: var(--danger, #dc2626); color: #fff; border-color: var(--danger, #dc2626); }
+.dist-btn-danger:hover:not(:disabled) { filter: brightness(1.06); }
+.dist-btn-danger:disabled { opacity: .5; cursor: not-allowed; }
+.dist-del-card { max-width: 520px; }
+.dist-del-opt { display: flex; gap: 11px; width: 100%; text-align: left; align-items: flex-start; padding: 13px 14px; border: 1.5px solid var(--border-soft); border-radius: 13px; background: var(--card); cursor: pointer; margin-bottom: 10px; transition: border-color .12s, background .12s; }
+.dist-del-opt:hover { border-color: var(--border); }
+.dist-del-opt.safe.on { border-color: var(--green-700); background: var(--green-50, #ecfdf5); }
+.dist-del-opt.danger.on { border-color: var(--danger, #dc2626); background: var(--danger-bg, #fef2f2); }
+.dist-del-radio { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); flex-shrink: 0; margin-top: 1px; color: #fff; }
+.dist-del-opt.safe.on .dist-del-radio { background: var(--green-700); border-color: var(--green-700); }
+.dist-del-opt.danger.on .dist-del-radio { background: var(--danger, #dc2626); border-color: var(--danger, #dc2626); }
+.dist-del-opt-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dist-del-opt-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; color: var(--text); }
+.dist-del-opt-desc { font-size: 12px; line-height: 1.5; color: var(--text-mut); }
+.dist-del-safe { font-size: 10px; font-weight: 800; color: var(--green-700); background: var(--green-50, #ecfdf5); border: 1px solid var(--green-700); border-radius: 5px; padding: 0 5px; }
+.dist-del-confirm { margin-top: 4px; padding: 12px 14px; border: 1px dashed var(--danger, #dc2626); border-radius: 12px; background: var(--danger-bg, #fef2f2); }
+.dist-del-warn { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; font-weight: 700; color: var(--danger, #b91c1c); margin-bottom: 10px; }
+.dist-del-warn svg { flex-shrink: 0; margin-top: 1px; }
+.dist-del-check { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+.dist-del-check input { margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--danger, #dc2626); }
+.dist-del-typebox { margin-top: 11px; }
+.dist-del-typelbl { font-size: 12px; font-weight: 700; color: var(--text-mut); margin-bottom: 5px; }
 .dist-cd-addr { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-mut); margin-top: 6px; }
 .dist-mapsurl-row { display: flex; gap: 8px; align-items: stretch; }
 .dist-mapsurl-row .fld { flex: 1; min-width: 0; }

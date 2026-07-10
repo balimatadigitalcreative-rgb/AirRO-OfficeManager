@@ -58,6 +58,8 @@ const IconUserCircle = (p) => <Ic {...p}><circle cx="12" cy="12" r="9"/><circle 
 const IconSparkle = (p) => <Ic {...p}><path d="M12 3l1.9 5.2L19 10l-5.1 1.8L12 17l-1.9-5.2L5 10l5.1-1.8z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/></Ic>;
 const IconSend = (p) => <Ic {...p}><path d="M4 12l16-8-6 16-3-6-7-2z"/><path d="M11 13l3-3"/></Ic>;
 const IconRefresh = (p) => <Ic {...p}><path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v4h-4"/></Ic>;
+const IconTrash = (p) => <Ic {...p}><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></Ic>;
+const IconWarn = (p) => <Ic {...p}><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></Ic>;
 
 Object.assign(window, {
   Logo, IconDashboard, IconTx, IconCustomers, IconInvoice, IconExpense, IconReport,
@@ -67,5 +69,5 @@ Object.assign(window, {
   IconCoinIn, IconCoinOut, IconDrop, IconGas, IconWrench, IconBolt, IconUsersGroup,
   IconStore, IconFork, IconHome, IconPin,
   IconLock, IconLogout, IconShield, IconBackspace, IconPencil, IconUserCircle,
-  IconSparkle, IconSend, IconRefresh,
+  IconSparkle, IconSend, IconRefresh, IconTrash, IconWarn,
 });

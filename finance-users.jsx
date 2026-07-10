@@ -49,6 +49,7 @@ const CAP_GROUPS = [
     ['distribusiOrder', 'Tambah Orderan Tambahan'],
     ['distribusiRute', 'Atur Urutan Rute Pengiriman'],
     ['distribusiHargaMaster', 'Ubah Harga Master'],
+    ['distribusiCustomerDelete', 'Hapus / Nonaktifkan Pelanggan'],
     ['distribusiAudit', 'Lihat Log Audit'],
   ] },
 ];

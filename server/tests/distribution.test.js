@@ -390,3 +390,71 @@ describe('Distribusi — gallon stock (loan/exchange ledger)', () => {
     expect(audit.body.data.some((a) => /Koreksi stok galon/.test(a.title))).toBe(true);
   });
 });
+
+describe('Distribusi — customer deactivate / reactivate / permanent delete', () => {
+  let gm, noDel, cid;   // gm holds distribusiCustomerDelete; noDel has broad distribusi but NOT the delete cap
+  const listIds = async (t, status) => (await request(app).get('/api/v1/distribusi/customers' + (status ? `?status=${status}` : '')).set(auth(t))).body.data.map((c) => c.id);
+  beforeAll(async () => {
+    gm = (await reg({ name: 'GM Del', username: 'gm_del', password: 'secret123', role: 'gm' })).token;
+    const u = await reg({ name: 'NoDel', username: 'nodel_d', password: 'secret123', role: 'finance' });
+    // Broad distribusi access but explicitly WITHOUT the delete cap → button/endpoint must reject.
+    await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(gm)).send({ permissions: { distribusi: true, distribusiCustomers: true, distribusiCustomerDelete: false } });
+    noDel = await login('nodel_d', 'secret123');
+    const c = await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'Toko Hapus', type: 'reguler', masterPrice: 5000 });
+    cid = c.body.data.id;
+    // give the customer real history: a bon sale (creates sisa bon + a transaction)
+    await request(app).post('/api/v1/distribusi/transactions').set(auth(gm)).send({ customerId: cid, qty: 4, method: 'bon', txnDate: '2026-10-01' });
+  });
+
+  it('a user WITHOUT distribusiCustomerDelete is forbidden on deactivate / reactivate / delete', async () => {
+    expect((await request(app).patch(`/api/v1/distribusi/customers/${cid}/deactivate`).set(auth(noDel))).status).toBe(403);
+    expect((await request(app).patch(`/api/v1/distribusi/customers/${cid}/reactivate`).set(auth(noDel))).status).toBe(403);
+    expect((await request(app).delete(`/api/v1/distribusi/customers/${cid}`).set(auth(noDel))).status).toBe(403);
+  });
+
+  it('deactivate → hidden from the active list but kept (history + sisa bon intact, still viewable)', async () => {
+    const before = await request(app).get(`/api/v1/distribusi/customers/${cid}`).set(auth(gm));
+    expect(before.body.data.sisaBon).toBe(20000);   // 4 × 5000 bon
+    const r = await request(app).patch(`/api/v1/distribusi/customers/${cid}/deactivate`).set(auth(gm));
+    expect(r.status).toBe(200);
+    expect(r.body.data.active).toBe(false);
+    expect(await listIds(gm)).not.toContain(cid);                 // gone from active (default)
+    expect(await listIds(gm, 'inactive')).toContain(cid);          // shows under Nonaktif
+    const det = await request(app).get(`/api/v1/distribusi/customers/${cid}`).set(auth(gm));
+    expect(det.status).toBe(200);
+    expect(det.body.data.txnCount).toBe(1);                        // history intact
+    expect(det.body.data.sisaBon).toBe(20000);                    // bon preserved
+  });
+
+  it('an inactive customer rejects a new sale but still accepts pelunasan (bon settlement)', async () => {
+    const sale = await request(app).post('/api/v1/distribusi/transactions').set(auth(gm)).send({ customerId: cid, qty: 2, method: 'lunas', txnDate: '2026-10-02' });
+    expect(sale.status).toBe(400);
+    const pay = await request(app).post('/api/v1/distribusi/transactions').set(auth(gm)).send({ customerId: cid, method: 'pelunasan', payAmount: 5000, txnDate: '2026-10-02' });
+    expect(pay.status).toBe(201);
+    expect(pay.body.data.sisaBon).toBe(15000);   // 20000 − 5000
+  });
+
+  it('reactivate → back on the active list', async () => {
+    const r = await request(app).patch(`/api/v1/distribusi/customers/${cid}/reactivate`).set(auth(gm));
+    expect(r.status).toBe(200);
+    expect(r.body.data.active).toBe(true);
+    expect(await listIds(gm)).toContain(cid);
+  });
+
+  it('permanent delete → customer + all related data gone, and the wipe is audited', async () => {
+    const r = await request(app).delete(`/api/v1/distribusi/customers/${cid}`).set(auth(gm));
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(r.body.impact.txnCount).toBeGreaterThanOrEqual(1);
+    // customer no longer exists
+    expect((await request(app).get(`/api/v1/distribusi/customers/${cid}`).set(auth(gm))).status).toBe(404);
+    expect(await listIds(gm, 'all')).not.toContain(cid);
+    // related transactions cascaded away
+    expect(await prisma.distTransaction.count({ where: { customerId: cid } })).toBe(0);
+    expect(await prisma.priceHistory.count({ where: { customerId: cid } })).toBe(0);
+    expect(await prisma.delivery.count({ where: { customerId: cid } })).toBe(0);
+    // audit row survives the wipe (not FK-tied to the customer)
+    const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(gm));
+    expect(audit.body.data.some((a) => /Hapus permanen pelanggan: Toko Hapus/.test(a.title))).toBe(true);
+  });
+});

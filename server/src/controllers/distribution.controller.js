@@ -89,7 +89,7 @@ const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), 
 const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), order: z.array(z.string().min(1)).max(2000) });
 const closeSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), generalNote: z.string().max(500).optional(), reasons: z.record(z.string().max(300)).optional() });
 const closeoutQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
-const custListQuery = z.object({ fleet: z.string().max(60).optional() });
+const custListQuery = z.object({ fleet: z.string().max(60).optional(), status: z.enum(['active', 'inactive', 'all']).optional() });
 const idParams = z.object({ id: z.string().min(1) });
 const batchParams = z.object({ batchId: z.string().min(1) });
 const invoiceCreateSchema = z.object({
@@ -101,7 +101,7 @@ const invoiceCreateSchema = z.object({
 });
 
 // ── customers ──
-const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet)));
+const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet, req.query.status)));
 const getCustomer = asyncHandler(async (req, res) => res.json({ data: await service.getCustomer(req.params.id, req.user) }));
 const createCustomer = asyncHandler(async (req, res) => { const c = await service.createCustomer(req.body, req.user); bcast('create', c.id); res.status(201).json({ data: c }); });
 const updateCustomer = asyncHandler(async (req, res) => { const c = await service.updateCustomer(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
@@ -110,6 +110,10 @@ const importCustomers = asyncHandler(async (req, res) => { const r = await servi
 const updatePrice = asyncHandler(async (req, res) => { const c = await service.updatePrice(req.params.id, req.body.newPrice, req.user, req.body.scope); bcast('price', c.id); res.json({ data: c }); });
 const pricePreview = asyncHandler(async (req, res) => res.json({ data: await service.pricePreview(req.params.id, req.body.newPrice, req.user) }));
 const cancelPriceAdjustment = asyncHandler(async (req, res) => { const r = await service.cancelPriceAdjustment(req.params.batchId, req.user); bcast('price', req.params.batchId); res.json({ data: r }); });
+// Customer deactivate (soft, reversible) / reactivate / hard delete — all gated distribusiCustomerDelete.
+const deactivateCustomer = asyncHandler(async (req, res) => { const c = await service.deactivateCustomer(req.params.id, req.user); bcast('deactivate', c.id); res.json({ data: c }); });
+const reactivateCustomer = asyncHandler(async (req, res) => { const c = await service.reactivateCustomer(req.params.id, req.user); bcast('reactivate', c.id); res.json({ data: c }); });
+const deleteCustomer = asyncHandler(async (req, res) => { const r = await service.deleteCustomer(req.params.id, req.user); bcast('delete', req.params.id); res.json(r); });
 
 // ── customer types (editable dictionary) ──
 const listTypes = asyncHandler(async (req, res) => res.json(await service.listTypes()));
@@ -166,6 +170,7 @@ const gallonCorrection = asyncHandler(async (req, res) => { const m = await serv
 
 module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, setLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
+  deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,

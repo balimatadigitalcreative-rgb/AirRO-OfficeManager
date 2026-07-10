@@ -108,7 +108,8 @@
       // A `fleet` filter ('Merah'/'Biru'/…) narrows a full-access user to one fleet;
       // scoped users are always restricted server-side regardless. Falsy/'all' = no filter.
       customers: {
-        list: (fleet) => req('GET', '/distribusi/customers' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
+        // status: undefined/'active' = active only (default); 'inactive' = deactivated only; 'all' = both.
+        list: (fleet, status) => { const q = []; if (fleet && fleet !== 'all') q.push('fleet=' + encodeURIComponent(fleet)); if (status && status !== 'active') q.push('status=' + encodeURIComponent(status)); return req('GET', '/distribusi/customers' + (q.length ? '?' + q.join('&') : '')); },
         get: (id) => req('GET', '/distribusi/customers/' + id),
         create: (data) => req('POST', '/distribusi/customers', data),
         update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),
@@ -118,6 +119,10 @@
         setPrice: (id, newPrice, scope) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice, scope: scope || null }),
         pricePreview: (id, newPrice) => req('POST', '/distribusi/customers/' + id + '/price/preview', { newPrice }),
         cancelPriceAdjustment: (batchId) => req('DELETE', '/distribusi/price-adjustments/' + batchId),
+        // Customer removal (gated distribusiCustomerDelete): deactivate = soft/reversible; remove = permanent wipe.
+        deactivate: (id) => req('PATCH', '/distribusi/customers/' + id + '/deactivate'),
+        reactivate: (id) => req('PATCH', '/distribusi/customers/' + id + '/reactivate'),
+        remove: (id) => req('DELETE', '/distribusi/customers/' + id),
       },
       // Editable customer-type dictionary (id + label).
       types: {

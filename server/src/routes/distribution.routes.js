@@ -21,6 +21,11 @@ router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ par
 // customer-management). Sets lat/lng + stamps who/when; fleet scope enforced.
 router.patch('/customers/:id/location', requireAnyCap(['distribusiInput', 'distribusiPengiriman']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationSchema }), ctrl.setLocation);
 router.post('/customers/import', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
+// Deactivate (soft, reversible) / reactivate / hard-delete a customer — dedicated
+// capability, separate from ordinary customer management. Server enforces the cap + scope.
+router.patch('/customers/:id/deactivate', requireCap('distribusiCustomerDelete'), validate({ params: ctrl.schemas.idParams }), ctrl.deactivateCustomer);
+router.patch('/customers/:id/reactivate', requireCap('distribusiCustomerDelete'), validate({ params: ctrl.schemas.idParams }), ctrl.reactivateCustomer);
+router.delete('/customers/:id', requireCap('distribusiCustomerDelete'), validate({ params: ctrl.schemas.idParams }), ctrl.deleteCustomer);
 // Master-price change is owner-level. Option (a) new-only just writes price_history +
 // audit; option (b) also appends retroactive price adjustments (originals untouched).
 router.post('/customers/:id/price/preview', requireCap('distribusiHargaMaster'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.pricePreviewSchema }), ctrl.pricePreview);

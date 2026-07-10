@@ -429,6 +429,9 @@ model Customer {
   address       String   @default("")          // free-text address (optional)
   locationSetAt DateTime?                       // when the coordinates were last set
   locationSetByName String?                     // who set them (accountability trail)
+  active        Boolean  @default(true)         // false = deactivated (hidden from active list + new txn/delivery, history kept)
+  deactivatedAt DateTime?
+  deactivatedByName String?
   createdById   String?                        // created_by (identity)
   createdByName String?
   createdByRole String?
