@@ -430,6 +430,39 @@ describe('Distribusi — gallon stock (loan/exchange ledger)', () => {
   });
 });
 
+describe('Distribusi — opening stock recognises a legacy "stok awal" depot correction', () => {
+  let sg;   // fleet-scoped GM → its own isolated depot ledger (fleetId = OpeningFleet)
+  const gget = async () => (await request(app).get('/api/v1/distribusi/gallon').set(auth(sg))).body.data;
+  beforeAll(async () => {
+    const r = await reg({ name: 'ScopedGM', username: 'sgm_o', password: 'secret123', role: 'gm' });
+    await request(app).patch(`/api/v1/users/${r.user.id}`).set(auth(owner)).send({ fleetScope: ['OpeningFleet'] });
+    sg = await login('sgm_o', 'secret123');
+  });
+
+  it('a depot correction noted "Stok awal" is read as opening stock (card shows it, not "belum diatur")', async () => {
+    // simulate the pre-feature path: opening entered as a depot correction with a "stok awal" reason
+    const c = await request(app).post('/api/v1/distribusi/gallon/correction').set(auth(sg)).send({ qty: 60, reason: 'Stok awal galon' });
+    expect(c.status).toBe(201);
+    const g = await gget();
+    expect(g.opening).toMatchObject({ set: true, total: 60, adjustCount: 0 });
+    expect(g.opening.setByName).toBe('ScopedGM');
+    expect(g.stock.totalOwned).toBe(60);
+    expect(g.stock.atDepot).toBe(60);
+    // the ledger row is surfaced under the 'opening' tag so card + ledger agree
+    expect(g.movements.some((m) => m.type === 'opening' && m.qty === 60)).toBe(true);
+  });
+
+  it('adjusting nets against the legacy baseline (60 → 80 = +20, never double-counts)', async () => {
+    const r = await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(sg)).send({ qty: 80, reason: 'tambah stok' });
+    expect(r.status).toBe(201);
+    expect(r.body.data.opening).toMatchObject({ total: 80, previous: 60, delta: 20, isFirst: false });
+    const g = await gget();
+    expect(g.opening.total).toBe(80);           // 60 legacy + 20 delta, one source
+    expect(g.stock.totalOwned).toBe(80);        // ledger-consistent, no double count
+    expect(g.stock.atDepot).toBe(80);
+  });
+});
+
 describe('Distribusi — customer deactivate / reactivate / permanent delete', () => {
   let gm, noDel, cid;   // gm holds distribusiCustomerDelete; noDel has broad distribusi but NOT the delete cap
   const listIds = async (t, status) => (await request(app).get('/api/v1/distribusi/customers' + (status ? `?status=${status}` : '')).set(auth(t))).body.data.map((c) => c.id);

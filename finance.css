@@ -1166,6 +1166,8 @@ select.fld::-ms-expand { display: none; }
 .dist-gm-mqty.purchase, .dist-gm-mqty.in { color: var(--green-700); }
 .dist-gm-mqty.out { color: var(--warn); }
 .dist-gm-mqty.corr, .dist-gm-mqty.opening { color: #5b6ed6; }
+.dist-gm-note { display: flex; align-items: flex-start; gap: 7px; font-size: 11.5px; line-height: 1.5; color: var(--text-mut); margin: -4px 2px 12px; }
+.dist-gm-note svg { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
 /* opening-stock summary row */
 .dist-gm-opening { display: flex; align-items: center; gap: 13px; padding: 13px 16px; margin-bottom: 14px; }
 .dist-gm-opening-main { flex: 1; min-width: 0; }

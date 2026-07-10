@@ -754,6 +754,12 @@ const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'retur
 // 'opening' is a depot baseline (owned + at depot, never at a customer). Its qty is a signed
 // delta so an adjustment (nilai_baru − nilai_lama) is another append, never an overwrite.
 const totalEffect = (m) => (m.type === 'purchase' || m.type === 'opening' ? m.qty : (m.type === 'correction' && !m.customerId) ? m.qty : 0);
+// A ledger row that REPRESENTS opening stock. The dedicated 'opening' type, PLUS legacy depot
+// corrections whose note was tagged as opening/starting stock (entered via "Koreksi depot"
+// before this feature existed). Recognising both keeps ONE source of truth: the Stok Awal card,
+// the ledger tag, and the delta baseline all read the same rows.
+const OPENING_NOTE = /stok\s*awal|saldo\s*awal|opening\s*stock/i;
+const isOpeningRow = (m) => m.type === 'opening' || (m.type === 'correction' && !m.customerId && OPENING_NOTE.test(m.note || ''));
 
 // Per-customer held balance (fleet-scoped): Σ(delivery_out − return_in ± customer correction).
 async function gallonBalances(user, qFleet) {
@@ -775,7 +781,10 @@ async function gallonStock(user, qFleet) {
 // own movement type so it shows separately from purchases/deliveries and its provenance is
 // clear. total = Σ opening deltas; first entry = when/who set it, last = when/who last tuned it.
 async function openingInfo(user, qFleet) {
-  const rows = await prisma.gallonMovement.findMany({ where: { active: true, type: 'opening', ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'asc' } });
+  // Pull the dedicated 'opening' rows AND depot corrections, then keep the ones that represent
+  // opening stock — so a baseline set via the old depot-correction flow still counts here.
+  const candidates = await prisma.gallonMovement.findMany({ where: { active: true, customerId: null, type: { in: ['opening', 'correction'] }, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'asc' } });
+  const rows = candidates.filter(isOpeningRow);
   if (!rows.length) return { set: false, total: 0, adjustCount: 0 };
   const total = rows.reduce((a, r) => a + r.qty, 0);
   const first = rows[0], last = rows[rows.length - 1];
@@ -796,7 +805,10 @@ async function setOpeningStock(body, actor) {
   if (!reason) throw ApiError.badRequest('Alasan/catatan wajib diisi.');
   const chosen = (body.fleet && body.fleet !== 'all') ? body.fleet : '';
   const fleetId = resolveWriteFleet(actor, chosen);   // scoped staff forced to their fleet; else global depot ''
-  const existing = await prisma.gallonMovement.findMany({ where: { active: true, type: 'opening', fleetId }, select: { qty: true } });
+  // Baseline = every opening-representing row (dedicated 'opening' + legacy opening corrections),
+  // so an adjustment nets against the real current value and never double-counts.
+  const candidates = await prisma.gallonMovement.findMany({ where: { active: true, customerId: null, type: { in: ['opening', 'correction'] }, fleetId }, select: { type: true, qty: true, note: true, customerId: true } });
+  const existing = candidates.filter(isOpeningRow);
   const current = existing.reduce((a, r) => a + r.qty, 0);
   const isFirst = existing.length === 0;
   const delta = target - current;
@@ -820,7 +832,8 @@ async function gallonSummary(user, qFleet) {
   const balances = Object.keys(balMap).filter((id) => balMap[id] !== 0)
     .map((id) => ({ customerId: id, name: (info[id] && info[id].name) || '—', armada: (info[id] && info[id].armada) || '', held: balMap[id] }))
     .sort((a, b) => b.held - a.held);
-  const movements = rows.map((r) => ({ id: r.id, type: r.type, qty: r.qty, customerId: r.customerId, customerName: r.customerId ? ((info[r.customerId] && info[r.customerId].name) || '—') : null, fleetId: r.fleetId, note: r.note, actorName: r.actorName, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null }));
+  // Display a legacy opening correction under the 'opening' tag so the ledger matches the card.
+  const movements = rows.map((r) => ({ id: r.id, type: isOpeningRow(r) ? 'opening' : r.type, qty: r.qty, customerId: r.customerId, customerName: r.customerId ? ((info[r.customerId] && info[r.customerId].name) || '—') : null, fleetId: r.fleetId, note: r.note, actorName: r.actorName, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null }));
   return { stock, opening, balances, movements };
 }
 // Record a delivery's gallon flow (called from createTransaction). out = full gallons
