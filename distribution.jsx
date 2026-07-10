@@ -245,6 +245,30 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
 // is locked server-side from the customer master price; we only preview it here.
 function shortRef(id) { return '#' + String(id || '').slice(-6).toUpperCase(); }
 function hhmm(ms) { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); }
+// Lazy-load SheetJS from its CDN — only when an .xlsx/.xls file is chosen, so it never
+// touches the initial page load. (CSV needs no library; it's parsed as plain text.)
+function loadSheetJS() {
+  return new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve(window.XLSX);
+    let s = document.getElementById('sheetjs-cdn');
+    if (s) { s.addEventListener('load', () => resolve(window.XLSX)); s.addEventListener('error', () => reject(new Error('cdn'))); return; }
+    s = document.createElement('script'); s.id = 'sheetjs-cdn';
+    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    s.onload = () => (window.XLSX ? resolve(window.XLSX) : reject(new Error('cdn')));
+    s.onerror = () => reject(new Error('cdn'));
+    document.head.appendChild(s);
+  });
+}
+// Split a delimited line the same way the paste box does (tab / comma / semicolon).
+const splitCells = (line) => line.split(/\t|,|;/).map((s) => s.trim());
+// Download a ready-to-fill CSV template (header + one example row).
+function downloadImportTemplate() {
+  const rows = [['Nama', 'No HP', 'Tipe', 'Harga', 'Hari Kirim', 'Armada'], ['Warung Sejahtera', '0821-1122-3344', 'Reguler', '12500', 'Sen;Rab;Jum', 'Merah']];
+  const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-pelanggan.csv';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 // Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
 const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng;
 // Read the device GPS and hand back a ready-made Google Maps link (used by the form's
@@ -755,6 +779,11 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
   const [impOpen, setImpOpen] = uSx(false);
   const [impText, setImpText] = uSx('');
   const [impSaving, setImpSaving] = uSx(false);
+  const [impFileRows, setImpFileRows] = uSx(null);   // 2D cells from an uploaded file (overrides the textarea)
+  const [impFileName, setImpFileName] = uSx('');
+  const [impFileErr, setImpFileErr] = uSx('');
+  const [impFileBusy, setImpFileBusy] = uSx(false);
+  const impFileRef = React.useRef(null);
   const [typesOpen, setTypesOpen] = uSx(false);
 
   const ef = effFleet(fleetScope, distFleet);
@@ -836,29 +865,77 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
     }
   };
 
-  // ── spreadsheet import parsing (type matched by LABEL against the dynamic dictionary) ──
+  // ── spreadsheet import parsing (shared by paste-text AND file upload) ──
   const typeByLabel = {}; types.forEach((t) => { typeByLabel[(t.label || '').toLowerCase()] = t.id; });
   const existing = new Set((custs || []).map((c) => (c.name || '').toLowerCase()));
+  // Rows of cells come from an uploaded file if present, else the pasted textarea.
+  const rawCells = impFileRows || impText.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
+  // Flexible header mapping: recognise common headers in ANY order; if the first row isn't a
+  // header, fall back to the positional order (Nama · No HP · Tipe · Harga).
+  const HRE = { name: /nama|name/i, phone: /hp|phone|telp|telepon|wa\b/i, type: /tipe|type|jenis/i, price: /harga|price|tarif/i, days: /hari|kirim|days/i, armada: /armada|fleet|mobil|kendaraan/i, address: /alamat|address/i, mapsUrl: /maps|link|gmaps|lokasi/i };
+  let colMap = { name: 0, phone: 1, type: 2, price: 3, days: -1, armada: -1, address: -1, mapsUrl: -1 };
+  let dataRows = rawCells;
+  if (rawCells.length) {
+    const h = rawCells[0].join(' ');
+    if (HRE.name.test(h) && HRE.price.test(h)) {   // looks like a header row
+      const hdr = rawCells[0]; const idx = (re) => hdr.findIndex((c) => re.test(c));
+      colMap = { name: Math.max(0, idx(HRE.name)), phone: idx(HRE.phone), type: idx(HRE.type), price: idx(HRE.price), days: idx(HRE.days), armada: idx(HRE.armada), address: idx(HRE.address), mapsUrl: idx(HRE.mapsUrl) };
+      dataRows = rawCells.slice(1);
+    }
+  }
+  const cellAt = (row, i) => (i >= 0 && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
   const seen = new Set();
-  let impLines = impText.split('\n').map((l) => l.trim()).filter(Boolean);
-  if (impLines.length && /nama/i.test(impLines[0]) && /harga|price/i.test(impLines[0])) impLines = impLines.slice(1);
-  const impRows = impLines.map((line) => {
-    const cols = line.split(/\t|,|;/).map((s) => s.trim());
-    const name = cols[0] || ''; const phone = cols[1] || '';
-    const type = typeByLabel[(cols[2] || '').toLowerCase()] || 'reguler';
-    const num = parseInt((cols[3] || '').replace(/[^0-9]/g, ''), 10);
+  const impRows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim())).map((cols) => {
+    const name = cellAt(cols, colMap.name); const phone = cellAt(cols, colMap.phone);
+    const type = typeByLabel[cellAt(cols, colMap.type).toLowerCase()] || 'reguler';
+    const num = parseInt(cellAt(cols, colMap.price).replace(/[^0-9]/g, ''), 10);
+    const dc = cellAt(cols, colMap.days); const days = dc ? DAY_CODES.filter((d) => new RegExp(d, 'i').test(dc)) : [];
+    const armada = cellAt(cols, colMap.armada); const address = cellAt(cols, colMap.address);
+    const mu = cellAt(cols, colMap.mapsUrl); const mapsUrl = /^https?:\/\//i.test(mu) ? mu : '';
     const key = name.toLowerCase(); const dup = existing.has(key) || seen.has(key);
     if (name) seen.add(key);
     const valid = !!name && !!num && !dup;
-    return { name: name || '(kosong)', phone: phone || '—', type, price: num || 0, valid, status: valid ? 'ok' : (!name || !num) ? 'kurang' : 'dup' };
+    return { name: name || '(kosong)', phone: phone || '—', type, price: num || 0, days, armada, address, mapsUrl, valid, status: valid ? 'ok' : (!name || !num) ? 'kurang' : 'dup' };
   });
   const impValid = impRows.filter((r) => r.valid);
+  const resetImport = () => { setImpText(''); setImpFileRows(null); setImpFileName(''); setImpFileErr(''); };
   const commitImport = () => {
     if (!impValid.length || impSaving) return;
     setImpSaving(true);
-    window.API.distribusi.customers.import(impValid.map((r) => ({ name: r.name, phone: r.phone === '—' ? '' : r.phone, type: r.type, masterPrice: r.price })))
-      .then((r) => { setImpSaving(false); setImpOpen(false); setImpText(''); flash(trD('dist.imported', { n: r.imported })); reload(); if (onChanged) onChanged(); })
+    window.API.distribusi.customers.import(impValid.map((r) => ({
+      name: r.name, phone: r.phone === '—' ? '' : r.phone, type: r.type, masterPrice: r.price,
+      ...(r.days.length ? { deliveryDays: r.days } : {}), ...(r.armada ? { armada: r.armada } : {}),
+      ...(r.address ? { address: r.address } : {}), ...(r.mapsUrl ? { mapsUrl: r.mapsUrl } : {}),
+    })))
+      .then((r) => { setImpSaving(false); setImpOpen(false); resetImport(); flash(trD('dist.importedSum', { n: r.imported, m: (r.received || 0) - r.imported })); reload(); if (onChanged) onChanged(); })
       .catch(() => setImpSaving(false));
+  };
+  // Read a chosen file → 2D cells. CSV as text; XLSX/XLS via lazy-loaded SheetJS.
+  const onImpFile = (e) => {
+    const file = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    setImpFileErr(''); setImpFileBusy(true); setImpFileName(file.name); setImpText('');
+    const isXlsx = /\.xlsx?$/i.test(file.name) || /sheet|excel/i.test(file.type);
+    if (isXlsx) {
+      loadSheetJS().then((XLSX) => {
+        const rd = new FileReader();
+        rd.onload = () => {
+          try {
+            const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' }).map((r) => r.map((c) => (c == null ? '' : String(c).trim())));
+            setImpFileRows(rows); setImpFileBusy(false);
+          } catch (ex) { setImpFileErr(trD('dist.importFileErr')); setImpFileBusy(false); setImpFileName(''); }
+        };
+        rd.onerror = () => { setImpFileErr(trD('dist.importFileErr')); setImpFileBusy(false); setImpFileName(''); };
+        rd.readAsArrayBuffer(file);
+      }).catch(() => { setImpFileErr(trD('dist.importXlsxCdnErr')); setImpFileBusy(false); setImpFileName(''); });
+    } else {
+      const rd = new FileReader();
+      rd.onload = () => { setImpFileRows(String(rd.result || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map(splitCells)); setImpFileBusy(false); };
+      rd.onerror = () => { setImpFileErr(trD('dist.importFileErr')); setImpFileBusy(false); setImpFileName(''); };
+      rd.readAsText(file);
+    }
   };
   const impSample = 'Warung Sejahtera\t0821-1122-3344\tReguler\t12500\nKos Anggrek\t0813-7788-9900\tKos\t13000\nCafe Ombak\t0817-2211-3344\tCafe\t14000';
 
@@ -1092,8 +1169,16 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
           <div className="modal-card" style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.importT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.importSub')}</div></div><button className="jp-icon" onClick={() => setImpOpen(false)}><IconClose s={18} /></button></div>
             <div className="modal-body">
-              <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Nama · No HP · Tipe · Harga</b></span><button type="button" className="dist-link" onClick={() => setImpText(impSample)}>{trD('dist.importSample')}</button></div>
-              <textarea className="fld dist-imp-ta" value={impText} placeholder={'Warung Sejahtera\t0821-1122-3344\tReguler\t12500'} onChange={(e) => setImpText(e.target.value)} />
+              <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Nama · No HP · Tipe · Harga</b></span><button type="button" className="dist-link" onClick={downloadImportTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+              <div className="dist-imp-upload">
+                <input ref={impFileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onImpFile} />
+                <button type="button" className="btn btn-ghost" onClick={() => impFileRef.current && impFileRef.current.click()}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.importPick')}</button>
+                {impFileBusy ? <span className="dist-imp-fname"><span className="ui-attach-spin" />{trD('dist.importReading')}</span>
+                  : impFileRows ? <span className="dist-imp-fname"><IconCheck s={13} />{impFileName}<button type="button" className="dist-link" onClick={resetImport} style={{ marginLeft: 8 }}>{trD('dist.importClear')}</button></span>
+                  : <span className="dist-imp-or">{trD('dist.importOr')} <button type="button" className="dist-link" onClick={() => setImpText(impSample)}>{trD('dist.importSample')}</button></span>}
+              </div>
+              {impFileErr && <div className="add-err" style={{ margin: '4px 0 8px' }}><IconClose s={14} />{impFileErr}</div>}
+              {!impFileRows && !impFileBusy && <textarea className="fld dist-imp-ta" value={impText} placeholder={'Warung Sejahtera\t0821-1122-3344\tReguler\t12500'} onChange={(e) => setImpText(e.target.value)} />}
               {impRows.length > 0 && (<>
                 <div className="dist-imp-counts"><span className="dist-imp-ok">{impValid.length} {trD('dist.importReady')}</span><span className="dist-imp-skip">{impRows.length - impValid.length} {trD('dist.importSkip')}</span></div>
                 <div className="dist-imp-preview">
