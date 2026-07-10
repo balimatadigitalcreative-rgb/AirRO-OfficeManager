@@ -59,7 +59,7 @@ router.get('/cash-integration', requireCap('distribusiCashIntegrasi'), validate(
 // marking a stop (terkirim/batal, link a txn) = distribusiPengiriman. ──
 router.get('/deliveries', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.boardQuery }), ctrl.deliveryBoard);
 router.post('/deliveries/order', requireCap('distribusiOrder'), validate({ body: ctrl.schemas.orderSchema }), ctrl.addOrder);
-router.put('/deliveries/reorder', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.reorderSchema }), ctrl.reorderDeliveries);
+router.put('/deliveries/reorder', requireCap('distribusiRute'), validate({ body: ctrl.schemas.reorderSchema }), ctrl.reorderDeliveries);
 router.patch('/deliveries/:id', requireCap('distribusiPengiriman'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.markSchema }), ctrl.markDelivery);
 
 // ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──

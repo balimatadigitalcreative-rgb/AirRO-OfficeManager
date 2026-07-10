@@ -47,6 +47,7 @@ const CAP_GROUPS = [
     ['distribusiGallon', 'Lihat Stok Galon'],
     ['distribusiPengiriman', 'Lihat Papan Pengiriman'],
     ['distribusiOrder', 'Tambah Orderan Tambahan'],
+    ['distribusiRute', 'Atur Urutan Rute Pengiriman'],
     ['distribusiHargaMaster', 'Ubah Harga Master'],
     ['distribusiAudit', 'Lihat Log Audit'],
   ] },

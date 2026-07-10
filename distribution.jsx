@@ -1613,7 +1613,7 @@ function DeliveryTxnModal({ stop, today, onClose, onCreated }) {
     </div>
   );
 }
-function DistDeliveries({ refreshKey, today, canOrder, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [custs, setCusts] = uSx([]);
@@ -1659,13 +1659,15 @@ function DistDeliveries({ refreshKey, today, canOrder, fleetScope, fleet, distFl
         {board !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.delivEmpty')}</div>}
         {rows.map((s, i) => (
           <div key={s.id} className={`dist-cust-row dist-deliv-row st-${s.status}`}
-            draggable onDragStart={(e) => { dragIdx.current = i; e.dataTransfer.effectAllowed = 'move'; }}
-            onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const from = dragIdx.current; dragIdx.current = null; reorder(from, i); }}>
-            <span className="dist-deliv-reorder no-print">
-              <span className="dist-deliv-grip" title={trD('dist.dragHint')}><IconMenu s={15} /></span>
-              <button type="button" className="icon-btn dist-deliv-mv" title={trD('dist.moveUp')} disabled={i === 0} onClick={() => reorder(i, i - 1)}><IconArrowUp s={14} /></button>
-              <button type="button" className="icon-btn dist-deliv-mv" title={trD('dist.moveDown')} disabled={i === rows.length - 1} onClick={() => reorder(i, i + 1)}><IconArrowDown s={14} /></button>
-            </span>
+            draggable={canRoute} onDragStart={canRoute ? (e) => { dragIdx.current = i; e.dataTransfer.effectAllowed = 'move'; } : undefined}
+            onDragOver={canRoute ? (e) => e.preventDefault() : undefined} onDrop={canRoute ? (e) => { e.preventDefault(); const from = dragIdx.current; dragIdx.current = null; reorder(from, i); } : undefined}>
+            {canRoute && (
+              <span className="dist-deliv-reorder no-print">
+                <span className="dist-deliv-grip" title={trD('dist.dragHint')}><IconMenu s={15} /></span>
+                <button type="button" className="icon-btn dist-deliv-mv" title={trD('dist.moveUp')} disabled={i === 0} onClick={() => reorder(i, i - 1)}><IconArrowUp s={14} /></button>
+                <button type="button" className="icon-btn dist-deliv-mv" title={trD('dist.moveDown')} disabled={i === rows.length - 1} onClick={() => reorder(i, i + 1)}><IconArrowDown s={14} /></button>
+              </span>
+            )}
             <span className="dist-txn-av">{initialsOf(s.customerName)}</span>
             <div className="dist-cust-main">
               <div className="dist-txn-line1"><span className="dist-deliv-seq">{i + 1}.</span><span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
