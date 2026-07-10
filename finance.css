@@ -1069,6 +1069,12 @@ select.fld::-ms-expand { display: none; }
 .dist-dstat.ditunda { color: #7c3aed; border-color: #7c3aed; }
 .dist-deliv-row.st-ditunda { opacity: .78; }
 .dist-deliv-reason { font-size: 11.5px; color: #7c3aed; margin-top: 3px; display: flex; align-items: center; gap: 5px; }
+/* Customer location */
+.dist-deliv-loc { display: flex; align-items: center; gap: 14px; margin-top: 5px; font-size: 12px; flex-wrap: wrap; }
+.dist-deliv-loc .dist-link, .dist-cd-meta .dist-link { display: inline-flex; align-items: center; gap: 4px; }
+.dist-noloc { color: var(--warn); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+.dist-noloc-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--warn); background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn); border-radius: 6px; padding: 1px 6px; }
+.dist-cd-addr { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-mut); margin-top: 6px; }
 /* Day closeout */
 .dist-closed-banner { display: flex; align-items: flex-start; gap: 11px; padding: 12px 16px; border: 1px solid var(--green-700); background: var(--pos-bg); }
 .dist-closed-ic { display: inline-flex; color: var(--green-700); flex-shrink: 0; margin-top: 1px; }

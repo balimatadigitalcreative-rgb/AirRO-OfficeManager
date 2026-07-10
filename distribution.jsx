@@ -245,6 +245,19 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
 // is locked server-side from the customer master price; we only preview it here.
 function shortRef(id) { return '#' + String(id || '').slice(-6).toUpperCase(); }
 function hhmm(ms) { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); }
+// Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
+const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng;
+// Tag a customer's location from the DEVICE GPS (free). Confirms before overwriting an
+// existing point; on denial/unavailable, reports so the user can enter it manually.
+function tagLocation(custId, hasLoc, onDone, onFail) {
+  if (hasLoc && !window.confirm(window.t('dist.locOverwriteConfirm'))) return;
+  if (!(navigator.geolocation && navigator.geolocation.getCurrentPosition)) { onFail(window.t('dist.locUnavailable')); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => { window.API.distribusi.customers.setLocation(custId, { lat: pos.coords.latitude, lng: pos.coords.longitude }).then((r) => onDone(r.data)).catch(() => onFail(window.t('dist.locSaveErr'))); },
+    () => onFail(window.t('dist.locDenied')),
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+  );
+}
 
 function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet }) {
   const [view, setView] = uSx('list');
@@ -788,8 +801,10 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
   };
   const defReminder = () => ({ enabled: false, dueDay: 0, weekday: '', overdueDays: 0, gallonThreshold: 0, bonThreshold: 0 });
   const remOf = (r) => (r && typeof r === 'object') ? { ...defReminder(), ...r, enabled: !!r.enabled } : defReminder();
-  const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '', reminder: defReminder() }); };
-  const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '', reminder: remOf(d.reminder) }); };
+  const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '', reminder: defReminder(), address: '', latlng: '' }); };
+  const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '', reminder: remOf(d.reminder), address: d.address || '', latlng: (d.lat != null && d.lng != null) ? (d.lat + ', ' + d.lng) : '' }); };
+  // Parse a pasted "lat, lng" (e.g. from Google Maps "share → copy coordinates").
+  const parseLatLng = (s) => { const m = String(s || '').match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/); if (!m) return null; const a = parseFloat(m[1]), b = parseFloat(m[2]); if (a < -90 || a > 90 || b < -180 || b > 180) return null; return { lat: a, lng: b }; };
   const toggleDay = (d) => setForm((f) => ({ ...f, deliveryDays: f.deliveryDays.includes(d) ? f.deliveryDays.filter((x) => x !== d) : [...f.deliveryDays, d] }));
 
   const commitForm = () => {
@@ -798,14 +813,18 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
     if (!name) { setFormErr(trD('dist.cfNameReq')); return; }
     const onErr = (e) => { setSaving(false); setFormErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); };
     const finish = (msg, data) => { setSaving(false); setForm(null); flash(msg); reload(); if (data) setDetail((d) => (d && d.id === data.id ? { ...d, ...data } : d)); if (onChanged) onChanged(); };
+    const latlngRaw = (form.latlng || '').trim();
+    const loc = latlngRaw ? parseLatLng(latlngRaw) : null;
+    if (latlngRaw && !loc) { setFormErr(trD('dist.locInvalid')); return; }
+    const locFields = { address: (form.address || '').trim(), lat: loc ? loc.lat : null, lng: loc ? loc.lng : null };
     setSaving(true); setFormErr('');
     if (!form.id) {
       const price = parseInt(String(form.price).replace(/[^0-9]/g, ''), 10);
       if (!price) { setSaving(false); setFormErr(trD('dist.cfPriceReq')); return; }
-      window.API.distribusi.customers.create({ name, phone: form.phone.trim(), type: form.type, masterPrice: price, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder })
+      window.API.distribusi.customers.create({ name, phone: form.phone.trim(), type: form.type, masterPrice: price, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder, ...locFields })
         .then(() => finish(trD('dist.custAdded'))).catch(onErr);
     } else {
-      window.API.distribusi.customers.update(form.id, { name, phone: form.phone.trim(), type: form.type, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder })
+      window.API.distribusi.customers.update(form.id, { name, phone: form.phone.trim(), type: form.type, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder, ...locFields })
         .then((r) => finish(trD('dist.custSaved'), r.data)).catch(onErr);
     }
   };
@@ -856,6 +875,11 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
           <div className="dist-typechips">{DAY_CODES.map((dd) => <button type="button" key={dd} className={`dist-typechip ${form.deliveryDays.includes(dd) ? 'on' : ''}`} onClick={() => toggleDay(dd)}>{dd}</button>)}</div>
           <label className="fld-label">{trD('dist.cfArmada')}</label>
           <UI.Dropdown value={form.armada} options={fleetOptsFor(form.armada)} placeholder={trD('dist.noArmada')} onChange={(v) => setForm({ ...form, armada: v })} fluid />
+          <label className="fld-label">{trD('dist.cfAddress')}</label>
+          <input className="fld" value={form.address} maxLength={300} placeholder={trD('dist.cfAddressPh')} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <label className="fld-label">{trD('dist.cfCoords')}</label>
+          <input className="fld tnum" value={form.latlng} placeholder={trD('dist.cfCoordsPh')} onChange={(e) => setForm({ ...form, latlng: e.target.value })} />
+          <div className="dist-hint" style={{ marginTop: 5 }}>{trD('dist.cfCoordsHint')}</div>
           {(() => {
             const r = form.reminder || {};
             const setR = (p) => setForm((f) => ({ ...f, reminder: { ...(f.reminder || {}), ...p } }));
@@ -913,7 +937,11 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
               <div className="dist-cd-meta">
                 <span><IconCalendar s={13} />{trD('dist.kirimHari')}: <b>{days || '—'}</b></span>
                 <span className={d.armada && !isActiveArmada(d.armada) ? 'inactive' : ''}><IconTruck s={13} />{trD('dist.armada')}: <b>{d.armada ? armadaFull(d.armada) : '—'}</b></span>
+                <span><IconPin s={13} />{trD('dist.location')}: {d.hasLocation
+                  ? <a href={mapsUrl(d.lat, d.lng)} target="_blank" rel="noopener noreferrer" className="dist-link">{trD('dist.openMaps')}</a>
+                  : <b className="dist-noloc">{trD('dist.locNotSet')}</b>}</span>
               </div>
+              {d.address ? <div className="dist-cd-addr"><IconHome s={12} />{d.address}</div> : null}
             </div>
             <div className="dist-cd-stats">
               <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
@@ -923,6 +951,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
             <div className="dist-cd-actions">
               {(canInput || canCustomers) && <button type="button" className="btn btn-primary btn-sm" onClick={() => setInvBuilder(true)}><IconInvoice s={14} />{trD('dist.makeInvoice')}</button>}
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={14} />{trD('dist.printHistory')}</button>
+              {(canInput || canCustomers) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => tagLocation(d.id, d.hasLocation, () => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }, (m) => flash(m))}><IconPin s={14} />{d.hasLocation ? trD('dist.locUpdate') : trD('dist.locTag')}</button>}
               {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
               {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
             </div>
@@ -1025,7 +1054,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, staffMode, refreshKey
             <div key={c.id} className="dist-cust-row" onClick={() => openDetail(c.id)}>
               <span className="dist-txn-av">{initialsOf(c.name)}</span>
               <div className="dist-cust-main">
-                <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}</div>
+                <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}{!c.hasLocation && <span className="dist-noloc-badge"><IconPin s={10} />{trD('dist.locNotSet')}</span>}</div>
                 <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
                 {(days || c.armada) && (
                   <div className="dist-cust-meta">
@@ -1692,6 +1721,12 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleet
               <div className="dist-txn-line1"><span className="dist-deliv-seq">{i + 1}.</span><span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
               <div className="dist-txn-sub">{s.phone || '—'}{s.deliveryDays && s.deliveryDays.length ? ' · ' + fmtDays(s.deliveryDays) : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}{s.note ? ' · ' + s.note : ''}</div>
               {s.pendingReason ? <div className="dist-deliv-reason"><IconInvoice s={11} />{trD('dist.pendingReason')}: {s.pendingReason}</div> : null}
+              <div className="dist-deliv-loc no-print">
+                {s.hasLocation
+                  ? <a href={mapsUrl(s.lat, s.lng)} target="_blank" rel="noopener noreferrer" className="dist-link"><IconPin s={12} />{trD('dist.openMaps')}</a>
+                  : <span className="dist-noloc"><IconPin s={12} />{trD('dist.locNotSet')}</span>}
+                <button type="button" className="dist-link" onClick={() => tagLocation(s.customerId, s.hasLocation, () => { flash(trD('dist.locSaved')); reload(); if (onChanged) onChanged(); }, (m) => flash(m))}>{s.hasLocation ? trD('dist.locUpdate') : trD('dist.locTag')}</button>
+              </div>
             </div>
             {s.status === 'pending' && (
               <div className="dist-deliv-actions">

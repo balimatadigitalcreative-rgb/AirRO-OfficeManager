@@ -26,8 +26,12 @@ const customerSchema = z.object({
   deliveryDays: DAYS.optional(),
   armada: z.string().max(40).optional(),
   reminder: reminderSchema.optional(),
+  address: z.string().max(300).optional(),
+  lat: z.union([z.number(), z.string(), z.null()]).optional(),
+  lng: z.union([z.number(), z.string(), z.null()]).optional(),
 });
 // Edit: every field optional; masterPrice is NOT accepted here (owner-gated price route).
+const LATLNG = z.union([z.number(), z.string(), z.null()]).optional();
 const customerUpdateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   phone: z.string().max(40).optional(),
@@ -35,7 +39,12 @@ const customerUpdateSchema = z.object({
   deliveryDays: DAYS.optional(),
   armada: z.string().max(40).optional(),
   reminder: reminderSchema.optional(),
+  address: z.string().max(300).optional(),
+  lat: LATLNG,
+  lng: LATLNG,
 });
+// Field GPS tag / paste — coordinates required; address optional.
+const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]), address: z.string().max(300).optional() });
 const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000) });
 // scope null/omitted = option (a) new-only; 'all'|'cycle'|'bon' = option (b) retroactive.
 const priceSchema = z.object({ newPrice: z.number().int().nonnegative(), scope: z.enum(['all', 'cycle', 'bon']).nullable().optional() });
@@ -94,6 +103,7 @@ const listCustomers = asyncHandler(async (req, res) => res.json(await service.li
 const getCustomer = asyncHandler(async (req, res) => res.json({ data: await service.getCustomer(req.params.id, req.user) }));
 const createCustomer = asyncHandler(async (req, res) => { const c = await service.createCustomer(req.body, req.user); bcast('create', c.id); res.status(201).json({ data: c }); });
 const updateCustomer = asyncHandler(async (req, res) => { const c = await service.updateCustomer(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
+const setLocation = asyncHandler(async (req, res) => { const c = await service.setCustomerLocation(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user); bcast('import', 'customers'); res.status(201).json(r); });
 const updatePrice = asyncHandler(async (req, res) => { const c = await service.updatePrice(req.params.id, req.body.newPrice, req.user, req.body.scope); bcast('price', c.id); res.json({ data: c }); });
 const pricePreview = asyncHandler(async (req, res) => res.json({ data: await service.pricePreview(req.params.id, req.body.newPrice, req.user) }));
@@ -153,10 +163,10 @@ const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await se
 const gallonCorrection = asyncHandler(async (req, res) => { const m = await service.gallonCorrection(req.body, req.user); bcast('gallon', m.id); res.status(201).json({ data: m }); });
 
 module.exports = {
-  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
+  listCustomers, getCustomer, createCustomer, updateCustomer, setLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
-  schemas: { customerSchema, customerUpdateSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { customerSchema, customerUpdateSchema, locationSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, custListQuery, gallonQuery, gallonCorrectionSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

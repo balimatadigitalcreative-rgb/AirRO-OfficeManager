@@ -17,6 +17,9 @@ router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.s
 // Adding / editing / importing customers needs the dedicated capability.
 router.post('/customers', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.customerSchema }), ctrl.createCustomer);
 router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.customerUpdateSchema }), ctrl.updateCustomer);
+// GPS location tagging by the delivery crew (needs only the delivery caps, not full
+// customer-management). Sets lat/lng + stamps who/when; fleet scope enforced.
+router.patch('/customers/:id/location', requireAnyCap(['distribusiInput', 'distribusiPengiriman']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationSchema }), ctrl.setLocation);
 router.post('/customers/import', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
 // Master-price change is owner-level. Option (a) new-only just writes price_history +
 // audit; option (b) also appends retroactive price adjustments (originals untouched).

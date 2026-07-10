@@ -160,7 +160,12 @@ async function logAudit(kind, title, detail, snap, fleetId) {
 function custClient(c) {
   let days = []; try { days = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
   let reminder = null; try { reminder = c.reminder ? JSON.parse(c.reminder) : null; } catch (e) {}
-  return { ...c, deliveryDays: Array.isArray(days) ? days : [], armada: c.armada || '', reminder };
+  return {
+    ...c, deliveryDays: Array.isArray(days) ? days : [], armada: c.armada || '', reminder,
+    lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, address: c.address || '',
+    hasLocation: c.lat != null && c.lng != null,
+    locationSetAt: c.locationSetAt ? new Date(c.locationSetAt).getTime() : null, locationSetByName: c.locationSetByName || null,
+  };
 }
 // Normalise + serialise a billing-reminder config. Any combination of modes; empty → ''.
 function cleanReminder(r) {
@@ -231,6 +236,7 @@ function customerCols(body) {
     deliveryDays: JSON.stringify(cleanDays(body.deliveryDays)),
     armada: body.armada != null ? String(body.armada).trim() : '',
     reminder: cleanReminder(body.reminder),
+    address: body.address != null ? String(body.address).slice(0, 300) : '',
   };
 }
 async function createCustomer(body, actor) {
@@ -239,6 +245,8 @@ async function createCustomer(body, actor) {
   cols.type = await validTypeId(body.type);
   cols.armada = resolveWriteFleet(actor, cols.armada);   // scoped staff → forced to their fleet
   const snap = await actorSnap(actor);
+  const loc = normLatLng(body.lat, body.lng);            // optional coordinates at creation
+  if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; cols.locationSetAt = new Date(); cols.locationSetByName = snap.actorName; }
   const c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
   await logAudit('pelanggan', `Pelanggan baru: ${c.name}`, `Tipe ${c.type} · harga master ${c.masterPrice}`, snap, c.armada);
   return custClient(c);
@@ -257,9 +265,41 @@ async function updateCustomer(id, body, actor) {
   if (body.armada !== undefined) data.armada = resolveWriteFleet(actor, body.armada);   // can't move out of scope
   if (body.reminder !== undefined) data.reminder = cleanReminder(body.reminder);        // billing-reminder settings
   if (body.type != null) data.type = await validTypeId(body.type);
-  const c = await prisma.customer.update({ where: { id }, data });
+  if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
   const snap = await actorSnap(actor);
+  // Manual coordinate entry (Add/Edit form). Providing both sets them + stamps who/when;
+  // sending null/'' for both clears the location.
+  if (body.lat !== undefined || body.lng !== undefined) {
+    const loc = normLatLng(body.lat, body.lng);
+    if (loc) { data.lat = loc.lat; data.lng = loc.lng; data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; }
+    else if ((body.lat === null || body.lat === '') && (body.lng === null || body.lng === '')) { data.lat = null; data.lng = null; }
+  }
+  const c = await prisma.customer.update({ where: { id }, data });
   await logAudit('pelanggan', `Ubah pelanggan: ${c.name}`, `Tipe ${c.type}`, snap, c.armada);
+  return custClient(c);
+}
+// Coordinate validation: finite numbers within earth bounds (or null if invalid).
+function normLatLng(lat, lng) {
+  const a = typeof lat === 'string' ? parseFloat(lat) : lat;
+  const b = typeof lng === 'string' ? parseFloat(lng) : lng;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  if (a < -90 || a > 90 || b < -180 || b > 180) return null;
+  return { lat: a, lng: b };
+}
+// Field GPS tagging (delivery staff). Sets the coordinates + stamps who/when. Respects
+// fleet scope. Separate from updateCustomer so it needs only the delivery caps, not
+// full customer-management.
+async function setCustomerLocation(id, body, actor) {
+  const cur = await prisma.customer.findUnique({ where: { id } });
+  if (!cur) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, cur.armada)) throw ApiError.forbidden('Pelanggan di luar akses Anda.');
+  const loc = normLatLng(body.lat, body.lng);
+  if (!loc) throw ApiError.badRequest('Koordinat tidak valid.');
+  const snap = await actorSnap(actor);
+  const data = { lat: loc.lat, lng: loc.lng, locationSetAt: new Date(), locationSetByName: snap.actorName };
+  if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
+  const c = await prisma.customer.update({ where: { id }, data });
+  await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}`, snap, c.armada);
   return custClient(c);
 }
 async function importCustomers(list, actor) {
@@ -724,6 +764,7 @@ function deliveryClient(r, sisaBon) {
     createdByName: r.createdByName || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
     customerName: c.name || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
     deliveryDays: Array.isArray(days) ? days : [], sisaBon: sisaBon || 0,
+    lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, hasLocation: c.lat != null && c.lng != null,
   };
 }
 async function bonMapFor(custIds) {
@@ -855,7 +896,7 @@ async function cashIntegration(user, query) {
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
-  listCustomers, getCustomer, createCustomer, updateCustomer, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
+  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,

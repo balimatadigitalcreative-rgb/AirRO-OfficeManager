@@ -48,6 +48,7 @@ const IconUsersGroup = (p) => <Ic {...p}><circle cx="9" cy="9" r="3"/><path d="M
 const IconStore = (p) => <Ic {...p}><path d="M4 9h16v11H4z"/><path d="M3 9l2-5h14l2 5"/><path d="M9 20v-5h6v5"/></Ic>;
 const IconFork = (p) => <Ic {...p}><path d="M6 3v7a2 2 0 0 0 4 0V3M8 10v11M16 3c-1.6 0-2.5 2-2.5 5s.9 4 2.5 4m0 0v9"/></Ic>;
 const IconHome = (p) => <Ic {...p}><path d="M4 11 12 4l8 7M6 10v10h12V10"/></Ic>;
+const IconPin = (p) => <Ic {...p}><path d="M12 21s7-6.5 7-11a7 7 0 1 0-14 0c0 4.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></Ic>;
 const IconLock = (p) => <Ic {...p}><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1.1" fill="currentColor" stroke="none"/></Ic>;
 const IconLogout = (p) => <Ic {...p}><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M16 8l4 4-4 4M9 12h11"/></Ic>;
 const IconShield = (p) => <Ic {...p}><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></Ic>;
@@ -64,7 +65,7 @@ Object.assign(window, {
   IconArrowUp, IconArrowDown, IconTrendUp, IconTrendDown, IconClock, IconWallet,
   IconFilter, IconDots, IconMenu, IconClose, IconCheck, IconCalendar, IconDownload,
   IconCoinIn, IconCoinOut, IconDrop, IconGas, IconWrench, IconBolt, IconUsersGroup,
-  IconStore, IconFork, IconHome,
+  IconStore, IconFork, IconHome, IconPin,
   IconLock, IconLogout, IconShield, IconBackspace, IconPencil, IconUserCircle,
   IconSparkle, IconSend, IconRefresh,
 });
