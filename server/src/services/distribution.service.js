@@ -157,13 +157,19 @@ async function logAudit(kind, title, detail, snap, fleetId) {
 // ── Customers ──────────────────────────────────────────────────────────────
 // Expose deliveryDays as a parsed array (stored as a JSON string). Old rows without
 // the column default to [] / '' → they render as "—" on the client.
+// The effective navigation link: a pasted Google Maps share link if set, else one built
+// from the GPS coordinates (both open Google Maps / directions on the device — free).
+const mapsLinkOf = (c) => (c && c.mapsUrl && String(c.mapsUrl).trim()) || ((c && c.lat != null && c.lng != null) ? ('https://www.google.com/maps?q=' + c.lat + ',' + c.lng) : '');
+// Light validation: keep only an http(s) URL (trimmed, capped); anything else → ''.
+function cleanMapsUrl(u) { const s = String(u || '').trim(); return /^https?:\/\//i.test(s) ? s.slice(0, 500) : ''; }
 function custClient(c) {
   let days = []; try { days = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
   let reminder = null; try { reminder = c.reminder ? JSON.parse(c.reminder) : null; } catch (e) {}
+  const mapsLink = mapsLinkOf(c);
   return {
     ...c, deliveryDays: Array.isArray(days) ? days : [], armada: c.armada || '', reminder,
     lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, address: c.address || '',
-    hasLocation: c.lat != null && c.lng != null,
+    mapsUrl: c.mapsUrl || '', mapsLink, hasLocation: !!mapsLink,
     locationSetAt: c.locationSetAt ? new Date(c.locationSetAt).getTime() : null, locationSetByName: c.locationSetByName || null,
   };
 }
@@ -237,6 +243,7 @@ function customerCols(body) {
     armada: body.armada != null ? String(body.armada).trim() : '',
     reminder: cleanReminder(body.reminder),
     address: body.address != null ? String(body.address).slice(0, 300) : '',
+    mapsUrl: cleanMapsUrl(body.mapsUrl),
   };
 }
 async function createCustomer(body, actor) {
@@ -246,7 +253,8 @@ async function createCustomer(body, actor) {
   cols.armada = resolveWriteFleet(actor, cols.armada);   // scoped staff → forced to their fleet
   const snap = await actorSnap(actor);
   const loc = normLatLng(body.lat, body.lng);            // optional coordinates at creation
-  if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; cols.locationSetAt = new Date(); cols.locationSetByName = snap.actorName; }
+  if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; }
+  if (loc || cols.mapsUrl) { cols.locationSetAt = new Date(); cols.locationSetByName = snap.actorName; }   // location provided at creation → stamp
   const c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
   await logAudit('pelanggan', `Pelanggan baru: ${c.name}`, `Tipe ${c.type} · harga master ${c.masterPrice}`, snap, c.armada);
   return custClient(c);
@@ -267,8 +275,9 @@ async function updateCustomer(id, body, actor) {
   if (body.type != null) data.type = await validTypeId(body.type);
   if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
   const snap = await actorSnap(actor);
-  // Manual coordinate entry (Add/Edit form). Providing both sets them + stamps who/when;
-  // sending null/'' for both clears the location.
+  // Google Maps link (pasted). '' clears it. A non-empty link stamps who/when.
+  if (body.mapsUrl !== undefined) { data.mapsUrl = cleanMapsUrl(body.mapsUrl); if (data.mapsUrl) { data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; } }
+  // Manual coordinate entry. Providing both sets them + stamps; null/'' for both clears.
   if (body.lat !== undefined || body.lng !== undefined) {
     const loc = normLatLng(body.lat, body.lng);
     if (loc) { data.lat = loc.lat; data.lng = loc.lng; data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; }
@@ -296,7 +305,8 @@ async function setCustomerLocation(id, body, actor) {
   const loc = normLatLng(body.lat, body.lng);
   if (!loc) throw ApiError.badRequest('Koordinat tidak valid.');
   const snap = await actorSnap(actor);
-  const data = { lat: loc.lat, lng: loc.lng, locationSetAt: new Date(), locationSetByName: snap.actorName };
+  // Also build a ready-to-use Maps link from the point so "Petunjuk Arah" works right away.
+  const data = { lat: loc.lat, lng: loc.lng, mapsUrl: 'https://www.google.com/maps?q=' + loc.lat + ',' + loc.lng, locationSetAt: new Date(), locationSetByName: snap.actorName };
   if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
   const c = await prisma.customer.update({ where: { id }, data });
   await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}`, snap, c.armada);
@@ -764,7 +774,7 @@ function deliveryClient(r, sisaBon) {
     createdByName: r.createdByName || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
     customerName: c.name || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
     deliveryDays: Array.isArray(days) ? days : [], sisaBon: sisaBon || 0,
-    lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, hasLocation: c.lat != null && c.lng != null,
+    lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, mapsLink: mapsLinkOf(c), hasLocation: !!mapsLinkOf(c),
   };
 }
 async function bonMapFor(custIds) {

@@ -425,6 +425,7 @@ model Customer {
   reminder      String   @default("")         // JSON billing-reminder settings ({enabled,dueDay,weekday,overdueDays,gallonThreshold,bonThreshold})
   lat           Float?                          // GPS latitude  (set from the field or pasted)
   lng           Float?                          // GPS longitude
+  mapsUrl       String   @default("")          // Google Maps link (pasted share link, or built ?q=lat,lng)
   address       String   @default("")          // free-text address (optional)
   locationSetAt DateTime?                       // when the coordinates were last set
   locationSetByName String?                     // who set them (accountability trail)

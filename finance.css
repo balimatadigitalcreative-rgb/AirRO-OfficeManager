@@ -1075,6 +1075,10 @@ select.fld::-ms-expand { display: none; }
 .dist-noloc { color: var(--warn); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
 .dist-noloc-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--warn); background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn); border-radius: 6px; padding: 1px 6px; }
 .dist-cd-addr { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-mut); margin-top: 6px; }
+.dist-mapsurl-row { display: flex; gap: 8px; align-items: stretch; }
+.dist-mapsurl-row .fld { flex: 1; min-width: 0; }
+.dist-gps-btn { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 560px) { .dist-mapsurl-row { flex-direction: column; } .dist-gps-btn { min-height: 44px; } }
 /* Day closeout */
 .dist-closed-banner { display: flex; align-items: flex-start; gap: 11px; padding: 12px 16px; border: 1px solid var(--green-700); background: var(--pos-bg); }
 .dist-closed-ic { display: inline-flex; color: var(--green-700); flex-shrink: 0; margin-top: 1px; }

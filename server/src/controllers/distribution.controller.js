@@ -27,6 +27,7 @@ const customerSchema = z.object({
   armada: z.string().max(40).optional(),
   reminder: reminderSchema.optional(),
   address: z.string().max(300).optional(),
+  mapsUrl: z.string().max(500).optional(),
   lat: z.union([z.number(), z.string(), z.null()]).optional(),
   lng: z.union([z.number(), z.string(), z.null()]).optional(),
 });
@@ -40,6 +41,7 @@ const customerUpdateSchema = z.object({
   armada: z.string().max(40).optional(),
   reminder: reminderSchema.optional(),
   address: z.string().max(300).optional(),
+  mapsUrl: z.string().max(500).optional(),
   lat: LATLNG,
   lng: LATLNG,
 });
