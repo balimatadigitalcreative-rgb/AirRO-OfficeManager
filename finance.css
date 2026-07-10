@@ -1202,6 +1202,12 @@ select.fld::-ms-expand { display: none; }
 .gud-mqty.dmg { color: var(--danger, #dc2626); }
 .gud-mqty.corr { color: #6D50D6; }
 .gud-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gud-salesnote { display: flex; align-items: center; gap: 8px; padding: 10px 15px; margin-bottom: 14px; font-size: 12.5px; font-weight: 600; color: var(--green-800); background: var(--pos-bg); border: 1px solid var(--green-700); }
+.gud-hint { font-size: 11.5px; color: var(--text-mut); margin: 6px 0 2px; line-height: 1.45; }
+.gud-card.rusak .gud-card-num { color: var(--warn); }
+/* damage/loss in the Distribusi gallon ledger */
+.dist-gm-mtag.dmg { background: var(--danger-bg, #fef2f2); color: var(--danger, #dc2626); }
+.dist-gm-mqty.dmg { color: var(--danger, #dc2626); }
 .dist-gm-note { display: flex; align-items: flex-start; gap: 7px; font-size: 11.5px; line-height: 1.5; color: var(--text-mut); margin: -4px 2px 12px; }
 .dist-gm-note svg { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
 /* opening-stock summary row */

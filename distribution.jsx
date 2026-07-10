@@ -1678,6 +1678,8 @@ const GM_META = {
   return_in: { l: 'dist.gmIn', cls: 'in', sign: '+' },
   correction: { l: 'dist.gmCorr', cls: 'corr', sign: '' },
   opening: { l: 'dist.gmOpening', cls: 'opening', sign: '' },
+  damage: { l: 'dist.gmDamage', cls: 'dmg', sign: '−' },
+  loss: { l: 'dist.gmLoss', cls: 'dmg', sign: '−' },
 };
 function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);

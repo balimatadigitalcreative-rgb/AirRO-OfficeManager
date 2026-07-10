@@ -10,10 +10,11 @@ const distribution = require('./distribution.service');
 
 // Seed the built-in item catalogue (idempotent). New types can also be added at runtime.
 const SEED_ITEMS = [
-  { id: 'galon',   name: 'Galon',        kind: 'galon',  unit: 'galon', sortOrder: 1 },
-  { id: 'sticker', name: 'Sticker',      kind: 'sticker', unit: 'pcs',  sortOrder: 2 },
-  { id: 'tutup',   name: 'Tutup Galon',  kind: 'tutup',  unit: 'pcs',   sortOrder: 3 },
-  { id: 'segel',   name: 'Segel Galon',  kind: 'segel',  unit: 'pcs',   sortOrder: 4 },
+  { id: 'galon',        name: 'Galon',        kind: 'galon',        unit: 'galon', sortOrder: 1 },
+  { id: 'galon_rusak',  name: 'Galon Rusak',  kind: 'galon_rusak',  unit: 'galon', sortOrder: 2 },
+  { id: 'sticker',      name: 'Sticker',      kind: 'sticker',      unit: 'pcs',   sortOrder: 3 },
+  { id: 'tutup',        name: 'Tutup Galon',  kind: 'tutup',        unit: 'pcs',   sortOrder: 4 },
+  { id: 'segel',        name: 'Segel Galon',  kind: 'segel',        unit: 'pcs',   sortOrder: 5 },
 ];
 async function seedInventoryItems() {
   try {
@@ -28,7 +29,7 @@ async function seedInventoryItems() {
 const ADD_TYPES = ['opening', 'purchase', 'in'];
 const OUT_TYPES = ['out', 'damage', 'loss', 'sale'];
 const ALL_TYPES = [...ADD_TYPES, ...OUT_TYPES, 'correction'];
-const KINDS = ['galon', 'sticker', 'tutup', 'segel', 'lainnya'];
+const KINDS = ['galon', 'galon_rusak', 'sticker', 'tutup', 'segel', 'lainnya'];
 const moveEffect = (m) => (m.type === 'correction' ? m.qty : (OUT_TYPES.includes(m.type) ? -Math.abs(m.qty) : Math.abs(m.qty)));
 
 async function actorSnap(actor) {
@@ -42,7 +43,7 @@ function itemClient(i, stock) {
   return { id: i.id, name: i.name, kind: i.kind, unit: i.unit, bufferMin: i.bufferMin, sortOrder: i.sortOrder, stock, needsRestock, managed: i.kind !== 'galon' };
 }
 function movClient(m, itemName) {
-  return { id: m.id, itemId: m.itemId, itemName: itemName || null, type: m.type, qty: m.qty, effect: moveEffect(m), reason: m.reason, actorName: m.actorName, createdAt: m.createdAt ? new Date(m.createdAt).getTime() : null };
+  return { id: m.id, itemId: m.itemId, itemName: itemName || null, type: m.type, qty: m.qty, effect: moveEffect(m), amount: m.amount != null ? m.amount : null, method: m.method || null, reason: m.reason, actorName: m.actorName, createdAt: m.createdAt ? new Date(m.createdAt).getTime() : null };
 }
 
 // Sum of ledger movements per (non-galon) item.
@@ -68,7 +69,10 @@ async function gudangSummary(user) {
   const rows = await prisma.stockMovement.findMany({ orderBy: { createdAt: 'desc' }, take: 100 });
   const nameById = {}; items.forEach((i) => { nameById[i.id] = i.name; });
   const movements = rows.map((m) => movClient(m, nameById[m.itemId]));
-  return { items: out, restock, movements };
+  // Damaged-gallon sale money — a dedicated figure, kept SEPARATE from normal water sales.
+  const sales = await prisma.stockMovement.findMany({ where: { itemId: 'galon_rusak', type: 'sale' }, select: { qty: true, amount: true } });
+  const rusakSales = { count: sales.length, qty: sales.reduce((a, s) => a + s.qty, 0), total: sales.reduce((a, s) => a + (s.amount || 0), 0) };
+  return { items: out, restock, movements, rusakSales };
 }
 
 async function getItem(id, user) {
@@ -84,7 +88,7 @@ async function createItem(body) {
   const name = String(body.name || '').trim();
   if (!name) throw ApiError.badRequest('Nama barang wajib diisi.');
   const kind = KINDS.includes(body.kind) ? body.kind : 'lainnya';
-  if (kind === 'galon') throw ApiError.badRequest('Item galon sudah dikelola oleh sistem.');
+  if (kind === 'galon' || kind === 'galon_rusak') throw ApiError.badRequest('Item galon sudah dikelola oleh sistem.');
   const unit = String(body.unit || 'pcs').trim() || 'pcs';
   const bufferMin = Math.max(0, Math.round(+body.bufferMin || 0));
   const id = 'inv_' + Math.random().toString(36).slice(2, 10);
@@ -136,7 +140,62 @@ async function report(user) {
   return { items: rows, restock: rows.filter((r) => r.needsRestock) };
 }
 
+async function ensureGalonRusak() {
+  const it = await prisma.inventoryItem.findUnique({ where: { id: 'galon_rusak' } });
+  if (!it) await prisma.inventoryItem.create({ data: { id: 'galon_rusak', name: 'Galon Rusak', kind: 'galon_rusak', unit: 'galon', sortOrder: 2 } });
+}
+
+// Report broken/lost gallons (anti-fraud: reason mandatory, who/when/why recorded, optional
+// evidence photo). Reduces GOOD gallon stock via the distribution ledger (single source). For
+// recoverable damage (pecah/rusak) it also books the gallon INTO "Galon Rusak" so it can later
+// be sold; a loss (hilang) is gone and books nothing extra.
+async function reportGallonDamage(body, actor) {
+  const kind = ['pecah', 'rusak', 'hilang'].includes(body.kind) ? body.kind : null;
+  if (!kind) throw ApiError.badRequest('Jenis tidak valid (pecah/rusak/hilang).');
+  const qty = Math.round(+body.qty || 0);
+  if (qty <= 0) throw ApiError.badRequest('Jumlah galon harus lebih dari 0.');
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan wajib diisi.');
+  const culprit = String(body.culprit || '').trim();
+  const fullReason = culprit ? `${reason} · pelaku: ${culprit}` : reason;
+  // 1) reduce good gallon stock (+ distribusi audit) — authoritative, in the gallon ledger
+  const good = await distribution.reportGallonDamage({ qty, kind, reason: fullReason, fleetId: body.fleet, proof: body.proof }, actor);
+  // 2) recoverable damage → book into the sellable "Galon Rusak" inventory
+  let rusak = null;
+  if (kind !== 'hilang') {
+    await ensureGalonRusak();
+    const snap = await actorSnap(actor);
+    const mov = await prisma.stockMovement.create({ data: { itemId: 'galon_rusak', type: 'in', qty, reason: `Dari laporan galon ${kind}: ${reason}`, refId: good.movement.id, fleetId: '', actorId: snap.actorId, actorName: snap.actorName, actorRole: snap.actorRole } });
+    rusak = movClient(mov, 'Galon Rusak');
+  }
+  const rusakStock = (await stockMap()).galon_rusak || 0;
+  return { kind, qty, goodStock: good.goodStock, rusak, rusakStock };
+}
+
+// Sell damaged gallons: reduce "Galon Rusak" stock (movement 'sale') + record the money as a
+// SEPARATE figure (never mixed with normal water sales) + Distribusi audit. Reason optional,
+// but qty/price/method captured. Cannot sell more than is in stock.
+async function sellGalonRusak(body, actor) {
+  await ensureGalonRusak();
+  const qty = Math.round(+body.qty || 0);
+  if (qty <= 0) throw ApiError.badRequest('Jumlah harus lebih dari 0.');
+  const unitPrice = Math.max(0, Math.round(+body.price || 0));
+  if (unitPrice <= 0) throw ApiError.badRequest('Harga harus lebih dari 0.');
+  const method = ['Cash', 'Transfer', 'QRIS'].includes(body.method) ? body.method : 'Cash';
+  const reason = String(body.reason || '').trim();
+  const have = (await stockMap()).galon_rusak || 0;
+  if (qty > have) throw ApiError.badRequest(`Stok galon rusak hanya ${have}.`, { stock: have });
+  const amount = qty * unitPrice;
+  const snap = await actorSnap(actor);
+  const note = [reason, `${qty} × ${unitPrice}`, method].filter(Boolean).join(' · ');
+  const mov = await prisma.stockMovement.create({ data: { itemId: 'galon_rusak', type: 'sale', qty, amount, method, reason: note, actorId: snap.actorId, actorName: snap.actorName, actorRole: snap.actorRole } });
+  await distribution.logDistAudit('input', 'Jual galon rusak', `${qty} galon · ${amount} (${method})${reason ? ' · ' + reason : ''}`, actor, '');
+  const stock = (await stockMap()).galon_rusak || 0;
+  return { movement: movClient(mov, 'Galon Rusak'), stock, amount, method };
+}
+
 module.exports = {
   seedInventoryItems, gudangSummary, getItem, createItem, updateItem, addMovement, report,
+  reportGallonDamage, sellGalonRusak,
   ADD_TYPES, OUT_TYPES, ALL_TYPES, KINDS,
 };

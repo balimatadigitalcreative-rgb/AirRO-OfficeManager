@@ -20,6 +20,17 @@ const updateItemSchema = z.object({
 const stockSchema = z.object({ type: z.enum(['opening', 'purchase', 'in', 'correction']), qty: z.number().int(), reason: z.string().trim().min(1).max(300), refId: z.string().max(120).optional() });
 // Damage / loss write-off (gudangDamage).
 const damageSchema = z.object({ type: z.enum(['damage', 'loss']), qty: z.number().int().positive(), reason: z.string().trim().min(1).max(300), refId: z.string().max(120).optional() });
+// Report a broken/lost GOOD gallon (gudangDamage). Reason mandatory; fleet/culprit/photo optional.
+const gallonDamageSchema = z.object({
+  kind: z.enum(['pecah', 'rusak', 'hilang']),
+  qty: z.number().int().positive(),
+  reason: z.string().trim().min(1).max(300),
+  fleet: z.string().max(60).optional(),
+  culprit: z.string().trim().max(80).optional(),
+  proof: z.any().optional(),
+});
+// Sell damaged gallons (gudangKelola): qty + unit price + method.
+const sellRusakSchema = z.object({ qty: z.number().int().positive(), price: z.number().int().positive(), method: z.enum(['Cash', 'Transfer', 'QRIS']).optional(), reason: z.string().trim().max(300).optional() });
 
 const summary = asyncHandler(async (req, res) => res.json({ data: await service.gudangSummary(req.user) }));
 const getItem = asyncHandler(async (req, res) => res.json({ data: await service.getItem(req.params.id, req.user) }));
@@ -28,8 +39,10 @@ const updateItem = asyncHandler(async (req, res) => res.json({ data: await servi
 const addStock = asyncHandler(async (req, res) => res.status(201).json({ data: await service.addMovement(req.params.id, req.body, req.user, service.ADD_TYPES.concat('correction')) }));
 const addDamage = asyncHandler(async (req, res) => res.status(201).json({ data: await service.addMovement(req.params.id, req.body, req.user, ['damage', 'loss']) }));
 const report = asyncHandler(async (req, res) => res.json({ data: await service.report(req.user) }));
+const reportGallonDamage = asyncHandler(async (req, res) => res.status(201).json({ data: await service.reportGallonDamage(req.body, req.user) }));
+const sellRusak = asyncHandler(async (req, res) => res.status(201).json({ data: await service.sellGalonRusak(req.body, req.user) }));
 
 module.exports = {
-  summary, getItem, createItem, updateItem, addStock, addDamage, report,
-  schemas: { idParams, createItemSchema, updateItemSchema, stockSchema, damageSchema },
+  summary, getItem, createItem, updateItem, addStock, addDamage, report, reportGallonDamage, sellRusak,
+  schemas: { idParams, createItemSchema, updateItemSchema, stockSchema, damageSchema, gallonDamageSchema, sellRusakSchema },
 };

@@ -575,7 +575,7 @@ model Correction {
 // is deactivated (active=false) if that entry is deleted, so stock never dangles.
 model GallonMovement {
   id            String   @id @default(cuid())
-  type          String                          // purchase | delivery_out | return_in | correction | opening
+  type          String                          // purchase | delivery_out | return_in | correction | opening | damage | loss
   qty           Int                             // positive; a correction's qty is a signed delta
   customerId    String?                         // set for delivery_out / return_in / customer correction
   transactionId String?                         // the DistTransaction that produced a delivery/return
@@ -583,6 +583,7 @@ model GallonMovement {
   fleetId       String   @default("")           // fleet scope ('' = global/depot)
   active        Boolean  @default(true)         // false when a linked cash purchase is removed
   note          String   @default("")
+  proof         String?                         // JSON proof-ref for a damage/loss report (evidence photo)
   actorId       String?
   actorRole     String?
   actorName     String?
@@ -679,8 +680,10 @@ model StockMovement {
   itemId    String
   type      String                                // opening | purchase | in | out | damage | loss | sale | correction
   qty       Int                                   // positive for directional types; signed delta for correction
+  amount    Int?                                  // money for a 'sale' (total Rp); null otherwise
+  method    String?                               // payment method for a 'sale' (Cash/Transfer/…)
   fleetId   String   @default("")                 // optional fleet scope ('' = global)
-  refId     String?                               // optional link to another record (cashflow entry, delivery, …)
+  refId     String?                               // optional link to another record (the source GallonMovement, …)
   reason    String   @default("")
   actorId   String?
   actorName String?

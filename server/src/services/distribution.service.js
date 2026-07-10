@@ -753,7 +753,13 @@ async function dashboardSummary(date, user, qFleet) {
 const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'return_in' ? -m.qty : (m.type === 'correction' && m.customerId) ? m.qty : 0);
 // 'opening' is a depot baseline (owned + at depot, never at a customer). Its qty is a signed
 // delta so an adjustment (nilai_baru − nilai_lama) is another append, never an overwrite.
-const totalEffect = (m) => (m.type === 'purchase' || m.type === 'opening' ? m.qty : (m.type === 'correction' && !m.customerId) ? m.qty : 0);
+// 'damage'/'loss' remove good gallons from the depot (broken/lost), qty positive → negative effect.
+const totalEffect = (m) => {
+  if (m.type === 'purchase' || m.type === 'opening') return m.qty;
+  if (m.type === 'damage' || m.type === 'loss') return -Math.abs(m.qty);
+  if (m.type === 'correction' && !m.customerId) return m.qty;
+  return 0;
+};
 // A ledger row that REPRESENTS opening stock. The dedicated 'opening' type, PLUS legacy depot
 // corrections whose note was tagged as opening/starting stock (entered via "Koreksi depot"
 // before this feature existed). Recognising both keeps ONE source of truth: the Stok Awal card,
@@ -819,6 +825,34 @@ async function setOpeningStock(body, actor) {
   await logAudit('koreksi', isFirst ? 'Set stok galon awal' : 'Penyesuaian stok galon awal',
     `${isFirst ? '' : current + ' → '}${target} galon (${delta >= 0 ? '+' : ''}${delta}) · ${reason}`, snap, fleetId);
   return { movement: mov, opening: { total: target, previous: current, delta, isFirst } };
+}
+
+// Report broken/lost GOOD gallons. Appends a 'damage' (pecah/rusak) or 'loss' (hilang)
+// GallonMovement that REDUCES the good-gallon total (single source), stamped with who/when/
+// why + optional evidence photo, and mirrored to the Distribusi audit log. Called by the
+// Gudang module — good-gallon stock lives here so the reduction stays authoritative.
+async function reportGallonDamage({ qty, kind, reason, fleetId, proof }, actor) {
+  const n = Math.round(+qty || 0);
+  if (n <= 0) throw ApiError.badRequest('Jumlah galon harus lebih dari 0.');
+  const rsn = String(reason || '').trim();
+  if (!rsn) throw ApiError.badRequest('Alasan wajib diisi.');
+  const kk = ['pecah', 'rusak', 'hilang'].includes(kind) ? kind : 'rusak';
+  const type = kk === 'hilang' ? 'loss' : 'damage';
+  const snap = await actorSnap(actor);
+  const fId = resolveWriteFleet(actor, (fleetId && fleetId !== 'all') ? fleetId : '');
+  const mov = await prisma.gallonMovement.create({ data: {
+    type, qty: n, fleetId: fId, active: true, note: `Galon ${kk}: ${rsn}`,
+    proof: proof ? JSON.stringify(proof) : null, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+  } });
+  await logAudit('koreksi', `Galon ${kk} (${type === 'loss' ? 'hilang' : 'rusak'})`, `${n} galon · ${rsn}`, snap, fId);
+  const stock = await gallonStock(actor, undefined);
+  return { movement: mov, kind: kk, type, qty: n, goodStock: stock.totalOwned };
+}
+// Public helper so sibling modules (Gudang) can append a Distribusi audit row using the same
+// actor-snapshot + trail. Keeps sensitive cross-module events in one auditable place.
+async function logDistAudit(kind, title, detail, actor, fleetId) {
+  const snap = await actorSnap(actor);
+  return logAudit(kind, title, detail, snap, fleetId || '');
 }
 // Everything the "Stok Galon" screen needs: stock cards, per-customer balances, ledger.
 async function gallonSummary(user, qFleet) {
@@ -1024,7 +1058,7 @@ async function cashIntegration(user, query) {
 
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
-  gallonSummary, gallonCorrection, setOpeningStock, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
+  gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,

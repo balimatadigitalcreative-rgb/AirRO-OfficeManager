@@ -170,6 +170,8 @@
       updateItem: (id, data) => req('PATCH', '/gudang/items/' + id, data), // { name?, unit?, bufferMin? }
       addStock: (id, data) => req('POST', '/gudang/items/' + id + '/stock', data),   // { type:in|purchase|opening|correction, qty, reason }
       addDamage: (id, data) => req('POST', '/gudang/items/' + id + '/damage', data), // { type:damage|loss, qty, reason }
+      reportGallonDamage: (data) => req('POST', '/gudang/gallon/damage', data),      // { kind:pecah|rusak|hilang, qty, reason, fleet?, culprit?, proof? }
+      sellRusak: (data) => req('POST', '/gudang/gallon-rusak/sell', data),           // { qty, price, method?, reason? }
     },
     settings: {
       all: () => req('GET', '/settings'),

@@ -23,10 +23,10 @@ beforeAll(async () => {
 afterAll(() => prisma.$disconnect());
 
 describe('Gudang — inventory ledger, buffer/restock, permissions', () => {
-  it('seeds the four built-in items (Galon/Sticker/Tutup/Segel), each starting at 0', async () => {
+  it('seeds the built-in items (Galon/Galon Rusak/Sticker/Tutup/Segel), each starting at 0', async () => {
     const d = await sum(owner);
     const ids = d.items.map((i) => i.id).sort();
-    expect(ids).toEqual(['galon', 'segel', 'sticker', 'tutup']);
+    expect(ids).toEqual(['galon', 'galon_rusak', 'segel', 'sticker', 'tutup']);
     expect(itemOf(d, 'sticker').stock).toBe(0);
     expect(itemOf(d, 'galon').managed).toBe(false);   // galon is read-only here
   });
@@ -88,6 +88,56 @@ describe('Gudang — inventory ledger, buffer/restock, permissions', () => {
     expect(r.status).toBe(201);
     const d = await sum(owner);
     expect(d.items.some((i) => i.name === 'Label 19L' && i.unit === 'roll')).toBe(true);
+  });
+
+  it('report 3 broken gallons → good gallon stock −3 and 3 booked into Galon Rusak', async () => {
+    await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(owner)).send({ qty: 100, reason: 'stok awal' });
+    const before = (await sum(owner)).items.find((i) => i.id === 'galon').stock;   // 100
+    const r = await request(app).post('/api/v1/gudang/gallon/damage').set(auth(owner)).send({ kind: 'pecah', qty: 3, reason: 'jatuh saat muat', culprit: 'sopir A' });
+    expect(r.status).toBe(201);
+    expect(r.body.data).toMatchObject({ kind: 'pecah', qty: 3, goodStock: before - 3, rusakStock: 3 });
+    const d = await sum(owner);
+    expect(d.items.find((i) => i.id === 'galon').stock).toBe(before - 3);      // good −3
+    expect(d.items.find((i) => i.id === 'galon_rusak').stock).toBe(3);          // recoverable +3
+    // audited in the distribusi trail (who/when/why), with the reason + culprit
+    const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(owner));
+    expect(audit.body.data.some((a) => /Galon pecah/i.test(a.title))).toBe(true);
+    // reason mandatory
+    expect((await request(app).post('/api/v1/gudang/gallon/damage').set(auth(owner)).send({ kind: 'pecah', qty: 1 })).status).toBe(400);
+  });
+
+  it('a LOST gallon (hilang) reduces good stock but adds nothing to Galon Rusak', async () => {
+    const g0 = (await sum(owner)).items.find((i) => i.id === 'galon').stock;
+    const r0 = (await sum(owner)).items.find((i) => i.id === 'galon_rusak').stock;
+    const r = await request(app).post('/api/v1/gudang/gallon/damage').set(auth(owner)).send({ kind: 'hilang', qty: 2, reason: 'hilang di jalan' });
+    expect(r.status).toBe(201);
+    expect(r.body.data.rusak).toBeNull();
+    const d = await sum(owner);
+    expect(d.items.find((i) => i.id === 'galon').stock).toBe(g0 - 2);
+    expect(d.items.find((i) => i.id === 'galon_rusak').stock).toBe(r0);   // unchanged
+  });
+
+  it('sell 2 damaged gallons → damaged stock −2 + money recorded separately (not water sales)', async () => {
+    const before = (await sum(owner)).items.find((i) => i.id === 'galon_rusak').stock;   // 3
+    const r = await request(app).post('/api/v1/gudang/gallon-rusak/sell').set(auth(owner)).send({ qty: 2, price: 5000, method: 'Cash', reason: 'ke pengepul' });
+    expect(r.status).toBe(201);
+    expect(r.body.data).toMatchObject({ stock: before - 2, amount: 10000, method: 'Cash' });
+    const d = await sum(owner);
+    expect(d.items.find((i) => i.id === 'galon_rusak').stock).toBe(before - 2);
+    expect(d.rusakSales).toMatchObject({ count: 1, qty: 2, total: 10000 });   // dedicated figure
+    // can't oversell
+    expect((await request(app).post('/api/v1/gudang/gallon-rusak/sell').set(auth(owner)).send({ qty: 999, price: 5000 })).status).toBe(400);
+    // audited
+    const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(owner));
+    expect(audit.body.data.some((a) => /Jual galon rusak/i.test(a.title))).toBe(true);
+  });
+
+  it('report + sell are server-gated (gudangDamage / gudangKelola)', async () => {
+    const u = await reg({ name: 'V2', username: 'v2_wh', password: 'secret123', role: 'finance' });
+    await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(owner)).send({ permissions: { gudangView: true, gudangKelola: false, gudangDamage: false } });
+    const t = await login('v2_wh', 'secret123');
+    expect((await request(app).post('/api/v1/gudang/gallon/damage').set(auth(t)).send({ kind: 'pecah', qty: 1, reason: 'x' })).status).toBe(403);
+    expect((await request(app).post('/api/v1/gudang/gallon-rusak/sell').set(auth(t)).send({ qty: 1, price: 1000 })).status).toBe(403);
   });
 
   it('every endpoint is server-gated by its capability', async () => {
