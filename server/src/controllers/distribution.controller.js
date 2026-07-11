@@ -90,6 +90,10 @@ const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), 
 const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), order: z.array(z.string().min(1)).max(2000) });
 const closeSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), generalNote: z.string().max(500).optional(), reasons: z.record(z.string().max(300)).optional() });
 const closeoutQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
+// Delivery runs (rit)
+const runOpenSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), gallonsOut: z.number().int().positive(), note: z.string().max(300).optional() });
+const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegative(), gallonsEmptyReturned: z.number().int().nonnegative(), diffReason: z.string().max(300).optional() });
+const runQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['open', 'closed']).optional() });
 const custListQuery = z.object({ fleet: z.string().max(60).optional(), status: z.enum(['active', 'inactive', 'all']).optional() });
 const idParams = z.object({ id: z.string().min(1) });
 const batchParams = z.object({ batchId: z.string().min(1) });
@@ -165,6 +169,11 @@ const closeDay = asyncHandler(async (req, res) => {
 });
 const listCloseouts = asyncHandler(async (req, res) => res.json(await service.listCloseouts(req.user, req.query)));
 
+// ── Delivery runs (rit) ──
+const openRun = asyncHandler(async (req, res) => { const r = await service.openRun(req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.status(201).json({ data: r }); });
+const closeRun = asyncHandler(async (req, res) => { const r = await service.closeRun(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.json({ data: r }); });
+const listRuns = asyncHandler(async (req, res) => res.json(await service.listRuns(req.user, req.query)));
+
 // ── gallon stock ──
 const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await service.gallonSummary(req.user, req.query.fleet) }));
 const gallonCorrection = asyncHandler(async (req, res) => { const m = await service.gallonCorrection(req.body, req.user); bcast('gallon', m.id); res.status(201).json({ data: m }); });
@@ -177,5 +186,6 @@ module.exports = {
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
-  schemas: { customerSchema, customerUpdateSchema, locationSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  openRun, closeRun, listRuns,
+  schemas: { customerSchema, customerUpdateSchema, locationSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

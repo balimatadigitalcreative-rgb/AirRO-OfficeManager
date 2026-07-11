@@ -74,6 +74,12 @@ router.post('/deliveries/close', requireCap('distribusiPengiriman'), validate({ 
 router.get('/closeouts', requireCap('distribusiDashboard'), validate({ query: ctrl.schemas.closeoutQuery }), ctrl.listCloseouts);
 router.patch('/deliveries/:id', requireCap('distribusiPengiriman'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.markSchema }), ctrl.markDelivery);
 
+// ── Delivery runs (rit) — per-trip gallon out/in + reconciliation. Same delivery cap;
+// fleet scope enforced. Report is scoped (owner sees all, helper sees their fleet). ──
+router.get('/runs', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.runQuery }), ctrl.listRuns);
+router.post('/runs/open', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.runOpenSchema }), ctrl.openRun);
+router.post('/runs/:id/close', requireCap('distribusiPengiriman'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.runCloseSchema }), ctrl.closeRun);
+
 // ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──
 router.get('/gallon', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
 router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);

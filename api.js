@@ -154,6 +154,12 @@
         close: (data) => req('POST', '/distribusi/deliveries/close', data),      // { date, fleet, generalNote, reasons:{id:reason} }
         closeouts: (qs) => req('GET', '/distribusi/closeouts' + (qs ? '?' + qs : '')),
       },
+      // Delivery runs (rit): per-trip gallon out/in + reconciliation.
+      runs: {
+        list: (date, fleet, status) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); if (status) p.push('status=' + encodeURIComponent(status)); return req('GET', '/distribusi/runs' + (p.length ? '?' + p.join('&') : '')); },
+        open: (data) => req('POST', '/distribusi/runs/open', data),               // { date, fleet, gallonsOut, note? }
+        close: (id, data) => req('POST', '/distribusi/runs/' + id + '/close', data), // { gallonsFullReturned, gallonsEmptyReturned, diffReason? }
+      },
       // Gallon stock (loan/exchange): summary + per-customer balances + ledger; correction.
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),

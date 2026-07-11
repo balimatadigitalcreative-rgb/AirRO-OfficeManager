@@ -17,6 +17,7 @@ async function resetDb() {
   // Distribusi (children before parents): correction → transaction → customer.
   await prisma.correction.deleteMany();
   await prisma.distAuditLog.deleteMany();
+  await prisma.deliveryRun.deleteMany();       // delivery runs (rit) — no FK, safe anytime
   await prisma.distTransaction.deleteMany();
   await prisma.priceHistory.deleteMany();
   await prisma.gallonMovement.deleteMany();   // gallon ledger (also feeds the Gudang galon card)

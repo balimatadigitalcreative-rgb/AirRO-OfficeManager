@@ -485,6 +485,7 @@ model DistTransaction {
   actorId         String?                       // actor_id
   actorRole       String?                       // actor_role (at input time)
   actorName       String?
+  deliveryRunId   String?                       // the delivery run (rit) this sale belongs to — set if a run was open
   createdAt       DateTime @default(now())
 
   customer    Customer     @relation(fields: [customerId], references: [id])
@@ -493,6 +494,34 @@ model DistTransaction {
   @@index([txnDate])
   @@index([customerId])
   @@index([fleetId])
+  @@index([deliveryRunId])
+}
+
+// Delivery run (rit) — one trip of a fleet: gallons loaded out, then full/empty returned,
+// with automatic reconciliation (expected remaining = loaded − sold vs actually returned).
+// It is a TRUCK-level tally + control layer; gallon STOCK stays driven by the per-customer
+// delivery_out/return_in movements (single source), so no second gallon number is created.
+model DeliveryRun {
+  id                   String   @id @default(cuid())
+  date                 String                          // YYYY-MM-DD
+  fleetId              String
+  runNo                Int                             // 1, 2, 3 … per fleet per day
+  gallonsOut           Int      @default(0)            // full gallons loaded at departure (MUAT)
+  gallonsFullReturned  Int      @default(0)            // full (unsold) gallons brought back (TUTUP)
+  gallonsEmptyReturned Int      @default(0)            // empty gallons brought back from customers (TUTUP)
+  status               String   @default("open")       // open | closed
+  diffReason           String   @default("")           // mandatory when the reconciliation difference ≠ 0
+  note                 String   @default("")
+  openedById   String?
+  openedByName String?
+  openedAt     DateTime @default(now())
+  closedById   String?
+  closedByName String?
+  closedAt     DateTime?
+
+  @@unique([date, fleetId, runNo])
+  @@index([fleetId, status])
+  @@index([date, fleetId])
 }
 
 // Delivery board — one row per stop, per fleet, per date. `jadwal` rows are generated

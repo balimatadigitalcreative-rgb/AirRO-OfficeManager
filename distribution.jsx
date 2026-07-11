@@ -1874,6 +1874,130 @@ function DeliveryTxnModal({ stop, today, onClose, onCreated }) {
     </div>
   );
 }
+// Delivery runs (rit) panel — MUAT (load out) / TUTUP (return + reconcile) + a per-day report
+// with the difference highlighted. Gallon STOCK is unchanged by this (it's driven by the
+// per-customer movements); a run is a truck-level control that surfaces shortfalls.
+function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChanged }) {
+  const [runs, setRuns] = uSx(null);      // runs for the selected date (report)
+  const [openRuns, setOpenRuns] = uSx([]); // currently-open runs (any date)
+  const [modal, setModal] = uSx(null);    // { kind:'open'|'close', run?, ...fields }
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  const [toast, setToast] = uSx('');
+  const reload = () => {
+    if (!(window.API && window.API.distribusi && window.API.distribusi.runs)) return;
+    window.API.distribusi.runs.list(date, ef).then((r) => setRuns(r.data || [])).catch(() => setRuns([]));
+    window.API.distribusi.runs.list(null, ef, 'open').then((r) => setOpenRuns(r.data || [])).catch(() => setOpenRuns([]));
+  };
+  uEx(() => { reload(); }, [refreshKey, ef, date]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+  const scoped = isScoped(fleetScope);
+  const fleetOpts = (fleet || []).filter(Boolean);
+  const openModal = () => { setErr(''); setModal({ kind: 'open', gallonsOut: '', note: '', fleet: (distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || '')) }); };
+  const closeModal = (run) => { setErr(''); setModal({ kind: 'close', run, full: '', empty: '', diffReason: '' }); };
+  const commit = () => {
+    if (!modal || saving) return;
+    setSaving(true); setErr('');
+    const done = (m) => { setSaving(false); setModal(null); flash(m); reload(); if (onChanged) onChanged(); };
+    const fail = (e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); };
+    if (modal.kind === 'open') {
+      const g = parseInt(String(modal.gallonsOut).replace(/[^0-9]/g, ''), 10);
+      if (!(g > 0)) { setSaving(false); setErr(trD('run.errOut')); return; }
+      if (!scoped && !modal.fleet) { setSaving(false); setErr(trD('run.errFleet')); return; }
+      window.API.distribusi.runs.open({ date, fleet: modal.fleet || undefined, gallonsOut: g, note: (modal.note || '').trim() || undefined }).then(() => done(trD('run.opened'))).catch(fail);
+      return;
+    }
+    const full = parseInt(String(modal.full).replace(/[^0-9]/g, ''), 10) || 0;
+    const empty = parseInt(String(modal.empty).replace(/[^0-9]/g, ''), 10) || 0;
+    const expected = modal.run.expectedRemaining;
+    const diff = full - expected;
+    if (diff !== 0 && !(modal.diffReason || '').trim()) { setSaving(false); setErr(trD('run.errDiffReason', { d: (diff > 0 ? '+' : '') + numX(diff) })); return; }
+    window.API.distribusi.runs.close(modal.run.id, { gallonsFullReturned: full, gallonsEmptyReturned: empty, diffReason: (modal.diffReason || '').trim() || undefined }).then(() => done(trD('run.closed'))).catch(fail);
+  };
+  const dayRuns = (runs || []);
+  const totals = dayRuns.reduce((a, r) => ({ out: a.out + r.gallonsOut, sold: a.sold + r.sold, full: a.full + (r.gallonsFullReturned || 0), empty: a.empty + (r.gallonsEmptyReturned || 0) }), { out: 0, sold: 0, full: 0, empty: 0 });
+  return (
+    <div className="card dist-card gud-runpanel">
+      <div className="dist-card-head">
+        <div className="sec-title"><IconTruck s={15} /> {trD('run.title')}</div>
+        <button type="button" className="btn btn-primary btn-sm" onClick={openModal}><IconPlus s={14} />{trD('run.muat')}</button>
+      </div>
+
+      {openRuns.length > 0 && openRuns.map((r) => (
+        <div key={r.id} className="run-open-row">
+          <span className="run-open-badge"><span className="run-dot" />{trD('run.open')}</span>
+          <div className="run-open-main"><b>{trD('run.ritN', { n: r.runNo })} · {r.fleetId}</b><span>{trD('run.loadedSold', { out: numX(r.gallonsOut), sold: numX(r.sold), exp: numX(r.expectedRemaining) })}</span></div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => closeModal(r)}><IconCheck s={14} />{trD('run.tutup')}</button>
+        </div>
+      ))}
+
+      <div className="run-table-wrap">
+        <table className="run-table">
+          <thead><tr><th>{trD('run.rit')}</th><th>{trD('run.armada')}</th><th className="num">{trD('run.keluar')}</th><th className="num">{trD('run.terjual')}</th><th className="num">{trD('run.sisa')}</th><th className="num">{trD('run.dikembalikan')}</th><th className="num">{trD('run.selisih')}</th><th className="num">{trD('run.kosong')}</th><th>{trD('run.status')}</th></tr></thead>
+          <tbody>
+            {dayRuns.length === 0 && <tr><td colSpan={9} className="run-empty">{runs === null ? (trD('common.loading') || '…') : trD('run.none')}</td></tr>}
+            {dayRuns.map((r) => (
+              <tr key={r.id} className={r.status === 'closed' && r.diff !== 0 ? 'run-diff' : ''}>
+                <td>{trD('run.ritN', { n: r.runNo })}</td>
+                <td>{r.fleetId}</td>
+                <td className="num">{numX(r.gallonsOut)}</td>
+                <td className="num">{numX(r.sold)}</td>
+                <td className="num">{numX(r.expectedRemaining)}</td>
+                <td className="num">{r.status === 'closed' ? numX(r.gallonsFullReturned) : '—'}</td>
+                <td className="num">{r.status === 'closed' ? (r.diff === 0 ? <span className="run-ok">0</span> : <span className="run-bad" title={r.diffReason}>{(r.diff > 0 ? '+' : '') + numX(r.diff)}</span>) : '—'}</td>
+                <td className="num">{r.status === 'closed' ? numX(r.gallonsEmptyReturned) : '—'}</td>
+                <td>{r.status === 'closed' ? <span className="run-st closed">{trD('run.closed_')}</span> : <span className="run-st open">{trD('run.open')}</span>}</td>
+              </tr>
+            ))}
+            {dayRuns.length > 0 && (
+              <tr className="run-total"><td colSpan={2}>{trD('run.total')}</td><td className="num">{numX(totals.out)}</td><td className="num">{numX(totals.sold)}</td><td className="num">—</td><td className="num">{numX(totals.full)}</td><td className="num">—</td><td className="num">{numX(totals.empty)}</td><td /></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <div className="modal-scrim" onClick={() => setModal(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{modal.kind === 'open' ? trD('run.muatT') : trD('run.tutupT')}</div>{modal.run && <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('run.ritN', { n: modal.run.runNo })} · {modal.run.fleetId}</div>}</div><button className="jp-icon" onClick={() => setModal(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              {modal.kind === 'open' ? (<>
+                <div className="dist-infobox"><IconTruck s={16} /><span>{trD('run.muatInfo')}</span></div>
+                {!scoped && (<>
+                  <label className="fld-label">{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                  <select className="fld" value={modal.fleet} onChange={(e) => setModal({ ...modal, fleet: e.target.value })}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
+                </>)}
+                <label className="fld-label">{trD('run.gallonsOut')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <input className="fld tnum" value={modal.gallonsOut} inputMode="numeric" placeholder="cth. 100" onChange={(e) => setModal({ ...modal, gallonsOut: e.target.value.replace(/[^0-9]/g, '') })} />
+                <label className="fld-label">{trD('run.note')}</label>
+                <input className="fld" value={modal.note} placeholder={trD('run.notePh')} onChange={(e) => setModal({ ...modal, note: e.target.value })} />
+              </>) : (<>
+                <div className="run-recon">
+                  <div><span>{trD('run.keluar')}</span><b>{numX(modal.run.gallonsOut)}</b></div>
+                  <div><span>{trD('run.terjual')}</span><b>{numX(modal.run.sold)}</b></div>
+                  <div className="run-recon-exp"><span>{trD('run.sisa')}</span><b>{numX(modal.run.expectedRemaining)}</b></div>
+                </div>
+                <label className="fld-label">{trD('run.fullReturned')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <input className="fld tnum" value={modal.full} inputMode="numeric" placeholder={String(modal.run.expectedRemaining)} onChange={(e) => setModal({ ...modal, full: e.target.value.replace(/[^0-9]/g, '') })} />
+                {modal.full !== '' && (() => { const d = (parseInt(modal.full, 10) || 0) - modal.run.expectedRemaining; return <div className={`run-diffline ${d !== 0 ? 'bad' : 'ok'}`}>{d === 0 ? trD('run.diffOk') : trD('run.diffBad', { d: (d > 0 ? '+' : '') + numX(d) })}</div>; })()}
+                <label className="fld-label">{trD('run.emptyReturned')}</label>
+                <input className="fld tnum" value={modal.empty} inputMode="numeric" placeholder="cth. 55" onChange={(e) => setModal({ ...modal, empty: e.target.value.replace(/[^0-9]/g, '') })} />
+                {modal.full !== '' && (parseInt(modal.full, 10) || 0) !== modal.run.expectedRemaining && (<>
+                  <label className="fld-label">{trD('run.diffReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                  <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={modal.diffReason} placeholder={trD('run.diffReasonPh')} onChange={(e) => setModal({ ...modal, diffReason: e.target.value })} />
+                </>)}
+              </>)}
+              {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setModal(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commit}>{saving ? '…' : (modal.kind === 'open' ? trD('run.muat') : trD('run.tutup'))}</button></div>
+          </div>
+        </div>
+      )}
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
 function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
@@ -1925,6 +2049,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleet
         {canOrder && <button type="button" className="btn btn-ghost" onClick={() => setOrderOpen(true)}><IconPlus s={16} />{trD('dist.addOrder')}</button>}
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
+
+      <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} refreshKey={refreshKey} onChanged={reload} />
       {closeouts.map((c) => (
         <div key={c.id} className="card dist-closed-banner">
           <span className="dist-closed-ic"><IconCheck s={17} /></span>

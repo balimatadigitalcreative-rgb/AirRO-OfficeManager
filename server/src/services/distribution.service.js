@@ -532,9 +532,10 @@ async function createTransaction(body, actor) {
   const unitPriceLocked = customer.masterPrice;
   const amount = qty * unitPriceLocked;
   const snap = await actorSnap(actor);
+  const deliveryRunId = await openRunIdFor(fleetId);   // tag the sale to the fleet's open rit (if any)
   const txn = await prisma.distTransaction.create({ data: {
     customerId: customer.id, fleetId, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
-    txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, deliveryRunId,
   } });
   // Gallon flow (loan/exchange): out = full gallons delivered (default = qty sold),
   // in = empty gallons returned. Recorded as append-only movements → customer balance.
@@ -998,6 +999,87 @@ async function listCloseouts(user, query) {
   const rows = await prisma.deliveryCloseout.findMany({ where, orderBy: { closedAt: 'desc' }, take: 500 });
   return { data: rows.map(closeoutClient) };
 }
+// ── Delivery runs (rit) — per-trip gallon out/in + reconciliation ─────────────
+// The gallon STOCK is still driven by the per-customer delivery_out/return_in movements
+// (single source). A run is a TRUCK-level control layer: it records what was loaded and what
+// came back, then reconciles against what was actually sold — surfacing any shortfall (theft/
+// breakage) the per-customer ledger can't see. No extra stock movements → no second number.
+const runMs = (d) => (d ? new Date(d).getTime() : null);
+function runClient(r, sold) {
+  const expectedRemaining = r.gallonsOut - sold;                       // full gallons that SHOULD be left on the truck
+  const diff = r.status === 'closed' ? (r.gallonsFullReturned - expectedRemaining) : null;   // returned − expected
+  return {
+    id: r.id, date: r.date, fleetId: r.fleetId, runNo: r.runNo, status: r.status,
+    gallonsOut: r.gallonsOut, gallonsFullReturned: r.gallonsFullReturned, gallonsEmptyReturned: r.gallonsEmptyReturned,
+    sold, expectedRemaining, diff, diffReason: r.diffReason || '', note: r.note || '',
+    openedByName: r.openedByName || null, openedAt: runMs(r.openedAt), closedByName: r.closedByName || null, closedAt: runMs(r.closedAt),
+  };
+}
+// Σ gallons sold (lunas/bon) per run, from the linked transactions.
+async function soldForRuns(runIds) {
+  if (!runIds.length) return {};
+  const txns = await prisma.distTransaction.findMany({ where: { deliveryRunId: { in: runIds }, method: { in: ['lunas', 'bon'] } }, select: { deliveryRunId: true, qty: true } });
+  const m = {}; txns.forEach((t) => { m[t.deliveryRunId] = (m[t.deliveryRunId] || 0) + t.qty; });
+  return m;
+}
+// The fleet's currently-open run id (used to auto-tag new sales), or null.
+async function openRunIdFor(fleetId) {
+  if (!fleetId) return null;
+  const r = await prisma.deliveryRun.findFirst({ where: { fleetId, status: 'open' }, select: { id: true } });
+  return r ? r.id : null;
+}
+// MUAT — open a run: record full gallons loaded onto the truck. One open run per fleet at a
+// time (must close the previous). runNo auto-increments per fleet per day.
+async function openRun(body, actor) {
+  const date = body.date;
+  if (!date) throw ApiError.badRequest('Tanggal wajib diisi.');
+  const fleetId = resolveWriteFleet(actor, body.fleet);
+  if (!fleetId) throw ApiError.badRequest('Pilih armada.');
+  const gallonsOut = int(body.gallonsOut);
+  if (gallonsOut <= 0) throw ApiError.badRequest('Jumlah galon dimuat harus lebih dari 0.');
+  const openExisting = await prisma.deliveryRun.findFirst({ where: { fleetId, status: 'open' } });
+  if (openExisting) throw ApiError.badRequest(`Masih ada rit terbuka (rit-${openExisting.runNo}) untuk armada ini — tutup dulu.`, { runId: openExisting.id });
+  const last = await prisma.deliveryRun.findFirst({ where: { date, fleetId }, orderBy: { runNo: 'desc' } });
+  const runNo = (last ? last.runNo : 0) + 1;
+  const snap = await actorSnap(actor);
+  const run = await prisma.deliveryRun.create({ data: { date, fleetId, runNo, gallonsOut, note: String(body.note || '').slice(0, 300), status: 'open', openedById: snap.actorId, openedByName: snap.actorName } });
+  await logAudit('pengiriman', `Muat rit-${runNo}: ${fleetId}`, `${gallonsOut} galon dimuat · ${date}`, snap, fleetId);
+  return runClient(run, 0);
+}
+// TUTUP — close a run: record full + empty gallons returned, reconcile vs expected, and REQUIRE
+// a reason when the difference ≠ 0.
+async function closeRun(id, body, actor) {
+  const run = await prisma.deliveryRun.findUnique({ where: { id } });
+  if (!run) throw ApiError.notFound('Rit tidak ditemukan.');
+  if (!fleetAllows(actor, run.fleetId)) throw ApiError.notFound('Rit tidak ditemukan.');
+  if (run.status === 'closed') throw ApiError.badRequest('Rit ini sudah ditutup.');
+  const full = int(body.gallonsFullReturned);
+  const empty = int(body.gallonsEmptyReturned);
+  const sold = (await soldForRuns([id]))[id] || 0;
+  const expectedRemaining = run.gallonsOut - sold;
+  const diff = full - expectedRemaining;
+  const reason = String(body.diffReason || '').trim();
+  if (diff !== 0 && !reason) throw ApiError.badRequest(`Selisih ${diff > 0 ? '+' : ''}${diff} galon (seharusnya ${expectedRemaining}, dikembalikan ${full}) — alasan wajib diisi.`, { diff, expectedRemaining, sold });
+  const snap = await actorSnap(actor);
+  const updated = await prisma.deliveryRun.update({ where: { id }, data: {
+    status: 'closed', gallonsFullReturned: full, gallonsEmptyReturned: empty, diffReason: diff !== 0 ? reason : '',
+    closedById: snap.actorId, closedByName: snap.actorName, closedAt: new Date(),
+  } });
+  await logAudit('pengiriman', `Tutup rit-${run.runNo}: ${run.fleetId}`,
+    `muat ${run.gallonsOut} · terjual ${sold} · sisa seharusnya ${expectedRemaining} · dikembalikan ${full} · selisih ${diff}${diff !== 0 ? ' (' + reason + ')' : ''} · kosong ${empty}`, snap, run.fleetId);
+  return runClient(updated, sold);
+}
+// Report: runs within the user's scope (by date/fleet/status), each with sold + reconciliation.
+async function listRuns(user, query) {
+  const q = query || {};
+  const where = { ...fleetWhere(user, 'fleetId', q.fleet) };
+  if (q.date) where.date = q.date;
+  if (q.status === 'open' || q.status === 'closed') where.status = q.status;
+  const rows = await prisma.deliveryRun.findMany({ where, orderBy: [{ date: 'desc' }, { fleetId: 'asc' }, { runNo: 'asc' }], take: 500 });
+  const sold = await soldForRuns(rows.map((r) => r.id));
+  return { data: rows.map((r) => runClient(r, sold[r.id] || 0)) };
+}
+
 // Add a 'tambahan' order (admin). fleetId comes from the chosen customer. Idempotent per
 // customer/day. Returns the row + fleetId so the controller can notify that fleet.
 async function addOrder(body, actor) {
@@ -1065,4 +1147,5 @@ module.exports = {
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
+  openRun, closeRun, listRuns,
 };
