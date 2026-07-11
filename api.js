@@ -178,6 +178,10 @@
       addDamage: (id, data) => req('POST', '/gudang/items/' + id + '/damage', data), // { type:damage|loss, qty, reason }
       reportGallonDamage: (data) => req('POST', '/gudang/gallon/damage', data),      // { kind:pecah|rusak|hilang, qty, reason, fleet?, culprit?, proof? }
       sellRusak: (data) => req('POST', '/gudang/gallon-rusak/sell', data),           // { qty, price, method?, reason? }
+      // Daily closeout (opname + day report).
+      closeoutPreview: (date) => req('GET', '/gudang/closeout?date=' + encodeURIComponent(date)),
+      closeWarehouse: (data) => req('POST', '/gudang/closeout', data),               // { date, items:[{itemId,physical,reason?}], note? }
+      closeouts: (date) => req('GET', '/gudang/closeouts' + (date ? '?date=' + encodeURIComponent(date) : '')),
     },
     settings: {
       all: () => req('GET', '/settings'),

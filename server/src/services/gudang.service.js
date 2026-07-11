@@ -194,8 +194,97 @@ async function sellGalonRusak(body, actor) {
   return { movement: movClient(mov, 'Galon Rusak'), stock, amount, method };
 }
 
+// ── Daily warehouse closeout (opname + day report) ───────────────────────────
+// createdAt range for a calendar day (server-local). Used for the day summary counts.
+function dayRange(date) {
+  const start = new Date(date + 'T00:00:00.000');
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { gte: start, lt: end };
+}
+// Informational day summary: gallons out/in from runs (rit), damage/loss, restock, rusak sales.
+async function daySummary(date, user) {
+  const runs = await prisma.deliveryRun.findMany({ where: { date }, select: { gallonsOut: true, gallonsFullReturned: true, gallonsEmptyReturned: true } });
+  const range = dayRange(date);
+  const gm = await prisma.gallonMovement.findMany({ where: { active: true, createdAt: range, type: { in: ['damage', 'loss', 'purchase'] } }, select: { type: true, qty: true } });
+  const sm = await prisma.stockMovement.findMany({ where: { createdAt: range }, select: { itemId: true, type: true, qty: true, amount: true } });
+  const sum = (a, k) => a.reduce((n, x) => n + (x[k] || 0), 0);
+  const sale = sm.filter((m) => m.itemId === 'galon_rusak' && m.type === 'sale');
+  return {
+    runsOut: sum(runs, 'gallonsOut'), runsFullReturned: sum(runs, 'gallonsFullReturned'), runsEmptyReturned: sum(runs, 'gallonsEmptyReturned'), runsCount: runs.length,
+    gallonDamage: gm.filter((m) => m.type === 'damage').reduce((a, m) => a + m.qty, 0),
+    gallonLoss: gm.filter((m) => m.type === 'loss').reduce((a, m) => a + m.qty, 0),
+    gallonPurchase: gm.filter((m) => m.type === 'purchase').reduce((a, m) => a + m.qty, 0),
+    restock: sm.filter((m) => ['in', 'purchase', 'opening'].includes(m.type)).reduce((a, m) => a + m.qty, 0),
+    stockDamageLoss: sm.filter((m) => ['damage', 'loss'].includes(m.type)).reduce((a, m) => a + m.qty, 0),
+    rusakSales: { qty: sale.reduce((a, m) => a + m.qty, 0), total: sale.reduce((a, m) => a + (m.amount || 0), 0) },
+  };
+}
+function closeoutClient(c) {
+  let items = []; try { items = JSON.parse(c.items); } catch (e) {}
+  let summary = {}; try { summary = JSON.parse(c.summary); } catch (e) {}
+  return { id: c.id, date: c.date, closedByName: c.closedByName || null, closedAt: c.closedAt ? new Date(c.closedAt).getTime() : null, items, summary, note: c.note || '', diffCount: c.diffCount };
+}
+// Current system stock per item (galon from the gallon ledger; others from the stock ledger).
+async function systemStock(user) {
+  const items = await prisma.inventoryItem.findMany({ where: { active: true }, orderBy: [{ sortOrder: 'asc' }] });
+  const map = await stockMap();
+  const galon = items.some((i) => i.kind === 'galon') ? await galonOwned(user) : 0;
+  return items.map((i) => ({ itemId: i.id, name: i.name, unit: i.unit, kind: i.kind, system: i.kind === 'galon' ? galon : (map[i.id] || 0) }));
+}
+// Preview the closeout for a date: system numbers + day summary + whether already closed.
+async function closeoutPreview(date, user) {
+  const existing = await prisma.warehouseCloseout.findUnique({ where: { date } });
+  return { date, closed: !!existing, closeout: existing ? closeoutClient(existing) : null, items: await systemStock(user), summary: await daySummary(date, user) };
+}
+// Close the warehouse for a date: confirm/opname each item. A physical ≠ system gap REQUIRES a
+// reason and is posted as a correction (append, never a silent overwrite). One closeout per date.
+async function closeWarehouse(body, actor) {
+  const date = body.date;
+  if (!date) throw ApiError.badRequest('Tanggal wajib diisi.');
+  const existing = await prisma.warehouseCloseout.findUnique({ where: { date } });
+  if (existing) throw ApiError.badRequest('Gudang sudah ditutup untuk tanggal ini.');
+  const items = await prisma.inventoryItem.findMany({ where: { active: true }, orderBy: [{ sortOrder: 'asc' }] });
+  const map = await stockMap();
+  const galon = items.some((i) => i.kind === 'galon') ? await galonOwned(actor) : 0;
+  const inputs = {}; (Array.isArray(body.items) ? body.items : []).forEach((it) => { if (it && it.itemId) inputs[it.itemId] = it; });
+  const snap = await actorSnap(actor);
+  const rows = []; let diffCount = 0;
+  for (const i of items) {
+    const system = i.kind === 'galon' ? galon : (map[i.id] || 0);
+    const inp = inputs[i.id] || {};
+    const physical = inp.physical != null ? Math.max(0, Math.round(+inp.physical)) : system;   // default = confirm system
+    const diff = physical - system;
+    const reason = String(inp.reason || '').trim();
+    if (diff !== 0 && !reason) throw ApiError.badRequest(`Selisih opname ${i.name} (${diff > 0 ? '+' : ''}${diff}) — alasan wajib diisi.`, { itemId: i.id, diff });
+    if (diff !== 0) {
+      diffCount++;
+      // Post the correction so the ledger now matches the physical count (append-only, with reason).
+      if (i.kind === 'galon') {
+        await distribution.gallonCorrection({ qty: diff, reason: `Opname ${date}: ${reason}` }, actor);
+      } else {
+        await prisma.stockMovement.create({ data: { itemId: i.id, type: 'correction', qty: diff, reason: `Opname ${date}: ${reason}`, actorId: snap.actorId, actorName: snap.actorName, actorRole: snap.actorRole } });
+      }
+    }
+    rows.push({ itemId: i.id, name: i.name, unit: i.unit, kind: i.kind, system, physical, diff, reason: diff !== 0 ? reason : '' });
+  }
+  const summary = await daySummary(date, actor);
+  const co = await prisma.warehouseCloseout.create({ data: {
+    date, closedById: snap.actorId, closedByName: snap.actorName, items: JSON.stringify(rows), summary: JSON.stringify(summary), note: String(body.note || '').slice(0, 500), diffCount,
+  } });
+  await distribution.logDistAudit('gudang', `Tutup gudang ${date}`, `${rows.length} item · ${diffCount} selisih opname${body.note ? ' · ' + String(body.note).slice(0, 120) : ''}`, actor, '');
+  return closeoutClient(co);
+}
+// Report: recent closeouts (supervisors). Optionally by date.
+async function listCloseouts(query) {
+  const q = query || {};
+  const where = {}; if (q.date) where.date = q.date;
+  const rows = await prisma.warehouseCloseout.findMany({ where, orderBy: { closedAt: 'desc' }, take: 200 });
+  return { data: rows.map(closeoutClient) };
+}
+
 module.exports = {
   seedInventoryItems, gudangSummary, getItem, createItem, updateItem, addMovement, report,
   reportGallonDamage, sellGalonRusak,
+  closeoutPreview, closeWarehouse, listCloseouts,
   ADD_TYPES, OUT_TYPES, ALL_TYPES, KINDS,
 };

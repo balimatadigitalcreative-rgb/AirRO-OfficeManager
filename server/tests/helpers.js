@@ -26,6 +26,7 @@ async function resetDb() {
   // Gudang (children before parents): stock movements → inventory items.
   await prisma.stockMovement.deleteMany();
   await prisma.inventoryItem.deleteMany();
+  await prisma.warehouseCloseout.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.user.deleteMany();
   await prisma.setting.deleteMany();

@@ -10,6 +10,11 @@ router.use(requireAuth);
 // View the warehouse dashboard / an item's ledger — read cap.
 router.get('/summary', requireCap('gudangView'), ctrl.summary);
 router.get('/report', requireCap('gudangReport'), ctrl.report);
+// Daily closeout (opname + day report) — the report/closeout capability. Preview shows system
+// numbers; POST confirms/opnames each item (a physical≠system gap needs a reason → correction).
+router.get('/closeout', requireCap('gudangReport'), validate({ query: ctrl.schemas.closeoutPreviewQuery }), ctrl.closeoutPreview);
+router.post('/closeout', requireCap('gudangReport'), validate({ body: ctrl.schemas.closeoutSchema }), ctrl.closeWarehouse);
+router.get('/closeouts', requireCap('gudangReport'), validate({ query: ctrl.schemas.closeoutQuery }), ctrl.listCloseouts);
 router.get('/items/:id', requireCap('gudangView'), validate({ params: ctrl.schemas.idParams }), ctrl.getItem);
 
 // Manage items + add/correct stock — manage cap.

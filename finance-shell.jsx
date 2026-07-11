@@ -1093,7 +1093,7 @@ function FApp() {
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'gudang' && p.gudangView && (
-            <GUDANG.Dept refreshKey={distTick} canManage={!!p.gudangKelola} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} fleet={fleet} />
+            <GUDANG.Dept refreshKey={distTick} canManage={!!p.gudangKelola} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} fleet={fleet} today={FIN.TODAY} />
           )}
 
           {screen === 'setoran' && p.setoran && (

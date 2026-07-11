@@ -17,15 +17,19 @@ const SM_META = {
   correction: { l: 'gud.mCorr',     cls: 'corr' },
 };
 
-function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet }) {
+function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today }) {
   const [data, setData] = uSg(null);
   const [err, setErr] = uSg('');
   const [toast, setToast] = uSg('');
   const [modal, setModal] = uSg(null);   // { kind:'stock'|'damage'|'correction'|'buffer'|'new', item?, type, qty, reason, bufferMin, name, unit, itemKind }
   const [saving, setSaving] = uSg(false);
+  const [closeouts, setCloseouts] = uSg([]);   // recent daily closeouts (report)
+  const [coModal, setCoModal] = uSg(null);     // closeout modal: { items:[{...,physical,reason}], summary, note }
+  const [coView, setCoView] = uSg(null);       // view a past closeout's detail
 
   const reload = () => {
     if (!(window.API && window.API.gudang)) return Promise.resolve();
+    window.API.gudang.closeouts().then((r) => setCloseouts(r.data || [])).catch(() => {});
     return window.API.gudang.summary().then((r) => { setData(r.data); setErr(''); })
       .catch((e) => setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
   };
@@ -43,6 +47,25 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet }) {
   const openNew = () => { setErr(''); setModal({ kind: 'new', name: '', itemKind: 'sticker', unit: 'pcs', bufferMin: '' }); };
   const openReport = () => { setErr(''); setModal({ kind: 'report', jenis: 'pecah', qty: '', reason: '', culprit: '', fleet: '', proof: null }); };
   const openSell = (item) => { setErr(''); setModal({ kind: 'sell', item, qty: '', price: '', method: 'Cash', reason: '' }); };
+  const openCloseout = () => {
+    setErr('');
+    window.API.gudang.closeoutPreview(today).then((r) => {
+      const d = r.data;
+      if (d.closed) { setCoView(d.closeout); return; }
+      setCoModal({ items: (d.items || []).map((i) => ({ ...i, physical: String(i.system), reason: '' })), summary: d.summary || {}, note: '' });
+    }).catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
+  };
+  const commitCloseout = () => {
+    if (!coModal || saving) return;
+    const bad = coModal.items.find((it) => (parseInt(it.physical, 10) || 0) !== it.system && !(it.reason || '').trim());
+    if (bad) { setErr(trD('gud.coErrReason', { name: bad.name })); return; }
+    setSaving(true); setErr('');
+    const payload = { date: today, note: (coModal.note || '').trim() || undefined,
+      items: coModal.items.map((it) => ({ itemId: it.itemId, physical: parseInt(it.physical, 10) || 0, reason: (it.reason || '').trim() || undefined })) };
+    window.API.gudang.closeWarehouse(payload)
+      .then(() => { setSaving(false); setCoModal(null); flash(trD('gud.coSaved')); reload(); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
 
   const commit = () => {
     if (!modal || saving) return;
@@ -99,12 +122,29 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet }) {
     return it.needsRestock ? <span className="gud-badge low"><IconWarn s={11} />{trD('gud.needRestock')}</span> : <span className="gud-badge ok"><IconCheck s={11} />{trD('gud.safe')}</span>;
   };
 
+  const fmtT = (ms) => { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); };
+  const todayCo = (closeouts || []).find((c) => c.date === today);
+
   return (
     <div className="dist-dash screen-enter">
       <div className="gud-head">
         <div className="sec-title">{trD('gud.title')}</div>
-        {canManage && <button type="button" className="btn btn-primary btn-sm" onClick={openNew}><IconPlus s={15} />{trD('gud.addItem')}</button>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {canReport && !todayCo && <button type="button" className="btn btn-ghost btn-sm" onClick={openCloseout}><IconCheck s={15} />{trD('gud.coBtn')}</button>}
+          {canManage && <button type="button" className="btn btn-primary btn-sm" onClick={openNew}><IconPlus s={15} />{trD('gud.addItem')}</button>}
+        </div>
       </div>
+
+      {todayCo && (
+        <div className="card gud-closed-banner" onClick={() => setCoView(todayCo)}>
+          <span className="gud-closed-ic"><IconCheck s={16} /></span>
+          <div className="gud-closed-main">
+            <b>{trD('gud.coClosedBy', { who: todayCo.closedByName || '—', t: fmtT(todayCo.closedAt) })}</b>
+            {todayCo.diffCount > 0 ? <span className="gud-closed-diff"><IconWarn s={12} />{trD('gud.coDiffN', { n: todayCo.diffCount })}</span> : <span className="gud-closed-ok">{trD('gud.coNoDiff')}</span>}
+          </div>
+          <span className="dist-link">{trD('gud.coView')}</span>
+        </div>
+      )}
 
       {restock.length > 0 && (
         <div className="card gud-restock">
@@ -161,6 +201,19 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet }) {
           </div>
         ); })}
       </div>
+
+      {canReport && (closeouts || []).length > 0 && (
+        <div className="card dist-card gud-coreport">
+          <div className="sec-title" style={{ marginBottom: 8 }}>{trD('gud.coHistory')}</div>
+          {closeouts.map((c) => (
+            <div key={c.id} className="gud-co-row" onClick={() => setCoView(c)}>
+              <span className="gud-co-date">{c.date}</span>
+              <div className="gud-co-main"><span>{c.closedByName || '—'} · {fmtT(c.closedAt)}</span>{c.note ? <small>{c.note}</small> : null}</div>
+              {c.diffCount > 0 ? <span className="gud-badge low"><IconWarn s={11} />{trD('gud.coDiffN', { n: c.diffCount })}</span> : <span className="gud-badge ok"><IconCheck s={11} />{trD('gud.coNoDiff')}</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {modal && (
         <div className="modal-scrim" onClick={() => setModal(null)} style={{ zIndex: 200 }}>
@@ -248,6 +301,79 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet }) {
               {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
             </div>
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setModal(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commit}>{saving ? '…' : trD('gud.save')}</button></div>
+          </div>
+        </div>
+      )}
+
+      {coModal && (() => { const S = coModal.summary || {}; const anyDiff = coModal.items.some((it) => (parseInt(it.physical, 10) || 0) !== it.system);
+        const setIt = (idx, patch) => setCoModal({ ...coModal, items: coModal.items.map((it, i) => i === idx ? { ...it, ...patch } : it) });
+        return (
+        <div className="modal-scrim" onClick={() => setCoModal(null)} style={{ zIndex: 210 }}>
+          <div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('gud.coT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{today}</div></div><button className="jp-icon" onClick={() => setCoModal(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('gud.coInfo')}</span></div>
+              <div className="gud-co-daysum">
+                <span>{trD('gud.coSumRuns', { out: numX(S.runsOut || 0), full: numX(S.runsFullReturned || 0), empty: numX(S.runsEmptyReturned || 0) })}</span>
+                <span>{trD('gud.coSumDmg', { d: numX((S.gallonDamage || 0) + (S.stockDamageLoss || 0)), l: numX(S.gallonLoss || 0) })}</span>
+                <span>{trD('gud.coSumRestock', { n: numX(S.restock || 0) })}</span>
+                <span>{trD('gud.coSumSales', { n: numX((S.rusakSales || {}).qty || 0), rp: rpFull((S.rusakSales || {}).total || 0) })}</span>
+              </div>
+              <div className="gud-co-items">
+                <div className="gud-co-ihead"><span>{trD('gud.coItem')}</span><span className="num">{trD('gud.coSystem')}</span><span className="num">{trD('gud.coPhysical')}</span></div>
+                {coModal.items.map((it, idx) => { const phys = parseInt(it.physical, 10) || 0; const diff = phys - it.system; return (
+                  <div key={it.itemId} className={`gud-co-irow ${diff !== 0 ? 'diff' : ''}`}>
+                    <span className="gud-co-iname">{it.name}<small>{it.unit}</small></span>
+                    <span className="num gud-co-sys">{numX(it.system)}</span>
+                    <input className="fld tnum gud-co-phys" value={it.physical} inputMode="numeric" onChange={(e) => setIt(idx, { physical: e.target.value.replace(/[^0-9]/g, '') })} />
+                    {diff !== 0 && (
+                      <div className="gud-co-diffrow">
+                        <span className="gud-co-diff">{trD('gud.coDiff', { d: (diff > 0 ? '+' : '') + numX(diff) })}</span>
+                        <input className="fld gud-co-reason" value={it.reason} placeholder={trD('gud.coReasonPh')} onChange={(e) => setIt(idx, { reason: e.target.value })} />
+                      </div>
+                    )}
+                  </div>
+                ); })}
+              </div>
+              <label className="fld-label">{trD('gud.coNote')}</label>
+              <textarea className="fld" style={{ height: 56, padding: 12, resize: 'vertical' }} value={coModal.note} placeholder={trD('gud.coNotePh')} onChange={(e) => setCoModal({ ...coModal, note: e.target.value })} />
+              {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCoModal(null)}>{trD('dist.cancel')}</button><button className={`btn ${anyDiff ? 'gud-btn-warn' : 'btn-primary'}`} disabled={saving} onClick={commitCloseout}>{saving ? '…' : (anyDiff ? trD('gud.coCloseDiff') : trD('gud.coClose'))}</button></div>
+          </div>
+        </div>
+      ); })()}
+
+      {coView && (
+        <div className="modal-scrim" onClick={() => setCoView(null)} style={{ zIndex: 210 }}>
+          <div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('gud.coViewT')} · {coView.date}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{coView.closedByName || '—'} · {fmtT(coView.closedAt)}</div></div><button className="jp-icon" onClick={() => setCoView(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              {(() => { const S = coView.summary || {}; return (
+                <div className="gud-co-daysum">
+                  <span>{trD('gud.coSumRuns', { out: numX(S.runsOut || 0), full: numX(S.runsFullReturned || 0), empty: numX(S.runsEmptyReturned || 0) })}</span>
+                  <span>{trD('gud.coSumDmg', { d: numX((S.gallonDamage || 0) + (S.stockDamageLoss || 0)), l: numX(S.gallonLoss || 0) })}</span>
+                  <span>{trD('gud.coSumRestock', { n: numX(S.restock || 0) })}</span>
+                  <span>{trD('gud.coSumSales', { n: numX((S.rusakSales || {}).qty || 0), rp: rpFull((S.rusakSales || {}).total || 0) })}</span>
+                </div>
+              ); })()}
+              <div className="gud-co-items">
+                <div className="gud-co-ihead"><span>{trD('gud.coItem')}</span><span className="num">{trD('gud.coSystem')}</span><span className="num">{trD('gud.coPhysical')}</span><span className="num">{trD('gud.coDiffCol')}</span></div>
+                {(coView.items || []).map((it) => (
+                  <div key={it.itemId} className={`gud-co-vrow ${it.diff !== 0 ? 'diff' : ''}`}>
+                    <span className="gud-co-iname">{it.name}</span>
+                    <span className="num">{numX(it.system)}</span>
+                    <span className="num">{numX(it.physical)}</span>
+                    <span className="num">{it.diff === 0 ? <span className="run-ok">0</span> : <span className="run-bad" title={it.reason}>{(it.diff > 0 ? '+' : '') + numX(it.diff)}</span>}</span>
+                  </div>
+                ))}
+              </div>
+              {(coView.items || []).filter((it) => it.diff !== 0 && it.reason).map((it) => (
+                <div key={'r' + it.itemId} className="gud-co-reasonline"><b>{it.name}:</b> {it.reason}</div>
+              ))}
+              {coView.note ? <div className="gud-co-noteline"><IconInvoice s={13} /> {coView.note}</div> : null}
+            </div>
+            <div className="modal-foot"><button className="btn btn-primary" onClick={() => setCoView(null)}>{trD('gud.ok')}</button></div>
           </div>
         </div>
       )}

@@ -723,3 +723,18 @@ model StockMovement {
   @@index([itemId])
   @@index([type])
 }
+
+// Daily warehouse closeout (opname) — a stock-take + day report. The officer confirms or
+// inputs a PHYSICAL count per item; any gap vs the system (ledger) number is recorded here AND
+// posted as a correction (never a silent overwrite). One per date; supervisors read the report.
+model WarehouseCloseout {
+  id           String   @id @default(cuid())
+  date         String   @unique                       // YYYY-MM-DD
+  closedById   String?
+  closedByName String?
+  closedAt     DateTime @default(now())
+  items        String   @default("[]")                // JSON: [{itemId,name,unit,kind,system,physical,diff,reason}]
+  summary      String   @default("{}")                // JSON day summary (runs out/in, damage/loss, restock, rusak sales)
+  note         String   @default("")                  // kendala / catatan
+  diffCount    Int      @default(0)                   // items with an opname difference (quick "selisih menonjol")
+}
