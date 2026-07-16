@@ -274,25 +274,92 @@ function downloadImportTemplate() {
 }
 // Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
 const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng;
-// Read the device GPS and hand back a ready-made Google Maps link (used by the form's
-// "Ambil Lokasi Saat Ini"). Free — no API key.
-function gpsLink(onLink, onErr) {
-  if (!(navigator.geolocation && navigator.geolocation.getCurrentPosition)) { onErr(window.t('dist.locUnavailable')); return; }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => onLink(mapsUrl(pos.coords.latitude, pos.coords.longitude)),
-    () => onErr(window.t('dist.locDenied')),
-    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
-  );
+// GPS capture button — TOUCH-ONLY (hidden on desktop so the office location is never saved as a
+// customer's; desktop keeps only the paste-a-Maps-link field). Reads a high-accuracy fix; if the
+// reported accuracy is worse than 100 m (likely WiFi, not GPS) it asks first: Retry / Save anyway /
+// Cancel. `onCapture` → fill mode (add/edit form); otherwise it saves straight to the server.
+const IS_TOUCH = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+const ACC_LIMIT = 100;
+function GpsButton({ custId, hasLoc, onSaved, onCapture, onFlash, label }) {
+  const [busy, setBusy] = uSx(false);
+  const [low, setLow] = uSx(null);   // { lat, lng, accuracy } awaiting the low-accuracy choice
+  if (!IS_TOUCH()) return null;
+  const fail = (m) => onFlash && onFlash(m);
+  const persist = (lat, lng, accuracy) => {
+    if (onCapture) { onCapture({ lat, lng, accuracy }); return; }
+    setBusy(true);
+    window.API.distribusi.customers.setLocation(custId, { lat, lng, accuracy })
+      .then((r) => { setBusy(false); onSaved && onSaved(r.data); })
+      .catch(() => { setBusy(false); fail(trD('dist.locSaveErr')); });
+  };
+  const capture = () => {
+    if (hasLoc && !onCapture && !window.confirm(trD('dist.locOverwriteConfirm'))) return;
+    if (!(navigator.geolocation && navigator.geolocation.getCurrentPosition)) { fail(trD('dist.locUnavailable')); return; }
+    setBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setBusy(false);
+        const acc = Math.round(pos.coords.accuracy);
+        if (acc > ACC_LIMIT) { setLow({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc }); return; }
+        persist(pos.coords.latitude, pos.coords.longitude, acc);
+      },
+      () => { setBusy(false); fail(trD('dist.locDenied')); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  };
+  return (<>
+    <button type="button" className="btn btn-ghost btn-sm dist-gps-btn" disabled={busy} onClick={capture}><IconPin s={14} />{busy ? '…' : (label || (hasLoc ? trD('dist.locUpdate') : trD('dist.locTag')))}</button>
+    {low && (
+      <div className="modal-scrim" onClick={() => setLow(null)} style={{ zIndex: 260 }}>
+        <div className="modal-card" style={{ maxWidth: 390 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 800 }}>{trD('dist.locLowT')}</div></div>
+          <div className="modal-body"><div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('dist.locLowMsg', { x: low.accuracy })}</span></div></div>
+          <div className="modal-foot" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={() => setLow(null)}>{trD('dist.locCancel')}</button>
+            <button className="btn btn-ghost" onClick={() => { setLow(null); capture(); }}>{trD('dist.locRetry')}</button>
+            <button className="btn btn-primary" onClick={() => { const l = low; setLow(null); persist(l.lat, l.lng, l.accuracy); }}>{trD('dist.locSaveAnyway')}</button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>);
 }
-// Tag a customer's location from the DEVICE GPS (free). Confirms before overwriting an
-// existing point; on denial/unavailable, reports so the user can enter it manually.
-function tagLocation(custId, hasLoc, onDone, onFail) {
-  if (hasLoc && !window.confirm(window.t('dist.locOverwriteConfirm'))) return;
-  if (!(navigator.geolocation && navigator.geolocation.getCurrentPosition)) { onFail(window.t('dist.locUnavailable')); return; }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => { window.API.distribusi.customers.setLocation(custId, { lat: pos.coords.latitude, lng: pos.coords.longitude }).then((r) => onDone(r.data)).catch(() => onFail(window.t('dist.locSaveErr'))); },
-    () => onFail(window.t('dist.locDenied')),
-    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+
+// Customer LOCATION PHOTO. Bytes live in the Attachment store (never inline in the record); the
+// customer row only keeps the attachment id. Thumbnail loads lazily; the full image opens via the
+// shared ProofViewer (also lazy). Upload/replace/remove go through UI.FileAttach (camera on mobile)
+// → we persist only the returned ref id. Not part of the "data lengkap" check — optional extra.
+function LocThumb({ photoId, onView }) {
+  const [src, setSrc] = uSx(null);
+  uEx(() => { let live = true; setSrc(null); if (photoId && window.API && window.API.attachments) { window.API.attachments.get(photoId).then((r) => { if (live) setSrc(r && r.data ? r.data.data : null); }).catch(() => {}); } return () => { live = false; }; }, [photoId]);
+  return src
+    ? <img className="dist-locphoto-thumb" src={src} alt="foto lokasi" onClick={onView} />
+    : <div className="dist-locphoto-ph" onClick={onView}><span className="ui-attach-spin" /></div>;
+}
+function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) {
+  const view = () => { if (photoId && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: photoId, isImg: true, name: 'foto-lokasi.jpg' }); };
+  const persist = (id) => window.API.distribusi.customers.setLocationPhoto(custId, id).then(() => onChanged && onChanged()).catch(() => {});
+  const onPick = (v) => { if (v && v.ref) persist(v.ref); };   // cloud upload → store only the ref id
+  if (compact) {
+    return (
+      <span className="dist-locphoto-board">
+        {photoId && <button type="button" className="dist-link" onClick={view}><IconPin s={12} />{trD('dist.locPhotoView')}</button>}
+        {canEdit && <UI.FileAttach value={null} onChange={onPick} compact camera label={photoId ? trD('dist.locPhotoReplace') : trD('dist.locPhotoAdd')} />}
+      </span>
+    );
+  }
+  return (
+    <div className="dist-locphoto">
+      {photoId ? (<>
+        <LocThumb photoId={photoId} onView={view} />
+        <div className="dist-locphoto-side">
+          {byName ? <div className="dist-locphoto-meta">{trD('dist.locPhotoBy', { who: byName, d: fmtDT(at) })}</div> : null}
+          {canEdit && <div className="dist-locphoto-acts"><UI.FileAttach value={null} onChange={onPick} compact camera label={trD('dist.locPhotoReplace')} /><button type="button" className="dist-link danger" onClick={() => persist(null)}>{trD('dist.locPhotoRemove')}</button></div>}
+        </div>
+      </>) : (
+        canEdit ? <UI.FileAttach value={null} onChange={onPick} camera label={trD('dist.locPhotoAdd')} /> : <div className="dist-hint">{trD('dist.locPhotoNone')}</div>
+      )}
+    </div>
   );
 }
 
@@ -936,6 +1003,8 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
     const mu = (form.mapsUrl || '').trim();
     if (mu && !/^https?:\/\//i.test(mu)) { setFormErr(trD('dist.mapsUrlInvalid')); return; }
     const locFields = { address: (form.address || '').trim(), mapsUrl: mu };
+    // GPS-captured point → also send lat/lng/accuracy so the ±m is stored (not just the link).
+    if (form._lat != null && form._lng != null) { locFields.lat = form._lat; locFields.lng = form._lng; locFields.accuracy = form._accuracy != null ? form._accuracy : null; }
     setSaving(true); setFormErr('');
     if (!form.id) {
       const price = parseInt(String(form.price).replace(/[^0-9]/g, ''), 10);
@@ -1046,9 +1115,11 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
           <input className="fld" value={form.address} maxLength={300} placeholder={trD('dist.cfAddressPh')} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           <label className="fld-label">{trD('dist.cfMapsUrl')}</label>
           <div className="dist-mapsurl-row">
-            <input className="fld" value={form.mapsUrl} maxLength={500} placeholder={trD('dist.cfMapsUrlPh')} onChange={(e) => setForm({ ...form, mapsUrl: e.target.value })} />
-            <button type="button" className="btn btn-ghost dist-gps-btn" onClick={() => gpsLink((link) => { setForm((f) => ({ ...f, mapsUrl: link })); setFormErr(''); }, (m) => setFormErr(m))}><IconPin s={15} />{trD('dist.getGps')}</button>
+            {/* Manually editing the link clears any captured GPS coords so we never save stale lat/lng. */}
+            <input className="fld" value={form.mapsUrl} maxLength={500} placeholder={trD('dist.cfMapsUrlPh')} onChange={(e) => setForm({ ...form, mapsUrl: e.target.value, _lat: undefined, _lng: undefined, _accuracy: undefined })} />
+            <GpsButton label={trD('dist.getGps')} onFlash={setFormErr} onCapture={({ lat, lng, accuracy }) => { setForm((f) => ({ ...f, mapsUrl: mapsUrl(lat, lng), _lat: lat, _lng: lng, _accuracy: accuracy })); setFormErr(''); }} />
           </div>
+          {form._accuracy != null && <div className="dist-hint" style={{ marginTop: 5 }}>{trD('dist.locAccNote', { x: Math.round(form._accuracy) })}</div>}
           {form.mapsUrl ? <a className="dist-link" href={form.mapsUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, marginTop: 5, display: 'inline-flex', gap: 4, alignItems: 'center' }}><IconPin s={12} />{trD('dist.openMaps')}</a> : <div className="dist-hint" style={{ marginTop: 5 }}>{trD('dist.cfMapsUrlHint')}</div>}
           {(() => {
             const r = form.reminder || {};
@@ -1113,11 +1184,17 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
               <div className="dist-cd-meta">
                 <span><IconCalendar s={13} />{trD('dist.kirimHari')}: <b>{days || '—'}</b></span>
                 <span className={d.armada && !isActiveArmada(d.armada) ? 'inactive' : ''}><IconTruck s={13} />{trD('dist.armada')}: <b>{d.armada ? armadaFull(d.armada) : '—'}</b></span>
-                <span><IconPin s={13} />{trD('dist.location')}: {d.mapsLink
+                <span className={d.locationAccuracy != null && d.locationAccuracy > ACC_LIMIT ? 'inactive' : ''}><IconPin s={13} />{trD('dist.location')}: {d.mapsLink
                   ? <a href={d.mapsLink} target="_blank" rel="noopener noreferrer" className="dist-link">{trD('dist.directions')}</a>
-                  : <b className="dist-noloc">{trD('dist.locNotSet')}</b>}</span>
+                  : <b className="dist-noloc">{trD('dist.locNotSet')}</b>}
+                  {d.hasLocation && d.locationAccuracy != null && <b className={d.locationAccuracy > ACC_LIMIT ? 'dist-acc-bad' : 'dist-acc-ok'}> · ±{Math.round(d.locationAccuracy)} m{d.locationAccuracy > ACC_LIMIT ? ' ' + trD('dist.locAccPoor') : ''}</b>}
+                  {d.hasLocation && d.locationSetByName && <span className="dist-loc-by"> · {trD('dist.locSetBy', { d: fmtDT(d.locationSetAt), who: d.locationSetByName })}</span>}</span>
               </div>
               {d.address ? <div className="dist-cd-addr"><IconHome s={12} />{d.address}</div> : null}
+              <div className="dist-cd-photo">
+                <div className="dist-cd-photo-lbl"><IconPin s={12} />{trD('dist.locPhoto')}</div>
+                <LocPhoto custId={d.id} photoId={d.locationPhotoId} byName={d.locationPhotoByName} at={d.locationPhotoAt} canEdit={canInput || canCustomers} onChanged={() => { openDetail(d.id); reload(); }} />
+              </div>
             </div>
             <div className="dist-cd-stats">
               <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
@@ -1127,7 +1204,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
             <div className="dist-cd-actions">
               {(canInput || canCustomers) && <button type="button" className="btn btn-primary btn-sm" onClick={() => setInvBuilder(true)}><IconInvoice s={14} />{trD('dist.makeInvoice')}</button>}
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={14} />{trD('dist.printHistory')}</button>
-              {(canInput || canCustomers) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => tagLocation(d.id, d.hasLocation, () => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }, (m) => flash(m))}><IconPin s={14} />{d.hasLocation ? trD('dist.locUpdate') : trD('dist.locTag')}</button>}
+              {(canInput || canCustomers) && <GpsButton custId={d.id} hasLoc={d.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }} onFlash={flash} />}
               {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
               {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
               {canDelete && d.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={() => doReactivate(d)}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
@@ -2168,7 +2245,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleet
                 {s.mapsLink
                   ? <a href={s.mapsLink} target="_blank" rel="noopener noreferrer" className="dist-link"><IconPin s={12} />{trD('dist.directions')}</a>
                   : <span className="dist-noloc"><IconPin s={12} />{trD('dist.locNotSet')}</span>}
-                <button type="button" className="dist-link" onClick={() => tagLocation(s.customerId, s.hasLocation, () => { flash(trD('dist.locSaved')); reload(); if (onChanged) onChanged(); }, (m) => flash(m))}>{s.hasLocation ? trD('dist.locUpdate') : trD('dist.locTag')}</button>
+                <GpsButton custId={s.customerId} hasLoc={s.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); reload(); if (onChanged) onChanged(); }} onFlash={flash} />
+                <LocPhoto custId={s.customerId} photoId={s.locationPhotoId} canEdit onChanged={() => { flash(trD('dist.locPhotoSaved')); reload(); if (onChanged) onChanged(); }} compact />
               </div>
             </div>
             {s.status === 'pending' && (

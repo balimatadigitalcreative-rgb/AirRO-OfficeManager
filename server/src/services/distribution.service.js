@@ -190,6 +190,9 @@ function custClient(c) {
     lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, address: c.address || '',
     mapsUrl: c.mapsUrl || '', mapsLink, hasLocation: !!mapsLink,
     locationSetAt: c.locationSetAt ? new Date(c.locationSetAt).getTime() : null, locationSetByName: c.locationSetByName || null,
+    locationAccuracy: c.locationAccuracy != null ? c.locationAccuracy : null,   // metres; null = pasted/unknown
+    locationPhotoId: c.locationPhotoId || null,
+    locationPhotoAt: c.locationPhotoAt ? new Date(c.locationPhotoAt).getTime() : null, locationPhotoByName: c.locationPhotoByName || null,
     active: c.active !== false,   // deactivated customers are hidden from active list + new txn/delivery selection
     deactivatedAt: c.deactivatedAt ? new Date(c.deactivatedAt).getTime() : null, deactivatedByName: c.deactivatedByName || null,
     complete: comp.complete, missing: comp.missing,
@@ -292,7 +295,7 @@ async function createCustomer(body, actor) {
   cols.armada = resolveWriteFleet(actor, cols.armada);   // scoped staff → forced to their fleet
   const snap = await actorSnap(actor);
   const loc = normLatLng(body.lat, body.lng);            // optional coordinates at creation
-  if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; }
+  if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; if (body.accuracy != null && Number.isFinite(+body.accuracy)) cols.locationAccuracy = Math.max(0, Math.round(+body.accuracy)); }
   if (loc || cols.mapsUrl) { cols.locationSetAt = new Date(); cols.locationSetByName = snap.actorName; }   // location provided at creation → stamp
   cols.code = await allocateCustomerCode();
   const c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
@@ -315,13 +318,14 @@ async function updateCustomer(id, body, actor) {
   if (body.type != null) data.type = await validTypeId(body.type);
   if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
   const snap = await actorSnap(actor);
-  // Google Maps link (pasted). '' clears it. A non-empty link stamps who/when.
-  if (body.mapsUrl !== undefined) { data.mapsUrl = cleanMapsUrl(body.mapsUrl); if (data.mapsUrl) { data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; } }
+  // Google Maps link (pasted). '' clears it. A non-empty link stamps who/when. A pasted link
+  // carries no GPS accuracy → clear locationAccuracy so a stale ±m from an old reading can't mislead.
+  if (body.mapsUrl !== undefined) { data.mapsUrl = cleanMapsUrl(body.mapsUrl); if (data.mapsUrl) { data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; data.locationAccuracy = null; } }
   // Manual coordinate entry. Providing both sets them + stamps; null/'' for both clears.
   if (body.lat !== undefined || body.lng !== undefined) {
     const loc = normLatLng(body.lat, body.lng);
-    if (loc) { data.lat = loc.lat; data.lng = loc.lng; data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; }
-    else if ((body.lat === null || body.lat === '') && (body.lng === null || body.lng === '')) { data.lat = null; data.lng = null; }
+    if (loc) { data.lat = loc.lat; data.lng = loc.lng; data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; data.locationAccuracy = null; }
+    else if ((body.lat === null || body.lat === '') && (body.lng === null || body.lng === '')) { data.lat = null; data.lng = null; data.locationAccuracy = null; }
   }
   const c = await prisma.customer.update({ where: { id }, data });
   await logAudit('pelanggan', `Ubah pelanggan: ${c.name}`, `Tipe ${c.type}`, snap, c.armada);
@@ -345,11 +349,27 @@ async function setCustomerLocation(id, body, actor) {
   const loc = normLatLng(body.lat, body.lng);
   if (!loc) throw ApiError.badRequest('Koordinat tidak valid.');
   const snap = await actorSnap(actor);
+  const acc = (body.accuracy != null && Number.isFinite(+body.accuracy)) ? Math.max(0, Math.round(+body.accuracy)) : null;
   // Also build a ready-to-use Maps link from the point so "Petunjuk Arah" works right away.
-  const data = { lat: loc.lat, lng: loc.lng, mapsUrl: 'https://www.google.com/maps?q=' + loc.lat + ',' + loc.lng, locationSetAt: new Date(), locationSetByName: snap.actorName };
+  const data = { lat: loc.lat, lng: loc.lng, mapsUrl: 'https://www.google.com/maps?q=' + loc.lat + ',' + loc.lng, locationAccuracy: acc, locationSetAt: new Date(), locationSetByName: snap.actorName };
   if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
   const c = await prisma.customer.update({ where: { id }, data });
-  await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}`, snap, c.armada);
+  await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}${acc != null ? ' · ±' + acc + ' m' : ''}`, snap, c.armada);
+  return custClient(c);
+}
+// Attach / replace / remove a customer's LOCATION PHOTO. The photo bytes already live in the
+// Attachment store (uploaded via the existing /attachments flow); here we only store its id + who/
+// when. photoId null removes it. Same audience as location tagging (delivery helpers + customer
+// managers); fleet scope enforced. NOT part of the completeness check — optional extra info.
+async function setLocationPhoto(id, body, actor) {
+  const cur = await prisma.customer.findUnique({ where: { id } });
+  if (!cur) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, cur.armada)) throw ApiError.forbidden('Pelanggan di luar akses Anda.');
+  const snap = await actorSnap(actor);
+  const photoId = body.photoId ? String(body.photoId).slice(0, 60) : null;
+  const data = { locationPhotoId: photoId, locationPhotoAt: photoId ? new Date() : null, locationPhotoByName: photoId ? snap.actorName : null };
+  const c = await prisma.customer.update({ where: { id }, data });
+  await logAudit('pelanggan', `${photoId ? 'Foto lokasi' : 'Hapus foto lokasi'}: ${c.name}`, photoId ? `oleh ${snap.actorName}` : '', snap, c.armada);
   return custClient(c);
 }
 async function importCustomers(list, actor) {
@@ -1020,6 +1040,7 @@ function deliveryClient(r, sisaBon) {
     customerName: c.name || '', customerCode: c.code || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
     deliveryDays: Array.isArray(days) ? days : [], sisaBon: sisaBon || 0,
     lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, mapsLink: mapsLinkOf(c), hasLocation: !!mapsLinkOf(c),
+    locationPhotoId: c.locationPhotoId || null,   // board shows a lazy "Foto lokasi" button when set
   };
 }
 async function bonMapFor(custIds) {
@@ -1233,7 +1254,7 @@ async function cashIntegration(user, query) {
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
-  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
+  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,

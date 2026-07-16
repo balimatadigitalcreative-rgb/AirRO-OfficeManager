@@ -119,7 +119,8 @@
         get: (id) => req('GET', '/distribusi/customers/' + id),
         create: (data) => req('POST', '/distribusi/customers', data),
         update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),
-        setLocation: (id, data) => req('PATCH', '/distribusi/customers/' + id + '/location', data),   // { lat, lng, address? }
+        setLocation: (id, data) => req('PATCH', '/distribusi/customers/' + id + '/location', data),   // { lat, lng, accuracy?, address? }
+        setLocationPhoto: (id, photoId) => req('PATCH', '/distribusi/customers/' + id + '/location-photo', { photoId: photoId || null }),
         import: (customers) => req('POST', '/distribusi/customers/import', { customers }),
         // scope: null = new transactions only; 'all'|'cycle'|'bon' = also adjust old ones.
         setPrice: (id, newPrice, scope) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice, scope: scope || null }),

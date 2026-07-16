@@ -158,8 +158,11 @@ function shrinkToJpeg(img) {
 // Attachment store, fetched lazily) OR a legacy/offline inline { name, isImg, data }.
 // FileAttach uploads to the attachment store when the cloud is active so the record it
 // is saved into never carries the base64; offline it embeds inline (no sync anyway).
-function FileAttach({ value, onChange, compact }) {
+function FileAttach({ value, onChange, compact, camera, accept, label }) {
   const inputRef = uRd(null);
+  // On a touch device, `camera` opens the rear camera directly (helper photographs on-site);
+  // desktop ignores `capture` and shows the normal file picker.
+  const isTouch = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
   const [busy, setBusy] = uSd(false);
   const [err, setErr] = uSd('');
   const [preview, setPreview] = uSd(null);   // local data URL for an instant thumbnail this session
@@ -209,12 +212,12 @@ function FileAttach({ value, onChange, compact }) {
   const thumb = preview || (value && value.data) || null;   // an inline image we can show now
   return (
     <div className={`ui-attach ${compact ? 'compact' : ''}`}>
-      <input ref={inputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={onPick} />
+      <input ref={inputRef} type="file" accept={accept || 'image/*,application/pdf'} {...(camera && isTouch ? { capture: 'environment' } : {})} style={{ display: 'none' }} onChange={onPick} />
       {busy ? (
         <div className="ui-attach-btn" style={{ opacity: .8 }}><span className="ui-attach-spin" />{tA('att.processing')}</div>
       ) : !value ? (
         <button type="button" className="ui-attach-btn" onClick={() => inputRef.current && inputRef.current.click()}>
-          <IconPlus s={15} /><span>{tA('att.upload') || 'Attach proof'}</span>
+          <IconPlus s={15} /><span>{label || tA('att.upload') || 'Attach proof'}</span>
         </button>
       ) : (
         <div className="ui-attach-prev">

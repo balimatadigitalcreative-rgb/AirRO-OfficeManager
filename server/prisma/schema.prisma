@@ -451,6 +451,10 @@ model Customer {
   address       String   @default("")          // free-text address (optional)
   locationSetAt DateTime?                       // when the coordinates were last set
   locationSetByName String?                     // who set them (accountability trail)
+  locationAccuracy Float?                        // GPS accuracy in metres (position.coords.accuracy); null = pasted/unknown
+  locationPhotoId  String?                       // Attachment.id of the location photo (bytes fetched lazily, never inline)
+  locationPhotoAt  DateTime?                     // when the photo was taken/uploaded
+  locationPhotoByName String?                    // who took it
   active        Boolean  @default(true)         // false = deactivated (hidden from active list + new txn/delivery, history kept)
   deactivatedAt DateTime?
   deactivatedByName String?

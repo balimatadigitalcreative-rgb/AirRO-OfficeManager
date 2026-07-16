@@ -20,6 +20,9 @@ router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ par
 // GPS location tagging by the delivery crew (needs only the delivery caps, not full
 // customer-management). Sets lat/lng + stamps who/when; fleet scope enforced.
 router.patch('/customers/:id/location', requireAnyCap(['distribusiInput', 'distribusiPengiriman']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationSchema }), ctrl.setLocation);
+// Location photo (bytes already in the Attachment store; this stores only the id + who/when).
+// Delivery helpers may photograph while delivering; customer managers may replace/remove.
+router.patch('/customers/:id/location-photo', requireAnyCap(['distribusiInput', 'distribusiPengiriman', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationPhotoSchema }), ctrl.setLocationPhoto);
 router.post('/customers/import', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
 // Deactivate (soft, reversible) / reactivate / hard-delete a customer — dedicated
 // capability, separate from ordinary customer management. Server enforces the cap + scope.
