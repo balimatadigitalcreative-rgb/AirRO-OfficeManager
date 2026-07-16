@@ -176,7 +176,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
   const [tab, setTab] = uSu('users');   // 'users' | 'roles'
   const [resetReqs, setResetReqs] = uSu([]);   // pending forgot-password requests
 
-  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword });
+  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword, weakPassword: !!u.weakPassword });
 
   const refreshReqs = () => { if (cloud) window.API.users.resetRequests('pending').then((r) => setResetReqs(r.data || [])).catch(() => {}); };
   const refresh = () => {
@@ -287,6 +287,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <RoleBadge role={u.role} size="sm" />
                 {u.permissions && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--green-700)', background: 'var(--pos-bg)', padding: '2px 7px', borderRadius: 999 }}>akses khusus</span>}
+                {u.weakPassword && <span className="um-weakpw" title={trU('um.weakPwHint')}><IconLock s={10} />{trU('um.weakPw')}</span>}
               </div>
             </div>
             <span className="um-edit"><IconPencil s={15} /></span>

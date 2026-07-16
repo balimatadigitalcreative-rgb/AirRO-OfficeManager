@@ -222,3 +222,57 @@ curl -s -o /dev/null -w '%{http_code}\n' -X PUT $DOMAIN/api/v1/state/airro_bigte
   and set a Postgres `DATABASE_URL`. See `server/README.md`.
 - `start.bat` / `serve.py` are for **local development only** — production uses
   Nginx + pm2.
+
+## Security hardening (production)
+
+This app is public and holds salaries, NIK and BPJS data. The checklist below is
+enforced in code + config; the commands verify it on the live box.
+
+**1. Rate limiting** (express-rate-limit, installed automatically by `update.sh`).
+- `POST /api/v1/auth/login` — **10 failed attempts / 15 min / IP** → `429` with
+  *"Terlalu banyak percobaan, coba lagi dalam beberapa menit."* Successful logins
+  don't count, so real users are never locked out.
+- Forgot-password endpoints — **5 / hour / IP**.
+- All authenticated API routes — **300 req / min / IP** (generous). The SSE stream
+  `/api/v1/events` and `/api/v1/health` are **exempt** so realtime + polling never trip it.
+- Nginx is the single proxy, so the app sets **`trust proxy = 1`** and limits on the
+  real client IP (from `X-Forwarded-For`). Tune via the `*_RATE_*` vars in `.env`.
+```bash
+DOMAIN=https://airrooffice.com
+# 11 rapid bad logins → first ~10 are 401, then 429:
+for i in $(seq 1 11); do
+  curl -s -o /dev/null -w "%{http_code} " -X POST $DOMAIN/api/v1/auth/login \
+    -H 'Content-Type: application/json' -d '{"username":"nobody","password":"x"}'
+done; echo
+```
+
+**2. Login observability.** The client always sees a generic *"Invalid credentials"*
+(never "user not found" vs "inactive"), but the server logs the real reason with the
+username + IP so you can diagnose lockouts: `pm2 logs airro-api` →
+`[auth] login gagal — user tidak ditemukan | akun nonaktif | password salah (username="…", ip="…")`.
+
+**3. Rotate `JWT_SECRET` now.** It was shared during debugging, so generate a fresh one:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+nano server/.env        # paste into JWT_SECRET=...
+pm2 restart airro-api --update-env
+```
+> ⚠️ Rotating the secret **invalidates every existing session** — everyone (including
+> you) must log in again. That's expected and harmless; do it once, then leave it alone.
+
+**4. CORS locked to the domain.** `CORS_ORIGIN=https://airrooffice.com` in `server/.env`
+(never `*`). The server refuses to start in production without a strong `JWT_SECRET`.
+
+**5. Secrets/DB/VCS are not reachable over HTTP.** `nginx-airro.conf` denies
+`/server`, `/deploy`, `*.db`, `*.env`, and dotfiles (`/.git`, `/.env`). Verify:
+```bash
+for p in /server/.env /server/prisma/prod.db /.git/config /.env; do
+  echo -n "$p → "; curl -s -o /dev/null -w "%{http_code}\n" $DOMAIN$p
+done
+# every line must be 403 or 404 — NEVER 200.
+```
+
+**6. Password policy (minimal, non-disruptive).** Register / self-change enforce a
+**min 8 chars** (server + client). Existing users are **not** force-reset; instead any
+short/temporary password (e.g. a 4-digit admin PIN like `1234`) is **flagged "password
+lemah"** next to that user in the user list, so you can decide who to upgrade.

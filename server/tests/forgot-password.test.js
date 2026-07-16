@@ -91,9 +91,17 @@ describe('Forgot password — request-to-admin', () => {
   });
 
   it('the endpoint is rate-limited (max 5/hour per IP)', async () => {
-    const app2 = createApp();   // fresh limiter state
+    // Limiters share ONE in-memory store for the whole process and are inert in tests
+    // unless a request opts in with `x-ratelimit-test: on` (so the other 200s above,
+    // and every other suite, are unaffected). This IP is used nowhere else.
+    const app2 = createApp();
     let last;
-    for (let i = 0; i < 7; i++) last = await request(app2).post('/api/v1/auth/forgot').set('X-Forwarded-For', '9.9.9.9').send({ username: 'gusde17' });
+    for (let i = 0; i < 7; i++) {
+      last = await request(app2).post('/api/v1/auth/forgot')
+        .set('X-Forwarded-For', '9.9.9.9').set('x-ratelimit-test', 'on')
+        .send({ username: 'gusde17' });
+    }
     expect(last.status).toBe(429);
+    expect(last.body.error.message).toMatch(/terlalu banyak/i);
   });
 });

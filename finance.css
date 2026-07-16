@@ -740,6 +740,7 @@ select.fld::-ms-expand { display: none; }
 .um-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .um-name { font-weight: 700; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
 .um-you { font-size: 10px; font-weight: 700; color: var(--green-700); background: var(--mint-100); padding: 1px 7px; border-radius: 999px; }
+.um-weakpw { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--warn); background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn); padding: 1px 7px; border-radius: 999px; cursor: help; }
 .um-user { font-size: 12.5px; color: var(--text-mut); }
 .um-edit { margin-left: auto; align-self: flex-start; color: var(--text-faint); }
 .cp-row { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 11px; background: var(--card-soft); }

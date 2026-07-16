@@ -31,6 +31,16 @@ const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   corsOrigin: process.env.CORS_ORIGIN || '*',
+  // Rate limiting (per real client IP — see app.set('trust proxy')). All configurable via env so an
+  // office behind one NAT IP can raise the general limit without a code change.
+  rateLimit: {
+    loginWindowMs: parseInt(process.env.LOGIN_RATE_WINDOW_MS || String(15 * 60 * 1000), 10),   // 15 min
+    loginMax: parseInt(process.env.LOGIN_RATE_MAX || '10', 10),
+    forgotWindowMs: parseInt(process.env.FORGOT_RATE_WINDOW_MS || String(60 * 60 * 1000), 10),  // 1 hour
+    forgotMax: parseInt(process.env.FORGOT_RATE_MAX || '5', 10),
+    apiWindowMs: parseInt(process.env.API_RATE_WINDOW_MS || String(60 * 1000), 10),             // 1 min
+    apiMax: parseInt(process.env.API_RATE_MAX || '300', 10),
+  },
 };
 
 // ---- production hardening guards --------------------------------------------

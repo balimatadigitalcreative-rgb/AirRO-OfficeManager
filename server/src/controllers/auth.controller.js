@@ -8,7 +8,7 @@ const registerSchema = z.object({
   // Usernames are case-INSENSITIVE: stored + matched lowercase so "Gusde17" == "gusde17".
   username: z.string().trim().toLowerCase().min(3).max(40).regex(/^[a-z0-9._-]+$/,
     'Username may contain only letters, numbers, dot, underscore and hyphen'),
-  password: z.string().min(6).max(200),
+  password: z.string().min(8, 'Password minimal 8 karakter').max(200),
   role: z.string().trim().min(1).max(40).default('finance'),
   sub: z.string().trim().max(120).optional(),
   color: z.string().trim().max(20).optional(),
@@ -43,7 +43,7 @@ const register = asyncHandler(async (req, res) => {
 });
 
 const login = asyncHandler(async (req, res) => {
-  const result = await authService.login(req.body);
+  const result = await authService.login(req.body, { ip: req.ip });
   res.status(200).json(result);
 });
 

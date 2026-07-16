@@ -9,8 +9,21 @@ const { parsePerms } = require('../config/permissions');
 const PASSWORD_MIN = 8;   // minimum length for a user-chosen password (self change)
 const PUBLIC_FIELDS = {
   id: true, name: true, username: true, role: true, sub: true,
-  color: true, active: true, permissions: true, fleetScope: true, mustChangePassword: true, createdAt: true,
+  color: true, active: true, permissions: true, fleetScope: true, mustChangePassword: true, weakPassword: true, createdAt: true,
 };
+
+// Is this plaintext password weak/temporary? Used to FLAG (not block) accounts for the owner —
+// short PINs (e.g. an admin-set '1234'), all-same digits, and a few notorious passwords. Existing
+// users are never force-reset; the owner sees the flag in the user list and changes them deliberately.
+const COMMON_WEAK = new Set(['12345678', '123456789', '1234567890', 'password', 'password1', 'qwerty123', 'iloveyou', 'admin123', '11111111', '00000000', 'abc12345']);
+function isWeakPassword(pw) {
+  const s = String(pw || '');
+  if (s.length < PASSWORD_MIN) return true;                 // shorter than the policy (covers 4-digit PINs)
+  if (COMMON_WEAK.has(s.toLowerCase())) return true;
+  if (/^(.)\1+$/.test(s)) return true;                      // all one character
+  if (/^0*123456789?0?$/.test(s)) return true;             // simple ascending run
+  return false;
+}
 
 // Distribusi fleet access is stored as a string: "all" or a JSON array of fleet names.
 // Parse to 'all' or an array for API responses.
@@ -47,23 +60,24 @@ async function register({ name, username, password, role, sub, color }) {
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { name, username: uname, passwordHash, role, sub, color },
+    data: { name, username: uname, passwordHash, weakPassword: isWeakPassword(password), role, sub, color },
     select: PUBLIC_FIELDS,
   });
   return { user: publicUser(user), token: signToken(user) };
 }
 
-async function login({ username, password }) {
+async function login({ username, password }, ctx) {
   const uname = normUsername(username);
+  const ip = (ctx && ctx.ip) || '?';
   const user = await prisma.user.findUnique({ where: { username: uname } });
   // SECURITY: the message returned to the client is ALWAYS generic (never reveal whether the
-  // user exists / is inactive / the password is wrong). The real reason is only logged
-  // server-side so the owner can diagnose from the server logs.
-  if (!user) { console.warn(`[auth] login gagal — user tidak ditemukan (username="${uname}")`); throw ApiError.unauthorized('Invalid credentials'); }
-  if (!user.active) { console.warn(`[auth] login gagal — akun nonaktif (username="${uname}", id=${user.id})`); throw ApiError.unauthorized('Invalid credentials'); }
+  // user exists / is inactive / the password is wrong). The real reason + client IP is only logged
+  // server-side so the owner can diagnose lockouts without leaking anything to an attacker.
+  if (!user) { console.warn(`[auth] login gagal — user tidak ditemukan (username="${uname}", ip=${ip})`); throw ApiError.unauthorized('Invalid credentials'); }
+  if (!user.active) { console.warn(`[auth] login gagal — akun nonaktif (username="${uname}", id=${user.id}, ip=${ip})`); throw ApiError.unauthorized('Invalid credentials'); }
 
   const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) { console.warn(`[auth] login gagal — password salah (username="${uname}", id=${user.id})`); throw ApiError.unauthorized('Invalid credentials'); }
+  if (!ok) { console.warn(`[auth] login gagal — password salah (username="${uname}", id=${user.id}, ip=${ip})`); throw ApiError.unauthorized('Invalid credentials'); }
 
   const { passwordHash, pin, updatedAt, ...safe } = user;
   return { user: publicUser(safe), token: signToken(user) };
@@ -107,7 +121,7 @@ async function changePassword(userId, oldPassword, newPassword) {
   if (!ok) throw ApiError.unauthorized('Password lama salah');
   if (!newPassword || newPassword.length < PASSWORD_MIN) throw ApiError.badRequest(`Password baru minimal ${PASSWORD_MIN} karakter`);
   const passwordHash = await bcrypt.hash(newPassword, 10);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false } });
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false, weakPassword: isWeakPassword(newPassword) } });
   return { ok: true };
 }
 
@@ -123,4 +137,4 @@ async function updateProfile(userId, { name, color }) {
   return publicUser(user);
 }
 
-module.exports = { register, login, requestPasswordReset, me, changePassword, updateProfile, signToken, publicUser, normUsername, PUBLIC_FIELDS, PASSWORD_MIN };
+module.exports = { register, login, requestPasswordReset, me, changePassword, updateProfile, signToken, publicUser, normUsername, isWeakPassword, PUBLIC_FIELDS, PASSWORD_MIN };

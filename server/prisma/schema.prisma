@@ -22,6 +22,7 @@ model User {
   passwordHash String
   pin          String? // optional quick-login PIN (hashed)
   mustChangePassword Boolean @default(false) // force a password change on next login
+  weakPassword Boolean @default(false) // last-set password is weak/temporary (e.g. a 4-digit PIN) — flagged for the owner, NOT force-reset
   role         String   @default("finance")
   sub          String? // subtitle shown in the UI, e.g. "Finance · Keuangan"
   color        String   @default("#22A7A1")
