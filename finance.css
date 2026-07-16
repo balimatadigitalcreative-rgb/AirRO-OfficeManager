@@ -973,6 +973,13 @@ select.fld::-ms-expand { display: none; }
 .dist-badge.lock { background: var(--card-soft); color: var(--text-faint); }
 .dist-badge.corr { background: var(--warn-bg); color: var(--warn); }
 .dist-badge.adj { background: #EDE9FB; color: #6D50D6; }   /* Disesuaikan (price adjustment) */
+.dist-badge.arsip { background: var(--card-soft, #f1f5f9); color: var(--text-mut); border: 1px solid var(--border-soft); }   /* Arsip (legacy import) */
+.dist-txn.is-legacy { opacity: .82; }
+/* legacy import: history list + 5-col preview */
+.dist-imp-hist-row { display: flex; align-items: center; gap: 12px; padding: 8px 2px; border-top: 1px solid var(--border-soft); }
+.dist-imp-hist-row:first-of-type { border-top: none; }
+.dist-imp-hist-main { flex: 1; min-width: 0; font-size: 12.5px; }
+.dist-imp-hrow.li, .dist-imp-row.li { grid-template-columns: 1.3fr .7fr 1fr .8fr .9fr; }
 .dist-sumrow { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; color: var(--text-mut); }
 .dist-sumrow:last-child { border-bottom: 0; }
 .dist-quick { padding: 18px; }
@@ -1417,6 +1424,7 @@ select.fld::-ms-expand { display: none; }
 .dist-imp-status.ok { background: #E6F5F0; color: #159a6b; }
 .dist-imp-status.kurang { background: var(--neg-bg); color: var(--neg); }
 .dist-imp-status.dup { background: var(--warn-bg); color: var(--warn); }
+.dist-imp-status.baddate { background: var(--neg-bg); color: var(--neg); }
 @media (max-width: 560px) { .dist-cust-pricecap { display: none; } .dist-cust-bon { width: auto; } }
 
 /* ---- Distribusi Harga Master + locked panel ---- */

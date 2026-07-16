@@ -1082,6 +1082,7 @@ function FApp() {
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canDelete={!!p.distribusiCustomerDelete}
+              canLegacyImport={!!p.distribusiLegacyImport} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />

@@ -12,7 +12,7 @@ const ROLE_PERMS = {
     kasbon: false, kasbonApprove: false,
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
   },
@@ -22,7 +22,7 @@ const ROLE_PERMS = {
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
   },
   hrd: {
@@ -175,9 +175,12 @@ function deriveDistribusiCaps(perms) {
   // `distribusi` — a plain full-distribusi user must not silently gain it. Only the explicit
   // owner/gm seed (or an admin toggle) grants it.
   if (p.distribusiGallonReset === undefined) p.distribusiGallonReset = false;
+  // Legacy import writes archive rows to a customer — a deliberate admin action, so it is never
+  // derived from the legacy combined `distribusi` cap either.
+  if (p.distribusiLegacyImport === undefined) p.distribusiLegacyImport = false;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport);
   return p;
 }
 

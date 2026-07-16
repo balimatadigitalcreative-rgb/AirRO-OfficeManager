@@ -24,6 +24,11 @@ router.patch('/customers/:id/location', requireAnyCap(['distribusiInput', 'distr
 // Delivery helpers may photograph while delivering; customer managers may replace/remove.
 router.patch('/customers/:id/location-photo', requireAnyCap(['distribusiInput', 'distribusiPengiriman', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationPhotoSchema }), ctrl.setLocationPhoto);
 router.post('/customers/import', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
+// Per-customer LEGACY (archive) transaction import — its own capability. customerId is from the
+// route; rows are stored legacy=true (excluded from every aggregate; no gallon movement). Undo a
+// whole batch is GM/Owner-only (enforced in the service). Fleet scope enforced.
+router.post('/customers/:id/transactions/import', requireCap('distribusiLegacyImport'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.legacyImportSchema }), ctrl.importLegacyTxns);
+router.delete('/customers/:id/transactions/legacy-batch/:batchId', requireCap('distribusiLegacyImport'), validate({ params: ctrl.schemas.legacyBatchParams }), ctrl.undoLegacyBatch);
 // Deactivate (soft, reversible) / reactivate / hard-delete a customer — dedicated
 // capability, separate from ordinary customer management. Server enforces the cap + scope.
 router.patch('/customers/:id/deactivate', requireCap('distribusiCustomerDelete'), validate({ params: ctrl.schemas.idParams }), ctrl.deactivateCustomer);

@@ -50,6 +50,10 @@ const customerUpdateSchema = z.object({
 const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]), accuracy: z.union([z.number(), z.string(), z.null()]).optional(), address: z.string().max(300).optional() });
 const locationPhotoSchema = z.object({ photoId: z.string().max(60).nullable().optional() });
 const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000), skipped: z.number().int().nonnegative().optional() });
+// Per-customer legacy (archive) transaction import — customerId comes from the route, NOT the body.
+const legacyRow = z.object({ txnDate: z.string().max(20), qty: z.number().int(), price: z.number().int().nonnegative(), method: z.enum(['lunas', 'bon']).optional(), note: z.string().max(300).optional() });
+const legacyImportSchema = z.object({ rows: z.array(legacyRow).max(5000), skipped: z.number().int().nonnegative().optional() });
+const legacyBatchParams = z.object({ id: z.string().min(1), batchId: z.string().min(1) });
 // scope null/omitted = option (a) new-only; 'all'|'cycle'|'bon' = option (b) retroactive.
 const priceSchema = z.object({ newPrice: z.number().int().nonnegative(), scope: z.enum(['all', 'cycle', 'bon']).nullable().optional() });
 const pricePreviewSchema = z.object({ newPrice: z.number().int().nonnegative() });
@@ -123,6 +127,8 @@ const updateCustomer = asyncHandler(async (req, res) => { const c = await servic
 const setLocation = asyncHandler(async (req, res) => { const c = await service.setCustomerLocation(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const setLocationPhoto = asyncHandler(async (req, res) => { const c = await service.setLocationPhoto(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user, req.body.skipped); bcast('import', 'customers'); res.status(201).json(r); });
+const importLegacyTxns = asyncHandler(async (req, res) => { const r = await service.importLegacyTransactions(req.params.id, req.body.rows, req.user, req.body.skipped); bcast('update', req.params.id); res.status(201).json(r); });
+const undoLegacyBatch = asyncHandler(async (req, res) => { const r = await service.undoLegacyBatch(req.params.id, req.params.batchId, req.user); bcast('update', req.params.id); res.json({ data: r }); });
 const updatePrice = asyncHandler(async (req, res) => { const c = await service.updatePrice(req.params.id, req.body.newPrice, req.user, req.body.scope); bcast('price', c.id); res.json({ data: c }); });
 const pricePreview = asyncHandler(async (req, res) => res.json({ data: await service.pricePreview(req.params.id, req.body.newPrice, req.user) }));
 const cancelPriceAdjustment = asyncHandler(async (req, res) => { const r = await service.cancelPriceAdjustment(req.params.batchId, req.user); bcast('price', req.params.batchId); res.json({ data: r }); });
@@ -192,12 +198,12 @@ const setOpeningStock = asyncHandler(async (req, res) => { const r = await servi
 const resetGallon = asyncHandler(async (req, res) => { const r = await service.resetGallon(req.body, req.user); bcast('gallon', 'reset'); res.status(201).json({ data: r }); });
 
 module.exports = {
-  listCustomers, getCustomer, createCustomer, updateCustomer, setLocation, setLocationPhoto, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
+  listCustomers, getCustomer, createCustomer, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns,
-  schemas: { customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

@@ -275,6 +275,25 @@ function downloadImportTemplate() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-pelanggan.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+// Parse a date cell (imported legacy history) into strict YYYY-MM-DD, or null if unparseable.
+// Accepts ISO, dd/mm/yyyy (and . or - separators), and Excel serial numbers.
+function realDate(y, mo, d) { const dt = new Date(Date.UTC(+y, +mo - 1, +d)); return (dt.getUTCFullYear() === +y && dt.getUTCMonth() === +mo - 1 && dt.getUTCDate() === +d) ? `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null; }
+function parseLegacyDate(s) {
+  s = String(s || '').trim(); if (!s) return null;
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return realDate(m[1], m[2], m[3]);
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/); if (m) return realDate(m[3], m[2], m[1]);   // dd/mm/yyyy
+  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000).toISOString().slice(0, 10); }
+  const t = Date.parse(s); if (!isNaN(t)) return new Date(t).toISOString().slice(0, 10);
+  return null;
+}
+// Ready-to-fill CSV template for the per-customer legacy transaction import (header + 1 example).
+function downloadLegacyTemplate() {
+  const rows = [['Tanggal', 'Jumlah Galon', 'Harga', 'Metode', 'Catatan'], ['2026-01-15', '10', '12000', 'lunas', 'saldo awal']];
+  const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-riwayat-transaksi.csv';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 // Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
 const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng;
 // GPS capture button — TOUCH-ONLY (hidden on desktop so the office location is never saved as a
@@ -423,7 +442,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
 
   const rows = (txns || []).filter((t) => {
     const corrected = (t.corrections || []).length > 0;
-    return filter === 'all' ? true : filter === 'corrected' ? corrected : t.method === filter;
+    return filter === 'all' ? true : filter === 'corrected' ? corrected : filter === 'arsip' ? t.legacy : t.method === filter;
   });
   const custOpts = customers.map((c) => ({ value: c.id, label: c.name + (c.type && c.type !== 'reguler' ? ' · ' + c.type : '') }));
 
@@ -513,7 +532,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
   }
 
   // ── LIST ──
-  const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')]];
+  const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')], ['arsip', trD('dist.arsip')]];
   return (
     <div className="dist-dash screen-enter">
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
@@ -539,7 +558,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
                 <div className="dist-txn-line1">
                   {t.customer && t.customer.code && <span className="dist-code">{t.customer.code}</span>}
                   <span className="dist-txn-name">{t.customer ? t.customer.name : '—'}</span>
-                  <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>
+                  {t.legacy ? <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span> : <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>}
                   {isNew ? <span className="dist-badge new">{trD('dist.baru')}</span> : null}
                   {corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
                   {t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
@@ -885,7 +904,120 @@ function DeleteCustomerModal({ customer, busy, onDeactivate, onDelete, onClose }
 // `fleet` is the SINGLE app-wide armada source (shell state ← /settings airro_fleet,
 // the same list managed in Setoran → Kelola Armada). Distribusi never keeps its own
 // copy — changing a plate there is reflected here immediately.
-function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
+// Per-customer LEGACY (archive) transaction import. Paste OR upload (.csv/.xlsx/.xls). Columns:
+// Tanggal · Jumlah galon · Harga · Metode(lunas|bon) · Catatan. No customer column — the server
+// takes the customerId from the route. Live preview (Ready/Missing/Invalid date/Duplicate); imports
+// valid rows only; dedupes vs this customer's existing rows + within the file.
+function LegacyImportModal({ customer, onClose, onDone }) {
+  const [text, setText] = uSx('');
+  const [fileRows, setFileRows] = uSx(null);
+  const [fileName, setFileName] = uSx('');
+  const [fileBusy, setFileBusy] = uSx(false);
+  const [err, setErr] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const fileRef = React.useRef(null);
+  const existing = new Set((customer.transactions || []).map((t) => `${t.txnDate}|${t.qty}|${t.amount}`));
+  const rawCells = fileRows || text.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
+  const HRE = { date: /tanggal|tgl|date/i, qty: /galon|jumlah|qty/i, price: /harga|price|tarif/i, method: /metode|method|bayar|cara/i, note: /catatan|note|keterangan|ket/i };
+  let colMap = { date: 0, qty: 1, price: 2, method: 3, note: 4 };
+  let dataRows = rawCells;
+  if (rawCells.length) {
+    const h = rawCells[0].join(' ');
+    if (HRE.date.test(h) && (HRE.qty.test(h) || HRE.price.test(h))) {   // header row
+      const hdr = rawCells[0]; const idx = (re) => hdr.findIndex((c) => re.test(c));
+      colMap = { date: Math.max(0, idx(HRE.date)), qty: idx(HRE.qty), price: idx(HRE.price), method: idx(HRE.method), note: idx(HRE.note) };
+      dataRows = rawCells.slice(1);
+    }
+  }
+  const cellAt = (row, i) => (i >= 0 && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
+  const seen = new Set();
+  const rows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim())).map((cols) => {
+    const dateRaw = cellAt(cols, colMap.date); const date = parseLegacyDate(dateRaw);
+    const qty = parseInt(cellAt(cols, colMap.qty).replace(/[^0-9]/g, ''), 10);
+    const priceCell = cellAt(cols, colMap.price); const price = priceCell === '' ? null : parseInt(priceCell.replace(/[^0-9]/g, ''), 10);
+    const method = /bon/i.test(cellAt(cols, colMap.method)) ? 'bon' : 'lunas';
+    const note = cellAt(cols, colMap.note);
+    const okBase = !!date && qty > 0 && price != null && !isNaN(price);
+    const amount = okBase ? qty * price : 0;
+    const key = okBase ? `${date}|${qty}|${amount}` : '';
+    const dup = okBase && (existing.has(key) || seen.has(key));
+    if (key && !dup) seen.add(key);
+    const status = !date ? 'baddate' : (!(qty > 0) || price == null || isNaN(price)) ? 'kurang' : dup ? 'dup' : 'ok';
+    return { dateRaw, date, qty: qty || 0, price: (price == null || isNaN(price)) ? null : price, method, note, amount, status, valid: status === 'ok' };
+  });
+  const valid = rows.filter((r) => r.valid);
+  const reset = () => { setText(''); setFileRows(null); setFileName(''); setErr(''); if (fileRef.current) fileRef.current.value = ''; };
+  const onFile = (e) => {
+    const file = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    setErr(''); setFileBusy(true); setFileName(file.name); setText('');
+    const isXlsx = /\.xlsx?$/i.test(file.name) || /sheet|excel/i.test(file.type);
+    if (isXlsx) {
+      loadSheetJS().then((XLSX) => {
+        const rd = new FileReader();
+        rd.onload = () => {
+          try {
+            const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array', cellDates: true });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rws = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: false, dateNF: 'yyyy-mm-dd', defval: '' }).map((r) => r.map((c) => (c == null ? '' : String(c).trim())));
+            setFileRows(rws); setFileBusy(false);
+          } catch (ex) { setErr(trD('dist.importFileErr')); setFileBusy(false); setFileName(''); }
+        };
+        rd.onerror = () => { setErr(trD('dist.importFileErr')); setFileBusy(false); setFileName(''); };
+        rd.readAsArrayBuffer(file);
+      }).catch(() => { setErr(trD('dist.importXlsxCdnErr')); setFileBusy(false); setFileName(''); });
+    } else {
+      const rd = new FileReader();
+      rd.onload = () => { setFileRows(String(rd.result || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map(splitCells)); setFileBusy(false); };
+      rd.onerror = () => { setErr(trD('dist.importFileErr')); setFileBusy(false); setFileName(''); };
+      rd.readAsText(file);
+    }
+  };
+  const commit = () => {
+    if (!valid.length || saving) return;
+    setSaving(true); setErr('');
+    window.API.distribusi.customers.importLegacyTxns(customer.id, valid.map((r) => ({ txnDate: r.date, qty: r.qty, price: r.price, method: r.method, ...(r.note ? { note: r.note } : {}) })), rows.length - valid.length)
+      .then((res) => { setSaving(false); onDone(res); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
+  const statusLabel = (s) => s === 'ok' ? trD('dist.impReady') : s === 'kurang' ? trD('dist.impMissing') : s === 'baddate' ? trD('dist.liBadDate') : trD('dist.impDup');
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 210 }}>
+      <div className="modal-card" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.liTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.code ? customer.code + ' · ' : ''}{customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.liInfo')}</span></div>
+          <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Jumlah Galon · Harga · Metode · Catatan</b></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+          <div className="dist-imp-upload">
+            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onFile} />
+            <button type="button" className="btn btn-ghost" onClick={() => fileRef.current && fileRef.current.click()}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.importUpload')}</button>
+            {fileBusy ? <span className="dist-imp-fname"><span className="ui-attach-spin" />{trD('dist.importReading')}</span>
+              : fileRows ? <span className="dist-imp-fname"><IconCheck s={13} />{fileName}<button type="button" className="dist-link" onClick={reset} style={{ marginLeft: 8 }}>{trD('dist.importClear')}</button></span>
+              : <span className="dist-imp-or">{trD('dist.importOr')}</span>}
+          </div>
+          {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={13} />{err}</div>}
+          {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'2026-01-15\t10\t12000\tlunas\tsaldo awal'} onChange={(e) => setText(e.target.value)} />}
+          {rows.length > 0 && (<>
+            <div className="dist-imp-counts"><span className="dist-imp-ok">{valid.length} {trD('dist.importReady')}</span><span className="dist-imp-skip">{rows.length - valid.length} {trD('dist.importSkip')}</span></div>
+            <div className="dist-imp-preview">
+              <div className="dist-imp-hrow li"><span>Tanggal</span><span>Galon</span><span>Harga</span><span>Metode</span><span>Status</span></div>
+              {rows.slice(0, 400).map((r, i) => (
+                <div key={i} className="dist-imp-row li">
+                  <span className="dist-imp-name">{r.date || r.dateRaw || '—'}</span><span>{r.qty || '—'}</span><span>{r.price != null ? rpFull(r.price) : '—'}</span><span>{r.method}</span>
+                  <span><span className={`dist-imp-status ${r.status}`}>{statusLabel(r.status)}</span></span>
+                </div>
+              ))}
+              {rows.length > 400 && <div className="dist-hint" style={{ padding: '6px 10px' }}>… +{rows.length - 400}</div>}
+            </div>
+          </>)}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!valid.length || saving} onClick={commit}>{saving ? '…' : trD('dist.liImport', { n: valid.length })}</button></div>
+      </div>
+    </div>
+  );
+}
+
+function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyImport, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [statusFilter, setStatusFilter] = uSx('active');   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
@@ -898,6 +1030,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
   const [invBuilder, setInvBuilder] = uSx(false); // Buat Invoice modal
   const [invView, setInvView] = uSx(null);        // printable invoice viewer
   const [histOpen, setHistOpen] = uSx(false);     // printable full transaction-history doc
+  const [legacyOpen, setLegacyOpen] = uSx(false); // legacy (archive) transaction import modal
   const [payFor, setPayFor] = uSx(null);          // standalone Pelunasan Bon for this customer
   const [q, setQ] = uSx('');
   const [filter, setFilter] = uSx('all');
@@ -1095,6 +1228,13 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
     }
   };
   const impSample = 'Warung Sejahtera\t0821-1122-3344\tReguler\t12500\nKos Anggrek\t0813-7788-9900\tKos\t13000\nCafe Ombak\t0817-2211-3344\tCafe\t14000';
+  // Undo a legacy import batch (GM/owner) — typed confirmation. Safe: archive rows touch no ledger.
+  const undoLegacyBatch = (batchId) => {
+    if (window.prompt(trD('dist.liUndoPrompt')) !== 'HAPUS') return;
+    window.API.distribusi.customers.undoLegacyBatch(detail.id, batchId)
+      .then(() => { flash(trD('dist.liUndone')); openDetail(detail.id); reload(); if (onChanged) onChanged(); })
+      .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')));
+  };
 
   // Add/Edit modal — shared by the list and detail views. Price is add-only (edits
   // go through Harga Master, which keeps the price history).
@@ -1209,6 +1349,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
             <div className="dist-cd-actions">
               {(canInput || canCustomers) && <button type="button" className="btn btn-primary btn-sm" onClick={() => setInvBuilder(true)}><IconInvoice s={14} />{trD('dist.makeInvoice')}</button>}
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={14} />{trD('dist.printHistory')}</button>
+              {canLegacyImport && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLegacyOpen(true)}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('dist.liBtn')}</button>}
               {(canInput || canCustomers) && <GpsButton custId={d.id} hasLoc={d.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }} onFlash={flash} />}
               {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
               {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
@@ -1240,10 +1381,10 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
               <div className="sec-title" style={{ marginBottom: 8 }}>{trD('dist.riwayat')}</div>
               {(!d.transactions || d.transactions.length === 0) && <div className="dist-empty">{trD('dist.noTxn')}</div>}
               {(d.transactions || []).map((t) => (
-                <div key={t.id} className="dist-txn">
-                  <span className="dist-cd-bar" style={{ background: t.method === 'bon' ? '#e0a13c' : t.method === 'pelunasan' ? '#2f6fb0' : '#17b083' }} />
+                <div key={t.id} className={`dist-txn ${t.legacy ? 'is-legacy' : ''}`}>
+                  <span className="dist-cd-bar" style={{ background: t.legacy ? '#94a3b8' : t.method === 'bon' ? '#e0a13c' : t.method === 'pelunasan' ? '#2f6fb0' : '#17b083' }} />
                   <div className="dist-txn-mid">
-                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}{t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}</div>
+                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.legacy && <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span>}{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}{t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}</div>
                     <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · {t.txnDate} {hhmm(t.createdAt)}{t.actorName ? ' · ' + t.actorName : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
                   </div>
                   <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
@@ -1251,6 +1392,17 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
               ))}
             </div>
           </div>
+          {(d.imports || []).length > 0 && (
+            <div className="card dist-card dist-imp-hist" style={{ marginTop: 16 }}>
+              <div className="sec-title" style={{ marginBottom: 8 }}><IconInvoice s={14} /> {trD('dist.liHistTitle')}</div>
+              {(d.imports || []).map((b) => (
+                <div key={b.batchId} className="dist-imp-hist-row">
+                  <div className="dist-imp-hist-main">{trD('dist.liHistLine', { d: fmtDT(b.at), n: b.count, who: b.byName || '—' })}</div>
+                  {isGmOwner && <button type="button" className="dist-link danger" onClick={() => undoLegacyBatch(b.batchId)}>{trD('dist.liUndo')}</button>}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="card dist-card" style={{ marginTop: 16 }}>
             <div className="dist-card-head"><div className="sec-title">{trD('dist.invHistory')}</div>{(canInput || canCustomers) && <button type="button" className="dist-link" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button>}</div>
             {invoices.length === 0 && <div className="dist-empty">{trD('dist.noInvoice')}</div>}
@@ -1269,6 +1421,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
         {invBuilder && d && <InvoiceBuilder customer={d} onClose={() => setInvBuilder(false)} onCreated={(iv) => { setInvBuilder(false); setInvView(iv); loadInvoices(d.id); if (onChanged) onChanged(); }} />}
         {invView && <InvoiceViewer invoice={invView} onClose={() => setInvView(null)} />}
         {histOpen && d && <TxnHistoryDoc customer={d} userName={userName} onClose={() => setHistOpen(false)} />}
+        {legacyOpen && d && <LegacyImportModal customer={d} onClose={() => setLegacyOpen(false)} onDone={(res) => { setLegacyOpen(false); flash(trD('dist.liDone', { n: res.imported, m: res.skipped })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {renderForm()}
         {typesModal()}

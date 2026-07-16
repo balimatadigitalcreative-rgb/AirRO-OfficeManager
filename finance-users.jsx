@@ -51,6 +51,7 @@ const CAP_GROUPS = [
     ['distribusiHargaMaster', 'Ubah Harga Master'],
     ['distribusiCustomerDelete', 'Hapus / Nonaktifkan Pelanggan'],
     ['distribusiGallonReset', 'Reset Jumlah Galon'],
+    ['distribusiLegacyImport', 'Impor Riwayat Transaksi (arsip)'],
     ['distribusiAudit', 'Lihat Log Audit'],
   ] },
   { title: 'Gudang', caps: [

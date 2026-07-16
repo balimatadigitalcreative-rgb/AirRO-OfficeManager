@@ -12,6 +12,10 @@ const { resolvePerms } = require('../config/permissions');
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
 
 const METHODS = ['lunas', 'bon', 'pelunasan'];
+// Legacy (imported archive) transactions must NEVER touch any aggregate — KPIs, cash integration,
+// receivables/bon, gallon totals. Add this to the `where` of every aggregate query. (`not: true`
+// matches both false and legacy NULL, so it is safe on pre-migration rows too.)
+const NOT_LEGACY = { legacy: { not: true } };
 // Retroactive-price-change scopes (option b). Payments (pelunasan) are never re-priced.
 const PRICE_SCOPES = ['all', 'cycle', 'bon'];
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -218,7 +222,7 @@ async function listCustomers(user, qFleet, status) {
   const st = status === 'inactive' || status === 'all' ? status : 'active';
   const activeWhere = st === 'active' ? { active: { not: false } } : st === 'inactive' ? { active: false } : {};
   const rows = await prisma.customer.findMany({ where: { ...fleetWhere(user, 'armada', qFleet), ...activeWhere }, orderBy: { name: 'asc' } });
-  const txns = await prisma.distTransaction.findMany({ where: fleetWhere(user, 'fleetId', qFleet), select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true } });
+  const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...NOT_LEGACY }, select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true } });
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const agg = {};
   txns.forEach((t) => {
@@ -239,17 +243,25 @@ async function getCustomer(id, user) {
   const c = await prisma.customer.findUnique({ where: { id }, include: { priceHistory: { orderBy: { changedAt: 'desc' } } } });
   if (!c) throw ApiError.notFound('Customer not found');
   if (!fleetAllows(user, c.armada)) throw ApiError.notFound('Customer not found');   // out of the user's fleet scope
+  // The transaction LIST includes legacy (archive) rows — flagged — because the printed statement
+  // needs them; the STATS below (totalGalon / sisaBon) count only real (non-legacy) rows.
   const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' }, include: { corrections: true } });
   let bon = 0, pelunasan = 0, totalGalon = 0;
   const transactions = txns.map((t) => {
     const adj = priceDelta(t.corrections);
     const eff = t.amount + adj;
-    totalGalon += t.qty;
-    // bon uses the EFFECTIVE (adjusted) amount; a paid txn's adjustment is reported but
-    // does not become a new receivable (money already settled at the old price).
-    if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount;
-    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0 };
+    if (!t.legacy) {   // legacy rows are archive-only — never in the aggregates
+      totalGalon += t.qty;
+      // bon uses the EFFECTIVE (adjusted) amount; a paid txn's adjustment is reported but
+      // does not become a new receivable (money already settled at the old price).
+      if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount;
+    }
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, importBatchId: t.importBatchId || null };
   });
+  // Legacy import batches (for the "Batalkan" undo list): one entry per importBatchId.
+  const impMap = {};
+  txns.forEach((t) => { if (t.legacy && t.importBatchId) { const b = impMap[t.importBatchId] || (impMap[t.importBatchId] = { batchId: t.importBatchId, count: 0, at: null, byName: t.actorName || null }); b.count++; const ms = t.createdAt ? new Date(t.createdAt).getTime() : 0; if (!b.at || ms < b.at) b.at = ms; } });
+  const imports = Object.values(impMap).sort((a, b) => (b.at || 0) - (a.at || 0));
   // Active price-adjustment batches (for the "batalkan penyesuaian" UI).
   const batches = {};
   txns.forEach((t) => t.corrections.filter((x) => x.kind === 'price' && x.active).forEach((x) => {
@@ -259,7 +271,7 @@ async function getCustomer(id, user) {
   }));
   const priceAdjustments = Object.values(batches).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const gallonsHeld = await gallonBalanceOf(id);   // computed from the gallon ledger
-  return { ...custClient(c), transactions, totalGalon, sisaBon: Math.max(0, bon - pelunasan), txnCount: txns.length, priceAdjustments, gallonsHeld };
+  return { ...custClient(c), transactions, imports, totalGalon, sisaBon: Math.max(0, bon - pelunasan), txnCount: txns.filter((t) => !t.legacy).length, priceAdjustments, gallonsHeld };
 }
 // Sync write columns (type is resolved separately — it needs a DB lookup).
 function customerCols(body) {
@@ -400,13 +412,72 @@ async function importCustomers(list, actor, clientSkipped) {
   return { data: out, imported: created, skipped, received: rows.length };
 }
 
+// A real calendar date in strict YYYY-MM-DD (the client normalises other formats before sending).
+function validTxnDate(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return (d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]) ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+// Import LEGACY (historical) transactions for ONE customer — ARCHIVE ONLY. Every row is created
+// with legacy=true + a shared importBatchId, unit price = the row's price (NOT the master price),
+// and NO GallonMovement is ever written. Idempotent: dedupe by (customerId+date+qty+amount) within
+// the batch AND against existing rows. The customerId comes from the ROUTE — any customer column in
+// the file is ignored. Fleet scope + audit enforced.
+async function importLegacyTransactions(customerId, rows, actor, clientSkipped) {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');   // out of scope
+  const snap = await actorSnap(actor);
+  const list = Array.isArray(rows) ? rows : [];
+  const batchId = 'lb' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+  const key = (d, q, a) => `${d}|${q}|${a}`;
+  const existing = await prisma.distTransaction.findMany({ where: { customerId }, select: { txnDate: true, qty: true, amount: true } });
+  const seen = new Set(existing.map((t) => key(t.txnDate, t.qty, t.amount)));
+  let created = 0, serverSkipped = 0;
+  for (const row of list) {
+    const qty = Math.round(+row.qty || 0);
+    const price = Math.round(+row.price || 0);
+    const date = validTxnDate(row.txnDate);
+    if (!(qty > 0) || price < 0 || !date) { serverSkipped++; continue; }   // invalid
+    const amount = qty * price;
+    const k = key(date, qty, amount);
+    if (seen.has(k)) { serverSkipped++; continue; }                        // duplicate
+    seen.add(k);
+    const method = row.method === 'bon' ? 'bon' : 'lunas';
+    await prisma.distTransaction.create({ data: {
+      customerId, fleetId: customer.armada || '', qty, unitPriceLocked: price, amount, method,
+      note: String(row.note || '').slice(0, 300), txnDate: date, legacy: true, importBatchId: batchId,
+      actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    } });   // NO recordDelivery / GallonMovement — archive only.
+    created++;
+  }
+  const skipped = Math.max(0, Math.round(+clientSkipped || 0)) + serverSkipped;
+  await logAudit('impor', `Impor riwayat: ${customer.name}`, `batch ${batchId} · ${created} ditambah · ${skipped} dilewati (duplikat/invalid)`, snap, customer.armada);
+  return { imported: created, skipped, batchId, received: list.length };
+}
+// Undo a whole legacy import batch — GM/OWNER ONLY. Safe: legacy rows touch no ledger. Only rows
+// that are BOTH legacy AND in this batch AND this customer are removed (never a real sale).
+async function undoLegacyBatch(customerId, batchId, actor) {
+  if (!(actor && (actor.role === 'owner' || actor.role === 'gm'))) throw ApiError.forbidden('Hanya GM/Owner yang boleh membatalkan impor.');
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');
+  const where = { customerId, importBatchId: String(batchId || ''), legacy: true };
+  await prisma.correction.deleteMany({ where: { transaction: where } });   // defensive (legacy rows have none)
+  const del = await prisma.distTransaction.deleteMany({ where });
+  const snap = await actorSnap(actor);
+  await logAudit('pelanggan', `Batalkan impor riwayat: ${customer.name}`, `batch ${batchId} · ${del.count} baris arsip dihapus`, snap, customer.armada);
+  return { deleted: del.count, batchId };
+}
+
 // Small rollup used by both the deactivate flow and the delete-warning modal: how much
 // history is attached to a customer (so the UI/audit can say "N transaksi & sisa bon Rp X").
 async function customerImpact(id) {
   const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, include: { corrections: true } });
   let bon = 0, pelunasan = 0;
-  txns.forEach((t) => { const eff = t.amount + priceDelta(t.corrections); if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; });
-  return { txnCount: txns.length, sisaBon: Math.max(0, bon - pelunasan) };
+  txns.forEach((t) => { if (t.legacy) return; const eff = t.amount + priceDelta(t.corrections); if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; });
+  return { txnCount: txns.length, sisaBon: Math.max(0, bon - pelunasan) };   // count includes legacy (they'll be deleted too); sisaBon excludes them
 }
 
 // Mode (a) — Nonaktifkan: soft-hide the customer. ALL history (transactions, sisa bon,
@@ -479,7 +550,7 @@ async function updatePrice(id, newPriceRaw, actor, scopeRaw) {
     // Option (b): append a numeric price adjustment per in-scope OLD transaction. The
     // original transaction is NEVER mutated; the effective/reported amount follows the
     // new price via these adjustments, grouped by batchId so the event can be reversed.
-    const txns = await prisma.distTransaction.findMany({ where: { customerId: id, ...scopeWhere(scope, todayISO()) } });
+    const txns = await prisma.distTransaction.findMany({ where: { customerId: id, ...NOT_LEGACY, ...scopeWhere(scope, todayISO()) } });
     batchId = 'pb' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
     for (const t of txns) {
       const delta = (newPrice - oldPrice) * t.qty;
@@ -509,7 +580,7 @@ async function pricePreview(id, newPriceRaw, user) {
   const newPrice = int(newPriceRaw);
   const oldPrice = c.masterPrice;
   const cyc = cycleOf(todayISO());
-  const sales = await prisma.distTransaction.findMany({ where: { customerId: id, method: { in: ['lunas', 'bon'] } }, select: { qty: true, method: true, txnDate: true } });
+  const sales = await prisma.distTransaction.findMany({ where: { customerId: id, ...NOT_LEGACY, method: { in: ['lunas', 'bon'] } }, select: { qty: true, method: true, txnDate: true } });
   const calc = (rows) => rows.reduce((acc, t) => { const d = (newPrice - oldPrice) * t.qty; if (d !== 0) { acc.count++; acc.totalDelta += d; } return acc; }, { count: 0, totalDelta: 0 });
   return {
     oldPrice, newPrice,
@@ -550,14 +621,16 @@ async function listTransactions(q, user) {
     include: { customer: { select: { name: true, code: true, type: true } }, corrections: { orderBy: { createdAt: 'desc' } } },
   });
   // Expose the effective (adjusted) amount + flags so reports/Cash Integration follow the
-  // new price while the original `amount` stays intact.
-  const data = rows.map((r) => { const adj = priceDelta(r.corrections); return { ...r, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections) }; });
+  // new price while the original `amount` stays intact. Legacy (archive) rows are INCLUDED here so
+  // the Transactions screen can show them with an "Arsip" badge/filter — the `legacy` flag on each
+  // row lets Cash Integration (and any aggregate) drop them.
+  const data = rows.map((r) => { const adj = priceDelta(r.corrections); return { ...r, legacy: !!r.legacy, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections) }; });
   return { data, now: new Date().toISOString() };
 }
 // Current outstanding bon (piutang) for a customer: Σ effective bon − Σ pelunasan,
 // floored at 0 — identical to the sisaBon shown on the customer list/detail.
 async function customerBonBalance(customerId) {
-  const txns = await prisma.distTransaction.findMany({ where: { customerId }, include: { corrections: true } });
+  const txns = await prisma.distTransaction.findMany({ where: { customerId, ...NOT_LEGACY }, include: { corrections: true } });
   let bon = 0, pel = 0;
   txns.forEach((t) => { if (t.method === 'bon') bon += t.amount + priceDelta(t.corrections); else if (t.method === 'pelunasan') pel += t.amount; });
   return Math.max(0, bon - pel);
@@ -650,7 +723,7 @@ async function createInvoice(customerId, body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!customer) throw ApiError.notFound('Customer not found');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');
-  const where = { customerId, method: { in: ['lunas', 'bon'] } };
+  const where = { customerId, ...NOT_LEGACY, method: { in: ['lunas', 'bon'] } };   // legacy archive rows are never billable
   const scope = body.scope || 'unpaidBon';
   if (scope === 'period') { where.txnDate = {}; if (body.dateFrom) where.txnDate.gte = body.dateFrom; if (body.dateTo) where.txnDate.lte = body.dateTo; }
   let txns = await prisma.distTransaction.findMany({ where, orderBy: [{ txnDate: 'asc' }, { createdAt: 'asc' }], include: { corrections: true } });
@@ -712,7 +785,7 @@ async function billingReminders(user, qFleet, dateStr) {
   const customers = await prisma.customer.findMany({ where: fleetWhere(user, 'armada', qFleet) });
   const active = customers.filter((c) => { try { const r = JSON.parse(c.reminder || ''); return r && r.enabled; } catch (e) { return false; } });
   if (!active.length) return { data: [], date: today };
-  const txns = await prisma.distTransaction.findMany({ where: fleetWhere(user, 'fleetId', qFleet), select: { customerId: true, method: true, amount: true, txnDate: true, corrections: { select: { kind: true, deltaAmount: true, active: true } } } });
+  const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...NOT_LEGACY }, select: { customerId: true, method: true, amount: true, txnDate: true, corrections: { select: { kind: true, deltaAmount: true, active: true } } } });
   const agg = {};
   txns.forEach((t) => {
     const a = agg[t.customerId] || (agg[t.customerId] = { bon: 0, pel: 0, oldestBon: null });
@@ -750,7 +823,7 @@ async function dashboardSummary(date, user, qFleet) {
   const from = addDays(day, -6);
   const fleetFilter = fleetWhere(user, 'fleetId', qFleet);
   const rows = await prisma.distTransaction.findMany({
-    where: { txnDate: { gte: from, lte: day }, ...fleetFilter },
+    where: { txnDate: { gte: from, lte: day }, ...fleetFilter, ...NOT_LEGACY },
     include: { customer: { select: { name: true, type: true } }, corrections: { select: { kind: true, deltaAmount: true, active: true } } },
     orderBy: { createdAt: 'desc' },
   });
@@ -776,7 +849,7 @@ async function dashboardSummary(date, user, qFleet) {
   // per-customer and floored at 0, identical to the Customers screen's sisaBon so the
   // dashboard total and the customer list can never disagree. This is a live balance,
   // NOT a 7-day figure, so a bon booked last month still shows as a receivable today. ──
-  const allTxns = await prisma.distTransaction.findMany({ where: { ...fleetFilter }, select: { id: true, customerId: true, amount: true, method: true } });
+  const allTxns = await prisma.distTransaction.findMany({ where: { ...fleetFilter, ...NOT_LEGACY }, select: { id: true, customerId: true, amount: true, method: true } });
   const rcvDelta = await activePriceDeltas({});
   const bonByCust = {};
   allTxns.forEach((t) => { const c = bonByCust[t.customerId] || (bonByCust[t.customerId] = { bon: 0, pel: 0 }); if (t.method === 'bon') c.bon += t.amount + (rcvDelta[t.id] || 0); else if (t.method === 'pelunasan') c.pel += t.amount; });
@@ -1057,7 +1130,7 @@ function deliveryClient(r, sisaBon) {
 async function bonMapFor(custIds) {
   const map = {};
   if (!custIds.length) return map;
-  const txns = await prisma.distTransaction.findMany({ where: { customerId: { in: custIds } }, select: { customerId: true, amount: true, method: true } });
+  const txns = await prisma.distTransaction.findMany({ where: { customerId: { in: custIds }, ...NOT_LEGACY }, select: { customerId: true, amount: true, method: true } });
   txns.forEach((t) => { const b = map[t.customerId] || (map[t.customerId] = { bon: 0, pel: 0 }); if (t.method === 'bon') b.bon += t.amount; else if (t.method === 'pelunasan') b.pel += t.amount; });
   const out = {}; Object.keys(map).forEach((k) => { out[k] = Math.max(0, map[k].bon - map[k].pel); });
   return out;
@@ -1259,13 +1332,13 @@ async function cashIntegration(user, query) {
     listCustomers(user, q.fleet, 'all'),   // include deactivated — they may still carry outstanding bon
     listAudit({ limit: 500, fleet: q.fleet }, user),
   ]);
-  return { transactions: t.data, customers: c.data, audit: a.data };
+  return { transactions: t.data.filter((x) => !x.legacy), customers: c.data, audit: a.data };   // cash integration excludes archive rows
 }
 
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
-  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
+  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,

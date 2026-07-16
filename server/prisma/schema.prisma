@@ -522,6 +522,9 @@ model DistTransaction {
   actorRole       String?                       // actor_role (at input time)
   actorName       String?
   deliveryRunId   String?                       // the delivery run (rit) this sale belongs to — set if a run was open
+  legacy          Boolean  @default(false)       // imported historical row — ARCHIVE ONLY: excluded from every
+                                                 // KPI / cash / gallon / receivable aggregate; never writes a GallonMovement
+  importBatchId   String?                        // groups the rows of one legacy import (for undo)
   createdAt       DateTime @default(now())
 
   customer    Customer     @relation(fields: [customerId], references: [id])
@@ -531,6 +534,7 @@ model DistTransaction {
   @@index([customerId])
   @@index([fleetId])
   @@index([deliveryRunId])
+  @@index([importBatchId])
 }
 
 // Delivery run (rit) — one trip of a fleet: gallons loaded out, then full/empty returned,
