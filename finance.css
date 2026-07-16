@@ -1090,6 +1090,12 @@ select.fld::-ms-expand { display: none; }
 .dist-deliv-loc .dist-link, .dist-cd-meta .dist-link { display: inline-flex; align-items: center; gap: 4px; }
 .dist-noloc { color: var(--warn); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
 .dist-noloc-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--warn); background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn); border-radius: 6px; padding: 1px 6px; }
+/* customer code + incomplete-data badge */
+.dist-code { font-size: 11px; font-weight: 800; color: var(--green-800); background: var(--pos-bg); border-radius: 6px; padding: 1px 6px; font-variant-numeric: tabular-nums; letter-spacing: .2px; flex-shrink: 0; }
+.dist-code.lg { font-size: 12.5px; padding: 2px 8px; }
+.dist-incomplete { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 4px; cursor: pointer; }
+.dist-incomplete-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 800; color: var(--warn); background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn); border-radius: 6px; padding: 1px 7px; }
+.dist-miss-chip { font-size: 10px; font-weight: 600; color: var(--text-mut); background: var(--card-soft, #f1f5f9); border: 1px solid var(--border-soft); border-radius: 6px; padding: 1px 6px; }
 /* ── Customer deactivate / delete ── */
 .dist-inactive-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--text-mut); background: var(--card-soft, #f1f5f9); border: 1px solid var(--border-soft); border-radius: 6px; padding: 1px 6px; }
 .dist-cust-row.is-inactive { opacity: .62; }

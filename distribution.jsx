@@ -24,6 +24,9 @@ const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() 
 const DAY_CODES = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 const fmtDays = (arr) => (Array.isArray(arr) && arr.length ? DAY_CODES.filter((d) => arr.includes(d)).join(', ') : '');
 const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+// Missing-field labels for the "Data belum lengkap" chips (keys match server completeness output).
+const MISSING_KEYS = { phone: 'dist.mPhone', location: 'dist.mLoc', armada: 'dist.mArmada', deliveryDays: 'dist.mDays', price: 'dist.mPrice' };
+const missChips = (missing) => (missing || []).map((k) => <span key={k} className="dist-miss-chip">{trD(MISSING_KEYS[k] || k)}</span>);
 const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' } };
 const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 function fmtDT(iso) { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const p = (n) => String(n).padStart(2, '0'); return d.getDate() + ' ' + MONTHS_ID[d.getMonth()] + ' ' + d.getFullYear() + ' · ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
@@ -464,6 +467,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
               <span className="dist-txn-av">{(t.customer && t.customer.name || '?').slice(0, 1).toUpperCase()}</span>
               <div className="dist-txn-mid">
                 <div className="dist-txn-line1">
+                  {t.customer && t.customer.code && <span className="dist-code">{t.customer.code}</span>}
                   <span className="dist-txn-name">{t.customer ? t.customer.name : '—'}</span>
                   <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>
                   {isNew ? <span className="dist-badge new">{trD('dist.baru')}</span> : null}
@@ -693,7 +697,7 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
   const docNo = 'RWT-' + String(customer.id || '').slice(-6).toUpperCase() + '-' + stamp.replace(/-/g, '');
   const periodLabel = mode === 'range' ? ((from || '…') + ' – ' + (to || '…')) : mode === 'month' ? month : trD('dist.periodAll');
   const share = () => {
-    const lines = ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + customer.name, trD('dist.period') + ': ' + periodLabel, '',
+    const lines = ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + (customer.code ? customer.code + ' · ' : '') + customer.name, trD('dist.period') + ': ' + periodLabel, '',
       trD('dist.totalGalon') + ': ' + numX(galon), trD('dist.histTotalValue') + ': ' + rpFull(nilai), trD('dist.histTotalPaid') + ': ' + rpFull(terbayar), trD('dist.sisaBon') + ': ' + rpFull(customer.sisaBon || 0),
       '', trD('dist.txnCount', { n: rows.length }) + ' · ' + docNo];
     const raw = (customer.phone || '').replace(/[^0-9]/g, '');
@@ -719,7 +723,7 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
         </div>
         <div className="inv-meta">
           <div><div className="inv-title">{trD('dist.histTitle')}</div><div className="inv-num">{docNo}</div></div>
-          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{customer.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{customer.phone || '—'}{customer.armada ? ' · ' + customer.armada : ''}</div></div>
+          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{customer.code ? customer.code + ' · ' : ''}{customer.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{customer.phone || '—'}{customer.armada ? ' · ' + customer.armada : ''}</div></div>
         </div>
         <div className="inv-dates"><span>{trD('dist.issueDate')}: <b>{stamp}</b></span><span>{trD('dist.period')}: <b>{periodLabel}</b></span></div>
         <div className="inv-table-wrap">
@@ -1098,7 +1102,13 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
           <div className="card dist-cd-head">
             <span className="dist-cd-av">{initialsOf(d.name)}</span>
             <div style={{ flex: 1, minWidth: 180 }}>
-              <div className="dist-cd-namerow"><h2 className="dist-cd-name">{d.name}</h2>{tag(d.type)}{d.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
+              <div className="dist-cd-namerow">{d.code && <span className="dist-code lg">{d.code}</span>}<h2 className="dist-cd-name">{d.name}</h2>{tag(d.type)}{d.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
+              {d.complete === false && (
+                <div className="dist-incomplete" style={{ marginTop: 6 }} onClick={() => canCustomers && openEdit(d)}>
+                  <span className="dist-incomplete-badge"><IconWarn s={11} />{trD('dist.incomplete')}</span>
+                  {missChips(d.missing)}
+                </div>
+              )}
               <div className="dist-cd-phone">{d.phone || '—'}</div>
               <div className="dist-cd-meta">
                 <span><IconCalendar s={13} />{trD('dist.kirimHari')}: <b>{days || '—'}</b></span>
@@ -1188,10 +1198,11 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
 
   // ── LIST ──
   const rows = (custs || []).filter((c) => {
-    if (q && !((c.name || '') + (c.phone || '')).toLowerCase().includes(q.toLowerCase())) return false;
-    return filter === 'all' ? true : filter === 'bon' ? c.sisaBon > 0 : filter === 'bulk' ? c.type === 'bulk' : filter === 'reguler' ? c.type === 'reguler' : true;
+    if (q && !((c.name || '') + (c.phone || '') + (c.code || '')).toLowerCase().includes(q.toLowerCase())) return false;
+    return filter === 'all' ? true : filter === 'bon' ? c.sisaBon > 0 : filter === 'bulk' ? c.type === 'bulk' : filter === 'reguler' ? c.type === 'reguler' : filter === 'belum' ? c.complete === false : true;
   });
-  const chips = [['all', trD('dist.fAll')], ['bon', trD('dist.filterBon')], ['reguler', trD('dist.filterReg')], ['bulk', trD('dist.filterBulk')]];
+  const incompleteN = (custs || []).filter((c) => c.complete === false).length;
+  const chips = [['all', trD('dist.fAll')], ['bon', trD('dist.filterBon')], ['reguler', trD('dist.filterReg')], ['bulk', trD('dist.filterBulk')], ['belum', trD('dist.filterIncomplete') + (incompleteN ? ' (' + incompleteN + ')' : '')]];
   return (
     <div className="dist-dash screen-enter">
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
@@ -1229,8 +1240,14 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
             <div key={c.id} className={`dist-cust-row ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetail(c.id)}>
               <span className="dist-txn-av">{initialsOf(c.name)}</span>
               <div className="dist-cust-main">
-                <div className="dist-txn-line1"><span className="dist-txn-name">{c.name}</span>{tag(c.type)}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}{c.active !== false && !c.hasLocation && <span className="dist-noloc-badge"><IconPin s={10} />{trD('dist.locNotSet')}</span>}</div>
+                <div className="dist-txn-line1">{c.code && <span className="dist-code">{c.code}</span>}<span className="dist-txn-name">{c.name}</span>{tag(c.type)}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
                 <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
+                {c.active !== false && c.complete === false && (
+                  <div className="dist-incomplete" onClick={(e) => { e.stopPropagation(); canCustomers ? openEdit(c) : openDetail(c.id); }}>
+                    <span className="dist-incomplete-badge"><IconWarn s={11} />{trD('dist.incomplete')}</span>
+                    {missChips(c.missing)}
+                  </div>
+                )}
                 {(days || c.armada) && (
                   <div className="dist-cust-meta">
                     {days && <span><IconCalendar s={11} />{days}</span>}
@@ -2144,7 +2161,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleet
             )}
             <span className="dist-txn-av">{initialsOf(s.customerName)}</span>
             <div className="dist-cust-main">
-              <div className="dist-txn-line1"><span className="dist-deliv-seq">{i + 1}.</span><span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
+              <div className="dist-txn-line1"><span className="dist-deliv-seq">{i + 1}.</span>{s.customerCode && <span className="dist-code">{s.customerCode}</span>}<span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
               <div className="dist-txn-sub">{s.phone || '—'}{s.deliveryDays && s.deliveryDays.length ? ' · ' + fmtDays(s.deliveryDays) : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}{s.note ? ' · ' + s.note : ''}</div>
               {s.pendingReason ? <div className="dist-deliv-reason"><IconInvoice s={11} />{trD('dist.pendingReason')}: {s.pendingReason}</div> : null}
               <div className="dist-deliv-loc no-print">

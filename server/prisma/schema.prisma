@@ -435,6 +435,9 @@ model Document {
 
 model Customer {
   id            String   @id @default(cuid())
+  code          String?  @unique                  // human-readable running id (C-0001). Server-allocated,
+                                                   // stable, never reused. Nullable only for the migration
+                                                   // window (backfilled once); every new customer gets one.
   name          String
   phone         String   @default("")
   type          String   @default("reguler") // CustomerType id (seed ids: reguler|kos|cafe|bulk)
@@ -461,6 +464,16 @@ model Customer {
   deliveries   Delivery[]
 
   @@index([type])
+}
+
+// Append-only counter for customer codes (C-0001…). A dedicated table (like EmployeeNip) keeps
+// the sequence MONOTONIC and race-safe: rows are never deleted, so a code is never reused when a
+// customer is deactivated/deleted; concurrent creates can't claim the same seq (unique → retry).
+model CustomerCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  seq       Int      @unique
+  createdAt DateTime @default(now())
 }
 
 // Editable customer-type dictionary (id + label so a rename never orphans customers).

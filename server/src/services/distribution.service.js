@@ -162,17 +162,37 @@ async function logAudit(kind, title, detail, snap, fleetId) {
 const mapsLinkOf = (c) => (c && c.mapsUrl && String(c.mapsUrl).trim()) || ((c && c.lat != null && c.lng != null) ? ('https://www.google.com/maps?q=' + c.lat + ',' + c.lng) : '');
 // Light validation: keep only an http(s) URL (trimmed, capped); anything else → ''.
 function cleanMapsUrl(u) { const s = String(u || '').trim(); return /^https?:\/\//i.test(s) ? s.slice(0, 500) : ''; }
+// ONE shared completeness rule so the badge, filter, and counts never disagree. A customer is
+// "complete" when it has BOTH a phone AND a location (mapsUrl OR lat+lng). `missing` also lists
+// the softer-but-important gaps (armada / delivery days / price) so the detail can show every fix.
+function customerCompleteness(c) {
+  const hasPhone = !!(c.phone && String(c.phone).trim());
+  const hasLoc = !!mapsLinkOf(c);
+  const hasArmada = !!(c.armada && String(c.armada).trim());
+  let days = c.deliveryDays; if (typeof days === 'string') { try { days = JSON.parse(days); } catch (e) { days = []; } }
+  const hasDays = Array.isArray(days) && days.length > 0;
+  const hasPrice = (+c.masterPrice || 0) > 0;
+  const missing = [];
+  if (!hasPhone) missing.push('phone');
+  if (!hasLoc) missing.push('location');
+  if (!hasArmada) missing.push('armada');
+  if (!hasDays) missing.push('deliveryDays');
+  if (!hasPrice) missing.push('price');
+  return { complete: hasPhone && hasLoc, missing };   // core = phone + location
+}
 function custClient(c) {
   let days = []; try { days = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
   let reminder = null; try { reminder = c.reminder ? JSON.parse(c.reminder) : null; } catch (e) {}
   const mapsLink = mapsLinkOf(c);
+  const comp = customerCompleteness(c);
   return {
-    ...c, deliveryDays: Array.isArray(days) ? days : [], armada: c.armada || '', reminder,
+    ...c, code: c.code || '', deliveryDays: Array.isArray(days) ? days : [], armada: c.armada || '', reminder,
     lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, address: c.address || '',
     mapsUrl: c.mapsUrl || '', mapsLink, hasLocation: !!mapsLink,
     locationSetAt: c.locationSetAt ? new Date(c.locationSetAt).getTime() : null, locationSetByName: c.locationSetByName || null,
     active: c.active !== false,   // deactivated customers are hidden from active list + new txn/delivery selection
     deactivatedAt: c.deactivatedAt ? new Date(c.deactivatedAt).getTime() : null, deactivatedByName: c.deactivatedByName || null,
+    complete: comp.complete, missing: comp.missing,
   };
 }
 // Normalise + serialise a billing-reminder config. Any combination of modes; empty → ''.
@@ -251,6 +271,20 @@ function customerCols(body) {
     mapsUrl: cleanMapsUrl(body.mapsUrl),
   };
 }
+// Allocate the next human-readable customer code (C-0001, C-0002, …), server-side + race-safe.
+// Mirrors the EmployeeNip allocator: a dedicated append-only counter table means the sequence is
+// MONOTONIC — codes are never reused even when a customer is deactivated or deleted. On a unique
+// clash (two concurrent creates) the loser retries with the next number.
+async function allocateCustomerCode() {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const count = await prisma.customerCode.count();
+    const seq = count + 1;
+    const code = 'C-' + String(seq).padStart(4, '0');
+    try { await prisma.customerCode.create({ data: { code, seq } }); return code; }
+    catch (e) { if (e && e.code === 'P2002') continue; throw e; }
+  }
+  throw ApiError.conflict('Gagal mengalokasikan kode pelanggan (terlalu banyak bentrokan, coba lagi).');
+}
 async function createCustomer(body, actor) {
   const cols = customerCols(body);
   if (!cols.name) throw ApiError.badRequest('name is required');
@@ -260,6 +294,7 @@ async function createCustomer(body, actor) {
   const loc = normLatLng(body.lat, body.lng);            // optional coordinates at creation
   if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; }
   if (loc || cols.mapsUrl) { cols.locationSetAt = new Date(); cols.locationSetByName = snap.actorName; }   // location provided at creation → stamp
+  cols.code = await allocateCustomerCode();
   const c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
   await logAudit('pelanggan', `Pelanggan baru: ${c.name}`, `Tipe ${c.type} · harga master ${c.masterPrice}`, snap, c.armada);
   return custClient(c);
@@ -326,6 +361,7 @@ async function importCustomers(list, actor) {
     if (!cols.name) continue;
     cols.type = await validTypeId(item.type);
     cols.armada = resolveWriteFleet(actor, cols.armada);   // scoped importer → their fleet
+    cols.code = await allocateCustomerCode();
     const c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
     out.push(custClient(c)); created++;
   }
@@ -480,7 +516,7 @@ async function listTransactions(q, user) {
   if (q.method && METHODS.includes(q.method)) where.method = q.method;
   const rows = await prisma.distTransaction.findMany({
     where, orderBy: { createdAt: 'desc' },
-    include: { customer: { select: { name: true, type: true } }, corrections: { orderBy: { createdAt: 'desc' } } },
+    include: { customer: { select: { name: true, code: true, type: true } }, corrections: { orderBy: { createdAt: 'desc' } } },
   });
   // Expose the effective (adjusted) amount + flags so reports/Cash Integration follow the
   // new price while the original `amount` stays intact.
@@ -573,7 +609,7 @@ function invoiceClient(inv, customer) {
     id: inv.id, number: inv.number, customerId: inv.customerId, fleetId: inv.fleetId,
     issueDate: inv.issueDate, dueDate: inv.dueDate, items, total: inv.total, sisaBon: inv.sisaBon, note: inv.note,
     createdByName: inv.createdByName, createdByRole: inv.createdByRole, createdAt: inv.createdAt ? new Date(inv.createdAt).getTime() : null,
-    customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone, type: customer.type, armada: customer.armada || '' } : null,
+    customer: customer ? { id: customer.id, code: customer.code || '', name: customer.name, phone: customer.phone, type: customer.type, armada: customer.armada || '' } : null,
   };
 }
 // Create an invoice from selected transactions (or a scope). Snapshots items + totals.
@@ -981,7 +1017,7 @@ function deliveryClient(r, sisaBon) {
     id: r.id, date: r.date, fleetId: r.fleetId, customerId: r.customerId, source: r.source, seq: r.seq,
     status: r.status, qty: r.qty, note: r.note || '', pendingReason: r.pendingReason || '', transactionId: r.transactionId || null,
     createdByName: r.createdByName || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
-    customerName: c.name || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
+    customerName: c.name || '', customerCode: c.code || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
     deliveryDays: Array.isArray(days) ? days : [], sisaBon: sisaBon || 0,
     lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null, mapsLink: mapsLinkOf(c), hasLocation: !!mapsLinkOf(c),
   };
