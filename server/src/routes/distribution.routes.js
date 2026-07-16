@@ -86,6 +86,9 @@ router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ 
 // Opening (go-live) depot stock — same stock-management cap as a correction. Append-only:
 // records the delta as an 'opening' movement, never overwrites the ledger.
 router.post('/gallon/opening', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.openingStockSchema }), ctrl.setOpeningStock);
+// Reset gallon count — GM-tier destructive action, its OWN capability. Server rejects anyone
+// without it (403), not just a hidden button. Balanced mode appends corrections; purge deletes.
+router.post('/gallon/reset', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.gallonResetSchema }), ctrl.resetGallon);
 
 // NOTE: no DELETE routes anywhere — distribusi records are immutable/append-only.
 module.exports = router;

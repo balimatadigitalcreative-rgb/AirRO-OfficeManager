@@ -170,6 +170,7 @@
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),
       setOpeningStock: (data) => req('POST', '/distribusi/gallon/opening', data),   // { qty, fleet?, reason }
+      resetGallon: (data) => req('POST', '/distribusi/gallon/reset', data),          // { mode:balanced|purge, fleet?, target?, confirm?, reason }
       summary: (date, fleet) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/dashboard/summary' + (p.length ? '?' + p.join('&') : '')); },
       billingReminders: (fleet) => req('GET', '/distribusi/billing-reminders' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
     },

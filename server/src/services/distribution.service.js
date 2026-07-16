@@ -766,7 +766,8 @@ const totalEffect = (m) => {
 // before this feature existed). Recognising both keeps ONE source of truth: the Stok Awal card,
 // the ledger tag, and the delta baseline all read the same rows.
 const OPENING_NOTE = /stok\s*awal|saldo\s*awal|opening\s*stock/i;
-const isOpeningRow = (m) => m.type === 'opening' || (m.type === 'correction' && !m.customerId && OPENING_NOTE.test(m.note || ''));
+// A gallon-reset correction is NOT opening stock even if the reason mentions "stok awal".
+const isOpeningRow = (m) => m.type === 'opening' || (m.type === 'correction' && !m.customerId && OPENING_NOTE.test(m.note || '') && !/reset stok galon/i.test(m.note || ''));
 
 // Per-customer held balance (fleet-scoped): Σ(delivery_out − return_in ± customer correction).
 async function gallonBalances(user, qFleet) {
@@ -912,6 +913,61 @@ async function syncPurchaseMovement(entryId, qtyRaw, actor) {
 }
 async function retractPurchaseMovement(entryId) {
   await prisma.gallonMovement.updateMany({ where: { cashEntryId: entryId, type: 'purchase', active: true }, data: { active: false } });
+}
+
+// GM-only "Reset Jumlah Galon". Two modes, both fleet-scoped (all / one fleet):
+//  (a) 'balanced' (recommended) — APPEND balancing corrections so the numbers become the target
+//      (default 0) WITHOUT touching history: per-customer correction −balance (→ "at customers"
+//      = 0) + one depot correction (target − totalOwned) so total → target and the derived depot
+//      → target. The old ledger stays intact and traceable.
+//  (b) 'purge' — DELETE every GallonMovement in scope (permanent). Requires confirm === 'RESET'.
+// Everything numeric is recomputed from the ledger; one audit row records who/mode/scope/
+// before→after/reason.
+async function resetGallon(body, actor) {
+  const mode = body.mode === 'purge' ? 'purge' : 'balanced';
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan wajib diisi.');
+  const chosen = (body.fleet && body.fleet !== 'all') ? String(body.fleet) : '';
+  const qFleet = chosen || undefined;
+  if (chosen && !fleetAllows(actor, chosen)) throw ApiError.forbidden('Armada di luar akses Anda.');
+  const snap = await actorSnap(actor);
+  const scopeLabel = chosen || 'semua armada';
+  const before = await gallonStock(actor, qFleet);
+
+  if (mode === 'purge') {
+    if (String(body.confirm) !== 'RESET') throw ApiError.badRequest('Ketik RESET untuk konfirmasi penghapusan permanen.');
+    const del = await prisma.gallonMovement.deleteMany({ where: { ...fleetWhere(actor, 'fleetId', qFleet) } });
+    await logAudit('koreksi', `Reset stok galon — HAPUS PERMANEN oleh ${snap.actorName}`,
+      `cakupan ${scopeLabel} · ${del.count} baris ledger dihapus · total ${before.totalOwned}→0 · di pelanggan ${before.atCustomers}→0 · alasan: ${reason}`, snap, chosen);
+    const after = await gallonStock(actor, qFleet);
+    return { mode, scope: scopeLabel, before, after, deleted: del.count, reason };
+  }
+
+  // balanced
+  const target = Math.max(0, Math.round(+body.target || 0));
+  const balMap = await gallonBalances(actor, qFleet);
+  const custIds = Object.keys(balMap).filter((id) => balMap[id] !== 0);
+  const custs = custIds.length ? await prisma.customer.findMany({ where: { id: { in: custIds } }, select: { id: true, armada: true, name: true } }) : [];
+  const ops = [];
+  let customersReset = 0;
+  for (const c of custs) {
+    if (!fleetAllows(actor, c.armada)) continue;   // out of the actor's scope
+    const bal = balMap[c.id];
+    if (!bal) continue;
+    ops.push(prisma.gallonMovement.create({ data: { type: 'correction', qty: -bal, customerId: c.id, fleetId: c.armada || '', active: true, note: `Reset stok galon oleh ${snap.actorName}: saldo pelanggan → 0 · ${reason}`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } }));
+    customersReset++;
+  }
+  // depot correction sets TOTAL owned to target (the derived depot then follows, since
+  // atDepot = totalOwned − atCustomers and customers are now 0).
+  const depotDelta = target - before.totalOwned;
+  if (depotDelta !== 0) {
+    ops.push(prisma.gallonMovement.create({ data: { type: 'correction', qty: depotDelta, customerId: null, fleetId: resolveWriteFleet(actor, chosen), active: true, note: `Reset stok galon oleh ${snap.actorName}: total → ${target} · ${reason}`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } }));
+  }
+  if (ops.length) await prisma.$transaction(ops);
+  await logAudit('koreksi', `Reset stok galon (tercatat) oleh ${snap.actorName}`,
+    `cakupan ${scopeLabel} · total ${before.totalOwned}→${target} · di pelanggan ${before.atCustomers}→0 · ${customersReset} pelanggan disetel · alasan: ${reason}`, snap, chosen);
+  const after = await gallonStock(actor, qFleet);
+  return { mode, scope: scopeLabel, target, before, after, customersReset, reason };
 }
 
 // ── Delivery board ──────────────────────────────────────────────────────────
@@ -1140,7 +1196,7 @@ async function cashIntegration(user, query) {
 
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
-  gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
+  gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, importCustomers, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,

@@ -50,6 +50,7 @@ const CAP_GROUPS = [
     ['distribusiRute', 'Atur Urutan Rute Pengiriman'],
     ['distribusiHargaMaster', 'Ubah Harga Master'],
     ['distribusiCustomerDelete', 'Hapus / Nonaktifkan Pelanggan'],
+    ['distribusiGallonReset', 'Reset Jumlah Galon'],
     ['distribusiAudit', 'Lihat Log Audit'],
   ] },
   { title: 'Gudang', caps: [

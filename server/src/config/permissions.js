@@ -12,7 +12,7 @@ const ROLE_PERMS = {
     kasbon: false, kasbonApprove: false,
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
   },
@@ -22,7 +22,7 @@ const ROLE_PERMS = {
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
   },
   hrd: {
@@ -171,9 +171,13 @@ function deriveDistribusiCaps(perms) {
   // Customers. Safe default: a plain view/run/manage user doesn't silently gain them.
   if (p.distribusiRute === undefined) p.distribusiRute = legacy;
   if (p.distribusiCustomerDelete === undefined) p.distribusiCustomerDelete = legacy;
+  // distribusiGallonReset is DESTRUCTIVE (GM-tier): it is NEVER derived from the legacy combined
+  // `distribusi` — a plain full-distribusi user must not silently gain it. Only the explicit
+  // owner/gm seed (or an admin toggle) grants it.
+  if (p.distribusiGallonReset === undefined) p.distribusiGallonReset = false;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset);
   return p;
 }
 

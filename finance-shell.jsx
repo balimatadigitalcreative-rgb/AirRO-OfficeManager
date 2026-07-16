@@ -1092,7 +1092,7 @@ function FApp() {
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-gallon' && p.distribusiGallon && (
-            <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers}
+            <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canReset={!!p.distribusiGallonReset}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
           {screen === 'dist-prices' && p.distribusiHargaMaster && (

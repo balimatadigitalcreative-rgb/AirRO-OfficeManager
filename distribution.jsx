@@ -1681,11 +1681,12 @@ const GM_META = {
   damage: { l: 'dist.gmDamage', cls: 'dmg', sign: '−' },
   loss: { l: 'dist.gmLoss', cls: 'dmg', sign: '−' },
 };
-function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistGallon({ refreshKey, canCustomers, canReset, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);
   const [toast, setToast] = uSx('');
   const [corr, setCorr] = uSx(null);   // { customerId, name, qty, reason }
   const [opening, setOpening] = uSx(null);   // opening-stock modal: { qty, reason }
+  const [reset, setReset] = uSx(null);   // reset-gallon modal: { mode, fleet, target, reason, confirm }
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
   const ef = effFleet(fleetScope, distFleet);
@@ -1712,12 +1713,31 @@ function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, se
       .then(() => { setSaving(false); setOpening(null); flash(trD('dist.goSaved')); reload(); })
       .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
+  const openReset = () => { setErr(''); setReset({ mode: 'balanced', fleet: (distFleet && distFleet !== 'all') ? distFleet : 'all', target: '0', reason: '', confirm: '' }); };
+  const commitReset = () => {
+    if (!reset || saving) return;
+    if (!reset.reason.trim()) { setErr(trD('dist.grErrReason')); return; }
+    if (reset.mode === 'purge' && reset.confirm !== 'RESET') { setErr(trD('dist.grErrConfirm')); return; }
+    setSaving(true); setErr('');
+    const body = { mode: reset.mode, fleet: reset.fleet || 'all', reason: reset.reason.trim() };
+    if (reset.mode === 'balanced') body.target = Math.max(0, parseInt(reset.target || '0', 10) || 0);
+    else body.confirm = reset.confirm;
+    window.API.distribusi.resetGallon(body)
+      .then(() => { setSaving(false); setReset(null); flash(trD('dist.grSaved')); reload(); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
   const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   if (!data) return <div className="dist-dash screen-enter">{bar}<div className="card"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div></div>;
   const st = data.stock || {};
   return (
     <div className="dist-dash screen-enter">
       {bar}
+      {canReset && (
+        <div className="dist-gm-resetbar">
+          <div style={{ flex: 1 }} />
+          <button type="button" className="btn btn-danger btn-sm" onClick={openReset}><IconRefresh s={14} />{trD('dist.grBtn')}</button>
+        </div>
+      )}
       <div className="dist-gm-cards">
         <div className="card stat-box"><span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX('IconDrop', { s: 18 })}</span><div className="tnum dist-gm-val">{numX(st.totalOwned || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmTotal')}</div></div>
         <div className="card stat-box"><span className="icon-tile" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>{IcX('IconCustomers', { s: 18 })}</span><div className="tnum dist-gm-val" style={{ color: 'var(--warn)' }}>{numX(st.atCustomers || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmAtCust')}</div></div>
@@ -1797,6 +1817,54 @@ function DistGallon({ refreshKey, canCustomers, fleetScope, fleet, distFleet, se
           </div>
         </div>
       )}
+
+      {reset && (() => { const tgt = reset.mode === 'balanced' ? (Math.max(0, parseInt(reset.target || '0', 10) || 0)) : 0; const fleetOpts = (fleet || []).filter(Boolean); return (
+        <div className="modal-scrim" onClick={() => setReset(null)} style={{ zIndex: 210 }}>
+          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.grTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.grSub')}</div></div><button className="jp-icon" onClick={() => setReset(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              {/* mode choice */}
+              <label className={`dist-gr-mode ${reset.mode === 'balanced' ? 'on' : ''}`} onClick={() => setReset({ ...reset, mode: 'balanced' })}>
+                <input type="radio" checked={reset.mode === 'balanced'} readOnly />
+                <div><b>{trD('dist.grModeA')}</b><span>{trD('dist.grModeADesc')}</span></div>
+              </label>
+              <label className={`dist-gr-mode danger ${reset.mode === 'purge' ? 'on' : ''}`} onClick={() => setReset({ ...reset, mode: 'purge' })}>
+                <input type="radio" checked={reset.mode === 'purge'} readOnly />
+                <div><b>{trD('dist.grModeB')}</b><span>{trD('dist.grModeBDesc')}</span></div>
+              </label>
+
+              <div className="gud-row2" style={{ marginTop: 6 }}>
+                <div>
+                  <label className="fld-label">{trD('dist.grScope')}</label>
+                  <select className="fld" value={reset.fleet} onChange={(e) => setReset({ ...reset, fleet: e.target.value })}>
+                    <option value="all">{trD('dist.grAllFleets')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+                {reset.mode === 'balanced' && (
+                  <div><label className="fld-label">{trD('dist.grTarget')}</label><input className="fld tnum" value={reset.target} inputMode="numeric" placeholder="0" onChange={(e) => setReset({ ...reset, target: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                )}
+              </div>
+
+              <div className="dist-gr-preview">
+                <span>{trD('dist.gmTotal')}: <b>{numX(st.totalOwned || 0)}</b> → <b className="to">{numX(tgt)}</b></span>
+                <span>{trD('dist.gmAtCust')}: <b>{numX(st.atCustomers || 0)}</b> → <b className="to">0</b></span>
+                <span>{trD('dist.gmAtDepot')}: <b>{numX(st.atDepot || 0)}</b> → <b className="to">{numX(tgt)}</b></span>
+              </div>
+
+              <label className="fld-label">{trD('dist.grReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={reset.reason} placeholder={trD('dist.grReasonPh')} onChange={(e) => setReset({ ...reset, reason: e.target.value })} />
+
+              {reset.mode === 'purge' && (<>
+                <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('dist.grPurgeWarn')}</span></div>
+                <label className="fld-label">{trD('dist.grConfirmLbl')}</label>
+                <input className="fld" value={reset.confirm} placeholder="RESET" onChange={(e) => setReset({ ...reset, confirm: e.target.value })} />
+              </>)}
+              {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setReset(null)}>{trD('dist.cancel')}</button><button className={`btn ${reset.mode === 'purge' ? 'btn-danger' : 'btn-primary'}`} disabled={saving} onClick={commitReset}>{saving ? '…' : (reset.mode === 'purge' ? trD('dist.grDoPurge') : trD('dist.grDo'))}</button></div>
+          </div>
+        </div>
+      ); })()}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
   );

@@ -1280,6 +1280,18 @@ select.fld::-ms-expand { display: none; }
 .dist-gm-mtag.dmg { background: var(--danger-bg, #fef2f2); color: var(--danger, #dc2626); }
 .dist-gm-mqty.dmg { color: var(--danger, #dc2626); }
 .dist-gm-note { display: flex; align-items: flex-start; gap: 7px; font-size: 11.5px; line-height: 1.5; color: var(--text-mut); margin: -4px 2px 12px; }
+/* Reset gallon count (GM) */
+.btn-danger { background: var(--danger, #dc2626); color: #fff; border-color: var(--danger, #dc2626); }
+.btn-danger:hover { filter: brightness(1.05); }
+.dist-gm-resetbar { display: flex; align-items: center; margin-bottom: 12px; }
+.dist-gr-mode { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1.5px solid var(--border); border-radius: 12px; margin-bottom: 8px; cursor: pointer; }
+.dist-gr-mode.on { border-color: var(--green-700); background: var(--green-50, #ecfdf5); }
+.dist-gr-mode.danger.on { border-color: var(--danger, #dc2626); background: var(--danger-bg, #fef2f2); }
+.dist-gr-mode input { margin-top: 3px; flex-shrink: 0; }
+.dist-gr-mode b { display: block; font-size: 13.5px; } .dist-gr-mode span { display: block; font-size: 11.5px; color: var(--text-mut); margin-top: 2px; line-height: 1.4; }
+.dist-gr-preview { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; margin: 10px 0; background: var(--card-soft, #f1f5f9); border-radius: 10px; font-size: 12px; }
+.dist-gr-preview .to { color: var(--green-700); }
+.dist-gr-warn { display: flex; align-items: flex-start; gap: 8px; padding: 9px 11px; margin: 8px 0; font-size: 11.5px; line-height: 1.45; color: var(--danger, #dc2626); background: var(--danger-bg, #fef2f2); border: 1px solid var(--danger, #dc2626); border-radius: 10px; }
 .dist-gm-note svg { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
 /* opening-stock summary row */
 .dist-gm-opening { display: flex; align-items: center; gap: 13px; padding: 13px 16px; margin-bottom: 14px; }
