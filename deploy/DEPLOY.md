@@ -119,26 +119,117 @@ would lose data.
 **Golden rules:** never run `prisma migrate reset` or `prisma db push --force-reset`
 on production (those wipe data). Always let `update.sh` back up first.
 
-## Database backups
+## Backup & Restore
 
-`deploy/backup-db.sh` makes a dated, gzipped snapshot (SQLite or Postgres) and
-keeps the last 14 days. Install sqlite3 once for safe SQLite snapshots:
+The database holds salaries, NIK and BPJS data, so backups are **local + offsite
+(encrypted)**, scheduled, integrity-checked, and the restore path is tested.
+
+**Where backups live**
+- **Local:** `~/airro-backups/airro-YYYYMMDD-HHMMSS.db.gz` — 14-day retention.
+- **Offsite:** an encrypted copy on cloud storage (rclone) — 90-day retention.
+- **Log:** every run appends a summary to `~/airro-backups/backup.log`.
+- **Failure markers:** `LAST_BACKUP_FAILED` / `LAST_OFFSITE_FAILED` appear in
+  `~/airro-backups/` only when a run fails (removed on the next success) — a
+  dead-simple thing to check or alert on.
+
+### 1. Scheduled local backup
+Install sqlite3 once (safe online snapshots + record counts):
 ```bash
 sudo apt-get install -y sqlite3
-bash deploy/backup-db.sh            # writes to ~/airro-backups/
+bash deploy/backup-db.sh            # writes to ~/airro-backups/, verifies, ships offsite
 ```
-Automate it daily at 2am with cron (`crontab -e`):
+`backup-db.sh` snapshots the DB, runs `gzip -t` on the archive, and **fails loudly
+(non-zero + marker)** if it's corrupt or smaller than 50 KB. It prunes local backups
+older than 14 days, then chains `backup-offsite.sh` (skip with `SKIP_OFFSITE=1`, which
+`update.sh` does so a deploy is never blocked by a cloud outage).
+
+Daily at 02:00 via cron (`crontab -e`) — one line runs local **and** offsite and logs both:
 ```
-0 2 * * * cd /var/www/airro && /bin/bash deploy/backup-db.sh >> ~/airro-backups/backup.log 2>&1
+0 2 * * * /bin/bash /var/www/airrooffice/deploy/backup-db.sh >> $HOME/airro-backups/backup.log 2>&1
 ```
-Restore (SQLite): stop the API, `gunzip` the backup over `server/prisma/prod.db`,
-start the API:
+
+### 2. Offsite copy (encrypted) — one-time setup
+`backup-offsite.sh` uploads each new archive to storage **outside** the VPS with rclone.
+`rclone config` needs a **one-time interactive OAuth login by the owner** — it cannot be
+automated. Do it once on the VPS:
 ```bash
-pm2 stop airro-api
-gunzip -c ~/airro-backups/airro-YYYYMMDD-HHMMSS.db.gz > /var/www/airro/server/prisma/prod.db
-pm2 start airro-api
+sudo apt-get install -y rclone
+rclone config
+#  n) New remote
+#  name> airro-offsite
+#  Storage> drive           (Google Drive)   — or  s3  for S3-compatible
+#  client_id / client_secret> (blank is fine for a personal test; better: your own)
+#  scope> 1                  (full access)
+#  Edit advanced config> n
+#  Use web browser to authenticate> y  → a browser/URL opens; log in as the OWNER,
+#                                        approve, paste the token back if headless
+#  Configure as a Shared Drive> n
+#  y) Yes this is OK  → q) Quit config
+rclone lsd airro-offsite:                       # sanity: lists your Drive folders
 ```
-Tip: also copy backups off the VPS periodically (e.g. `scp` to your PC, or rclone to cloud storage).
+Then choose an **encryption mode** and set it in `server/.env`:
+- **Mode A — gpg (simplest, plain remote):** set `BACKUP_PASSPHRASE` (long/random).
+  Each archive is `gpg -c` AES256-encrypted here, and the `.gpg` is uploaded.
+  **Keep a copy of the passphrase somewhere offsite too** — lose it and the offsite
+  copies are unrecoverable.
+- **Mode B — rclone crypt (no passphrase in env):** run `rclone config` again to make a
+  `crypt` remote wrapping `airro-offsite:`, point `RCLONE_REMOTE` at it, and leave
+  `BACKUP_PASSPHRASE` empty. rclone encrypts names + contents transparently.
+```
+# server/.env
+RCLONE_REMOTE="airro-offsite:airro"
+BACKUP_PASSPHRASE="<long random — mode A>"     # empty for mode B
+OFFSITE_KEEP_DAYS="90"
+```
+The upload **fails loudly** (non-zero + `LAST_OFFSITE_FAILED`) if rclone is missing, the
+remote is unconfigured, or the transfer errors — a silent failed backup is the worst case.
+
+### 3. Restore
+```bash
+bash deploy/restore-db.sh <backup-file.gz>        # into PRODUCTION
+```
+It refuses a file that fails `gzip -t`, then: stops the API → **snapshots the current db
+first** (`.pre-restore-<stamp>`) → gunzips the backup over the `DATABASE_URL` path (read
+from `server/.env`) → starts the API → health-checks → prints record counts
+(User / Entry / Employee / Setoran) so you can confirm the data is really there.
+
+**Decrypting an offsite archive** before restoring:
+```bash
+rclone copy airro-offsite:airro/airro-YYYYMMDD-HHMMSS.db.gz.gpg .   # download (mode A)
+gpg --batch --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
+    -o airro-YYYYMMDD-HHMMSS.db.gz -d airro-YYYYMMDD-HHMMSS.db.gz.gpg
+bash deploy/restore-db.sh airro-YYYYMMDD-HHMMSS.db.gz
+# Mode B (crypt remote): `rclone copy` decrypts automatically — no gpg step.
+```
+
+### 4. Restore drill (prove backups are usable — touches nothing in production)
+```bash
+bash deploy/restore-db.sh --drill            # newest local backup, into /tmp/restore-test.db
+```
+Expected output (numbers should roughly match production):
+```
+==> DRILL — restoring '.../airro-YYYYMMDD-HHMMSS.db.gz' into /tmp/restore-test.db (production is NOT touched)
+==> Record counts in the restored copy:
+   User       7
+   Entry      1284
+   Employee   19
+   Setoran    342
+✅ Drill OK — the backup gunzips cleanly and contains data. Nothing in production changed.
+```
+Run this monthly. If the counts are 0 or the drill errors, your backups are not usable —
+fix it before you need them. (Compare against production:
+`sqlite3 server/prisma/prod.db 'SELECT COUNT(*) FROM "User";'`.)
+
+### 5. Monitoring
+Each run appends one line to `backup.log`:
+```
+SUMMARY 2026-07-17 02:00:03 | file=airro-20260717-020001.db.gz size=1.2M | local=OK | offsite=OK | keep_local=14d
+```
+Quick health check any time:
+```bash
+tail -n 3 ~/airro-backups/backup.log
+ls ~/airro-backups/LAST_*_FAILED 2>/dev/null && echo "⚠️  a backup failed — investigate" || echo "backups OK"
+```
 
 ## Troubleshooting: "data doesn't persist on the server" (/state)
 

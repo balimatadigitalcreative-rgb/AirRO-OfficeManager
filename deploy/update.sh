@@ -15,8 +15,11 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$APP_DIR"
 
-echo "==> 1/6  Backup database..."
-bash deploy/backup-db.sh
+echo "==> 1/6  Backup database (local only — offsite runs from the daily cron)..."
+# SKIP_OFFSITE: a deploy must not be blocked if cloud storage is briefly down. The
+# LOCAL backup still runs and is what protects this deploy; the scheduled cron ships
+# the offsite copy separately (and fails loudly there if it can't).
+SKIP_OFFSITE=1 bash deploy/backup-db.sh
 
 echo "==> 2/6  Pull latest code..."
 git fetch origin
