@@ -36,24 +36,34 @@ function signToken(user) {
   );
 }
 
+// Usernames are case-INSENSITIVE everywhere: always normalise to lowercase before storing
+// or looking up. The controller schema also lowercases; this is the defensive backstop.
+const normUsername = (u) => String(u || '').trim().toLowerCase();
+
 async function register({ name, username, password, role, sub, color }) {
-  const existing = await prisma.user.findUnique({ where: { username } });
+  const uname = normUsername(username);
+  const existing = await prisma.user.findUnique({ where: { username: uname } });
   if (existing) throw ApiError.conflict('Username is already taken');
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { name, username, passwordHash, role, sub, color },
+    data: { name, username: uname, passwordHash, role, sub, color },
     select: PUBLIC_FIELDS,
   });
   return { user: publicUser(user), token: signToken(user) };
 }
 
 async function login({ username, password }) {
-  const user = await prisma.user.findUnique({ where: { username } });
-  if (!user || !user.active) throw ApiError.unauthorized('Invalid credentials');
+  const uname = normUsername(username);
+  const user = await prisma.user.findUnique({ where: { username: uname } });
+  // SECURITY: the message returned to the client is ALWAYS generic (never reveal whether the
+  // user exists / is inactive / the password is wrong). The real reason is only logged
+  // server-side so the owner can diagnose from the server logs.
+  if (!user) { console.warn(`[auth] login gagal — user tidak ditemukan (username="${uname}")`); throw ApiError.unauthorized('Invalid credentials'); }
+  if (!user.active) { console.warn(`[auth] login gagal — akun nonaktif (username="${uname}", id=${user.id})`); throw ApiError.unauthorized('Invalid credentials'); }
 
   const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) throw ApiError.unauthorized('Invalid credentials');
+  if (!ok) { console.warn(`[auth] login gagal — password salah (username="${uname}", id=${user.id})`); throw ApiError.unauthorized('Invalid credentials'); }
 
   const { passwordHash, pin, updatedAt, ...safe } = user;
   return { user: publicUser(safe), token: signToken(user) };
@@ -90,4 +100,4 @@ async function updateProfile(userId, { name, color }) {
   return publicUser(user);
 }
 
-module.exports = { register, login, me, changePassword, updateProfile, signToken, publicUser, PUBLIC_FIELDS, PASSWORD_MIN };
+module.exports = { register, login, me, changePassword, updateProfile, signToken, publicUser, normUsername, PUBLIC_FIELDS, PASSWORD_MIN };

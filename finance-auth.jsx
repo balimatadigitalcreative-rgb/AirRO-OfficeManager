@@ -149,6 +149,7 @@ function LoginScreen({ onLogin, lang, onLang }) {
             <IconUserCircle s={18} />
             <input value={username} autoFocus placeholder={trA('login.usernamePh')} onChange={(e) => { setUsername(e.target.value); setErr(false); }} />
           </div>
+          <div className="login-hint">{trA('login.usernameCI')}</div>
 
           <label className="fld-label">{trA('login.password')}</label>
           <div className={`login-field ${err ? 'err' : ''}`}>

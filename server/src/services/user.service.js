@@ -2,7 +2,7 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
-const { PUBLIC_FIELDS, publicUser } = require('./auth.service');
+const { PUBLIC_FIELDS, publicUser, normUsername } = require('./auth.service');
 
 // Guard: a user's role must reference an existing role in the Role table.
 async function assertRole(role) {
@@ -35,6 +35,7 @@ async function getById(id) {
   return publicUser(u);
 }
 async function create({ password, ...rest }) {
+  if (rest.username != null) rest.username = normUsername(rest.username);   // case-insensitive
   const existing = await prisma.user.findUnique({ where: { username: rest.username } });
   if (existing) throw ApiError.conflict('Username is already taken');
   await assertRole(rest.role);
@@ -45,6 +46,12 @@ async function create({ password, ...rest }) {
 async function update(id, { password, ...rest }) {
   await getById(id);
   await assertRole(rest.role);
+  if (rest.username != null) {
+    rest.username = normUsername(rest.username);   // case-insensitive
+    // Block a rename that would collide with a DIFFERENT user (avoids a raw unique-constraint 500).
+    const clash = await prisma.user.findUnique({ where: { username: rest.username } });
+    if (clash && clash.id !== id) throw ApiError.conflict('Username is already taken');
+  }
   const data = normalize(rest);
   if (password) data.passwordHash = await bcrypt.hash(password, 10);
   const u = await prisma.user.update({ where: { id }, data, select: PUBLIC_FIELDS });

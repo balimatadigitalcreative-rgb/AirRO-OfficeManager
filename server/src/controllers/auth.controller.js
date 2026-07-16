@@ -5,7 +5,8 @@ const asyncHandler = require('../utils/asyncHandler');
 
 const registerSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  username: z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/,
+  // Usernames are case-INSENSITIVE: stored + matched lowercase so "Gusde17" == "gusde17".
+  username: z.string().trim().toLowerCase().min(3).max(40).regex(/^[a-z0-9._-]+$/,
     'Username may contain only letters, numbers, dot, underscore and hyphen'),
   password: z.string().min(6).max(200),
   role: z.string().trim().min(1).max(40).default('finance'),
@@ -14,7 +15,7 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  username: z.string().trim().min(1),
+  username: z.string().trim().toLowerCase().min(1),   // case-insensitive login
   password: z.string().min(1),
 });
 
