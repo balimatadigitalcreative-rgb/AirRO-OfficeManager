@@ -372,21 +372,32 @@ async function setLocationPhoto(id, body, actor) {
   await logAudit('pelanggan', `${photoId ? 'Foto lokasi' : 'Hapus foto lokasi'}: ${c.name}`, photoId ? `oleh ${snap.actorName}` : '', snap, c.armada);
   return custClient(c);
 }
-async function importCustomers(list, actor) {
+// Bulk import. The client already validates + dedups in the preview and sends only the valid
+// rows (+ how many it skipped). The server still dedups DEFENSIVELY by name+phone (against existing
+// customers in scope + within the batch) so a race/duplicate can't slip in, and the audit records
+// the true imported/skipped counts (who, when). Each new customer gets a sequential code.
+async function importCustomers(list, actor, clientSkipped) {
   const rows = Array.isArray(list) ? list : [];
   const snap = await actorSnap(actor);
-  let created = 0; const out = [];
+  const dupKey = (n, p) => (String(n || '').trim().toLowerCase() + '|' + String(p || '').trim().toLowerCase());
+  const existing = await prisma.customer.findMany({ where: fleetWhere(actor, 'armada'), select: { name: true, phone: true } });
+  const seen = new Set(existing.map((c) => dupKey(c.name, c.phone)));
+  let created = 0, serverSkipped = 0; const out = [];
   for (const item of rows) {
     const cols = customerCols(item);
-    if (!cols.name) continue;
+    if (!cols.name || cols.masterPrice <= 0) { serverSkipped++; continue; }   // missing required
+    const k = dupKey(cols.name, cols.phone);
+    if (seen.has(k)) { serverSkipped++; continue; }                            // duplicate name+phone
+    seen.add(k);
     cols.type = await validTypeId(item.type);
     cols.armada = resolveWriteFleet(actor, cols.armada);   // scoped importer → their fleet
     cols.code = await allocateCustomerCode();
     const c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
     out.push(custClient(c)); created++;
   }
-  await logAudit('impor', `Impor ${created} pelanggan`, `Dari ${rows.length} baris`, snap);
-  return { data: out, imported: created, received: rows.length };
+  const skipped = Math.max(0, Math.round(+clientSkipped || 0)) + serverSkipped;
+  await logAudit('impor', `Impor pelanggan: ${created} ditambah`, `${created} ditambah · ${skipped} dilewati (duplikat/data kurang)`, snap);
+  return { data: out, imported: created, skipped, received: rows.length };
 }
 
 // Small rollup used by both the deactivate flow and the delete-warning modal: how much

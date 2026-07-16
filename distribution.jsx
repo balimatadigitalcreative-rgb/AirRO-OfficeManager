@@ -266,7 +266,10 @@ function loadSheetJS() {
 const splitCells = (line) => line.split(/\t|,|;/).map((s) => s.trim());
 // Download a ready-to-fill CSV template (header + one example row).
 function downloadImportTemplate() {
-  const rows = [['Nama', 'No HP', 'Tipe', 'Harga', 'Hari Kirim', 'Armada'], ['Warung Sejahtera', '0821-1122-3344', 'Reguler', '12500', 'Sen;Rab;Jum', 'Merah']];
+  const rows = [
+    ['Nama', 'No HP', 'Tipe', 'Harga', 'Hari Kirim', 'Armada', 'Alamat', 'Maps'],
+    ['Warung Sejahtera', '0821-1122-3344', 'Reguler', '12500', 'Sen;Rab;Jum', 'Merah', 'Jl. Melati No. 7', 'https://maps.app.goo.gl/xxxx'],
+  ];
   const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-pelanggan.csv';
@@ -1019,7 +1022,9 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
 
   // ── spreadsheet import parsing (shared by paste-text AND file upload) ──
   const typeByLabel = {}; types.forEach((t) => { typeByLabel[(t.label || '').toLowerCase()] = t.id; });
-  const existing = new Set((custs || []).map((c) => (c.name || '').toLowerCase()));
+  // Dedup key = name + phone (two different people can share a name), matched case-insensitively.
+  const dupKey = (n, p) => (String(n || '').trim().toLowerCase() + '|' + String(p || '').trim().toLowerCase());
+  const existing = new Set((custs || []).map((c) => dupKey(c.name, c.phone)));
   // Rows of cells come from an uploaded file if present, else the pasted textarea.
   const rawCells = impFileRows || impText.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
   // Flexible header mapping: recognise common headers in ANY order; if the first row isn't a
@@ -1044,7 +1049,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
     const dc = cellAt(cols, colMap.days); const days = dc ? DAY_CODES.filter((d) => new RegExp(d, 'i').test(dc)) : [];
     const armada = cellAt(cols, colMap.armada); const address = cellAt(cols, colMap.address);
     const mu = cellAt(cols, colMap.mapsUrl); const mapsUrl = /^https?:\/\//i.test(mu) ? mu : '';
-    const key = name.toLowerCase(); const dup = existing.has(key) || seen.has(key);
+    const key = dupKey(name, phone); const dup = existing.has(key) || seen.has(key);
     if (name) seen.add(key);
     const valid = !!name && !!num && !dup;
     return { name: name || '(kosong)', phone: phone || '—', type, price: num || 0, days, armada, address, mapsUrl, valid, status: valid ? 'ok' : (!name || !num) ? 'kurang' : 'dup' };
@@ -1058,8 +1063,8 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, staffMode,
       name: r.name, phone: r.phone === '—' ? '' : r.phone, type: r.type, masterPrice: r.price,
       ...(r.days.length ? { deliveryDays: r.days } : {}), ...(r.armada ? { armada: r.armada } : {}),
       ...(r.address ? { address: r.address } : {}), ...(r.mapsUrl ? { mapsUrl: r.mapsUrl } : {}),
-    })))
-      .then((r) => { setImpSaving(false); setImpOpen(false); resetImport(); flash(trD('dist.importedSum', { n: r.imported, m: (r.received || 0) - r.imported })); reload(); if (onChanged) onChanged(); })
+    })), impRows.length - impValid.length)   // pass the count skipped in preview → server audit
+      .then((r) => { setImpSaving(false); setImpOpen(false); resetImport(); flash(trD('dist.importedSum', { n: r.imported, m: r.skipped != null ? r.skipped : (impRows.length - impValid.length) })); reload(); if (onChanged) onChanged(); })
       .catch(() => setImpSaving(false));
   };
   // Read a chosen file → 2D cells. CSV as text; XLSX/XLS via lazy-loaded SheetJS.

@@ -49,7 +49,7 @@ const customerUpdateSchema = z.object({
 // Field GPS tag / paste — coordinates required; accuracy (metres) + address optional.
 const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]), accuracy: z.union([z.number(), z.string(), z.null()]).optional(), address: z.string().max(300).optional() });
 const locationPhotoSchema = z.object({ photoId: z.string().max(60).nullable().optional() });
-const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000) });
+const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000), skipped: z.number().int().nonnegative().optional() });
 // scope null/omitted = option (a) new-only; 'all'|'cycle'|'bon' = option (b) retroactive.
 const priceSchema = z.object({ newPrice: z.number().int().nonnegative(), scope: z.enum(['all', 'cycle', 'bon']).nullable().optional() });
 const pricePreviewSchema = z.object({ newPrice: z.number().int().nonnegative() });
@@ -122,7 +122,7 @@ const createCustomer = asyncHandler(async (req, res) => { const c = await servic
 const updateCustomer = asyncHandler(async (req, res) => { const c = await service.updateCustomer(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const setLocation = asyncHandler(async (req, res) => { const c = await service.setCustomerLocation(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const setLocationPhoto = asyncHandler(async (req, res) => { const c = await service.setLocationPhoto(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
-const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user); bcast('import', 'customers'); res.status(201).json(r); });
+const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user, req.body.skipped); bcast('import', 'customers'); res.status(201).json(r); });
 const updatePrice = asyncHandler(async (req, res) => { const c = await service.updatePrice(req.params.id, req.body.newPrice, req.user, req.body.scope); bcast('price', c.id); res.json({ data: c }); });
 const pricePreview = asyncHandler(async (req, res) => res.json({ data: await service.pricePreview(req.params.id, req.body.newPrice, req.user) }));
 const cancelPriceAdjustment = asyncHandler(async (req, res) => { const r = await service.cancelPriceAdjustment(req.params.batchId, req.user); bcast('price', req.params.batchId); res.json({ data: r }); });
