@@ -54,6 +54,8 @@
   async function changePassword(oldPassword, newPassword) { return req('POST', '/auth/change-password', { oldPassword, newPassword }); }
   // Edit the signed-in user's own profile (display name / avatar colour only).
   async function updateProfile(data) { const r = await req('PATCH', '/auth/me', data); return r.user; }
+  // Forgot password (public, no token): always resolves with a generic message.
+  async function forgot(username, note) { return req('POST', '/auth/forgot', { username, note: note || undefined }); }
   function logout() { setToken(null); }
 
   // ---- generic resource helpers ----
@@ -69,8 +71,8 @@
   window.API = {
     BASE, ApiOffline, ApiError,
     onUnauthorized: null,   // set by the cloud adapter; called on any non-login 401
-    getToken, setToken, ping, login, me, logout, changePassword, updateProfile,
-    auth: { login, me, logout, changePassword, updateProfile },
+    getToken, setToken, ping, login, me, logout, changePassword, updateProfile, forgot,
+    auth: { login, me, logout, changePassword, updateProfile, forgot },
     accounts: collection('accounts'),
     transfers: collection('transfers'),
     entries: collection('entries'),
@@ -94,7 +96,11 @@
       reject: (id, data) => req('POST', '/cashbon/' + id + '/reject', data),
       cancel: (id) => req('POST', '/cashbon/' + id + '/cancel', {}),
     }),
-    users: collection('users'),
+    users: Object.assign(collection('users'), {
+      // Forgot-password request queue (owner/GM).
+      resetRequests: (status) => req('GET', '/users/reset-requests' + (status ? '?status=' + encodeURIComponent(status) : '')),
+      handleResetRequest: (id, status) => req('PATCH', '/users/reset-requests/' + id, { status }),
+    }),
     roles: collection('roles'),
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

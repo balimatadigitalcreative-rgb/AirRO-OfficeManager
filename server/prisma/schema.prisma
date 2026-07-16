@@ -371,6 +371,25 @@ model Approval {
   @@index([updatedAt])
 }
 
+// Forgot-password request (no email infra — request-to-admin flow). Created UNAUTHENTICATED
+// from the login screen; owner/HRD (user-management) sees it in Requests + AlertBell, resets
+// the password (temporary + mustChangePassword) using the existing admin flow, then marks it
+// handled. A dedicated model (NOT Approval) because it is created without a login, is gated by
+// user-management rather than the `approvals` cap, and needs none of Approval's creator/data.
+model PasswordResetRequest {
+  id            String    @id @default(cuid())
+  username      String                             // requested username (lowercased); may or may not exist
+  note          String    @default("")
+  status        String    @default("pending")      // pending | selesai | ditolak
+  requestedAt   DateTime  @default(now())
+  handledById   String?
+  handledByName String?
+  handledAt     DateTime?
+
+  @@index([status])
+  @@index([requestedAt])
+}
+
 // ── NIP allocation ledger ────────────────────────────────────────────────
 // One row per issued NIP. The unique constraints make sequence allocation
 // race-safe (concurrent requests can't claim the same office+year+seq). This

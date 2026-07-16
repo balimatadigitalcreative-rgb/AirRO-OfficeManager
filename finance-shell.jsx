@@ -101,6 +101,7 @@ function FApp() {
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
   const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard/transaksi re-fetch
   const [deliveryAlerts, setDeliveryAlerts] = uSh([]);   // AlertBell: extra orders on today's board for the user's fleet
+  const [resetAlerts, setResetAlerts] = uSh([]);         // AlertBell: pending forgot-password requests (owner/GM)
   const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
   const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
@@ -175,6 +176,19 @@ function FApp() {
     Promise.all(jobs).then(() => { if (live) setDeliveryAlerts(acc); });
     return () => { live = false; };
   }, [user, p.distribusiPengiriman, p.distribusiDashboard, distTick]);
+  // Forgot-password requests (AlertBell) — owner/GM only. Poll lightly; refresh on nav.
+  uEh(() => {
+    const isAdmin = user && (user.role === 'owner' || user.role === 'gm');
+    if (!isAdmin || !(window.API && window.API.users && window.API.users.resetRequests)) { setResetAlerts([]); return; }
+    let live = true;
+    const load = () => window.API.users.resetRequests('pending').then((r) => {
+      if (!live) return; const reqs = r.data || [];
+      setResetAlerts(reqs.length ? [{ id: 'pwreset', level: 'high', icon: 'IconLock', title: tr('fp.alertTitle'), msg: tr('fp.alertMsg', { n: reqs.length, u: reqs[0].username }) }] : []);
+    }).catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { live = false; clearInterval(iv); };
+  }, [user, screen, distTick]);
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // ── Setoran: REST per-record (create/update/delete one record at a time) ──
@@ -1046,7 +1060,7 @@ function FApp() {
                 </span>
               )}
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
-              {(p.seeMoney || p.distribusiPengiriman) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts]} />}
+              {(p.seeMoney || p.distribusiPengiriman || resetAlerts.length > 0) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts, ...resetAlerts]} />}
               <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []} activity={myActivity}
                 onChangePassword={() => setPwModal(true)} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>

@@ -76,12 +76,60 @@ function ChangePassword({ forced, prefillOld, onDone, onClose }) {
   );
 }
 
+// Forgot-password modal — request-to-admin (no email). Always shows the SAME generic result,
+// so it never reveals whether the username exists.
+function ForgotModal({ prefill, onClose }) {
+  const [username, setUsername] = uSa(prefill || '');
+  const [note, setNote] = uSa('');
+  const [busy, setBusy] = uSa(false);
+  const [done, setDone] = uSa(false);
+  const [err, setErr] = uSa('');
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const submit = async () => {
+    if (busy) return;
+    const u = username.trim();
+    if (!u) { setErr(trA('fp.errUser')); return; }
+    setBusy(true); setErr('');
+    try { await window.API.auth.forgot(u, note.trim()); setDone(true); }
+    catch (e) {
+      // A 429 (rate-limited) is the only non-generic case worth surfacing; otherwise still show
+      // the generic "sent" message so nothing leaks even on an unexpected error.
+      if (e && e.status === 429) setErr(trA('fp.rate')); else setDone(true);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 300 }}>
+      <div className="modal-card" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('fp.title')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {done ? (
+            <div className="fp-done"><span className="fp-done-ic"><IconCheck s={20} /></span><div>{trA('fp.sent')}</div></div>
+          ) : (<>
+            <div className="dist-infobox"><IconLock s={16} /><span>{trA('fp.info')}</span></div>
+            <label className="fld-label">{trA('login.username')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <input className="fld" value={username} autoFocus placeholder={trA('login.usernamePh')} onChange={(e) => { setUsername(e.target.value); setErr(''); }} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <label className="fld-label">{trA('fp.note')}</label>
+            <textarea className="fld" style={{ height: 56, padding: 12, resize: 'vertical' }} value={note} placeholder={trA('fp.notePh')} onChange={(e) => setNote(e.target.value)} />
+            {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+          </>)}
+        </div>
+        <div className="modal-foot">
+          {done
+            ? <button className="btn btn-primary" onClick={onClose}>{trA('fp.ok')}</button>
+            : <><button className="btn btn-ghost" onClick={onClose}>{trA('fp.cancel')}</button><button className="btn btn-primary" disabled={busy} onClick={submit}>{busy ? '…' : trA('fp.send')}</button></>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin, lang, onLang }) {
   const [username, setUsername] = uSa('');
   const [password, setPassword] = uSa('');
   const [err, setErr] = uSa(false);
   const [errText, setErrText] = uSa('');
   const [show, setShow] = uSa(false);
+  const [forgotOpen, setForgotOpen] = uSa(false);
   const [forceUser, setForceUser] = uSa(null);   // {cu, pw} when the account must set a new password
 
   const [busy, setBusy] = uSa(false);
@@ -161,8 +209,10 @@ function LoginScreen({ onLogin, lang, onLang }) {
           {err && <div className="login-err"><IconClose s={14} />{errText}</div>}
 
           <button type="submit" className="login-submit" disabled={busy}>{busy ? '…' : trA('login.login')}</button>
+          <button type="button" className="login-forgot" onClick={() => setForgotOpen(true)}>{trA('fp.link')}</button>
         </form>
       </div>
+      {forgotOpen && <ForgotModal prefill={username.trim()} onClose={() => setForgotOpen(false)} />}
       {forceUser && <ChangePassword forced prefillOld={forceUser.pw} onDone={() => onLogin({ ...forceUser.cu, mustChangePassword: false })} />}
     </div>
   );

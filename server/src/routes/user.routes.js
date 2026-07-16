@@ -9,6 +9,9 @@ const router = Router();
 router.use(requireAuth, requireRole('owner', 'gm'));
 
 router.get('/', ctrl.list);
+// Forgot-password request queue (owner/GM). Declared BEFORE '/:id' so it isn't shadowed.
+router.get('/reset-requests', validate({ query: ctrl.schemas.resetReqQuery }), ctrl.listResetRequests);
+router.patch('/reset-requests/:id', validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.resetReqUpdate }), ctrl.handleResetRequest);
 router.get('/:id', validate({ params: ctrl.schemas.idParams }), ctrl.getOne);
 router.post('/', validate({ body: ctrl.schemas.createSchema }), ctrl.create);
 router.patch('/:id', validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.updateSchema }), ctrl.update);

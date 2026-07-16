@@ -14,6 +14,7 @@ async function resetDb() {
   await prisma.category.deleteMany();
   await prisma.cashbon.deleteMany();    // child of Employee (employeeId FK) — before employee
   await prisma.approval.deleteMany();
+  await prisma.passwordResetRequest.deleteMany();
   // Distribusi (children before parents): correction → transaction → customer.
   await prisma.correction.deleteMany();
   await prisma.distAuditLog.deleteMany();

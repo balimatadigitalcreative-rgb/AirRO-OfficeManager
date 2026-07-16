@@ -27,6 +27,9 @@ class ApiError extends Error {
   static conflict(message = 'Resource already exists', details) {
     return new ApiError(409, 'CONFLICT', message, details);
   }
+  static tooMany(message = 'Too many requests') {
+    return new ApiError(429, 'TOO_MANY_REQUESTS', message);
+  }
 }
 
 module.exports = ApiError;

@@ -172,16 +172,29 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
   const [busy, setBusy] = uSu(false);
   const [err, setErr] = uSu(null);
   const [tab, setTab] = uSu('users');   // 'users' | 'roles'
+  const [resetReqs, setResetReqs] = uSu([]);   // pending forgot-password requests
 
   const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword });
 
+  const refreshReqs = () => { if (cloud) window.API.users.resetRequests('pending').then((r) => setResetReqs(r.data || [])).catch(() => {}); };
   const refresh = () => {
     if (!cloud) { setRows(users || []); return; }
     window.API.users.list()
       .then((r) => setRows((r.data || []).map(toRow)))
       .catch((e) => setErr((e.body && e.body.error && e.body.error.message) || e.message || 'Gagal memuat user'));
+    refreshReqs();
   };
   React.useEffect(() => { refresh(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Open the existing admin reset flow for a request's user (pre-check "force change"); saving a
+  // new PIN marks the request handled.
+  const openReset = (rq) => {
+    if (!rq.userId) return;
+    const row = (rows || []).find((x) => x.id === rq.userId);
+    if (!row) return;
+    setErr(null); setEdit({ ...row, pin: '', mustChangePassword: true, _resetReqId: rq.id });
+  };
+  const rejectReq = async (rq) => { try { await window.API.users.handleResetRequest(rq.id, 'ditolak'); refreshReqs(); } catch (e) {} };
 
   const list = rows || [];
 
@@ -204,6 +217,8 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
         const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword };
         if (u.pin) body.password = u.pin;   // only change the password when re-entered
         await window.API.users.update(u.id, body);
+        // If this edit came from a forgot-password request AND a new password was set, close it.
+        if (u._resetReqId && u.pin) { try { await window.API.users.handleResetRequest(u._resetReqId, 'selesai'); } catch (e) {} }
       }
       setEdit(null);
       refresh();
@@ -243,6 +258,23 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
         <button className="btn btn-primary" onClick={addNew}><IconPlus s={16} />{trU('um.add')}</button>
       </div>
       {err && <div className="login-err" style={{ margin: '4px 0 12px' }}><IconClose s={14} />{err}</div>}
+      {resetReqs.length > 0 && (
+        <div className="card um-reqs">
+          <div className="um-reqs-head"><IconLock s={15} />{trU('um.resetReqs', { n: resetReqs.length })}</div>
+          {resetReqs.map((rq) => (
+            <div key={rq.id} className="um-req-row">
+              <div className="um-req-main">
+                <div className="um-req-user">@{rq.username}{rq.userId ? (rq.userName ? ' · ' + rq.userName : '') : <span className="um-req-unknown">{trU('um.reqUnknown')}</span>}</div>
+                <div className="um-req-meta">{FS.fmtWhen ? FS.fmtWhen(rq.requestedAt) : new Date(rq.requestedAt).toLocaleString('id-ID')}{rq.note ? ' · ' + rq.note : ''}</div>
+              </div>
+              <div className="um-req-actions">
+                {rq.userId && rq.userActive !== false && <button className="btn btn-primary btn-sm" onClick={() => openReset(rq)}><IconLock s={13} />{trU('um.reqReset')}</button>}
+                <button className="btn btn-ghost btn-sm" onClick={() => rejectReq(rq)}>{trU('um.reqReject')}</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="um-grid">
         {list.map((u) => (
           <div key={u.id} className="um-card card" onClick={() => { setErr(null); setEdit(u); }}>

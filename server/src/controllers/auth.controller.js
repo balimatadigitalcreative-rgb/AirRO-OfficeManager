@@ -19,6 +19,12 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+// Forgot password — public. The username is all that's required (+ an optional note).
+const forgotSchema = z.object({
+  username: z.string().trim().toLowerCase().min(1).max(40),
+  note: z.string().trim().max(300).optional(),
+});
+
 const changePasswordSchema = z.object({
   oldPassword: z.string().min(1),
   newPassword: z.string().min(8, 'Password baru minimal 8 karakter').max(200),
@@ -41,6 +47,12 @@ const login = asyncHandler(async (req, res) => {
   res.status(200).json(result);
 });
 
+// Always returns the SAME generic message whether or not the username exists (no enumeration).
+const forgot = asyncHandler(async (req, res) => {
+  await authService.requestPasswordReset(req.body);
+  res.status(200).json({ ok: true, message: 'Permintaan dikirim ke admin. Hubungi owner/HRD Anda.' });
+});
+
 const me = asyncHandler(async (req, res) => {
   const user = await authService.me(req.user.id);
   res.status(200).json({ user });
@@ -56,4 +68,4 @@ const updateProfile = asyncHandler(async (req, res) => {
   res.status(200).json({ user });
 });
 
-module.exports = { register, login, me, changePassword, updateProfile, schemas: { registerSchema, loginSchema, changePasswordSchema, updateProfileSchema } };
+module.exports = { register, login, forgot, me, changePassword, updateProfile, schemas: { registerSchema, loginSchema, forgotSchema, changePasswordSchema, updateProfileSchema } };

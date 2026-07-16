@@ -704,6 +704,21 @@ select.fld::-ms-expand { display: none; }
 .login-field { display: flex; align-items: center; gap: 10px; height: 46px; border: 1.5px solid var(--border); border-radius: 12px; padding: 0 12px; background: var(--card); transition: border-color .14s, box-shadow .14s; margin-bottom: 4px; }
 .login-field svg { color: var(--green-700); flex-shrink: 0; }
 .login-hint { font-size: 11px; color: var(--text-mut); margin: 2px 2px 6px; }
+.login-forgot { display: block; width: 100%; margin-top: 10px; background: none; border: none; color: var(--green-700); font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: center; padding: 4px; }
+.login-forgot:hover { text-decoration: underline; }
+.fp-done { display: flex; align-items: center; gap: 12px; padding: 8px 2px; font-size: 13.5px; color: var(--text); }
+.fp-done-ic { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--pos-bg); color: var(--green-800); flex-shrink: 0; }
+/* forgot-password request queue (user management) */
+.um-reqs { padding: 14px 16px; margin-bottom: 14px; border-color: var(--warn); }
+.um-reqs-head { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 800; color: var(--warn); margin-bottom: 10px; }
+.um-req-row { display: flex; align-items: center; gap: 12px; padding: 9px 2px; border-top: 1px solid var(--border-soft); }
+.um-req-row:first-of-type { border-top: none; }
+.um-req-main { flex: 1; min-width: 0; }
+.um-req-user { font-size: 13.5px; font-weight: 700; }
+.um-req-unknown { color: var(--neg); font-weight: 600; }
+.um-req-meta { font-size: 11.5px; color: var(--text-mut); margin-top: 1px; }
+.um-req-actions { display: flex; gap: 7px; flex-shrink: 0; }
+@media (max-width: 560px) { .um-req-row { flex-wrap: wrap; } .um-req-actions { flex-basis: 100%; } .um-req-actions .btn { flex: 1; justify-content: center; } }
 .login-field input { flex: 1; min-width: 0; border: none; outline: none; background: none; font-family: 'Inter'; font-size: 14px; color: var(--ink); }
 .login-field:focus-within { border-color: var(--green-700); box-shadow: 0 0 0 3px rgba(11,126,177,.1); }
 .login-field.err { border-color: var(--neg); }

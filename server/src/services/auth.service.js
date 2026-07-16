@@ -69,6 +69,29 @@ async function login({ username, password }) {
   return { user: publicUser(safe), token: signToken(user) };
 }
 
+// Forgot-password (request-to-admin; no email). ALWAYS succeeds silently from the client's
+// point of view — the caller returns the same generic message regardless, so a probe can't tell
+// whether the username exists. A request row is created ONLY for a real, active user (a pending
+// one is reused, not duplicated); unknown/inactive usernames are logged server-side and dropped.
+async function requestPasswordReset({ username, note }) {
+  const uname = normUsername(username);
+  const cleanNote = String(note || '').slice(0, 300).trim();
+  const user = await prisma.user.findUnique({ where: { username: uname } });
+  if (!user || !user.active) {
+    console.warn(`[auth] reset password diminta untuk username tak terpakai (username="${uname}") — diabaikan, balasan tetap generik`);
+    return { ok: true };   // generic path — nothing created, nothing leaked
+  }
+  const existing = await prisma.passwordResetRequest.findFirst({ where: { username: uname, status: 'pending' } });
+  if (existing) {
+    await prisma.passwordResetRequest.update({ where: { id: existing.id }, data: { requestedAt: new Date(), note: cleanNote || existing.note } });
+    console.info(`[auth] reset password: permintaan pending diperbarui (username="${uname}", id=${existing.id})`);
+  } else {
+    const r = await prisma.passwordResetRequest.create({ data: { username: uname, note: cleanNote } });
+    console.info(`[auth] reset password: permintaan baru (username="${uname}", id=${r.id})`);
+  }
+  return { ok: true };
+}
+
 async function me(userId) {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: PUBLIC_FIELDS });
   if (!user) throw ApiError.notFound('User not found');
@@ -100,4 +123,4 @@ async function updateProfile(userId, { name, color }) {
   return publicUser(user);
 }
 
-module.exports = { register, login, me, changePassword, updateProfile, signToken, publicUser, normUsername, PUBLIC_FIELDS, PASSWORD_MIN };
+module.exports = { register, login, requestPasswordReset, me, changePassword, updateProfile, signToken, publicUser, normUsername, PUBLIC_FIELDS, PASSWORD_MIN };
