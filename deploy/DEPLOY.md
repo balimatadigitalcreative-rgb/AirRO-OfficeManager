@@ -181,26 +181,44 @@ RCLONE_REMOTE="airro-offsite:airro"
 BACKUP_PASSPHRASE="<long random — mode A>"     # empty for mode B
 OFFSITE_KEEP_DAYS="90"
 ```
-The upload **fails loudly** (non-zero + `LAST_OFFSITE_FAILED`) if rclone is missing, the
-remote is unconfigured, or the transfer errors — a silent failed backup is the worst case.
+After uploading, the script **verifies the copy actually landed** (`rclone ls` + size match) —
+a transfer that "succeeded" but isn't listable is not a backup. It **fails loudly** (non-zero +
+`LAST_OFFSITE_FAILED` + a `FAIL:` line in `backup.log`) if rclone is missing, the remote is
+unconfigured, the transfer errors, or the remote size doesn't match. Verify by hand any time:
+```bash
+rclone ls airro-offsite:airro | tail -5      # newest encrypted archives in Drive
+```
 
 ### 3. Restore
 ```bash
-bash deploy/restore-db.sh <backup-file.gz>        # into PRODUCTION
+bash deploy/restore-db.sh <backup-file.gz>        # a LOCAL archive
+bash deploy/restore-db.sh <backup-file.gz.gpg>    # an OFFSITE archive — decrypts automatically
 ```
-It refuses a file that fails `gzip -t`, then: stops the API → **snapshots the current db
-first** (`.pre-restore-<stamp>`) → gunzips the backup over the `DATABASE_URL` path (read
-from `server/.env`) → starts the API → health-checks → prints record counts
-(User / Entry / Employee / Setoran) so you can confirm the data is really there.
+It refuses a file that fails `gzip -t` (and a `.gpg` that fails to decrypt), then: stops
+the API → **snapshots the current db first** (`.pre-restore-<stamp>`) → gunzips the backup
+over the `DATABASE_URL` path (read from `server/.env`) → starts the API → health-checks →
+prints record counts (User / Entry / Employee / Setoran) so you can confirm the data is
+really there.
 
-**Decrypting an offsite archive** before restoring:
+**Restoring from Google Drive** — the script handles the decryption for you:
 ```bash
-rclone copy airro-offsite:airro/airro-YYYYMMDD-HHMMSS.db.gz.gpg .   # download (mode A)
-gpg --batch --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
-    -o airro-YYYYMMDD-HHMMSS.db.gz -d airro-YYYYMMDD-HHMMSS.db.gz.gpg
-bash deploy/restore-db.sh airro-YYYYMMDD-HHMMSS.db.gz
-# Mode B (crypt remote): `rclone copy` decrypts automatically — no gpg step.
+rclone copy airro-offsite:airro/airro-YYYYMMDD-HHMMSS.db.gz.gpg .   # download
+bash deploy/restore-db.sh airro-YYYYMMDD-HHMMSS.db.gz.gpg           # decrypts + restores
 ```
+**Decrypting by hand** (e.g. to inspect an archive on another machine — all you need is
+the passphrase and gpg; no AirRO code required):
+```bash
+gpg --batch --pinentry-mode loopback --passphrase 'YOUR_BACKUP_PASSPHRASE' \
+    -o airro-YYYYMMDD-HHMMSS.db.gz -d airro-YYYYMMDD-HHMMSS.db.gz.gpg
+gunzip -c airro-YYYYMMDD-HHMMSS.db.gz > airro.db && sqlite3 airro.db '.tables'
+```
+
+> ### ⚠️ Store `BACKUP_PASSPHRASE` OUTSIDE the server
+> The offsite archives are useless without it. If the VPS is lost, wiped, or
+> compromised, `server/.env` goes with it — and every Drive backup becomes
+> permanently unrecoverable. Keep a copy in a password manager (or on paper in a
+> safe) **off the server**. This is the single point of failure in the whole
+> backup design. It is never committed to git.
 
 ### 4. Restore drill (prove backups are usable — touches nothing in production)
 ```bash

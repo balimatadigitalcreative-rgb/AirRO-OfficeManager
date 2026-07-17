@@ -21,7 +21,12 @@ APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKUP_DIR="${AIRRO_BACKUP_DIR:-$HOME/airro-backups}"
 mkdir -p "$BACKUP_DIR"
 MARKER="$BACKUP_DIR/LAST_OFFSITE_FAILED"
-fail() { echo "ERROR (offsite): $*" >&2; echo "$(date '+%F %T') OFFSITE FAILED: $*" > "$MARKER"; exit 1; }
+fail() {
+  echo "ERROR (offsite): $*" >&2
+  echo "$(date '+%F %T') OFFSITE FAILED: $*" > "$MARKER"
+  echo "OFFSITE $(date '+%F %T') | file=${FILE:-?} | FAIL: $*" >> "$BACKUP_DIR/backup.log"
+  exit 1
+}
 
 # Read a key from server/.env without sourcing it (values may contain spaces/#).
 ENV_FILE="$APP_DIR/server/.env"
@@ -55,11 +60,24 @@ if [ -n "$BACKUP_PASSPHRASE" ]; then
 fi
 
 # Upload. copyto keeps the exact filename; --no-traverse is fast for single files.
-rclone copyto "$UPLOAD" "$RCLONE_REMOTE/$(basename "$UPLOAD")" --no-traverse \
+BASE="$(basename "$UPLOAD")"
+rclone copyto "$UPLOAD" "$RCLONE_REMOTE/$BASE" --no-traverse \
   || fail "rclone upload failed → $RCLONE_REMOTE"
+
+# VERIFY the upload really landed — a copy that "succeeded" but isn't listable is not a
+# backup. Compare the remote size against the local one.
+REMOTE_LINE="$(rclone ls "$RCLONE_REMOTE" --include "$BASE" 2>/dev/null | head -1 || true)"
+[ -n "$REMOTE_LINE" ] || fail "upload not found on the remote after copy (rclone ls '$RCLONE_REMOTE' has no '$BASE')"
+REMOTE_SIZE="$(echo "$REMOTE_LINE" | awk '{print $1}')"
+LOCAL_SIZE="$(stat -c%s "$UPLOAD" 2>/dev/null || stat -f%z "$UPLOAD" 2>/dev/null || echo 0)"
+[ "$REMOTE_SIZE" = "$LOCAL_SIZE" ] \
+  || fail "size mismatch after upload: remote=${REMOTE_SIZE}B local=${LOCAL_SIZE}B ($BASE)"
 
 # Offsite retention (longer than local): drop remote files older than N days.
 rclone delete --min-age "${OFFSITE_KEEP_DAYS}d" "$RCLONE_REMOTE" 2>/dev/null || true
 
 rm -f "$MARKER"
-echo "OFFSITE OK | $(basename "$UPLOAD") → $RCLONE_REMOTE | enc=$MODE | keep=${OFFSITE_KEEP_DAYS}d"
+HSIZE="$(du -h "$UPLOAD" | cut -f1)"
+echo "OFFSITE OK | $BASE → $RCLONE_REMOTE | enc=$MODE | verified=${REMOTE_SIZE}B | keep=${OFFSITE_KEEP_DAYS}d"
+# Summary line straight to the log (so it's recorded however the script was invoked).
+echo "OFFSITE $(date '+%F %T') | file=$BASE size=$HSIZE | ok" >> "$BACKUP_DIR/backup.log"

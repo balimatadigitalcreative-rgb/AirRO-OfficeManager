@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # AirRO Water — database RESTORE (and a safe restore DRILL).
 #
-#   bash deploy/restore-db.sh <backup-file.gz>       # RESTORE into production
-#   bash deploy/restore-db.sh --drill [<file.gz>]    # DRILL into /tmp (production untouched)
+#   bash deploy/restore-db.sh <backup-file.gz|.gpg>    # RESTORE into production
+#   bash deploy/restore-db.sh --drill [<file>]         # DRILL into /tmp (production untouched)
 #
+# Accepts a LOCAL .gz or an OFFSITE .gpg (downloaded from Drive) — a .gpg is decrypted
+# first with BACKUP_PASSPHRASE from server/.env into a temp file that is always removed.
 # Production restore steps: stop API → snapshot the CURRENT db (safety) → gunzip the
 # backup over the DATABASE_URL path (read from server/.env, never hardcoded) → start
 # API → health-check → print record counts so the operator can verify.
@@ -21,8 +23,28 @@ FILE="${1:-}"
 if [ "$DRILL" = "1" ] && [ -z "$FILE" ]; then
   FILE="$(ls -t "$BACKUP_DIR"/airro-*.db.gz "$BACKUP_DIR"/airro-*.sql.gz 2>/dev/null | head -1 || true)"
 fi
-[ -n "$FILE" ] || { echo "Usage: bash deploy/restore-db.sh <backup-file.gz>   (or: --drill [file])" >&2; exit 2; }
+[ -n "$FILE" ] || { echo "Usage: bash deploy/restore-db.sh <backup-file.gz|.gpg>   (or: --drill [file])" >&2; exit 2; }
 [ -f "$FILE" ] || { echo "File not found: $FILE" >&2; exit 2; }
+
+# Read a key from server/.env without sourcing it.
+ENV_FILE="$APP_DIR/server/.env"
+getenv() { [ -f "$ENV_FILE" ] && grep -E "^[[:space:]]*$1=" "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'"'' | sed 's/[[:space:]]*$//' || true; }
+
+# ── An OFFSITE archive (.gpg) is decrypted first, into a temp file we always remove.
+TMP_DEC=""
+cleanup() { [ -n "$TMP_DEC" ] && rm -f "$TMP_DEC" || true; }
+trap cleanup EXIT
+
+if [[ "$FILE" == *.gpg ]]; then
+  command -v gpg >/dev/null 2>&1 || { echo "gpg is not installed — needed to decrypt '$FILE'" >&2; exit 1; }
+  PASS="${BACKUP_PASSPHRASE:-$(getenv BACKUP_PASSPHRASE)}"
+  [ -n "$PASS" ] || { echo "BACKUP_PASSPHRASE is not set in server/.env — cannot decrypt '$FILE'" >&2; exit 1; }
+  TMP_DEC="/tmp/airro-restore-$$.gz"
+  echo "==> Decrypting offsite archive: $(basename "$FILE")"
+  gpg --batch --yes --pinentry-mode loopback --passphrase "$PASS" -o "$TMP_DEC" -d "$FILE" 2>/dev/null \
+    || { echo "REFUSING: gpg decryption failed for '$FILE' (wrong passphrase or corrupt file)." >&2; exit 1; }
+  FILE="$TMP_DEC"
+fi
 
 # Refuse a corrupt archive before touching anything.
 gzip -t "$FILE" 2>/dev/null || { echo "REFUSING: '$FILE' fails gzip -t (corrupt/incomplete)." >&2; exit 1; }
