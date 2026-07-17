@@ -1,0 +1,6 @@
+# Vendored third-party libraries and webfonts must ship BYTE-FOR-BYTE — never
+# line-ending-converted on checkout (they are upstream artifacts, not our source).
+vendor/** -text
+*.woff2 binary
+*.png    binary
+*.ico    binary

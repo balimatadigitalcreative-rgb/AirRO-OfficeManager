@@ -1,27 +1,29 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <!-- Don't cache the page itself, so script/style updates always reach the browser. -->
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
-  <title>AirRO Reverse Osmosis — Daily Finance Manager</title>
-  <link rel="stylesheet" href="styles.css?v=l135" />
-  <link rel="stylesheet" href="app.css?v=l135" />
-  <link rel="stylesheet" href="finance.css?v=l135" />
-  <link rel="stylesheet" href="desktop-scale.css?v=l135" />
-  <!-- Production React (minified). JSX is pre-compiled at build time into dist/app.js, so
-       @babel/standalone is no longer loaded or run in the browser. -->
-  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AirRO Office</title>
+  <link rel="icon" href="/icons/favicon.ico" sizes="any" />
+  <meta name="robots" content="noindex" />
+  <!-- LEGACY URL. The app now lives at https://airrooffice.com/ — this file only exists
+       so old bookmarks and pinned tabs keep working. Nginx also 301s this path to /,
+       so this page is normally never rendered; it's the belt-and-braces fallback for
+       anyone opening the file directly.
+
+       The redirect is done in JS (not meta-refresh) so the #hash — which is the app's
+       router state (#distribusi, #payroll, …) — survives. A meta-refresh to "/" would
+       silently drop it and dump the user on the default screen. -->
+  <script>
+    (function () {
+      try { location.replace('/' + (location.hash || '')); }
+      catch (e) { location.href = '/'; }
+    })();
+  </script>
 </head>
 <body>
-  <div id="root"></div>
-  <!-- Single pre-built bundle: all former per-file scripts (finance-i18n.js … finance-shell.jsx)
-       transformed by esbuild and concatenated in the SAME load order by build.mjs.
-       Rebuild with `npm run build` after editing any .js/.jsx source. See deploy/DEPLOY.md. -->
-  <script src="dist/app.js?v=l135"></script>
+  <p style="font:14px system-ui,sans-serif;padding:24px;color:#1C2B33">
+    AirRO Office has moved to <a href="/">airrooffice.com</a> — redirecting…
+  </p>
 </body>
 </html>

@@ -59,7 +59,7 @@ info() { log "   ·  $*"; }
 # State tracked for the summary + rollback.
 SHA_BEFORE=""; SHA_AFTER=""; BACKUP_FILE=""; COUNTS_BEFORE=""; COUNTS_AFTER=""
 MIGRATIONS_APPLIED="no"; TESTS="skipped"; ROLLED_BACK="no"; DB_RESTORED="no"
-HEALTH_CODE="000"; FAIL_REASON=""
+HEALTH_CODE="000"; FAIL_REASON=""; FRONTEND="not checked"
 
 log ""
 log "════════════════════════════════════════════════════════════════════"
@@ -155,6 +155,7 @@ finish() {
   log "  tests         : $TESTS"
   log "  migrations    : $MIGRATIONS_APPLIED"
   log "  health        : $HEALTH_CODE"
+  log "  frontend      : $FRONTEND"
   log "  counts before : ${COUNTS_BEFORE:-?}"
   log "  counts after  : ${COUNTS_AFTER:-?}"
   log "  rollback      : $ROLLED_BACK   db restored: $DB_RESTORED"
@@ -351,6 +352,32 @@ if counts_not_lower "$COUNTS_BEFORE" "$COUNTS_AFTER"; then
 else
   rollback "record counts DROPPED — data loss detected"
   FAIL_REASON="record counts dropped: [$COUNTS_BEFORE] → [$COUNTS_AFTER]"; finish "FAIL"
+fi
+
+# 3e. frontend served correctly by Nginx (clean URL + vendored libs + manifest).
+# WARN-only on purpose: the Nginx config lives OUTSIDE git (/etc/nginx/...), so a
+# failure here is almost always a webserver config drift — rolling the app code back
+# could not fix it and would only hide the real cause. Loud warning + summary instead.
+fe_get() { curl -s -o /dev/null -w "$1" -H 'Host: airrooffice.com' --max-time 5 "http://127.0.0.1$2" 2>/dev/null || echo "000"; }
+FE_ERR=""
+[ "$(fe_get '%{http_code}' '/')" = "200" ] || FE_ERR="$FE_ERR /→$(fe_get '%{http_code}' '/')"
+curl -s -H 'Host: airrooffice.com' --max-time 5 http://127.0.0.1/ 2>/dev/null | grep -q 'id="root"' \
+  || FE_ERR="$FE_ERR /-not-the-app"
+case "$(fe_get '%{content_type}' '/vendor/react.production.min.js')" in
+  *javascript*) ;; *) FE_ERR="$FE_ERR vendor-js-type" ;;
+esac
+case "$(fe_get '%{content_type}' '/manifest.webmanifest')" in
+  *manifest+json*) ;; *) FE_ERR="$FE_ERR manifest-type" ;;
+esac
+if [ -z "$FE_ERR" ]; then
+  FRONTEND="OK (clean URL, vendored libs, manifest)"; ok "frontend: $FRONTEND"
+else
+  FRONTEND="WARN:$FE_ERR"
+  log "   ⚠️  frontend checks failed:$FE_ERR"
+  log "       The API is healthy — this is an Nginx config issue, not the app code, so"
+  log "       the deploy was NOT rolled back. Re-apply the site config:"
+  log "           sudo cp deploy/nginx-airro.conf /etc/nginx/sites-available/airro"
+  log "           sudo nginx -t && sudo systemctl reload nginx"
 fi
 
 finish "PASS"

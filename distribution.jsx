@@ -248,17 +248,19 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
 // is locked server-side from the customer master price; we only preview it here.
 function shortRef(id) { return '#' + String(id || '').slice(-6).toUpperCase(); }
 function hhmm(ms) { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); }
-// Lazy-load SheetJS from its CDN — only when an .xlsx/.xls file is chosen, so it never
+// Lazy-load SheetJS — only when an .xlsx/.xls file is chosen, so its ~930 KB never
 // touches the initial page load. (CSV needs no library; it's parsed as plain text.)
+// Served from OUR origin (vendor/), not cdn.sheetjs.com: that CDN has failed before,
+// and an Excel import must not depend on a third party being reachable.
 function loadSheetJS() {
   return new Promise((resolve, reject) => {
     if (window.XLSX) return resolve(window.XLSX);
-    let s = document.getElementById('sheetjs-cdn');
-    if (s) { s.addEventListener('load', () => resolve(window.XLSX)); s.addEventListener('error', () => reject(new Error('cdn'))); return; }
-    s = document.createElement('script'); s.id = 'sheetjs-cdn';
-    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
-    s.onload = () => (window.XLSX ? resolve(window.XLSX) : reject(new Error('cdn')));
-    s.onerror = () => reject(new Error('cdn'));
+    let s = document.getElementById('sheetjs-vendor');
+    if (s) { s.addEventListener('load', () => resolve(window.XLSX)); s.addEventListener('error', () => reject(new Error('sheetjs'))); return; }
+    s = document.createElement('script'); s.id = 'sheetjs-vendor';
+    s.src = '/vendor/xlsx.full.min.js';
+    s.onload = () => (window.XLSX ? resolve(window.XLSX) : reject(new Error('sheetjs')));
+    s.onerror = () => reject(new Error('sheetjs'));
     document.head.appendChild(s);
   });
 }

@@ -1,13 +1,48 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AirRO Water — Finance Manager</title>
-  <meta http-equiv="refresh" content="0; url=AirRO%20Water%20-%20Daily%20Finance%20Manager.html" />
+  <!-- viewport-fit=cover + the safe-area CSS lets the app use the full screen on
+       notched iPhones without the bottom nav sliding under the home indicator. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- Don't cache the page itself, so script/style updates always reach the browser. -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>AirRO Office — Finance, HR &amp; Distribution</title>
+  <meta name="description" content="AirRO Water — finance, HR and distribution manager." />
+
+  <!-- Installable web app: "Add to Home Screen" gives staff the AirRO icon and a
+       fullscreen window with no address bar. See deploy/DEPLOY.md → Installing on phones. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#065489" />
+  <link rel="icon" href="/icons/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="AirRO" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <link rel="stylesheet" href="styles.css?v=l136" />
+  <link rel="stylesheet" href="app.css?v=l136" />
+  <link rel="stylesheet" href="finance.css?v=l136" />
+  <link rel="stylesheet" href="desktop-scale.css?v=l136" />
+
+  <!-- Production React (minified), served from OUR origin — never a CDN. If unpkg is
+       unreachable the app must still boot. JSX is pre-compiled at build time into
+       dist/app.js, so @babel/standalone is not loaded or run in the browser.
+       No integrity/crossorigin: those exist for cross-origin CDN fetches and are
+       meaningless (and brittle) for same-origin files we ship ourselves. -->
+  <script src="/vendor/react.production.min.js?v=l136"></script>
+  <script src="/vendor/react-dom.production.min.js?v=l136"></script>
 </head>
 <body>
-  <p>Loading AirRO Water — Daily Finance Manager…
-     <a href="AirRO%20Water%20-%20Daily%20Finance%20Manager.html">Open manually</a>.</p>
+  <div id="root"></div>
+  <!-- Single pre-built bundle: all former per-file scripts (finance-i18n.js … finance-shell.jsx)
+       transformed by esbuild and concatenated in the SAME load order by build.mjs.
+       Rebuild with `npm run build` after editing any .js/.jsx source. See deploy/DEPLOY.md. -->
+  <script src="/dist/app.js?v=l136"></script>
 </body>
 </html>

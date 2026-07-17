@@ -5,7 +5,10 @@
    (token names kept from the original build; values are AirRO brand)
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+/* Brand webfonts, SELF-HOSTED from /vendor/fonts (was Google Fonts). The app must boot
+   with zero third-party requests: if fonts.googleapis.com is blocked or down, an @import
+   here would stall the whole stylesheet. Same weights as before — see vendor/fonts.css. */
+@import url('/vendor/fonts.css?v=l136');
 
 :root {
   /* AirRO blue family (names retained for cascade) */

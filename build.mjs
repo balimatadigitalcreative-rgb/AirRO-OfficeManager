@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MINIFY = !process.argv.includes('--no-minify');
 
-// EXACT script load order from "AirRO Water - Daily Finance Manager.html" (the <script src> sequence).
+// EXACT script load order from index.html (the <script src> sequence).
 // Keep this in sync with the HTML if scripts are ever added/reordered.
 const FILES = [
   'finance-i18n.js',

@@ -261,7 +261,7 @@ Enforced server-side, mirroring `finance-store.js`:
 
 ## Frontend integration (cloud adapter)
 
-The prototype (`../AirRO Water - Daily Finance Manager.html`) is wired to this
+The web client (`../index.html`) is wired to this
 backend via two browser scripts loaded before the React code:
 
 - **`api.js`** (`window.API`) — fetch client with JWT persistence + graceful

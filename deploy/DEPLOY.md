@@ -72,7 +72,7 @@ the *identical* global scope and load order. Only whitespace/syntax are minified
 # on your machine, after editing any .js/.jsx source:
 npm install        # once — installs esbuild (devDependency)
 npm run build      # regenerates dist/app.js (+ .map)   ~150 ms
-# bump the ?v=lNN number in "AirRO Water - Daily Finance Manager.html"
+# bump the ?v=lNN number in index.html (the app page)
 git add -A && git commit -m "..." && git push
 ```
 
@@ -119,6 +119,64 @@ failure, so a broken deploy can never look successful. Full details in
 **Golden rules:** never run `prisma migrate reset` or `prisma db push --force-reset`
 on production (those wipe data). Always let `update.sh` back up first.
 
+## The app URL, vendored libraries, and installing on phones
+
+### Clean URL
+The app is served at **`https://airrooffice.com/`**. `index.html` **is** the app — there
+is no redirect hop and no long filename in the address bar.
+
+The old URL (`/AirRO%20Water%20-%20Daily%20Finance%20Manager.html`) still works: Nginx
+301s it to `/`, and the file itself also JS-redirects as a fallback. Both preserve the
+`#hash` — the app's router state — because fragments are never sent to the server and
+browsers re-apply them to the redirect target. So an old bookmark to `…Manager.html#payroll`
+still lands on Payroll.
+
+`try_files $uri $uri/ /index.html` means refreshing on any `#screen` still works.
+
+### Zero third-party requests (deliberate)
+Everything the browser loads comes from our own origin. **No CDNs.** If unpkg,
+cdn.sheetjs.com or fonts.googleapis.com is blocked or down, the app still boots.
+
+| Vendored in `vendor/` | Why |
+|---|---|
+| `react.production.min.js`, `react-dom.production.min.js` (18.3.1) | unpkg outage = app never boots |
+| `xlsx.full.min.js` (SheetJS 0.20.3) | this CDN **has already failed once**; still lazy-loaded, only when an `.xlsx` is picked |
+| `fonts.css` + `fonts/*.woff2` (Poppins, Inter — latin + latin-ext) | Google Fonts `@import` stalls the whole stylesheet if unreachable, and leaks every staff IP to Google |
+
+`integrity`/`crossorigin` attributes were dropped: they exist for cross-origin CDN
+fetches and are meaningless for same-origin files we ship ourselves.
+
+**To verify (the acceptance test):** DevTools → Network → check "Blocked requests" after
+setting a request-blocking pattern for `*google*`, `*unpkg*`, `*sheetjs*` → the app must
+still load and the Excel import must still work.
+
+### Installing on phones ("Add to Home Screen")
+`manifest.webmanifest` makes AirRO installable: **Android** → Chrome ⋮ → *Install app*;
+**iOS** → Safari Share → *Add to Home Screen*. Staff get the AirRO droplet icon and a
+fullscreen window with **no address bar** (`display: standalone`).
+- Icons are generated from `assets/airro-mark.png` into `icons/` — 192/512 in both `any`
+  (transparent) and `maskable` (brand-blue, logo inside the 80% safe zone so Android's
+  circle mask can't clip it), plus `apple-touch-icon` (opaque — iOS ignores transparency).
+- iOS safe areas are respected via `viewport-fit=cover` + `env(safe-area-inset-*)`, so the
+  bottom nav sits above the home indicator instead of under it.
+> Nginx needs `types { application/manifest+json webmanifest; }` — `.webmanifest` is **not**
+> in Nginx's default mime.types, and without it the browser silently refuses to install.
+
+### No service worker — deliberate deferral
+There is **no service worker**, and this is a decision, not an oversight. A naive
+app-shell SW caches `index.html`/`dist/app.js` and would:
+- serve **stale code** to staff after a deploy (the cache wins over the network, so the
+  cache-bust `?v=lNN` never gets fetched) — exactly the class of bug the no-cache headers
+  on `index.html` exist to prevent; and
+- interact badly with **JWT sessions** — cached authenticated responses can leak between
+  users on a shared phone, and a rotated `JWT_SECRET` (which logs everyone out) leaves
+  cached 200s that make a dead session look alive.
+
+Installability does **not** require a service worker — the manifest alone is enough for
+"Add to Home Screen" and standalone display. If offline support is wanted later, it needs
+a proper strategy (network-first for HTML/JS, never cache `/api/`, explicit SW versioning
++ `skipWaiting`), not a copy-pasted SW.
+
 ## Deploy pipeline (self-verifying + auto-rollback)
 
 ```bash
@@ -155,8 +213,17 @@ Then **post-deploy verify** — the part that was missing:
 - **smoke test**: `401` without a token, then a real authenticated `GET /auth/me`
   round-trip with a short-lived JWT → catches "server up but auth broken"
 - record counts **>= pre-deploy** — a drop means data loss
+- **frontend**: `/` returns the app, `/vendor/*.js` is `application/javascript`, and the
+  manifest is `application/manifest+json` — **warn-only**, see below
 
-Any post-deploy failure → **automatic rollback**.
+Any post-deploy failure → **automatic rollback** — except the frontend check, which only
+**warns**. The Nginx config lives outside git (`/etc/nginx/sites-available/airro`), so a
+failure there is config drift, not bad app code: rolling back could not fix it and would
+hide the real cause. The warning tells you to re-apply the site config:
+```bash
+sudo cp deploy/nginx-airro.conf /etc/nginx/sites-available/airro
+sudo nginx -t && sudo systemctl reload nginx
+```
 
 ### Rollback rules (deliberate)
 - **Code rollback is automatic**: `git reset --hard <previous SHA>` → reinstall → rebuild
