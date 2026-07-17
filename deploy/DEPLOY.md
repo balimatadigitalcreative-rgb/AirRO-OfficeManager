@@ -105,10 +105,10 @@ cd server && unset DATABASE_URL && npx prisma migrate resolve --applied 0_init
 ```bash
 cd /var/www/airrooffice && bash deploy/update.sh
 ```
-It backs up → pulls code → applies only new migrations → restarts. Data is safe
-because: `.env`/`*.db` are gitignored (untouched by `git pull`), and
-`prisma migrate deploy` only *adds* schema changes and refuses anything that
-would lose data.
+It is a **gated, self-verifying pipeline**: any failed gate stops the deploy, and a
+failure *after* the new code goes live rolls back automatically. It exits non-zero on
+failure, so a broken deploy can never look successful. Full details in
+[Deploy pipeline](#deploy-pipeline-self-verifying--auto-rollback) below.
 
 **Workflow for a schema change (developer side):**
 1. Edit `prisma/schema.prisma` (add a table/column — never remove on prod).
@@ -118,6 +118,114 @@ would lose data.
 
 **Golden rules:** never run `prisma migrate reset` or `prisma db push --force-reset`
 on production (those wipe data). Always let `update.sh` back up first.
+
+## Deploy pipeline (self-verifying + auto-rollback)
+
+```bash
+cd /var/www/airrooffice && bash deploy/update.sh
+```
+
+### Why: the 16 Jul incident
+A stale **Docker container** was still publishing `:4000`. pm2 could not bind
+(`EADDRINUSE`), so the API never actually restarted — but the old deploy script only
+*printed* suggested checks and exited 0. The deploy looked successful while **every
+staff login failed for hours**. Two lessons are now enforced in code:
+1. **Never deploy into a contended port.** Pre-flight aborts if anything other than our
+   own pm2 process holds `:4000`.
+2. **"Exit 0" is not "it works."** The deploy now proves the API authenticates before
+   declaring success, and rolls back if it doesn't.
+
+### The gates
+Pre-flight (nothing touched): app dir + git repo · warn on uncommitted changes ·
+record rollback SHA · **port guard** · record counts.
+Then, aborting on any failure:
+
+| # | Gate | Failure means |
+|---|------|---------------|
+| 1 | `backup-db.sh` (local **+ offsite**) | no good backup → no deploy |
+| 2 | `git fetch` + `reset --hard origin/master` | can't get the code |
+| 3 | `npm ci` + **`npm test`** | failing tests → abort, **prod untouched** |
+| 4 | `prisma migrate deploy` | migration error, or reports **data loss** → abort |
+| 5 | `npm run build` → `dist/app.js` | build broken |
+| 6 | `pm2 startOrReload` | process won't start |
+
+Then **post-deploy verify** — the part that was missing:
+- `:4000` is held by **our** pm2 process (not docker/stray)
+- health `200` (5 retries, exponential backoff)
+- **smoke test**: `401` without a token, then a real authenticated `GET /auth/me`
+  round-trip with a short-lived JWT → catches "server up but auth broken"
+- record counts **>= pre-deploy** — a drop means data loss
+
+Any post-deploy failure → **automatic rollback**.
+
+### Rollback rules (deliberate)
+- **Code rollback is automatic**: `git reset --hard <previous SHA>` → reinstall → rebuild
+  → `pm2 startOrReload` → health-check again.
+- **The database is NEVER restored automatically.** Migrations are additive (`migrate
+  deploy` refuses data loss), so the previous code almost always runs fine against the
+  new schema — and restoring would throw away real writes made since the backup. A DB
+  restore happens only when **all three** hold: migrations applied in this run **and**
+  verification failed **and** you passed `--restore-db`. Otherwise the script prints the
+  exact command for you to run deliberately.
+
+### Flags
+| Flag | Use |
+|------|-----|
+| `--restore-db` | also restore the pre-deploy snapshot if a rollback happens *and* migrations ran (destructive) |
+| `--skip-offsite` | emergency: deploy while cloud storage is down (local backup still required) |
+| `--skip-tests` | emergency only — you are deploying unverified code |
+
+### Reading `deploy/deploy.log`
+Every run appends a timestamped block, ending in a summary:
+```
+──────────────────────── DEPLOY PASS ────────────────────────
+  commit before : ca1014d2
+  commit after  : f25afec9
+  tests         : 195 passed, 195 total
+  migrations    : yes
+  health        : 200
+  counts before : user=7 entry=1284 employee=19 setoran=342
+  counts after  : user=7 entry=1284 employee=19 setoran=342
+  rollback      : no   db restored: no
+```
+```bash
+tail -40 deploy/deploy.log                    # last run
+grep -E 'DEPLOY (PASS|FAIL)' deploy/deploy.log | tail -10   # deploy history
+grep -A12 'DEPLOY FAIL' deploy/deploy.log | tail -20        # why the last one failed
+```
+
+### If a deploy fails
+The script already rolled the code back and re-checked health. To confirm and dig in:
+```bash
+curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:4000/api/v1/health
+pm2 logs airro-api --lines 40
+git log --oneline -1                 # should be the previous (working) commit
+```
+**Manual rollback** (if you ever need it yourself):
+```bash
+cd /var/www/airrooffice
+git log --oneline -5                 # pick the last known-good SHA
+git reset --hard <SHA>
+cd server && npm ci && npx prisma generate && cd ..
+npm run build
+pm2 startOrReload deploy/ecosystem.config.js --update-env
+curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:4000/api/v1/health
+```
+Note the rolled-back commit is still on `origin/master`, so the **next** `update.sh`
+will pull it again — push a fix (or `git revert`) rather than redeploying the same break.
+
+### Port conflict (the 16 Jul failure) — what you'll see
+```
+   ❌ port 4000 is held by a process that is NOT our pm2 airro-api:
+   ·  pid 12345 → docker-proxy /usr/bin/docker-proxy -proto tcp -host-port 4000 ...
+```
+Fix it, then re-run the deploy:
+```bash
+ss -ltnp | grep 4000        # who holds the port
+docker ps                   # a container publishing :4000?
+docker stop <id>            # stop it (and remove it from the compose/run that starts it)
+pm2 describe airro-api      # is pm2 actually managing our API?
+```
 
 ## Backup & Restore
 
