@@ -37,6 +37,7 @@ cd "$APP_DIR" || { echo "FATAL: cannot cd to $APP_DIR"; exit 1; }
 LOG="$APP_DIR/deploy/deploy.log"
 PORT="${AIRRO_PORT:-4000}"
 PM2_APP="airro-api"
+DOMAIN="${AIRRO_DOMAIN:-airrooffice.com}"
 HEALTH_URL="http://127.0.0.1:$PORT/api/v1/health"
 
 RESTORE_DB=0; SKIP_OFFSITE=0; SKIP_TESTS=0
@@ -59,7 +60,8 @@ info() { log "   ·  $*"; }
 # State tracked for the summary + rollback.
 SHA_BEFORE=""; SHA_AFTER=""; BACKUP_FILE=""; COUNTS_BEFORE=""; COUNTS_AFTER=""
 MIGRATIONS_APPLIED="no"; TESTS="skipped"; ROLLED_BACK="no"; DB_RESTORED="no"
-HEALTH_CODE="000"; FAIL_REASON=""; FRONTEND="not checked"
+HEALTH_CODE="000"; FAIL_REASON=""
+PUBLIC_HTTPS="not checked"; LISTEN_443="?"; CERT_DAYS="?"
 
 log ""
 log "════════════════════════════════════════════════════════════════════"
@@ -154,8 +156,10 @@ finish() {
   log "  commit after  : ${SHA_AFTER:0:8}${SHA_AFTER:+ }$([ "$ROLLED_BACK" = yes ] && echo '(rolled back)')"
   log "  tests         : $TESTS"
   log "  migrations    : $MIGRATIONS_APPLIED"
-  log "  health        : $HEALTH_CODE"
-  log "  frontend      : $FRONTEND"
+  log "  health (local): $HEALTH_CODE"
+  log "  :443 listening: $LISTEN_443"
+  log "  public https  : $PUBLIC_HTTPS      ← the 17 Jul gate (https://$DOMAIN/)"
+  log "  cert expires  : ${CERT_DAYS} days"
   log "  counts before : ${COUNTS_BEFORE:-?}"
   log "  counts after  : ${COUNTS_AFTER:-?}"
   log "  rollback      : $ROLLED_BACK   db restored: $DB_RESTORED"
@@ -218,6 +222,22 @@ else
   log "       docker stop <id>             # ...stop it"
   log "       pm2 describe $PM2_APP        # is pm2 even managing our API?"
   abort "port $PORT contended — never deploy into a contended port"
+fi
+
+# Will the API survive a reboot? `pm2 save` (run later) only persists the process LIST —
+# without a systemd unit nothing replays it at boot, so a reboot silently takes the site
+# down until someone notices. Warn, don't block: it's a one-time manual root step.
+PM2_UNIT="pm2-$(whoami)"
+if command -v systemctl >/dev/null 2>&1; then
+  if [ "$(systemctl is-enabled "$PM2_UNIT" 2>/dev/null)" = "enabled" ]; then
+    ok "pm2 boot persistence enabled ($PM2_UNIT)"
+  else
+    log "   ⚠️  pm2 startup is NOT enabled — the API will NOT come back after a reboot."
+    log "       One-time fix (run the command it prints, then re-run this deploy):"
+    log "           pm2 startup systemd"
+    log "           pm2 save"
+    log "           systemctl is-enabled $PM2_UNIT     # expect: enabled"
+  fi
 fi
 
 # Pre-deploy record counts (rollback tripwire).
@@ -354,30 +374,120 @@ else
   FAIL_REASON="record counts dropped: [$COUNTS_BEFORE] → [$COUNTS_AFTER]"; finish "FAIL"
 fi
 
-# 3e. frontend served correctly by Nginx (clean URL + vendored libs + manifest).
-# WARN-only on purpose: the Nginx config lives OUTSIDE git (/etc/nginx/...), so a
-# failure here is almost always a webserver config drift — rolling the app code back
-# could not fix it and would only hide the real cause. Loud warning + summary instead.
-fe_get() { curl -s -o /dev/null -w "$1" -H 'Host: airrooffice.com' --max-time 5 "http://127.0.0.1$2" 2>/dev/null || echo "000"; }
-FE_ERR=""
-[ "$(fe_get '%{http_code}' '/')" = "200" ] || FE_ERR="$FE_ERR /→$(fe_get '%{http_code}' '/')"
-curl -s -H 'Host: airrooffice.com' --max-time 5 http://127.0.0.1/ 2>/dev/null | grep -q 'id="root"' \
-  || FE_ERR="$FE_ERR /-not-the-app"
-case "$(fe_get '%{content_type}' '/vendor/react.production.min.js')" in
-  *javascript*) ;; *) FE_ERR="$FE_ERR vendor-js-type" ;;
-esac
-case "$(fe_get '%{content_type}' '/manifest.webmanifest')" in
-  *manifest+json*) ;; *) FE_ERR="$FE_ERR manifest-type" ;;
-esac
-if [ -z "$FE_ERR" ]; then
-  FRONTEND="OK (clean URL, vendored libs, manifest)"; ok "frontend: $FRONTEND"
+# ── 3e. THE PUBLIC SITE — the 17 Jul gate ─────────────────────────────────────
+# 17 Jul: applying the repo's Nginx template deleted certbot's :443 block. Nginx came
+# back on :80 only, the site was unreachable from the internet (ERR_TIMED_OUT), and this
+# script still printed "frontend: OK / DEPLOY PASS" — because it only ever tested
+# localhost. Everything below deliberately leaves the box.
+#
+# These gates FAIL the deploy but do NOT roll the code back: a missing :443, a dead cert
+# or a closed firewall are INFRASTRUCTURE, and reverting app code cannot fix any of them
+# — it would only add a second change during an outage and hide the real cause. The
+# localhost gates above already roll back genuine code faults. Each failure prints the
+# exact repair instead.
+log ""
+log "▸ PUBLIC SITE VERIFY (from outside localhost)"
+PUB="https://$DOMAIN"
+
+# 3e-1. Nginx must be listening on BOTH :80 and :443.
+LISTEN="$(ss -ltnH 2>/dev/null || netstat -ltn 2>/dev/null)"
+for p in 80 443; do
+  if echo "$LISTEN" | grep -qE "[:.]$p\b"; then
+    ok "Nginx listening on :$p"
+  else
+    log "   ❌ nothing is listening on :$p"
+    if [ "$p" = "443" ]; then
+      log "       This is the 17 Jul failure: the HTTPS server block is gone, so the site"
+      log "       is unreachable from the internet. The API itself is fine — the code was"
+      log "       NOT rolled back, because that cannot restore an Nginx TLS block. Repair:"
+      log "           sudo bash deploy/apply-nginx.sh          # ships the full config incl. :443"
+      log "           sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN   # if the cert is gone too"
+    fi
+    PUBLIC_HTTPS="FAIL (:$p not listening)"; LISTEN_443="no"
+    FAIL_REASON="Nginx not listening on :$p — site unreachable from the internet"
+    finish "FAIL"
+  fi
+done
+LISTEN_443="yes"
+
+# 3e-2. Public HTTPS must answer 200. If it doesn't, retry pinned to this box so we can
+# tell "Nginx is broken" apart from "DNS/firewall/Cloudflare is broken" — very different fixes.
+# curl already prints 000 when it cannot connect — never append another one.
+http_code() { local c; c="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$@" 2>>"$LOG")"; echo "${c:-000}"; }
+PUB_CODE="$(http_code "$PUB/")"
+if [ "$PUB_CODE" = "200" ]; then
+  ok "public $PUB/ → 200"
 else
-  FRONTEND="WARN:$FE_ERR"
-  log "   ⚠️  frontend checks failed:$FE_ERR"
-  log "       The API is healthy — this is an Nginx config issue, not the app code, so"
-  log "       the deploy was NOT rolled back. Re-apply the site config:"
-  log "           sudo cp deploy/nginx-airro.conf /etc/nginx/sites-available/airro"
-  log "           sudo nginx -t && sudo systemctl reload nginx"
+  LOCAL_CODE="$(http_code --resolve "$DOMAIN:443:127.0.0.1" "$PUB/")"
+  DNS_IP="$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)"
+  log "   ❌ public $PUB/ → $PUB_CODE"
+  log "      same request pinned to this box (--resolve $DOMAIN:443:127.0.0.1) → $LOCAL_CODE"
+  log "      DNS: $DOMAIN → ${DNS_IP:-<does not resolve>}"
+  if [ -z "$DNS_IP" ]; then
+    log "      → DNS does not resolve at all. Nothing on this server can fix that:"
+    log "           check the domain's A record / registrar / nameservers"
+  elif [ "$LOCAL_CODE" = "200" ]; then
+    log "      → Nginx + the app are HEALTHY on this server, but the site is not reachable"
+    log "        at its public address. That points OUTSIDE this box — check in order:"
+    log "           dig +short $DOMAIN          # does DNS still point at THIS server's IP?"
+    log "           sudo ufw status             # is 443/tcp allowed?"
+    log "           (hosting firewall / security group / Cloudflare proxy status)"
+  else
+    log "      → Nginx itself is not serving this site correctly on :443. Check:"
+    log "           sudo nginx -t ; sudo systemctl status nginx"
+    log "           sudo bash deploy/apply-nginx.sh"
+  fi
+  PUBLIC_HTTPS="FAIL ($PUB_CODE, local=$LOCAL_CODE)"
+  FAIL_REASON="public site unreachable: $PUB/ → $PUB_CODE (pinned local → $LOCAL_CODE)"
+  finish "FAIL"
+fi
+
+# 3e-3. What's served must BE the app (catches a bad build / wrong root), and the API must
+# work THROUGH the public URL (proves Nginx → Node proxying, not just Node on localhost).
+PUB_HTML="$(curl -sS --max-time 10 "$PUB/" 2>>"$LOG")"
+if echo "$PUB_HTML" | grep -q 'dist/app.js' && echo "$PUB_HTML" | grep -q 'manifest.webmanifest'; then
+  ok "public / serves the app (dist/app.js + manifest present)"
+else
+  # This one IS code-shaped (bad build/commit or wrong root), so roll back like the others.
+  rollback "the public URL is not serving the app (no dist/app.js / manifest in the HTML)"
+  PUBLIC_HTTPS="FAIL (not the app)"
+  FAIL_REASON="public / does not contain dist/app.js + manifest — bad build or wrong Nginx root"
+  finish "FAIL"
+fi
+
+PUB_API="$(http_code "$PUB/api/v1/health")"
+if [ "$PUB_API" = "200" ]; then
+  ok "public $PUB/api/v1/health → 200 (Nginx → Node proxy works end to end)"
+else
+  log "   ❌ public API health → $PUB_API while localhost health was 200"
+  log "      → Nginx is serving the site but NOT proxying /api/ to Node. Check the"
+  log "        'location /api/' block, then: sudo bash deploy/apply-nginx.sh"
+  PUBLIC_HTTPS="FAIL (api $PUB_API)"
+  FAIL_REASON="public API health → $PUB_API (Nginx→Node proxy broken)"
+  finish "FAIL"
+fi
+PUBLIC_HTTPS="OK (200, api 200)"
+
+# 3e-4. Certificate expiry — WARN only (a valid-but-expiring cert is not a reason to fail
+# a deploy; it IS a reason to shout). certbot renews automatically; this catches renewal
+# having silently stopped working.
+CERT_END="$(echo | openssl s_client -servername "$DOMAIN" -connect "$DOMAIN:443" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+if [ -n "$CERT_END" ]; then
+  END_S="$(date -d "$CERT_END" +%s 2>/dev/null || echo 0)"
+  NOW_S="$(date +%s)"
+  if [ "$END_S" -gt 0 ]; then
+    DAYS=$(( (END_S - NOW_S) / 86400 ))
+    CERT_DAYS="$DAYS"
+    if [ "$DAYS" -lt 21 ]; then
+      log "   ⚠️  TLS certificate expires in $DAYS days ($CERT_END) — renewal may be broken."
+      log "       sudo certbot renew --dry-run       # test it"
+      log "       sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN   # re-issue if needed"
+    else
+      ok "TLS certificate valid for $DAYS more days"
+    fi
+  fi
+else
+  info "could not read the TLS certificate expiry (skipped)"
 fi
 
 finish "PASS"

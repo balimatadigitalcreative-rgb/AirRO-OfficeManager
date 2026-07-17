@@ -30,9 +30,16 @@ auto-uses `/api/v1`.
 Open `https://yourdomain.com` → log in with `owner` / your seeded password.
 
 ## Files in this folder
-- `nginx-airro.conf` — Nginx site (frontend + `/api/` proxy). deploy.sh fills in your domain/path.
+- `nginx-airro.conf` — the **full** production Nginx site: `:80`→`:443` redirect + the
+  `:443` server block (TLS, frontend, `/api/` proxy). Apply it **only** with `apply-nginx.sh`.
+- `nginx-airro-bootstrap.conf` — HTTP-only config for a **fresh box**, used once by
+  `deploy.sh` before certbot exists. Never apply it over a live HTTPS site.
+- `apply-nginx.sh` — the safe way to update Nginx: diff → refuse-if-it-drops-TLS → back up
+  → `nginx -t` → reload → verify `:443` → restore on any failure.
 - `ecosystem.config.js` — pm2 config for the backend (binds `127.0.0.1:4000`).
-- `deploy.sh` — installs everything and configures the site.
+- `deploy.sh` — first-time installer (refuses to overwrite an existing site config).
+- `update.sh` — the gated, self-verifying deploy with auto-rollback.
+- `backup-db.sh` / `backup-offsite.sh` / `restore-db.sh` — backups (local + encrypted offsite).
 
 ## Updating the site later (your "can I edit while live?" question)
 
@@ -183,15 +190,44 @@ a proper strategy (network-first for HTML/JS, never cache `/api/`, explicit SW v
 cd /var/www/airrooffice && bash deploy/update.sh
 ```
 
-### Why: the 16 Jul incident
-A stale **Docker container** was still publishing `:4000`. pm2 could not bind
-(`EADDRINUSE`), so the API never actually restarted — but the old deploy script only
-*printed* suggested checks and exited 0. The deploy looked successful while **every
-staff login failed for hours**. Two lessons are now enforced in code:
-1. **Never deploy into a contended port.** Pre-flight aborts if anything other than our
-   own pm2 process holds `:4000`.
-2. **"Exit 0" is not "it works."** The deploy now proves the API authenticates before
-   declaring success, and rolls back if it doesn't.
+### Post-mortem: 16 Jul — stale Docker container held :4000
+**Symptom:** every staff login failed for hours; the deploy reported success.
+**Root cause:** a leftover Docker container still published `:4000`, so pm2 could not
+bind (`EADDRINUSE`) and the API never actually restarted. The old script only *printed*
+suggested checks and exited 0.
+**Fix:** pre-flight **port guard** — abort if anything other than our own pm2 process
+holds `:4000` (it no longer blindly `fuser -k`s the port), plus a post-deploy **smoke
+test** that proves the API authenticates.
+**Gate that now catches it:** pre-flight port guard → `DEPLOY FAIL`.
+
+### Post-mortem: 17 Jul — applying the Nginx template deleted HTTPS
+**Symptom:** the site was unreachable from the internet (`ERR_TIMED_OUT`). Nginx was
+listening on **`:80` only**. Meanwhile `bash deploy/update.sh` reported
+`frontend: OK` and `DEPLOY PASS`.
+**Root cause — two independent failures:**
+1. `deploy/nginx-airro.conf` contained only a `listen 80` block with a comment saying
+   "certbot adds HTTPS". Copying it over the live config **deleted certbot's entire
+   `:443` server block**. Nginx reloaded happily — a config with no HTTPS is perfectly
+   valid, just wrong.
+2. **The deploy's verification only tested `localhost`.** `curl http://127.0.0.1/` with
+   a `Host:` header succeeds whether or not `:443` exists, so the pipeline could not
+   see that the public site was gone. It reported PASS on a dead site.
+**Fix:**
+1. The repo now ships the **full** config including the `:443` block, and
+   **`deploy/apply-nginx.sh`** refuses to apply a config that would remove TLS the live
+   one has — it backs up, `nginx -t`s, reloads only on success, and restores on failure.
+2. The deploy now **leaves the box**: it checks `:80` *and* `:443` are listening, fetches
+   `https://airrooffice.com/` for real, and hits the API through the public URL.
+**Gate that now catches it:** `PUBLIC SITE VERIFY` → `DEPLOY FAIL` (see the summary's
+`public https` line).
+**Repair, if it happens again:**
+```bash
+sudo certbot --nginx -d airrooffice.com -d www.airrooffice.com   # re-issue + re-add :443
+sudo nginx -t && sudo systemctl reload nginx
+curl -sS -o /dev/null -w '%{http_code}\n' https://airrooffice.com/    # must be 200
+```
+
+**The lesson both share: "exit 0" is not "it works", and localhost is not the internet.**
 
 ### The gates
 Pre-flight (nothing touched): app dir + git repo · warn on uncommitted changes ·
@@ -207,23 +243,30 @@ Then, aborting on any failure:
 | 5 | `npm run build` → `dist/app.js` | build broken |
 | 6 | `pm2 startOrReload` | process won't start |
 
-Then **post-deploy verify** — the part that was missing:
+Then **post-deploy verify — on localhost** (these roll the code back on failure):
 - `:4000` is held by **our** pm2 process (not docker/stray)
 - health `200` (5 retries, exponential backoff)
 - **smoke test**: `401` without a token, then a real authenticated `GET /auth/me`
   round-trip with a short-lived JWT → catches "server up but auth broken"
 - record counts **>= pre-deploy** — a drop means data loss
-- **frontend**: `/` returns the app, `/vendor/*.js` is `application/javascript`, and the
-  manifest is `application/manifest+json` — **warn-only**, see below
 
-Any post-deploy failure → **automatic rollback** — except the frontend check, which only
-**warns**. The Nginx config lives outside git (`/etc/nginx/sites-available/airro`), so a
-failure there is config drift, not bad app code: rolling back could not fix it and would
-hide the real cause. The warning tells you to re-apply the site config:
-```bash
-sudo cp deploy/nginx-airro.conf /etc/nginx/sites-available/airro
-sudo nginx -t && sudo systemctl reload nginx
-```
+Then **PUBLIC SITE VERIFY — off the box** (the 17 Jul gate). These **fail the deploy**:
+- Nginx listening on **both `:80` and `:443`** — a missing `:443` is 17 Jul
+- **`https://airrooffice.com/` → 200**, fetched for real over the internet
+- the served HTML **is the app** (`dist/app.js` + manifest present)
+- **`https://airrooffice.com/api/v1/health` → 200** — proves Nginx→Node proxying, not
+  just Node answering on localhost
+- TLS certificate expiry — **warn** if < 21 days
+
+> **Why the public gates fail but do NOT roll back.** A missing `:443`, a dead
+> certificate or a closed firewall are *infrastructure*: reverting app code cannot fix
+> any of them, and doing so would add a second change during an outage while hiding the
+> real cause. So they exit non-zero with the exact repair command instead. The one
+> exception is "the public URL isn't serving the app", which *is* code-shaped (bad build
+> or wrong root) — that rolls back. Genuine code faults are already caught by the
+> localhost gates above, which do roll back.
+> The old `frontend:` check was **warn-only and localhost-only** — that is precisely why
+> 17 Jul was reported as PASS. It has been replaced by the gates above.
 
 ### Rollback rules (deliberate)
 - **Code rollback is automatic**: `git reset --hard <previous SHA>` → reinstall → rebuild
@@ -250,11 +293,16 @@ Every run appends a timestamped block, ending in a summary:
   commit after  : f25afec9
   tests         : 195 passed, 195 total
   migrations    : yes
-  health        : 200
+  health (local): 200
+  :443 listening: yes
+  public https  : OK (200, api 200)      ← the 17 Jul gate (https://airrooffice.com/)
+  cert expires  : 72 days
   counts before : user=7 entry=1284 employee=19 setoran=342
   counts after  : user=7 entry=1284 employee=19 setoran=342
   rollback      : no   db restored: no
 ```
+`public https` is the line that matters: if it is anything other than `OK`, staff cannot
+reach the site — no matter how healthy everything else looks.
 ```bash
 tail -40 deploy/deploy.log                    # last run
 grep -E 'DEPLOY (PASS|FAIL)' deploy/deploy.log | tail -10   # deploy history
@@ -280,6 +328,73 @@ curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:4000/api/v1/hea
 ```
 Note the rolled-back commit is still on `origin/master`, so the **next** `update.sh`
 will pull it again — push a fix (or `git revert`) rather than redeploying the same break.
+
+### Applying the Nginx config — NEVER `cp` it by hand
+```bash
+sudo bash deploy/apply-nginx.sh          # the only supported way
+```
+> ⚠️ **This is what caused the 17 Jul outage.** `sudo cp deploy/nginx-airro.conf
+> /etc/nginx/sites-available/airro` replaces the live file wholesale. If the repo copy is
+> missing anything the live one has — above all **certbot's `:443` block** — that config
+> is *deleted*, `nginx -t` still passes (a site with no HTTPS is valid, just wrong), and
+> the site drops off the internet.
+
+`apply-nginx.sh` makes it safe:
+1. shows a **diff** (live → repo);
+2. **refuses** if the live config has TLS the repo copy lacks (the 17 Jul footgun) —
+   override only with `--force` if you truly mean it;
+3. checks every `/etc/letsencrypt/...` file the config references **exists**;
+4. **backs up** the live file (`airro.bak-<stamp>`);
+5. copies, runs **`nginx -t`**, and reloads **only if it passes**;
+6. verifies `:80` **and** `:443` are listening afterwards;
+7. on *any* failure — bad test, reload error, `:443` not up — **restores the backup**,
+   reloads, and exits non-zero.
+
+The repo config now contains the complete production setup (`:80` → `:443` redirect with
+an ACME passthrough, and the full `:443` server block). If certbot's paths on your box
+differ, **the live file is the source of truth** — check the diff before saying yes.
+
+**If HTTPS is ever gone (the 17 Jul repair):**
+```bash
+sudo certbot --nginx -d airrooffice.com -d www.airrooffice.com
+sudo nginx -t && sudo systemctl reload nginx
+curl -sS -o /dev/null -w '%{http_code}\n' https://airrooffice.com/     # must be 200
+ss -ltnp | grep -E ':80|:443'                                          # both present
+```
+
+### Surviving a reboot (one-time, needs root)
+`update.sh` runs `pm2 save`, which persists the process *list* — but nothing replays it at
+boot unless pm2's systemd unit is installed. Without this, **a reboot silently takes the
+site down** until someone notices. Do it once:
+```bash
+pm2 startup systemd          # prints a `sudo env PATH=... pm2 startup ...` command
+# → copy-paste and run exactly what it printed
+pm2 save
+systemctl is-enabled pm2-root      # expect: enabled   (pm2-<user> if not running as root)
+```
+`update.sh` prints a **pre-flight warning** if this isn't enabled. Verify for real with
+`sudo reboot`, then check `https://airrooffice.com/` comes back on its own.
+
+### External monitoring (do this — it's the only thing that tells you first)
+Every gate here runs **only when you deploy**. On 17 Jul the site was down and nothing
+told the owner — he found it by hand. A free uptime monitor closes that gap.
+
+**Setup (~3 minutes, needs a human — no way to automate the signup):**
+1. Sign up at **https://uptimerobot.com** (free tier: 50 monitors, 5-minute checks).
+2. **+ New Monitor**:
+   - Monitor Type: **HTTP(s)**
+   - Friendly Name: `AirRO API health`
+   - URL: `https://airrooffice.com/api/v1/health`
+   - Monitoring Interval: **5 minutes**
+3. **Alert Contacts** → add your **email**; for WhatsApp/Telegram alerts, add the
+   Telegram integration or a webhook (free tier does not do SMS).
+4. Add a second monitor for `https://airrooffice.com/` (the app itself, not just the API)
+   — 17 Jul killed the site while the API was perfectly healthy, so **monitoring only the
+   API would have missed it**.
+5. Test it: `pm2 stop airro-api` → wait ~5 min → you should get an alert → `pm2 start airro-api`.
+
+Why `/api/v1/health`: it is unauthenticated, cheap, exempt from rate limiting, and it
+proves Nginx→Node end to end. Why also `/`: it proves the static site + TLS are alive.
 
 ### Port conflict (the 16 Jul failure) — what you'll see
 ```

@@ -35,10 +35,24 @@ pm2 save
 pm2 startup systemd -u "$(logname)" --hp "/home/$(logname)" || true
 
 # 4. Nginx site
+# This script is the FIRST-TIME installer. If a site config already exists it may hold
+# certbot's :443 block — overwriting it here is exactly what caused the 17 Jul outage
+# (site off the internet, Nginx on :80 only). Refuse and hand off to apply-nginx.sh,
+# which diffs, backs up, tests and rolls back.
 SITE=/etc/nginx/sites-available/airro
-sed -e "s/yourdomain.com/$DOMAIN/g" -e "s#/var/www/airro#$APP_DIR#g" deploy/nginx-airro.conf > "$SITE"
-ln -sf "$SITE" /etc/nginx/sites-enabled/airro
-nginx -t && systemctl reload nginx
+if [ -e "$SITE" ]; then
+  echo "!! $SITE already exists — NOT overwriting it."
+  echo "   This installer is for a fresh box. To update an existing site safely:"
+  echo "       sudo bash deploy/apply-nginx.sh"
+  echo "   (it backs up, runs nginx -t, reloads only on success, and restores on failure)"
+else
+  # Bootstrap = HTTP only. The full config (nginx-airro.conf) references certificates
+  # that do not exist yet, so nginx -t would fail here. certbot creates them in step 4,
+  # then apply-nginx.sh installs the full config (step 5).
+  sed -e "s/yourdomain.com/$DOMAIN/g" -e "s#/var/www/airro#$APP_DIR#g" deploy/nginx-airro-bootstrap.conf > "$SITE"
+  ln -sf "$SITE" /etc/nginx/sites-enabled/airro
+  nginx -t && systemctl reload nginx
+fi
 
 cat <<EOF
 
@@ -47,6 +61,10 @@ cat <<EOF
   2) Seed the admin account:  cd $APP_DIR/server && SEED_DEMO_USERS=false SEED_OWNER_PASSWORD='YourStrongPass' node prisma/seed.js
   3) Restart backend:         pm2 restart airro-api
   4) Enable HTTPS:            apt-get install -y certbot python3-certbot-nginx && certbot --nginx -d $DOMAIN -d www.$DOMAIN
+     (Nginx is HTTP-only until this runs — that's the bootstrap config.)
+  4b) Install the full config: sudo bash deploy/apply-nginx.sh
+     (adds the canonical :443 block, HTTP→HTTPS redirect, caching, manifest type.
+      NEVER cp the config by hand — that wiped HTTPS on 17 Jul. See DEPLOY.md.)
   5) Firewall (optional):     ufw allow 'Nginx Full' && ufw allow OpenSSH && ufw enable
 
 Then open https://$DOMAIN  and log in with owner / <the password you seeded>.
