@@ -244,6 +244,43 @@ function FApp() {
     history.replaceState({ screen: target }, '', '#' + target);
     overlayStack.current = [];
   }, [user]);
+
+  // ── "New version available" (code freshness) ────────────────────────────────
+  // There is NO service worker (deliberate): a tab left open across a deploy keeps the
+  // old dist/app.js until reopened, which can break against a changed API. So poll the
+  // cheap unauthenticated build stamp (GET /api/v1/version) every 10 min + whenever the
+  // tab regains focus/visibility. If the DEPLOYED version differs from the one THIS bundle
+  // was built with, show a small non-blocking banner. We NEVER auto-reload (typing is
+  // never interrupted) — the user reloads on click. Shown once per detected version.
+  // A 401 session-expiry is a SEPARATE flow (see API.onUnauthorized) — this is only code.
+  const RUNNING_BUILD = (typeof window !== 'undefined' && window.__AIRRO_BUILD__) || null;
+  const [newVer, setNewVer] = uSh(null);
+  const verNotifiedRef = uRf(null);
+  uEh(() => {
+    if (!RUNNING_BUILD) return;   // an unstamped/dev bundle → nothing to compare against
+    const base = window.AIRRO_API_BASE || '';
+    let alive = true;
+    const check = () => {
+      if (document.hidden) return;
+      fetch(base + '/version?_=' + Date.now(), { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!alive || !d || !d.version) return;
+          if (d.version !== RUNNING_BUILD && verNotifiedRef.current !== d.version) {
+            verNotifiedRef.current = d.version;   // one prompt per distinct new version
+            setNewVer(d.version);
+          }
+        })
+        .catch(() => {});   // offline / API down → silently retry next tick
+    };
+    const iv = setInterval(check, 10 * 60 * 1000);
+    const onVisible = () => { if (!document.hidden) check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    const t = setTimeout(check, 15000);   // first check shortly after load (don't race hydration)
+    return () => { alive = false; clearInterval(iv); clearTimeout(t); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
+  }, []);
+
   // If the active screen isn't one the user may access (perms changed, a stale landing, or
   // a deep-linked feature), fall back to their first available screen — never render a
   // feature they don't have. Applies to EVERY menu group, not just distribusi.
@@ -1316,6 +1353,14 @@ function FApp() {
       </nav>
 
       {toast && <FToast msg={toast} onDone={() => setToast(null)} />}
+      {newVer && (
+        <div className="ver-banner" role="status" aria-live="polite">
+          <IconRefresh s={16} />
+          <span className="ver-msg">{tr('ver.available')}</span>
+          <button className="ver-reload" onClick={() => location.reload()}>{tr('ver.reload')}</button>
+          <button className="ver-x" title={tr('ver.later')} aria-label={tr('ver.later')} onClick={() => setNewVer(null)}>×</button>
+        </div>
+      )}
       {pwModal && <AUTH.ChangePassword onClose={dismissOverlay} onDone={() => { dismissOverlay(); setToast(tr('pw.changed')); }} />}
       {sessionExpired && (
         <div className="modal-scrim" style={{ zIndex: 200 }}>

@@ -36,7 +36,7 @@ const forgotLimiter = rateLimit({
 
 // General API guard: generous cap on ALL /api/v1 traffic so a bug/abuse can't hammer the box.
 // SSE (long-lived) and the health probe are always exempt.
-const isExemptPath = (req) => { const p = (req.originalUrl || '').split('?')[0]; return p === '/api/v1/events' || p === '/api/v1/health'; };
+const isExemptPath = (req) => { const p = (req.originalUrl || '').split('?')[0]; return p === '/api/v1/events' || p === '/api/v1/health' || p === '/api/v1/version'; };
 const apiLimiter = rateLimit({
   ...common, windowMs: config.rateLimit.apiWindowMs, limit: config.rateLimit.apiMax,
   skip: (req) => isExemptPath(req) || testInert(req), handler: send429(API_MSG),

@@ -6,6 +6,7 @@
       'lang.en': 'EN', 'lang.id': 'ID',
       'sync.saving': 'Saving…', 'sync.saved': 'Saved', 'sync.error': 'Sync failed', 'sync.expired': 'Session ended',
       'sess.title': 'Session ended', 'sess.body': 'Your session has expired. Please sign in again — any unsaved changes are kept and will be sent once you sign back in.', 'sess.login': 'Sign in again',
+      'ver.available': 'A new version is available', 'ver.reload': 'Reload', 'ver.later': 'Later',
       // nav
       'navgrp.overview': 'Overview', 'navgrp.finance': 'Finance', 'navgrp.hr': 'Human Resources', 'navgrp.distribusi': 'Distribution', 'navgrp.gudang': 'Warehouse', 'navgrp.admin': 'Administration',
       'nav.distDashboard': 'Dashboard', 'nav.distCustomers': 'Customers', 'nav.distTransactions': 'Transactions', 'nav.distGallon': 'Gallon Stock', 'nav.distIntegration': 'Cash Integration', 'nav.distPrices': 'Master Price', 'nav.distAudit': 'Audit Log', 'nav.distDeliveries': 'Deliveries', 'nav.gudang': 'Warehouse',
@@ -445,6 +446,7 @@
       'lang.en': 'EN', 'lang.id': 'ID',
       'sync.saving': 'Menyimpan…', 'sync.saved': 'Tersimpan', 'sync.error': 'Gagal sinkron', 'sync.expired': 'Sesi berakhir',
       'sess.title': 'Sesi berakhir', 'sess.body': 'Sesi Anda telah berakhir. Silakan login kembali — perubahan yang belum tersimpan tetap disimpan dan akan dikirim setelah Anda masuk lagi.', 'sess.login': 'Login Kembali',
+      'ver.available': 'Versi baru tersedia', 'ver.reload': 'Muat ulang', 'ver.later': 'Nanti',
       'nav.cashbook': 'Dashboard', 'nav.overview': 'Arus Kas', 'nav.entries': 'Semua Catatan',
       'navgrp.overview': 'Ringkasan', 'navgrp.finance': 'Keuangan', 'navgrp.hr': 'SDM / HRD', 'navgrp.distribusi': 'Distribusi', 'navgrp.gudang': 'Gudang', 'navgrp.admin': 'Administrasi',
       'nav.distDashboard': 'Dashboard', 'nav.distCustomers': 'Pelanggan', 'nav.distTransactions': 'Transaksi', 'nav.distGallon': 'Stok Galon', 'nav.distIntegration': 'Integrasi Kas', 'nav.distPrices': 'Harga Master', 'nav.distAudit': 'Log Audit', 'nav.distDeliveries': 'Pengiriman', 'nav.gudang': 'Gudang',
