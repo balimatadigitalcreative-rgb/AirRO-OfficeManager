@@ -227,7 +227,33 @@ sudo nginx -t && sudo systemctl reload nginx
 curl -sS -o /dev/null -w '%{http_code}\n' https://airrooffice.com/    # must be 200
 ```
 
-**The lesson both share: "exit 0" is not "it works", and localhost is not the internet.**
+### Post-mortem: 18 Jul — the whole site downloaded instead of rendering
+**Symptom:** opening `https://airrooffice.com/` prompted a **download of `index.html`**
+instead of showing the app. HTTP status was `200` and the HTML was correct — only the
+`Content-Type` was wrong (`application/octet-stream`).
+**Root cause:** the Nginx config had, at server level,
+`types { application/manifest+json webmanifest; }` to make the manifest installable. But
+**an Nginx `types { }` block REPLACES the entire inherited mime map — it does not extend
+it.** That one line wiped every default mapping (`.html→text/html`, `.js`, `.css`, `.png`
+…), so every static file was served as octet-stream and the browser downloaded it. A
+second `types { }` inside `location /vendor/` had the same defect.
+**Why the 17 Jul gate missed it:** that gate fetches `/` and greps the body for
+`dist/app.js` — which was still present. A wrong `Content-Type` returns `200` with the
+right body, so a status+body check sails through. Only the **header** exposes it.
+**Fix:**
+1. Removed both `types { }` blocks. The manifest type is now set with `default_type` in an
+   **exact location** (`location = /manifest.webmanifest`), which touches only that one URL
+   and leaves the inherited mime map intact. `/vendor/` needs no override at all —
+   `mime.types` already maps `.js → application/javascript`.
+2. New **Content-Type regression gate** in the deploy: it asserts `/` is `text/html`,
+   `/vendor/*.js` is a JavaScript type, and the manifest is `application/manifest+json`.
+   A wrong type **fails the deploy**.
+**Gate that now catches it:** `PUBLIC SITE VERIFY → content-types` → `DEPLOY FAIL`.
+**The rule:** `types { }` **replaces, never extends** the mime map. To add ONE type,
+use `default_type` in an exact `location =` — never a bare `types { }` block. (If you
+ever do need a block, it must start with `include mime.types;` to re-inherit the defaults.)
+
+**The lesson all three share: "exit 0" is not "it works", and localhost is not the internet.**
 
 ### The gates
 Pre-flight (nothing touched): app dir + git repo · warn on uncommitted changes ·
@@ -254,6 +280,10 @@ Then **PUBLIC SITE VERIFY — off the box** (the 17 Jul gate). These **fail the 
 - Nginx listening on **both `:80` and `:443`** — a missing `:443` is 17 Jul
 - **`https://airrooffice.com/` → 200**, fetched for real over the internet
 - the served HTML **is the app** (`dist/app.js` + manifest present)
+- **Content-Type** is right (18 Jul): `/` is `text/html`, `/vendor/*.js` is a JavaScript
+  type, the manifest is `application/manifest+json` — a wrong type means the browser
+  downloads the page instead of rendering it (status is still `200`, so only the header
+  catches it)
 - **`https://airrooffice.com/api/v1/health` → 200** — proves Nginx→Node proxying, not
   just Node answering on localhost
 - TLS certificate expiry — **warn** if < 21 days

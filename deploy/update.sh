@@ -455,6 +455,32 @@ else
   finish "FAIL"
 fi
 
+# 3e-3b. Content-Type REGRESSION GATE (the 18 Jul bug). A server-level `types { }` block
+# REPLACES the whole inherited mime map, so index.html was served as octet-stream: HTTP 200,
+# correct HTML BODY (3e-3 above still passed!), but the browser DOWNLOADS the page instead of
+# rendering it. Only the Content-Type HEADER reveals it — so assert it explicitly.
+# Infra-shaped (Nginx mime map) → FAIL, no rollback; reverting app code cannot fix it.
+content_type() { curl -sS -o /dev/null -D - --max-time 10 "$@" 2>>"$LOG" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{print tolower($2)}' | head -1; }
+CT_ROOT="$(content_type "$PUB/")"
+CT_VENDOR="$(content_type "$PUB/vendor/react.production.min.js")"
+CT_MANIFEST="$(content_type "$PUB/manifest.webmanifest")"
+CT_ERR=""
+case "$CT_ROOT"     in *text/html*)       ;; *) CT_ERR="$CT_ERR /=(${CT_ROOT:-none})" ;; esac
+case "$CT_VENDOR"   in *javascript*)      ;; *) CT_ERR="$CT_ERR vendor-js=(${CT_VENDOR:-none})" ;; esac
+case "$CT_MANIFEST" in *manifest+json*)   ;; *) CT_ERR="$CT_ERR manifest=(${CT_MANIFEST:-none})" ;; esac
+if [ -z "$CT_ERR" ]; then
+  ok "content-types OK (/ text/html · vendor javascript · manifest application/manifest+json)"
+else
+  log "   ❌ wrong Content-Type — the browser will DOWNLOAD the page, not render it:$CT_ERR"
+  log "      Cause is almost always a 'types { }' block in the Nginx config, which REPLACES"
+  log "      the whole mime map instead of extending it. Use default_type in an exact"
+  log "      location (see deploy/nginx-airro.conf), then re-apply:"
+  log "           sudo bash deploy/apply-nginx.sh"
+  PUBLIC_HTTPS="FAIL (content-type:$CT_ERR)"
+  FAIL_REASON="wrong Content-Type served:$CT_ERR — Nginx mime map broken (types{} replaces the map)"
+  finish "FAIL"
+fi
+
 PUB_API="$(http_code "$PUB/api/v1/health")"
 if [ "$PUB_API" = "200" ]; then
   ok "public $PUB/api/v1/health → 200 (Nginx → Node proxy works end to end)"
