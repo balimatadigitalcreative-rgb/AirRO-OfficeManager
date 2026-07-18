@@ -17,6 +17,21 @@ const SM_META = {
   correction: { l: 'gud.mCorr',     cls: 'corr' },
 };
 
+// Sanitize a SIGNED integer string: digits with an OPTIONAL leading "-" (any other
+// minus is dropped). Used by the stock-correction field, which must accept negatives
+// (e.g. -5) — on iOS the numeric keypad has no minus key, so the field is text + a
+// sign-toggle button (see the correction modal).
+function signedIntStr(v) {
+  const s = String(v == null ? '' : v).replace(/[^0-9-]/g, '');
+  const neg = s.startsWith('-');
+  return (neg ? '-' : '') + s.replace(/-/g, '');
+}
+// Flip the sign of a signed-int string ("" → "-" to prime a negative, "-5" → "5", "5" → "-5").
+function flipSign(v) {
+  const s = String(v == null ? '' : v);
+  return s.startsWith('-') ? s.slice(1) : '-' + s;
+}
+
 function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today }) {
   const [data, setData] = uSg(null);
   const [err, setErr] = uSg('');
@@ -101,8 +116,8 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
     const reason = (modal.reason || '').trim();
     if (!reason) { setSaving(false); setErr(trD('gud.errReason')); return; }
     if (modal.kind === 'correction') {
-      const qty = parseInt(String(modal.qty).replace(/[^0-9-]/g, ''), 10);
-      if (!qty) { setSaving(false); setErr(trD('gud.errQtyCorr')); return; }
+      const qty = parseInt(signedIntStr(modal.qty), 10);   // signed; may be negative
+      if (!Number.isInteger(qty) || qty === 0) { setSaving(false); setErr(trD('gud.errQtyCorr')); return; }
       window.API.gudang.addStock(modal.item.id, { type: 'correction', qty, reason }).then(() => done(trD('gud.moveSaved'))).catch(fail);
       return;
     }
@@ -258,7 +273,17 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
               {modal.kind === 'correction' && (<>
                 <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('gud.corrInfo')}</span></div>
                 <label className="fld-label">{trD('gud.corrQty')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-                <input className="fld tnum" value={modal.qty} inputMode="numeric" placeholder="cth. -5 atau 3" onChange={(e) => setModal({ ...modal, qty: e.target.value.replace(/[^0-9-]/g, '') })} />
+                {/* Signed field: iOS's numeric keypad has NO minus key, so use a text keyboard
+                    (pattern keeps it digit-ish) PLUS a +/− toggle so the sign works on any device. */}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                  <button type="button" className="btn btn-ghost" title={trD('gud.corrFlip')} aria-label={trD('gud.corrFlip')}
+                    style={{ flex: '0 0 auto', minWidth: 48, fontSize: 20, fontWeight: 800, lineHeight: 1 }}
+                    onClick={() => setModal({ ...modal, qty: flipSign(modal.qty) })}>
+                    {String(modal.qty).startsWith('-') ? '−' : '+'}
+                  </button>
+                  <input className="fld tnum" style={{ flex: 1 }} value={modal.qty} inputMode="text" pattern="-?[0-9]*"
+                    placeholder="cth. -5 atau 3" onChange={(e) => setModal({ ...modal, qty: signedIntStr(e.target.value) })} />
+                </div>
                 <label className="fld-label">{trD('gud.reason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
                 <textarea className="fld" style={{ height: 64, padding: 12, resize: 'vertical' }} value={modal.reason} placeholder={trD('gud.reasonPh')} onChange={(e) => setModal({ ...modal, reason: e.target.value })} />
               </>)}
