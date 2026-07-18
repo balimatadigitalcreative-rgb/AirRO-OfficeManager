@@ -152,13 +152,105 @@ function FApp() {
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
   const p = FS.normKasbon((user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier'));
+
+  // ── Browser history: hash routing (#screen) + Back-to-close overlays ─────────
+  // Screen changes push a `#id` entry so the browser Back/Forward buttons walk the app
+  // instead of leaving the site, refresh keeps the current screen, and screens become
+  // shareable links (/#dist-deliveries). Open modals + the mobile drawer each OWN a
+  // history entry, so Back dismisses them BEFORE it changes screen (essential on phones,
+  // where Back is the natural "close" gesture). Everything stays permission-gated:
+  // navigation and hash-restore only ever target ids present in NAV (navIdsRef).
+  const isPopping = uRf(false);        // true only while applying a popstate → never push then
+  const overlayStack = uRf([]);        // LIFO of close() callbacks for open modals/drawer
+  const screenRef = uRf(screen); screenRef.current = screen;
+  const navIdsRef = uRf([]);
+  navIdsRef.current = user ? navForRole(p, user.role).map((n) => n.id) : [];
+
+  // Change screen + record it in history. Only ids in NAV (mirrors go()); pushing the same
+  // screen is skipped so Back never lands on a duplicate. `replace` (login / perm-correction)
+  // rewrites the entry instead of adding one, so Back can't return to a transient state.
+  const navigate = (id, opts) => {
+    const replace = !!(opts && opts.replace);
+    if (!navIdsRef.current.includes(id)) return;
+    setDrawer(false);
+    if (id === screenRef.current) { if (replace) history.replaceState({ screen: id }, '', '#' + id); return; }
+    setScreen(id);
+    if (isPopping.current) return;                 // popstate already moved the history pointer
+    const st = { screen: id };
+    if (replace) history.replaceState(st, '', '#' + id);
+    else history.pushState(st, '', '#' + id);
+  };
+
+  // Overlays own one history entry each. openOverlay() sets state open + pushes a marker;
+  // dismissOverlay() (X / Cancel / save) calls history.back(), whose popstate runs the
+  // registered close() — so the entry and the visual state always stay in lockstep (no
+  // lingering entries, no double-close). navigateFromOverlay() is for actions that close
+  // the overlay AND move to a screen (drawer nav item, "Edit" in a detail modal): it
+  // collapses the overlay's entry into the destination synchronously (no Back bounce).
+  const openOverlay = (close) => {
+    overlayStack.current.push(close);
+    history.pushState({ screen: screenRef.current, overlay: overlayStack.current.length }, '', location.hash || ('#' + screenRef.current));
+  };
+  const dismissOverlay = () => { if (overlayStack.current.length) history.back(); };
+  const navigateFromOverlay = (id) => {
+    if (overlayStack.current.length) { const close = overlayStack.current.pop(); isPopping.current = true; try { close(); } finally { isPopping.current = false; } }
+    if (!navIdsRef.current.includes(id)) return;
+    setDrawer(false); setScreen(id);
+    history.replaceState({ screen: id }, '', '#' + id);   // overwrite the overlay entry
+  };
+  // Overlay open helpers — set the state AND own a history entry in one call.
+  const openEditing = (e) => { setEditing(e); openOverlay(() => setEditing(null)); };
+  const openPw = () => { setPwModal(true); openOverlay(() => setPwModal(false)); };
+  const openEmp = (emp) => { setEmpDetail(emp); openOverlay(() => setEmpDetail(null)); };
+  const openDrawer = () => { setDrawer(true); openOverlay(() => setDrawer(false)); };
+
+  // Single popstate handler (mounted once). An open overlay claims Back first: close the
+  // topmost and leave the screen alone. Otherwise it's a screen navigation — restore the
+  // screen from history.state (or the hash), falling back to the first NAV item if that
+  // screen isn't accessible. Never pushes while handling a popstate (isPopping guard).
+  uEh(() => {
+    const onPop = (e) => {
+      if (overlayStack.current.length) {
+        const close = overlayStack.current.pop();
+        isPopping.current = true;
+        try { close(); } finally { isPopping.current = false; }
+        return;
+      }
+      const st = e.state || {};
+      const want = st.screen || location.hash.slice(1);
+      const ids = navIdsRef.current;
+      const id = ids.includes(want) ? want : ids[0];
+      if (!id) return;
+      isPopping.current = true;
+      try { setScreen(id); } finally { isPopping.current = false; }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // On login / refresh: honour the URL hash if it names a screen the user may access,
+  // otherwise land on their default screen. replaceState (not push) so Back can never
+  // return to the login form. Runs once per login; clears any stale overlay markers.
+  const bootedRef = uRf(false);
+  uEh(() => {
+    if (!user) { bootedRef.current = false; return; }
+    if (bootedRef.current) return;
+    const ids = navIdsRef.current;
+    if (!ids.length) return;
+    bootedRef.current = true;
+    const fromHash = location.hash.slice(1);
+    const target = ids.includes(fromHash) ? fromHash : (ids.includes(screenRef.current) ? screenRef.current : ids[0]);
+    if (target !== screenRef.current) setScreen(target);
+    history.replaceState({ screen: target }, '', '#' + target);
+    overlayStack.current = [];
+  }, [user]);
   // If the active screen isn't one the user may access (perms changed, a stale landing, or
   // a deep-linked feature), fall back to their first available screen — never render a
   // feature they don't have. Applies to EVERY menu group, not just distribusi.
   uEh(() => {
     if (!user) return;
     const nav = navForRole(p, user.role);
-    if (nav.length && !nav.some((n) => n.id === screen)) setScreen(nav[0].id);
+    if (nav.length && !nav.some((n) => n.id === screen)) navigate(nav[0].id, { replace: true });
   }, [screen, user]);
   // Delivery notifications (AlertBell), refreshed whenever a distribusi SSE event bumps
   // distTick: (a) helpers with the board cap → today's new extra orders; (b) admins with
@@ -647,7 +739,7 @@ function FApp() {
     // live in REST tables (not the blob), so pull them explicitly too.
     if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); reloadConfig(); }
   };
-  const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); };
+  const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); overlayStack.current = []; try { history.replaceState(null, '', location.pathname); } catch (e) {} };
   // Self profile edit (display name + avatar colour only — server rejects anything
   // else). Reflect the new name/colour in the signed-in user + users list so every
   // profile card updates immediately; role/permissions are left untouched.
@@ -724,15 +816,15 @@ function FApp() {
     setToast(tr('ori.toastPaid', { amt: FIN.fmt(total) }));
   };
   const del = (id) => { if (!p.delete) { setToast(tr('toast.onlyOwnerDelete')); return; } const e = entries.find((x) => x.id === id); if (e && !confirm(tr('toast.deleteConfirm', { n: e.note || '', amt: FIN.fmt(e.amount || 0) }))) return; removeEntry(id); setToast(tr('toast.deleted')); };
-  const saveEdit = (upd) => { editEntry(upd); setEditing(null); setToast(tr('toast.updated')); };
+  const saveEdit = (upd) => { editEntry(upd); dismissOverlay(); setToast(tr('toast.updated')); };
   // Edit dispatcher for the entry lists. A normal entry opens the per-entry modal. A
   // Setoran-derived row (stinc-/stmfg-) is an auto-generated summary of the Setoran
   // table — it can't be edited here (the change would be recomputed away, the old
   // "account won't save" revert), so its edit button takes the user to the Setoran
   // screen where the source lives (or explains it if they have no setoran access).
   const editEntryRow = (e) => {
-    if (isDerivedEntry(e.id)) { if (p.setoran) setScreen('setoran'); else setToast(tr('entries.derivedInfo')); return; }
-    setEditing(e);
+    if (isDerivedEntry(e.id)) { if (p.setoran) navigate('setoran'); else setToast(tr('entries.derivedInfo')); return; }
+    openEditing(e);
   };
   // Demo reset now clears the REST cash book (real entries only; derived setoran
   // rows regenerate). Deletes each persisted entry, then repaints empty.
@@ -956,7 +1048,9 @@ function FApp() {
   // NAV only ever contains screens the user may access, so navigating is just "go if it's
   // in NAV". A cross-screen button targeting something the user lacks silently no-ops (its
   // own control is already hidden). The 2nd arg is legacy/ignored.
-  const go = (id) => { if (NAV.find((n) => n.id === id)) setScreen(id); setDrawer(false); };
+  // Navigate to a screen. If an overlay owns the top history entry (the mobile drawer is
+  // open), collapse it into the destination; otherwise push a normal screen entry.
+  const go = (id) => { if (overlayStack.current.length) navigateFromOverlay(id); else navigate(id); };
   // Admin/settings shortcuts inside the profile menu — already perm-filtered by NAV,
   // so a non-admin simply sees none.
   const pmShortcuts = NAV.filter((n) => n.id === 'users' || n.id === 'settings' || n.id === 'hrsettings');
@@ -1028,18 +1122,18 @@ function FApp() {
             <div className="up-name" title={user.name} style={{ fontSize: 13.5 }}>{user.name}</div>
             <AUTH.RoleBadge role={user.role} size="sm" />
           </div>
-          <button className="icon-btn" title={tr('pw.change')} onClick={() => setPwModal(true)}><IconLock s={17} /></button>
+          <button className="icon-btn" title={tr('pw.change')} onClick={openPw}><IconLock s={17} /></button>
           <button className="icon-btn logout-btn" title="Sign out" onClick={logout}><IconLogout s={18} /></button>
         </div>
       </aside>
 
-      <div className={`scrim ${drawer ? 'open' : ''}`} onClick={() => setDrawer(false)} />
+      <div className={`scrim ${drawer ? 'open' : ''}`} onClick={dismissOverlay} />
       <div className={`drawer ${drawer ? 'open' : ''}`}>
         <Nav />
         <div className="user-chip" style={{ marginTop: 'auto' }}>
           <span className="user-av" style={{ background: user.color, width: 38, height: 38 }}>{FS.initials(user.name)}</span>
           <div style={{ minWidth: 0, flex: 1 }}><div className="up-name" title={user.name} style={{ fontSize: 13.5 }}>{user.name}</div><AUTH.RoleBadge role={user.role} size="sm" /></div>
-          <button className="icon-btn" title={tr('pw.change')} onClick={() => setPwModal(true)}><IconLock s={17} /></button>
+          <button className="icon-btn" title={tr('pw.change')} onClick={openPw}><IconLock s={17} /></button>
           <button className="icon-btn logout-btn" onClick={logout}><IconLogout s={18} /></button>
         </div>
       </div>
@@ -1047,7 +1141,7 @@ function FApp() {
       <main className="main">
         <div className="content">
           <header className="topbar">
-            <button className="hamburger" onClick={() => setDrawer(true)}><IconMenu s={22} /></button>
+            <button className="hamburger" onClick={openDrawer}><IconMenu s={22} /></button>
             <div>
               <h1>{titles.t}</h1>
               <div className="sub">{titles.s}</div>
@@ -1062,7 +1156,7 @@ function FApp() {
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
               {(p.seeMoney || p.distribusiPengiriman || resetAlerts.length > 0) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts, ...resetAlerts]} />}
               <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []} activity={myActivity}
-                onChangePassword={() => setPwModal(true)} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
+                onChangePassword={openPw} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
           </header>
 
@@ -1165,7 +1259,7 @@ function FApp() {
           )}
 
           {screen === 'employees' && p.employees && (
-            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} onOpen={setEmpDetail} onEdit={() => setScreen('payroll')} canEdit={p.employees} seeMoney={p.seeMoney} setStaff={applyStaff} />
+            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} onOpen={openEmp} onEdit={() => navigate('payroll')} canEdit={p.employees} seeMoney={p.seeMoney} setStaff={applyStaff} />
           )}
 
           {screen === 'hrcalendar' && p.employees && (
@@ -1173,7 +1267,7 @@ function FApp() {
           )}
 
           {screen === 'orientation' && p.payroll && (
-            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={applyStaff} rates={hrdRates} today={FIN.TODAY} syncTick={syncTick} canEdit={p.employees} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={setEmpDetail} />
+            <COMPANY.OrientationScreen staff={hrdStaff} setStaff={applyStaff} rates={hrdRates} today={FIN.TODAY} syncTick={syncTick} canEdit={p.employees} canAddEntry={p.addEntry} onGraduate={graduateOrientation} onFail={failOrientation} onPay={payOrientation} orientationPaidIds={orientationPaidIds} onOpen={openEmp} />
           )}
 
           {screen === 'kasbon' && p.kasbonView && (
@@ -1218,11 +1312,11 @@ function FApp() {
             so nothing is unreachable on mobile. Highlighted when the drawer is open
             OR the current screen isn't one of the 4 quick items. Logout lives in the
             drawer's user chip. */}
-        <button className={`mnav ${drawer || !NAV.slice(0, 4).some((n) => n.id === screen) ? 'on' : ''}`} onClick={() => setDrawer(true)}><IconMenu s={22} /><span>{tr('nav.more')}</span></button>
+        <button className={`mnav ${drawer || !NAV.slice(0, 4).some((n) => n.id === screen) ? 'on' : ''}`} onClick={openDrawer}><IconMenu s={22} /><span>{tr('nav.more')}</span></button>
       </nav>
 
       {toast && <FToast msg={toast} onDone={() => setToast(null)} />}
-      {pwModal && <AUTH.ChangePassword onClose={() => setPwModal(false)} onDone={() => { setPwModal(false); setToast(tr('pw.changed')); }} />}
+      {pwModal && <AUTH.ChangePassword onClose={dismissOverlay} onDone={() => { dismissOverlay(); setToast(tr('pw.changed')); }} />}
       {sessionExpired && (
         <div className="modal-scrim" style={{ zIndex: 200 }}>
           <div className="modal-card" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
@@ -1239,10 +1333,10 @@ function FApp() {
       )}
       <PROOFMOUNT />
       {editing && p.edit && (
-        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} onSave={saveEdit} onClose={() => setEditing(null)} />
+        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} onSave={saveEdit} onClose={dismissOverlay} />
       )}
       {empDetail && p.empDetail && (
-        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => { setEmpDetail(null); setScreen('payroll'); }} onClose={() => setEmpDetail(null)} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
+        <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => navigateFromOverlay('payroll')} onClose={dismissOverlay} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />
       )}
     </div>
   );
