@@ -603,8 +603,11 @@ select.fld::-ms-expand { display: none; }
   .topbar h1 { font-size: 19px; }
 }
 @media (max-width: 480px) {
-  /* phones incl. iPhone 14 Pro Max (430px) — single column, roomier touch targets */
-  .content { padding: 14px 13px 96px; gap: 14px; }
+  /* phones incl. iPhone 14 Pro Max (430px) — single column, roomier touch targets.
+     Keep the safe-area insets (esp. top) or the header lands under the iOS status bar
+     in standalone / notch in landscape. Overrides app.css's mobile .content, so it must
+     re-declare them. */
+  .content { padding: calc(14px + env(safe-area-inset-top)) calc(13px + env(safe-area-inset-right)) 96px calc(13px + env(safe-area-inset-left)); gap: 14px; }
   .fin-stat-row { grid-template-columns: 1fr; gap: 12px; }
   .ms-grid { grid-template-columns: 1fr; }
   .hrr-tiles { grid-template-columns: 1fr 1fr; }
@@ -634,7 +637,8 @@ select.fld::-ms-expand { display: none; }
   .ed-att-grid { grid-template-columns: repeat(5, 1fr); gap: 5px; }
   .ed-att-stat b { font-size: 16px; }
   /* ---- global down-scale so nothing feels oversized on a phone ---- */
-  .content { padding: 12px 11px 92px; gap: 12px; }
+  /* (this is the LAST .content rule at ≤480px, so it wins — it must carry the insets too) */
+  .content { padding: calc(12px + env(safe-area-inset-top)) calc(11px + env(safe-area-inset-right)) 92px calc(11px + env(safe-area-inset-left)); gap: 12px; }
   .card { border-radius: 14px; }
   .topbar h1 { font-size: 17px; }
   .sec-title { font-size: 14px !important; }
@@ -2041,7 +2045,7 @@ img, svg, canvas, video { max-width: 100%; }
 
 /* Small phones (≤380px, e.g. iPhone SE / mini): tighten chrome */
 @media (max-width: 380px) {
-  .content { padding: 12px 10px calc(74px + env(safe-area-inset-bottom)); }
+  .content { padding: calc(12px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) calc(74px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left)); }
   .modal-scrim { padding: 12px; }
   .modal-card { padding: 18px 16px; border-radius: 18px; }
   /* Match the sticky header's bleed to the mobile card padding (18/16) so it
