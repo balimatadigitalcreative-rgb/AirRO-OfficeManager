@@ -2,7 +2,29 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const { resolvePerms } = require('../config/permissions');
 const { PUBLIC_FIELDS, publicUser, normUsername, isWeakPassword } = require('./auth.service');
+
+// LOCKOUT GUARD: the system must never end up with zero ACTIVE users who hold
+// `manageUsers` — otherwise nobody can ever administer users again. Given a pending
+// change to one user (new perms / role / active, or a delete), recompute how many active
+// users would still hold the (effective) capability and reject if that would hit zero.
+// Covers the self-edit case too: removing your OWN manageUsers is only allowed while
+// another active user still has it.
+const holdsManageUsers = (u) => !!(u.active && resolvePerms(u.role, u.permissions).manageUsers);
+async function assertManageUsersKept({ targetId, deleting, next }) {
+  const users = await prisma.user.findMany({ select: { id: true, role: true, permissions: true, active: true } });
+  let holders = 0;
+  for (const u of users) {
+    if (u.id === targetId) {
+      if (deleting) continue;
+      if (holdsManageUsers({ role: u.role, permissions: u.permissions, active: u.active, ...next })) holders++;
+    } else if (holdsManageUsers(u)) {
+      holders++;
+    }
+  }
+  if (holders === 0) throw ApiError.badRequest('Minimal satu pengguna harus punya akses Kelola Pengguna.');
+}
 
 // Guard: a user's role must reference an existing role in the Role table.
 async function assertRole(role) {
@@ -52,6 +74,14 @@ async function update(id, { password, ...rest }) {
     const clash = await prisma.user.findUnique({ where: { username: rest.username } });
     if (clash && clash.id !== id) throw ApiError.conflict('Username is already taken');
   }
+  // Lockout guard — only when a change could remove a manageUsers holder.
+  if ('permissions' in rest || 'active' in rest || 'role' in rest) {
+    const next = {};
+    if ('permissions' in rest) next.permissions = rest.permissions;   // object | null (= role default)
+    if ('active' in rest) next.active = rest.active;
+    if ('role' in rest) next.role = rest.role;
+    await assertManageUsersKept({ targetId: id, next });
+  }
   const data = normalize(rest);
   if (password) { data.passwordHash = await bcrypt.hash(password, 10); data.weakPassword = isWeakPassword(password); }   // admin reset → re-evaluate the flag
   const u = await prisma.user.update({ where: { id }, data, select: PUBLIC_FIELDS });
@@ -60,6 +90,7 @@ async function update(id, { password, ...rest }) {
 async function remove(id, currentUserId) {
   if (id === currentUserId) throw ApiError.badRequest('You cannot delete your own account');
   await getById(id);
+  await assertManageUsersKept({ targetId: id, deleting: true });   // don't delete the last admin
   await prisma.user.delete({ where: { id } });
 }
 

@@ -4,9 +4,10 @@ const tr = (k, v) => window.t(k, v);
 function Ish(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
 function navForRole(p, role) {
-  // Owner/GM always keep access to user & role management, even if the 'reset'
-  // capability were edited off their role — so an admin can't lock themselves out.
-  const canAdmin = !!(p.reset || role === 'owner' || role === 'gm');
+  // User & role administration follows the `manageUsers` CAPABILITY only — never role===.
+  // Owner is configurable like anyone else; the server's lockout guard guarantees at least
+  // one active admin always exists, so this can't strand the app.
+  const canAdmin = !!p.manageUsers;
   const items = [];
   if (p.company) items.push({ id: 'company', label: tr('nav.company'), icon: 'IconHome', grp: 'overview' });
   if (p.company && p.reset) items.push({ id: 'projects', label: tr('nav.projects'), icon: 'IconBolt', grp: 'overview' });
@@ -152,6 +153,10 @@ function FApp() {
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
   const p = FS.normKasbon((user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier'));
+  // `manageUsers` is a NEW cap: an override saved before it existed omits it. Derive an
+  // ABSENT value from the legacy `reset` toggle or the role default — mirrors the server's
+  // resolvePerms exactly, so the sidebar and the API agree on who may administer users.
+  if (p.manageUsers === undefined) p.manageUsers = !!(p.reset || (FS.perms(user ? user.role : 'cashier') || {}).manageUsers);
 
   // ── Browser history: hash routing (#screen) + Back-to-close overlays ─────────
   // Screen changes push a `#id` entry so the browser Back/Forward buttons walk the app
@@ -305,9 +310,10 @@ function FApp() {
     Promise.all(jobs).then(() => { if (live) setDeliveryAlerts(acc); });
     return () => { live = false; };
   }, [user, p.distribusiPengiriman, p.distribusiDashboard, distTick]);
-  // Forgot-password requests (AlertBell) — owner/GM only. Poll lightly; refresh on nav.
+  // Forgot-password requests (AlertBell) — user admins only (matches the manageUsers-gated
+  // endpoint). Poll lightly; refresh on nav.
   uEh(() => {
-    const isAdmin = user && (user.role === 'owner' || user.role === 'gm');
+    const isAdmin = !!(user && p.manageUsers);
     if (!isAdmin || !(window.API && window.API.users && window.API.users.resetRequests)) { setResetAlerts([]); return; }
     let live = true;
     const load = () => window.API.users.resetRequests('pending').then((r) => {
@@ -1331,8 +1337,8 @@ function FApp() {
             <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canReset={p.reset} onResetData={resetData} settings={settings} onSettingsChange={applySettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
           )}
 
-          {screen === 'users' && (p.reset || user.role === 'owner' || user.role === 'gm') && (
-            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={user.role === 'owner' || user.role === 'gm' || p.reset} fleet={fleet} />
+          {screen === 'users' && p.manageUsers && (
+            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={!!p.manageUsers} fleet={fleet} />
           )}
 
           <footer className="app-footer">

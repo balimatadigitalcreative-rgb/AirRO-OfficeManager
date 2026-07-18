@@ -2,11 +2,13 @@
 const { Router } = require('express');
 const ctrl = require('../controllers/user.controller');
 const validate = require('../middleware/validate');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireCap } = require('../middleware/auth');
 
 const router = Router();
-// User administration (incl. password reset) is restricted to the Owner & GM roles.
-router.use(requireAuth, requireRole('owner', 'gm'));
+// User administration (incl. password reset) is gated on the `manageUsers` CAPABILITY —
+// NOT on role===owner/gm. Owner is configurable like anyone else; a lockout guard in the
+// service keeps at least one active manageUsers holder at all times.
+router.use(requireAuth, requireCap('manageUsers'));
 
 router.get('/', ctrl.list);
 // Forgot-password request queue (owner/GM). Declared BEFORE '/:id' so it isn't shadowed.

@@ -652,6 +652,37 @@ curl -s -o /dev/null -w '%{http_code}\n' -X PUT $DOMAIN/api/v1/state/airro_bigte
 - `start.bat` / `serve.py` are for **local development only** — production uses
   Nginx + pm2.
 
+## Recovery: locked out of user management
+
+Access to the **Pengguna** screen and all user/role administration is gated on the
+`manageUsers` capability — a real per-user toggle, not a role hard-grant (Owner is
+configurable like anyone else). A lockout guard **rejects** any change that would leave
+zero active users with `manageUsers`, so you normally can't strand yourself. If it ever
+happens anyway (e.g. a direct DB edit), re-grant it to the owner **from the server**:
+
+```bash
+cd /var/www/airrooffice/server
+node -e "
+const p = require('./src/lib/prisma');
+(async () => {
+  const u = await p.user.findFirst({ where: { username: 'owner' } });   // or the account you use
+  if (!u) { console.error('no such user'); process.exit(1); }
+  const perms = u.permissions ? JSON.parse(u.permissions) : {};
+  perms.manageUsers = true;                                             // grant the capability
+  await p.user.update({ where: { id: u.id }, data: { permissions: JSON.stringify(perms) } });
+  console.log('manageUsers granted to', u.username, '— log out and back in.');
+  await p.\$disconnect();
+})();
+"
+pm2 restart airro-api        # only needed if you also changed roles; token refresh happens on next login
+```
+The change takes effect on that user's **next login** (tokens are stateless). Alternative
+with `sqlite3` — reset the account to its ROLE defaults (the `owner` role ships with
+`manageUsers: true`), which also restores access:
+```bash
+sqlite3 prisma/prod.db "UPDATE User SET permissions = NULL WHERE username = 'owner';"
+```
+
 ## Security hardening (production)
 
 This app is public and holds salaries, NIK and BPJS data. The checklist below is

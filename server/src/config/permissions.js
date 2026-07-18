@@ -9,7 +9,7 @@ const ROLE_PERMS = {
     company: true, cashflow: true, employees: false, empDetail: false, attendance: false, addEntry: false, edit: false,
     delete: false, seeMoney: true, allEntries: false, reports: true, advisor: false,
     payroll: false, approvals: false, settings: false, reset: false, setoran: false, setoranOnly: false,
-    kasbon: false, kasbonApprove: false,
+    kasbon: false, kasbonApprove: false, manageUsers: true,
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true,
@@ -20,7 +20,7 @@ const ROLE_PERMS = {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
     delete: true, seeMoney: true, allEntries: true, reports: true, advisor: true,
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
-    kasbon: true, kasbonApprove: true,
+    kasbon: true, kasbonApprove: true, manageUsers: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
@@ -187,9 +187,23 @@ function deriveDistribusiCaps(perms) {
 // Effective capability map for a user: their per-user override if set, otherwise the
 // role's current defaults (from the live Role table, falling back to the seed). The
 // kasbon granular caps are derived for backward compatibility.
+// `manageUsers` is the explicit capability that gates the Pengguna screen + all user/role
+// administration (via requireCap, NOT role===). It's a NEW cap, so any per-user override
+// saved before it existed omits it — derive an ABSENT value from the legacy `reset` cap
+// (which used to double as the "Kelola User" toggle) OR the role's default. This makes an
+// upgrade non-disruptive and can never silently drop the only admin. An EXPLICIT per-user
+// value (set via the Pengguna toggle) always wins.
+function deriveManageUsers(perms, role) {
+  if (!perms || typeof perms !== 'object' || perms.manageUsers !== undefined) return perms;
+  const rd = rolePerms(role) || {};
+  perms.manageUsers = !!(perms.reset || rd.manageUsers);
+  return perms;
+}
+
 function resolvePerms(role, permsStrOrObj) {
   const override = parsePerms(permsStrOrObj);
-  return deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance));
+  const resolved = deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance));
+  return deriveManageUsers(resolved, role);
 }
 
 module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, deriveDistribusiCaps, refreshRoleCache, seedBuiltinRoles };

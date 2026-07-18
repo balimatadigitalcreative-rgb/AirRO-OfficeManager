@@ -36,7 +36,7 @@ const CAP_GROUPS = [
     ['company', 'Dashboard Perusahaan'],
     ['approvals', 'Pengajuan'],
     ['settings', 'Pengaturan'],
-    ['reset', 'Kelola User'],
+    ['manageUsers', 'Kelola Pengguna'],
   ] },
   { title: 'Distribusi', caps: [
     ['distribusiInput', 'Input Transaksi Distribusi'],
@@ -74,8 +74,19 @@ function UserModal({ row, users, onSave, onClose, busy, fleet }) {
   // split kasbon caps are derived from the legacy pair for display (kasbonView is a
   // computed flag — stripped so it's never persisted as a togglable cap).
   const { kasbonView: _kv, ...eff } = FS.normKasbon(f.permissions || FS.perms(f.role));
+  // manageUsers: derive an ABSENT value from legacy `reset` or the role default — mirrors
+  // the server so the checkbox reflects the effective capability, not a stale omission.
+  const effMU = (role, perms) => { const e = FS.normKasbon(perms || FS.perms(role)); return e.manageUsers === undefined ? !!(e.reset || (FS.perms(role) || {}).manageUsers) : !!e.manageUsers; };
+  if (eff.manageUsers === undefined) eff.manageUsers = effMU(f.role, f.permissions);
+  // LOCKOUT hint: is this the ONLY active user who holds manageUsers? If so, the toggle
+  // can't be turned off (the server would reject it anyway — this just explains why).
+  const otherAdmins = (users || []).filter((u) => u.id !== f.id && u.active !== false && effMU(u.role, u.permissions));
+  const isLastAdmin = !!eff.manageUsers && otherAdmins.length === 0;
   const custom = !!f.permissions;
-  const toggleCap = (key) => set({ permissions: { ...eff, [key]: !eff[key] } });
+  const toggleCap = (key) => {
+    if (key === 'manageUsers' && eff.manageUsers && isLastAdmin) return;   // never strand the last admin
+    set({ permissions: { ...eff, [key]: !eff[key] } });
+  };
   const changeRole = (r) => set({ role: r, color: FS.roleColor(r) || f.color, permissions: null }); // reset to new role defaults
   const resetToRole = () => set({ permissions: null });
 
@@ -121,12 +132,20 @@ function UserModal({ row, users, onSave, onClose, busy, fleet }) {
             <div key={g.title} style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-mut)', marginBottom: 6 }}>{g.title}</div>
               <div className="cat-chips">
-                {g.caps.map(([key, label]) => (
-                  <button key={key} type="button" className={`cat-chip ${eff[key] ? 'on' : ''}`} onClick={() => toggleCap(key)}>
-                    {eff[key] ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{label}
-                  </button>
-                ))}
+                {g.caps.map(([key, label]) => {
+                  const locked = key === 'manageUsers' && eff.manageUsers && isLastAdmin;
+                  return (
+                    <button key={key} type="button" className={`cat-chip ${eff[key] ? 'on' : ''}`} onClick={() => toggleCap(key)}
+                      title={locked ? 'Ini satu-satunya admin — tidak bisa dicabut' : undefined}
+                      style={locked ? { cursor: 'not-allowed', opacity: 0.9 } : undefined}>
+                      {eff[key] ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{label}{locked ? ' 🔒' : ''}
+                    </button>
+                  );
+                })}
               </div>
+              {g.caps.some(([k]) => k === 'manageUsers') && eff.manageUsers && isLastAdmin && (
+                <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>Ini satu-satunya admin — tidak bisa dicabut.</div>
+              )}
             </div>
           ))}
 
@@ -176,7 +195,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
   const [tab, setTab] = uSu('users');   // 'users' | 'roles'
   const [resetReqs, setResetReqs] = uSu([]);   // pending forgot-password requests
 
-  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword, weakPassword: !!u.weakPassword });
+  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', active: u.active !== false, mustChangePassword: !!u.mustChangePassword, weakPassword: !!u.weakPassword });
 
   const refreshReqs = () => { if (cloud) window.API.users.resetRequests('pending').then((r) => setResetReqs(r.data || [])).catch(() => {}); };
   const refresh = () => {
