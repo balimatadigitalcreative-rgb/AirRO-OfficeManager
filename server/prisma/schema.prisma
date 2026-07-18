@@ -733,10 +733,18 @@ model InventoryItem {
   name      String
   kind      String                                // galon | sticker | tutup | segel | lainnya
   unit      String   @default("pcs")              // pcs | galon | roll | …
+  form      String   @default("")                 // shape/form label, e.g. "galon 19L", "roll", "botol"
+  description String @default("")                 // free-text notes about the item
+  photoId   String?                               // → Attachment.id (compressed, out of payload); null = none
   bufferMin Int      @default(0)                  // safe-stock threshold; stock ≤ bufferMin (and >0) ⇒ "perlu restock"
   sortOrder Int      @default(0)
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+  // Edit audit — who last changed the item's details, and when (the ledger already
+  // audits stock; this covers name/unit/form/description/photo edits).
+  editedById   String?
+  editedByName String?
+  editedAt     DateTime?
 
   movements StockMovement[]
   @@index([kind])

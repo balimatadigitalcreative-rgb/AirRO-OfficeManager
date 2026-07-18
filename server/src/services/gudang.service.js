@@ -40,7 +40,12 @@ async function actorSnap(actor) {
 
 function itemClient(i, stock) {
   const needsRestock = i.bufferMin > 0 && stock <= i.bufferMin;   // only flag when a threshold is configured
-  return { id: i.id, name: i.name, kind: i.kind, unit: i.unit, bufferMin: i.bufferMin, sortOrder: i.sortOrder, stock, needsRestock, managed: i.kind !== 'galon' };
+  return {
+    id: i.id, name: i.name, kind: i.kind, unit: i.unit, form: i.form || '', description: i.description || '',
+    photoId: i.photoId || null, bufferMin: i.bufferMin, sortOrder: i.sortOrder, stock, needsRestock,
+    managed: i.kind !== 'galon',
+    editedByName: i.editedByName || null, editedAt: i.editedAt ? new Date(i.editedAt).getTime() : null,
+  };
 }
 function movClient(m, itemName) {
   return { id: m.id, itemId: m.itemId, itemName: itemName || null, type: m.type, qty: m.qty, effect: moveEffect(m), amount: m.amount != null ? m.amount : null, method: m.method || null, reason: m.reason, actorName: m.actorName, createdAt: m.createdAt ? new Date(m.createdAt).getTime() : null };
@@ -97,14 +102,24 @@ async function createItem(body) {
   return itemClient(item, 0);
 }
 
-// Edit an item's buffer / name / unit (never its computed stock).
-async function updateItem(id, body) {
+// Edit an item's DETAILS (name / unit / form / description / photo / buffer) — never its
+// computed stock. The id is stable, so renaming can't break the ledger (movements key on
+// itemId). Built-in items are editable here too; none are deletable (no delete endpoint).
+// Records who edited + when for the audit.
+async function updateItem(id, body, actor) {
   const i = await prisma.inventoryItem.findUnique({ where: { id } });
   if (!i) throw ApiError.notFound('Item tidak ditemukan');
   const data = {};
   if (body.bufferMin !== undefined) data.bufferMin = Math.max(0, Math.round(+body.bufferMin || 0));
   if (body.name !== undefined) { const n = String(body.name).trim(); if (n) data.name = n; }
   if (body.unit !== undefined) { const u = String(body.unit || '').trim(); if (u) data.unit = u; }
+  if (body.form !== undefined) data.form = String(body.form || '').trim().slice(0, 60);
+  if (body.description !== undefined) data.description = String(body.description || '').trim().slice(0, 500);
+  if (body.photoId !== undefined) data.photoId = body.photoId ? String(body.photoId) : null;
+  if (Object.keys(data).length) {
+    const snap = await actorSnap(actor);
+    data.editedById = snap.actorId; data.editedByName = snap.actorName; data.editedAt = new Date();
+  }
   const updated = await prisma.inventoryItem.update({ where: { id }, data });
   const stock = updated.kind === 'galon' ? await galonOwned({ role: 'owner' }) : (await stockMap())[id] || 0;
   return itemClient(updated, stock);

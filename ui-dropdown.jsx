@@ -167,8 +167,17 @@ function FileAttach({ value, onChange, compact, camera, accept, label }) {
   const [err, setErr] = uSd('');
   const [preview, setPreview] = uSd(null);   // local data URL for an instant thumbnail this session
   const cloud = !!(window.CLOUD && window.CLOUD.active && window.API && window.API.attachments);
-  // keep the preview in step with an externally-provided inline value; drop it on clear
-  uEd(() => { if (value && value.data) setPreview(value.data); else if (!value) setPreview(null); }, [value]);
+  // keep the preview in step with an externally-provided value; drop it on clear. A saved
+  // REF image (no inline bytes) is lazy-fetched so an already-attached photo shows its
+  // thumbnail (e.g. editing a Gudang item) without embedding base64 in the record.
+  uEd(() => {
+    let live = true;
+    if (value && value.data) { setPreview(value.data); }
+    else if (value && value.ref && value.isImg && window.API && window.API.attachments) {
+      window.API.attachments.get(value.ref).then((r) => { if (live && r && r.data) setPreview(r.data.data); }).catch(() => {});
+    } else if (!value) { setPreview(null); }
+    return () => { live = false; };
+  }, [value]);
 
   const onPick = async (e) => {
     const file = e.target.files && e.target.files[0];

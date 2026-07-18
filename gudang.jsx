@@ -32,6 +32,23 @@ function flipSign(v) {
   return s.startsWith('-') ? s.slice(1) : '-' + s;
 }
 
+// Item tile: a lazy-loaded photo thumbnail when the item has one (bytes fetched from the
+// Attachment store on demand — never embedded in the item payload), else the kind icon.
+function GudThumb({ photoId, kind }) {
+  const [src, setSrc] = uSg(null);
+  uEg(() => {
+    let live = true; setSrc(null);
+    if (photoId && window.API && window.API.attachments) {
+      window.API.attachments.get(photoId).then((r) => { if (live && r && r.data) setSrc(r.data.data); }).catch(() => {});
+    }
+    return () => { live = false; };
+  }, [photoId]);
+  if (photoId && src) {
+    return <span className="icon-tile" style={{ padding: 0, overflow: 'hidden' }}><img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /></span>;
+  }
+  return <span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX(GUD_KIND_ICON[kind] || 'IconDots', { s: 18 })}</span>;
+}
+
 function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today }) {
   const [data, setData] = uSg(null);
   const [err, setErr] = uSg('');
@@ -60,6 +77,9 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
   const openDamage = (item) => { setErr(''); setModal({ kind: 'damage', item, type: 'damage', qty: '', reason: '' }); };
   const openBuffer = (item) => { setErr(''); setModal({ kind: 'buffer', item, bufferMin: String(item.bufferMin || 0) }); };
   const openNew = () => { setErr(''); setModal({ kind: 'new', name: '', itemKind: 'sticker', unit: 'pcs', bufferMin: '' }); };
+  // Edit an item's details. Reconstruct the photo as a FileAttach ref value so the existing
+  // photo shows (lazy) and can be replaced/removed. photoId is stored on save (not base64).
+  const openEdit = (item) => { setErr(''); setModal({ kind: 'edit', item, name: item.name || '', unit: item.unit || '', form: item.form || '', description: item.description || '', bufferMin: String(item.bufferMin || 0), photo: item.photoId ? { ref: item.photoId, isImg: true, name: 'foto' } : null }); };
   const openReport = () => { setErr(''); setModal({ kind: 'report', jenis: 'pecah', qty: '', reason: '', culprit: '', fleet: '', proof: null }); };
   const openSell = (item) => { setErr(''); setModal({ kind: 'sell', item, qty: '', price: '', method: 'Cash', reason: '' }); };
   const openCloseout = () => {
@@ -95,6 +115,19 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
       const name = (modal.name || '').trim();
       if (!name) { setSaving(false); setErr(trD('gud.errName')); return; }
       window.API.gudang.createItem({ name, kind: modal.itemKind, unit: (modal.unit || 'pcs').trim() || 'pcs', bufferMin: Math.max(0, parseInt(modal.bufferMin || '0', 10) || 0) }).then(() => done(trD('gud.itemAdded'))).catch(fail);
+      return;
+    }
+    if (modal.kind === 'edit') {
+      const name = (modal.name || '').trim();
+      if (!name) { setSaving(false); setErr(trD('gud.errName')); return; }
+      // Photo: store ONLY the Attachment id (FileAttach uploaded the compressed bytes and
+      // returned a ref). Inline fallback (offline) has no id → treated as no photo change.
+      const photoId = (modal.photo && modal.photo.ref) ? modal.photo.ref : null;
+      window.API.gudang.updateItem(modal.item.id, {
+        name, unit: (modal.unit || '').trim() || 'pcs', form: (modal.form || '').trim(),
+        description: (modal.description || '').trim(), bufferMin: Math.max(0, parseInt(modal.bufferMin || '0', 10) || 0),
+        photoId,
+      }).then(() => done(trD('gud.itemSaved'))).catch(fail);
       return;
     }
     if (modal.kind === 'report') {
@@ -178,8 +211,8 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
         {items.map((it) => (
           <div key={it.id} className={`card gud-card ${it.needsRestock ? 'low' : ''}`}>
             <div className="gud-card-top">
-              <span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX(GUD_KIND_ICON[it.kind] || 'IconDots', { s: 18 })}</span>
-              <div style={{ flex: 1, minWidth: 0 }}><div className="gud-card-name">{it.name}</div><div className="gud-card-unit">{trD('gud.unit')}: {it.unit}</div></div>
+              <GudThumb photoId={it.photoId} kind={it.kind} />
+              <div style={{ flex: 1, minWidth: 0 }}><div className="gud-card-name">{it.name}</div><div className="gud-card-unit">{it.form ? it.form + ' · ' : ''}{trD('gud.unit')}: {it.unit}</div></div>
               {statusBadge(it)}
             </div>
             <div className="gud-card-stock"><span className="tnum gud-card-num">{numX(it.stock)}</span><span className="gud-card-numunit">{it.unit}</span></div>
@@ -187,18 +220,23 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
             {it.kind === 'galon' ? (
               <>
                 <div className="gud-card-note"><IconLock s={12} />{trD('gud.galonManaged')}</div>
-                {canDamage && <div className="gud-card-actions"><button type="button" className="btn btn-ghost btn-sm gud-dmg" onClick={openReport}><IconWarn s={13} />{trD('gud.report')}</button></div>}
+                {(canManage || canDamage) && <div className="gud-card-actions">
+                  {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
+                  {canDamage && <button type="button" className="btn btn-ghost btn-sm gud-dmg" onClick={openReport}><IconWarn s={13} />{trD('gud.report')}</button>}
+                </div>}
               </>
             ) : it.kind === 'galon_rusak' ? (
               <div className="gud-card-actions">
                 {canManage && <button type="button" className="btn btn-primary btn-sm" onClick={() => openSell(it)} disabled={it.stock <= 0}><IconCoinIn s={13} />{trD('gud.sell')}</button>}
                 {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openCorrection(it)}><IconPencil s={13} />{trD('gud.correct')}</button>}
+                {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
               </div>
             ) : (
               <div className="gud-card-actions">
                 {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openStock(it)}><IconPlus s={13} />{trD('gud.addStock')}</button>}
                 {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openCorrection(it)}><IconPencil s={13} />{trD('gud.correct')}</button>}
                 {canDamage && <button type="button" className="btn btn-ghost btn-sm gud-dmg" onClick={() => openDamage(it)}><IconWarn s={13} />{trD('gud.damage')}</button>}
+                {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
               </div>
             )}
           </div>
@@ -235,7 +273,7 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
           <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <div style={{ fontSize: 17, fontWeight: 800 }}>{modal.kind === 'new' ? trD('gud.addItem') : modal.kind === 'buffer' ? trD('gud.setBufferT') : modal.kind === 'correction' ? trD('gud.correctT') : modal.kind === 'damage' ? trD('gud.damageT') : modal.kind === 'report' ? trD('gud.reportT') : modal.kind === 'sell' ? trD('gud.sellT') : trD('gud.addStockT')}</div>
+                <div style={{ fontSize: 17, fontWeight: 800 }}>{modal.kind === 'new' ? trD('gud.addItem') : modal.kind === 'edit' ? trD('gud.editItemT') : modal.kind === 'buffer' ? trD('gud.setBufferT') : modal.kind === 'correction' ? trD('gud.correctT') : modal.kind === 'damage' ? trD('gud.damageT') : modal.kind === 'report' ? trD('gud.reportT') : modal.kind === 'sell' ? trD('gud.sellT') : trD('gud.addStockT')}</div>
                 {modal.item && <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{modal.item.name}</div>}
               </div>
               <button className="jp-icon" onClick={() => setModal(null)}><IconClose s={18} /></button>
@@ -252,6 +290,20 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
                   <div><label className="fld-label">{trD('gud.unit')}</label><input className="fld" value={modal.unit} placeholder="pcs" onChange={(e) => setModal({ ...modal, unit: e.target.value })} /></div>
                   <div><label className="fld-label">{trD('gud.buffer')}</label><input className="fld tnum" value={modal.bufferMin} inputMode="numeric" placeholder="0" onChange={(e) => setModal({ ...modal, bufferMin: e.target.value.replace(/[^0-9]/g, '') })} /></div>
                 </div>
+              </>)}
+              {modal.kind === 'edit' && (<>
+                <label className="fld-label">{trD('gud.itemName')}</label>
+                <input className="fld" value={modal.name} placeholder={trD('gud.itemNamePh')} onChange={(e) => setModal({ ...modal, name: e.target.value })} />
+                <div className="gud-row2">
+                  <div><label className="fld-label">{trD('gud.unit')}</label><input className="fld" value={modal.unit} placeholder="pcs" onChange={(e) => setModal({ ...modal, unit: e.target.value })} /></div>
+                  <div><label className="fld-label">{trD('gud.form')}</label><input className="fld" value={modal.form} placeholder={trD('gud.formPh')} onChange={(e) => setModal({ ...modal, form: e.target.value })} /></div>
+                </div>
+                <label className="fld-label">{trD('gud.buffer')}</label>
+                <input className="fld tnum" value={modal.bufferMin} inputMode="numeric" placeholder="0" onChange={(e) => setModal({ ...modal, bufferMin: e.target.value.replace(/[^0-9]/g, '') })} />
+                <label className="fld-label">{trD('gud.desc')}</label>
+                <textarea className="fld" style={{ height: 56, padding: 12, resize: 'vertical' }} value={modal.description} placeholder={trD('gud.descPh')} onChange={(e) => setModal({ ...modal, description: e.target.value })} />
+                <label className="fld-label">{trD('gud.photo')}</label>
+                <UI.FileAttach value={modal.photo} onChange={(v) => setModal({ ...modal, photo: v })} camera accept="image/*" label={trD('gud.photoAdd')} />
               </>)}
               {modal.kind === 'buffer' && (<>
                 <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('gud.bufferInfo')}</span></div>

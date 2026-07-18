@@ -14,6 +14,9 @@ const createItemSchema = z.object({
 const updateItemSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   unit: z.string().trim().max(20).optional(),
+  form: z.string().trim().max(60).optional(),
+  description: z.string().trim().max(500).optional(),
+  photoId: z.string().max(60).nullable().optional(),   // Attachment.id, or null to remove
   bufferMin: z.number().int().min(0).optional(),
 });
 // "Tambah Stok" / "Koreksi" — additive + correction types (gudangKelola).
@@ -44,7 +47,7 @@ const closeoutSchema = z.object({
 const summary = asyncHandler(async (req, res) => res.json({ data: await service.gudangSummary(req.user) }));
 const getItem = asyncHandler(async (req, res) => res.json({ data: await service.getItem(req.params.id, req.user) }));
 const createItem = asyncHandler(async (req, res) => res.status(201).json({ data: await service.createItem(req.body) }));
-const updateItem = asyncHandler(async (req, res) => res.json({ data: await service.updateItem(req.params.id, req.body) }));
+const updateItem = asyncHandler(async (req, res) => res.json({ data: await service.updateItem(req.params.id, req.body, req.user) }));
 const addStock = asyncHandler(async (req, res) => res.status(201).json({ data: await service.addMovement(req.params.id, req.body, req.user, service.ADD_TYPES.concat('correction')) }));
 const addDamage = asyncHandler(async (req, res) => res.status(201).json({ data: await service.addMovement(req.params.id, req.body, req.user, ['damage', 'loss']) }));
 const report = asyncHandler(async (req, res) => res.json({ data: await service.report(req.user) }));
