@@ -31,4 +31,13 @@ router.post('/gallon/damage', requireCap('gudangDamage'), validate({ body: ctrl.
 // Sell damaged gallons — reduces "Galon Rusak" stock + records the money separately. Manage cap.
 router.post('/gallon-rusak/sell', requireCap('gudangKelola'), validate({ body: ctrl.schemas.sellRusakSchema }), ctrl.sellRusak);
 
+// Suppliers (Pemasok) — reuse the gudangKelola cap (warehouse management). Read is also gated on
+// it so only managers see the supplier list; stock-in selects from the same list.
+router.get('/suppliers', requireCap('gudangKelola'), validate({ query: ctrl.schemas.supplierListQuery }), ctrl.listSuppliers);
+router.get('/suppliers/:id', requireCap('gudangKelola'), validate({ params: ctrl.schemas.idParams }), ctrl.getSupplier);
+router.post('/suppliers', requireCap('gudangKelola'), validate({ body: ctrl.schemas.supplierCreateSchema }), ctrl.createSupplier);
+router.patch('/suppliers/:id', requireCap('gudangKelola'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.supplierUpdateSchema }), ctrl.updateSupplier);
+router.patch('/suppliers/:id/active', requireCap('gudangKelola'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.supplierActiveSchema }), ctrl.setSupplierActive);
+router.delete('/suppliers/:id', requireCap('gudangKelola'), validate({ params: ctrl.schemas.idParams }), ctrl.deleteSupplier);
+
 module.exports = router;

@@ -48,7 +48,7 @@ function itemClient(i, stock) {
   };
 }
 function movClient(m, itemName) {
-  return { id: m.id, itemId: m.itemId, itemName: itemName || null, type: m.type, qty: m.qty, effect: moveEffect(m), amount: m.amount != null ? m.amount : null, method: m.method || null, reason: m.reason, actorName: m.actorName, createdAt: m.createdAt ? new Date(m.createdAt).getTime() : null };
+  return { id: m.id, itemId: m.itemId, itemName: itemName || null, type: m.type, qty: m.qty, effect: moveEffect(m), amount: m.amount != null ? m.amount : null, method: m.method || null, reason: m.reason, supplierId: m.supplierId || null, actorName: m.actorName, createdAt: m.createdAt ? new Date(m.createdAt).getTime() : null };
 }
 
 // Sum of ledger movements per (non-galon) item.
@@ -138,8 +138,15 @@ async function addMovement(id, body, actor, allowed) {
   let qty = Math.round(+body.qty || 0);
   if (type === 'correction') { if (!qty) throw ApiError.badRequest('Koreksi tidak boleh 0.'); }
   else { qty = Math.abs(qty); if (qty <= 0) throw ApiError.badRequest('Jumlah harus lebih dari 0.'); }
+  // Optional supplier link — only meaningful on incoming stock (purchase/in). Validated to exist.
+  let supplierId = null;
+  if (body.supplierId && (type === 'purchase' || type === 'in')) {
+    const sup = await prisma.supplier.findUnique({ where: { id: String(body.supplierId) } });
+    if (!sup) throw ApiError.badRequest('Pemasok tidak ditemukan.');
+    supplierId = sup.id;
+  }
   const snap = await actorSnap(actor);
-  const mov = await prisma.stockMovement.create({ data: { itemId: id, type, qty, reason, refId: body.refId ? String(body.refId) : null, fleetId: '', actorId: snap.actorId, actorName: snap.actorName, actorRole: snap.actorRole } });
+  const mov = await prisma.stockMovement.create({ data: { itemId: id, type, qty, reason, refId: body.refId ? String(body.refId) : null, supplierId, fleetId: '', actorId: snap.actorId, actorName: snap.actorName, actorRole: snap.actorRole } });
   const stock = (await stockMap())[id] || 0;
   return { movement: movClient(mov, item.name), stock, needsRestock: item.bufferMin > 0 && stock <= item.bufferMin };
 }
@@ -297,9 +304,101 @@ async function listCloseouts(query) {
   return { data: rows.map(closeoutClient) };
 }
 
+// ── SUPPLIER (Pemasok) ───────────────────────────────────────────────────────
+function supplierClient(s) {
+  return {
+    id: s.id, code: s.code || null, name: s.name, phone: s.phone || '', address: s.address || '', note: s.note || '',
+    active: s.active !== false, createdAt: s.createdAt ? new Date(s.createdAt).getTime() : null,
+    createdByName: s.createdByName || null, editedByName: s.editedByName || null,
+    editedAt: s.editedAt ? new Date(s.editedAt).getTime() : null,
+    deactivatedByName: s.deactivatedByName || null, deactivatedAt: s.deactivatedAt ? new Date(s.deactivatedAt).getTime() : null,
+  };
+}
+// Monotonic supplier code "S-0001" — never reused (own counter table, like customers). On a
+// unique clash (concurrent creates) the loser retries with the next number.
+async function allocateSupplierCode() {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const count = await prisma.supplierCode.count();
+    const seq = count + 1;
+    const code = 'S-' + String(seq).padStart(4, '0');
+    try { await prisma.supplierCode.create({ data: { code, seq } }); return code; }
+    catch (e) { if (e && e.code === 'P2002') continue; throw e; }
+  }
+  throw ApiError.conflict('Gagal mengalokasikan kode pemasok, coba lagi.');
+}
+function supplierCols(body) {
+  const out = {};
+  if (body.name !== undefined) out.name = String(body.name || '').trim();
+  if (body.phone !== undefined) out.phone = String(body.phone || '').trim().slice(0, 40);
+  if (body.address !== undefined) out.address = String(body.address || '').trim().slice(0, 300);
+  if (body.note !== undefined) out.note = String(body.note || '').trim().slice(0, 500);
+  return out;
+}
+// status: 'active' (default) hides deactivated · 'inactive' only deactivated · 'all' both. q = name/code search.
+async function listSuppliers(query) {
+  const q = query || {};
+  const st = q.status === 'inactive' ? 'inactive' : q.status === 'all' ? 'all' : 'active';
+  const where = st === 'active' ? { active: { not: false } } : st === 'inactive' ? { active: false } : {};
+  const term = String(q.q || '').trim();
+  if (term) where.OR = [{ name: { contains: term } }, { code: { contains: term } }];
+  const rows = await prisma.supplier.findMany({ where, orderBy: [{ active: 'desc' }, { code: 'asc' }] });
+  return { data: rows.map(supplierClient) };
+}
+async function getSupplier(id) {
+  const s = await prisma.supplier.findUnique({ where: { id } });
+  if (!s) throw ApiError.notFound('Pemasok tidak ditemukan.');
+  // Purchase history — read-only archive of the stock movements that recorded this supplier.
+  const movs = await prisma.stockMovement.findMany({ where: { supplierId: id }, orderBy: { createdAt: 'desc' }, take: 300 });
+  const itemIds = [...new Set(movs.map((m) => m.itemId))];
+  const items = itemIds.length ? await prisma.inventoryItem.findMany({ where: { id: { in: itemIds } }, select: { id: true, name: true } }) : [];
+  const nameById = {}; items.forEach((i) => { nameById[i.id] = i.name; });
+  return { ...supplierClient(s), purchases: movs.map((m) => movClient(m, nameById[m.itemId])) };
+}
+async function createSupplier(body, actor) {
+  const cols = supplierCols(body);
+  if (!cols.name) throw ApiError.badRequest('Nama pemasok wajib diisi.');
+  const snap = await actorSnap(actor);
+  const code = await allocateSupplierCode();
+  const s = await prisma.supplier.create({ data: { ...cols, code, createdById: snap.actorId, createdByName: snap.actorName } });
+  console.info(`[gudang] pemasok dibuat: ${code} "${s.name}" oleh ${snap.actorName || snap.actorId}`);
+  return supplierClient(s);
+}
+async function updateSupplier(id, body, actor) {
+  const s = await prisma.supplier.findUnique({ where: { id } });
+  if (!s) throw ApiError.notFound('Pemasok tidak ditemukan.');
+  const cols = supplierCols(body);
+  if (cols.name !== undefined && !cols.name) throw ApiError.badRequest('Nama pemasok wajib diisi.');
+  const snap = await actorSnap(actor);
+  const updated = await prisma.supplier.update({ where: { id }, data: { ...cols, editedByName: snap.actorName, editedAt: new Date() } });
+  console.info(`[gudang] pemasok diubah: ${s.code || id} oleh ${snap.actorName || snap.actorId}`);
+  return supplierClient(updated);
+}
+async function setSupplierActive(id, active, actor) {
+  const s = await prisma.supplier.findUnique({ where: { id } });
+  if (!s) throw ApiError.notFound('Pemasok tidak ditemukan.');
+  const snap = await actorSnap(actor);
+  const data = active
+    ? { active: true, deactivatedAt: null, deactivatedByName: null }
+    : { active: false, deactivatedAt: new Date(), deactivatedByName: snap.actorName };
+  const updated = await prisma.supplier.update({ where: { id }, data });
+  console.info(`[gudang] pemasok ${active ? 'diaktifkan' : 'dinonaktifkan'}: ${s.code || id} oleh ${snap.actorName || snap.actorId}`);
+  return supplierClient(updated);
+}
+// Hard delete ONLY when the supplier was never referenced by a stock movement (deactivate keeps history).
+async function deleteSupplier(id, actor) {
+  const s = await prisma.supplier.findUnique({ where: { id } });
+  if (!s) throw ApiError.notFound('Pemasok tidak ditemukan.');
+  const refs = await prisma.stockMovement.count({ where: { supplierId: id } });
+  if (refs > 0) throw ApiError.badRequest('Pemasok sudah dipakai di riwayat stok — nonaktifkan saja (data tetap tersimpan).');
+  const snap = await actorSnap(actor);
+  await prisma.supplier.delete({ where: { id } });
+  console.info(`[gudang] pemasok dihapus (tanpa riwayat): ${s.code || id} oleh ${snap.actorName || snap.actorId}`);
+}
+
 module.exports = {
   seedInventoryItems, gudangSummary, getItem, createItem, updateItem, addMovement, report,
   reportGallonDamage, sellGalonRusak,
   closeoutPreview, closeWarehouse, listCloseouts,
+  listSuppliers, getSupplier, createSupplier, updateSupplier, setSupplierActive, deleteSupplier,
   ADD_TYPES, OUT_TYPES, ALL_TYPES, KINDS,
 };

@@ -762,6 +762,7 @@ model StockMovement {
   method    String?                               // payment method for a 'sale' (Cash/Transfer/…)
   fleetId   String   @default("")                 // optional fleet scope ('' = global)
   refId     String?                               // optional link to another record (the source GallonMovement, …)
+  supplierId String?                              // optional → Supplier.id, on purchase/restock movements
   reason    String   @default("")
   actorId   String?
   actorName String?
@@ -771,6 +772,38 @@ model StockMovement {
   item InventoryItem @relation(fields: [itemId], references: [id])
   @@index([itemId])
   @@index([type])
+  @@index([supplierId])
+}
+
+// ── SUPPLIER (Pemasok) — who we buy warehouse stock from ─────────────────────
+// Soft-delete like Customer: `active=false` keeps the purchase history; a hard delete is
+// only allowed when no StockMovement ever referenced the supplier. Codes are server-
+// allocated and monotonic (never reused) via SupplierCode.
+model Supplier {
+  id            String   @id @default(cuid())
+  code          String?  @unique                  // running id "S-0001" (server-allocated)
+  name          String
+  phone         String   @default("")
+  address       String   @default("")
+  note          String   @default("")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  createdById   String?
+  createdByName String?                            // audit: who created it
+  editedByName  String?                            // audit: who last edited it
+  editedAt      DateTime?
+  deactivatedByName String?                        // audit: who deactivated it
+  deactivatedAt DateTime?
+
+  @@index([active])
+}
+
+// Monotonic counter for Supplier.code — one row per code ever issued; never reused.
+model SupplierCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  seq       Int      @unique
+  createdAt DateTime @default(now())
 }
 
 // Daily warehouse closeout (opname) — a stock-take + day report. The officer confirms or

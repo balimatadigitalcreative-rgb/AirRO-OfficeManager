@@ -19,8 +19,14 @@ const updateItemSchema = z.object({
   photoId: z.string().max(60).nullable().optional(),   // Attachment.id, or null to remove
   bufferMin: z.number().int().min(0).optional(),
 });
-// "Tambah Stok" / "Koreksi" — additive + correction types (gudangKelola).
-const stockSchema = z.object({ type: z.enum(['opening', 'purchase', 'in', 'correction']), qty: z.number().int(), reason: z.string().trim().min(1).max(300), refId: z.string().max(120).optional() });
+// "Tambah Stok" / "Koreksi" — additive + correction types (gudangKelola). A purchase/restock
+// may record the supplier (supplierId) + an invoice/PO ref (refId).
+const stockSchema = z.object({ type: z.enum(['opening', 'purchase', 'in', 'correction']), qty: z.number().int(), reason: z.string().trim().min(1).max(300), refId: z.string().max(120).optional(), supplierId: z.string().max(60).optional() });
+// Supplier (Pemasok) — gudangKelola. Codes are server-allocated (S-0001).
+const supplierCreateSchema = z.object({ name: z.string().trim().min(1).max(120), phone: z.string().trim().max(40).optional(), address: z.string().trim().max(300).optional(), note: z.string().trim().max(500).optional() });
+const supplierUpdateSchema = supplierCreateSchema.partial();
+const supplierListQuery = z.object({ q: z.string().max(80).optional(), status: z.enum(['active', 'inactive', 'all']).optional() });
+const supplierActiveSchema = z.object({ active: z.boolean() });
 // Damage / loss write-off (gudangDamage).
 const damageSchema = z.object({ type: z.enum(['damage', 'loss']), qty: z.number().int().positive(), reason: z.string().trim().min(1).max(300), refId: z.string().max(120).optional() });
 // Report a broken/lost GOOD gallon (gudangDamage). Reason mandatory; fleet/culprit/photo optional.
@@ -56,9 +62,17 @@ const sellRusak = asyncHandler(async (req, res) => res.status(201).json({ data: 
 const closeoutPreview = asyncHandler(async (req, res) => res.json({ data: await service.closeoutPreview(req.query.date, req.user) }));
 const closeWarehouse = asyncHandler(async (req, res) => res.status(201).json({ data: await service.closeWarehouse(req.body, req.user) }));
 const listCloseouts = asyncHandler(async (req, res) => res.json(await service.listCloseouts(req.query)));
+// Suppliers
+const listSuppliers = asyncHandler(async (req, res) => res.json(await service.listSuppliers(req.query)));
+const getSupplier = asyncHandler(async (req, res) => res.json({ data: await service.getSupplier(req.params.id) }));
+const createSupplier = asyncHandler(async (req, res) => res.status(201).json({ data: await service.createSupplier(req.body, req.user) }));
+const updateSupplier = asyncHandler(async (req, res) => res.json({ data: await service.updateSupplier(req.params.id, req.body, req.user) }));
+const setSupplierActive = asyncHandler(async (req, res) => res.json({ data: await service.setSupplierActive(req.params.id, req.body.active, req.user) }));
+const deleteSupplier = asyncHandler(async (req, res) => { await service.deleteSupplier(req.params.id, req.user); res.status(204).send(); });
 
 module.exports = {
   summary, getItem, createItem, updateItem, addStock, addDamage, report, reportGallonDamage, sellRusak,
+  listSuppliers, getSupplier, createSupplier, updateSupplier, setSupplierActive, deleteSupplier,
   closeoutPreview, closeWarehouse, listCloseouts,
-  schemas: { idParams, createItemSchema, updateItemSchema, stockSchema, damageSchema, gallonDamageSchema, sellRusakSchema, closeoutQuery, closeoutPreviewQuery, closeoutSchema },
+  schemas: { idParams, createItemSchema, updateItemSchema, stockSchema, damageSchema, gallonDamageSchema, sellRusakSchema, closeoutQuery, closeoutPreviewQuery, closeoutSchema, supplierCreateSchema, supplierUpdateSchema, supplierListQuery, supplierActiveSchema },
 };

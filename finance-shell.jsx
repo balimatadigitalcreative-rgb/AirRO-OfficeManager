@@ -44,6 +44,7 @@ function navForRole(p, role) {
   ].forEach((it) => { if (it.caps.some((c) => p[c])) items.push({ id: it.id, label: it.label, icon: it.icon, grp: 'distribusi' }); });
   // GUDANG — warehouse inventory. One screen; shown iff the user may view it.
   if (p.gudangView) items.push({ id: 'gudang', label: tr('nav.gudang'), icon: 'IconStore', grp: 'gudang' });
+  if (p.gudangKelola) items.push({ id: 'suppliers', label: tr('nav.suppliers'), icon: 'IconCustomers', grp: 'gudang' });
   return items;
 }
 const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'];
@@ -1246,6 +1247,9 @@ function FApp() {
 
           {screen === 'gudang' && p.gudangView && (
             <GUDANG.Dept refreshKey={distTick} canManage={!!p.gudangKelola} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} fleet={fleet} today={FIN.TODAY} />
+          )}
+          {screen === 'suppliers' && p.gudangKelola && (
+            <GUDANG.Suppliers />
           )}
 
           {screen === 'setoran' && p.setoran && (

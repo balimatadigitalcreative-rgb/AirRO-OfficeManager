@@ -193,6 +193,13 @@
       closeoutPreview: (date) => req('GET', '/gudang/closeout?date=' + encodeURIComponent(date)),
       closeWarehouse: (data) => req('POST', '/gudang/closeout', data),               // { date, items:[{itemId,physical,reason?}], note? }
       closeouts: (date) => req('GET', '/gudang/closeouts' + (date ? '?date=' + encodeURIComponent(date) : '')),
+      // Suppliers (Pemasok).
+      suppliers: (query) => req('GET', '/gudang/suppliers' + (query ? '?' + query : '')),   // ?q=&status=active|inactive|all
+      supplier: (id) => req('GET', '/gudang/suppliers/' + id),                        // + purchase history
+      createSupplier: (data) => req('POST', '/gudang/suppliers', data),               // { name, phone?, address?, note? }
+      updateSupplier: (id, data) => req('PATCH', '/gudang/suppliers/' + id, data),
+      setSupplierActive: (id, active) => req('PATCH', '/gudang/suppliers/' + id + '/active', { active }),
+      deleteSupplier: (id) => req('DELETE', '/gudang/suppliers/' + id),
     },
     settings: {
       all: () => req('GET', '/settings'),
