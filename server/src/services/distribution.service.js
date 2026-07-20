@@ -8,6 +8,7 @@
 //   • every write also appends an immutable DistAuditLog row.
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const { normalizePhone } = require('../utils/phone');
 const { resolvePerms } = require('../config/permissions');
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
 
@@ -277,7 +278,7 @@ async function getCustomer(id, user) {
 function customerCols(body) {
   return {
     name: String(body.name || '').trim(),
-    phone: body.phone != null ? String(body.phone).trim() : '',
+    phone: body.phone != null ? normalizePhone(body.phone) : '',   // always stored as "08…"
     masterPrice: int(body.masterPrice != null ? body.masterPrice : body.master_price),
     deliveryDays: JSON.stringify(cleanDays(body.deliveryDays)),
     armada: body.armada != null ? String(body.armada).trim() : '',
@@ -323,7 +324,7 @@ async function updateCustomer(id, body, actor) {
   if (!fleetAllows(actor, cur.armada)) throw ApiError.notFound('Customer not found');   // out of scope
   const data = {};
   if (body.name != null) { const n = String(body.name).trim(); if (!n) throw ApiError.badRequest('name is required'); data.name = n; }
-  if (body.phone != null) data.phone = String(body.phone).trim();
+  if (body.phone != null) data.phone = normalizePhone(body.phone);
   if (body.deliveryDays !== undefined) data.deliveryDays = JSON.stringify(cleanDays(body.deliveryDays));
   if (body.armada !== undefined) data.armada = resolveWriteFleet(actor, body.armada);   // can't move out of scope
   if (body.reminder !== undefined) data.reminder = cleanReminder(body.reminder);        // billing-reminder settings
@@ -391,7 +392,8 @@ async function setLocationPhoto(id, body, actor) {
 async function importCustomers(list, actor, clientSkipped) {
   const rows = Array.isArray(list) ? list : [];
   const snap = await actorSnap(actor);
-  const dupKey = (n, p) => (String(n || '').trim().toLowerCase() + '|' + String(p || '').trim().toLowerCase());
+  // Dedup on the NORMALISED phone so "8123…" (Excel-mangled) and "08123…" are the same person.
+  const dupKey = (n, p) => (String(n || '').trim().toLowerCase() + '|' + normalizePhone(p));
   const existing = await prisma.customer.findMany({ where: fleetWhere(actor, 'armada'), select: { name: true, phone: true } });
   const seen = new Set(existing.map((c) => dupKey(c.name, c.phone)));
   let created = 0, serverSkipped = 0; const out = [];

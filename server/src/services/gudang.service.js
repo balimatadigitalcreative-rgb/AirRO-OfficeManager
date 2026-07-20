@@ -6,6 +6,7 @@
 // here only carries a buffer threshold; its stock/movements are never written through this module.
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const { normalizePhone } = require('../utils/phone');
 const distribution = require('./distribution.service');
 
 // Seed the built-in item catalogue (idempotent). New types can also be added at runtime.
@@ -329,7 +330,7 @@ async function allocateSupplierCode() {
 function supplierCols(body) {
   const out = {};
   if (body.name !== undefined) out.name = String(body.name || '').trim();
-  if (body.phone !== undefined) out.phone = String(body.phone || '').trim().slice(0, 40);
+  if (body.phone !== undefined) out.phone = normalizePhone(body.phone).slice(0, 40);   // same "08…" rule as customers
   if (body.address !== undefined) out.address = String(body.address || '').trim().slice(0, 300);
   if (body.note !== undefined) out.note = String(body.note || '').trim().slice(0, 500);
   return out;

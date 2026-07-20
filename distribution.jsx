@@ -28,6 +28,26 @@ const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((
 const MISSING_KEYS = { phone: 'dist.mPhone', location: 'dist.mLoc', armada: 'dist.mArmada', deliveryDays: 'dist.mDays', price: 'dist.mPrice' };
 const missChips = (missing) => (missing || []).map((k) => <span key={k} className="dist-miss-chip">{trD(MISSING_KEYS[k] || k)}</span>);
 const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' } };
+// Indonesian phone normalisation — MIRRORS server/src/utils/phone.js exactly (that one is
+// authoritative; this is for live preview/dedupe in the browser). Excel silently drops the
+// leading 0 from a phone column and people paste "+62 …", so every number is repaired to the
+// stored "08…" form — staff never have to reformat a spreadsheet.
+//   "" → ""  ·  "+62 812-1122-3344" → "081211223344"  ·  "81211223344" → "081211223344"
+//   "6281…" → "081…"  ·  "081…" → "081…"  ·  other digits kept as-is (landline/short)
+function normalizePhone(raw) {
+  const d = String(raw == null ? '' : raw).replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('62')) return '0' + d.slice(2);
+  if (d.startsWith('0')) return d;
+  if (d.startsWith('8')) return '0' + d;
+  return d;
+}
+// Did normalisation actually repair the number (vs just strip formatting)? Drives the
+// "0 dipulihkan" hint in the import preview so the fix is transparent, not silent.
+const phoneWasFixed = (raw) => { const d = String(raw == null ? '' : raw).replace(/\D/g, ''); return !!d && normalizePhone(d) !== d; };
+// WhatsApp wants the international form. Numbers are stored "08…", so: 62 + rest.
+const waNumber = (raw) => { const p = normalizePhone(raw); return p.startsWith('0') ? '62' + p.slice(1) : p; };
+
 const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 function fmtDT(iso) { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const p = (n) => String(n).padStart(2, '0'); return d.getDate() + ' ' + MONTHS_ID[d.getMonth()] + ' ' + d.getFullYear() + ' · ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
 // Local YYYY-MM-DD helpers for the Cash Integration period picker.
@@ -717,9 +737,7 @@ function InvoiceViewer({ invoice, onClose }) {
       ...iv.items.map((it) => it.date + ' · ' + it.qty + ' ' + trD('dist.galonUnit') + ' · ' + rpFull(it.amount)),
       '', trD('dist.total') + ': ' + rpFull(iv.total), trD('dist.sisaBon') + ': ' + rpFull(iv.sisaBon),
       iv.dueDate ? trD('dist.dueDate') + ': ' + iv.dueDate : ''].filter(Boolean);
-    const raw = (cust.phone || '').replace(/[^0-9]/g, '');
-    const phone = raw ? (raw.startsWith('0') ? '62' + raw.slice(1) : raw) : '';
-    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
+    window.open('https://wa.me/' + waNumber(cust.phone) + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
   };
   return (
     <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 210 }}>
@@ -791,9 +809,7 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
     const lines = ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + (customer.code ? customer.code + ' · ' : '') + customer.name, trD('dist.period') + ': ' + periodLabel, '',
       trD('dist.totalGalon') + ': ' + numX(galon), trD('dist.histTotalValue') + ': ' + rpFull(nilai), trD('dist.histTotalPaid') + ': ' + rpFull(terbayar), trD('dist.sisaBon') + ': ' + rpFull(customer.sisaBon || 0),
       '', trD('dist.txnCount', { n: rows.length }) + ' · ' + docNo];
-    const raw = (customer.phone || '').replace(/[^0-9]/g, '');
-    const phone = raw ? (raw.startsWith('0') ? '62' + raw.slice(1) : raw) : '';
-    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
+    window.open('https://wa.me/' + waNumber(customer.phone) + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
   };
   return (
     <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 210 }}>
@@ -1158,7 +1174,9 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
   // ── spreadsheet import parsing (shared by paste-text AND file upload) ──
   const typeByLabel = {}; types.forEach((t) => { typeByLabel[(t.label || '').toLowerCase()] = t.id; });
   // Dedup key = name + phone (two different people can share a name), matched case-insensitively.
-  const dupKey = (n, p) => (String(n || '').trim().toLowerCase() + '|' + String(p || '').trim().toLowerCase());
+  // Dedup on the NORMALISED phone so an Excel-mangled "8123…" and a typed "08123…" are the
+  // same person (mirrors the server's defensive dedup).
+  const dupKey = (n, p) => (String(n || '').trim().toLowerCase() + '|' + normalizePhone(p));
   const existing = new Set((custs || []).map((c) => dupKey(c.name, c.phone)));
   // Rows of cells come from an uploaded file if present, else the pasted textarea.
   const rawCells = impFileRows || impText.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
@@ -1178,7 +1196,9 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
   const cellAt = (row, i) => (i >= 0 && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
   const seen = new Set();
   const impRows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim())).map((cols) => {
-    const name = cellAt(cols, colMap.name); const phone = cellAt(cols, colMap.phone);
+    const name = cellAt(cols, colMap.name); const phoneRaw = cellAt(cols, colMap.phone);
+    // Auto-repair the number for BOTH the preview and the payload — the user never reformats Excel.
+    const phone = normalizePhone(phoneRaw); const phoneFixed = phoneWasFixed(phoneRaw);
     const type = typeByLabel[cellAt(cols, colMap.type).toLowerCase()] || 'reguler';
     const num = parseInt(cellAt(cols, colMap.price).replace(/[^0-9]/g, ''), 10);
     const dc = cellAt(cols, colMap.days); const days = dc ? DAY_CODES.filter((d) => new RegExp(d, 'i').test(dc)) : [];
@@ -1187,7 +1207,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
     const key = dupKey(name, phone); const dup = existing.has(key) || seen.has(key);
     if (name) seen.add(key);
     const valid = !!name && !!num && !dup;
-    return { name: name || '(kosong)', phone: phone || '—', type, price: num || 0, days, armada, address, mapsUrl, valid, status: valid ? 'ok' : (!name || !num) ? 'kurang' : 'dup' };
+    return { name: name || '(kosong)', phone: phone || '—', phoneFixed, type, price: num || 0, days, armada, address, mapsUrl, valid, status: valid ? 'ok' : (!name || !num) ? 'kurang' : 'dup' };
   });
   const impValid = impRows.filter((r) => r.valid);
   const resetImport = () => { setImpText(''); setImpFileRows(null); setImpFileName(''); setImpFileErr(''); };
@@ -1248,7 +1268,10 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
           <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.cfName')} <span style={{ color: 'var(--neg)' }}>*</span></label>
           <input className="fld" value={form.name} placeholder={trD('dist.cfNamePh')} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <label className="fld-label">{trD('dist.cfPhone')}</label>
-          <input className="fld" value={form.phone} placeholder="cth. 0812-3456-7890" onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          {/* Repair on blur so the field shows exactly what will be stored ("8123…" → "08123…"). */}
+          <input className="fld" value={form.phone} placeholder="cth. 0812-3456-7890"
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            onBlur={() => setForm((f) => ({ ...f, phone: normalizePhone(f.phone) }))} />
           <label className="fld-label">{trD('dist.cfType')}</label>
           <div className="dist-typechips">
             {types.map((t) => <button type="button" key={t.id} className={`dist-typechip ${form.type === t.id ? 'on' : ''}`} onClick={() => setForm({ ...form, type: t.id })}>{t.label}</button>)}
@@ -1514,6 +1537,8 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
             <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.importT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.importSub')}</div></div><button className="jp-icon" onClick={() => setImpOpen(false)}><IconClose s={18} /></button></div>
             <div className="modal-body">
               <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Nama · No HP · Tipe · Harga</b></span><button type="button" className="dist-link" onClick={downloadImportTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+              {/* Excel drops the leading 0 from phone columns — we repair it, so nobody has to reformat. */}
+              <div className="dist-infobox" style={{ marginBottom: 10 }}><IconCheck s={16} /><span>{trD('dist.impPhoneNote')}</span></div>
               <div className="dist-imp-upload">
                 <input ref={impFileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onImpFile} />
                 <button type="button" className="btn btn-ghost" onClick={() => impFileRef.current && impFileRef.current.click()}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.importPick')}</button>
@@ -1529,7 +1554,9 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
                   <div className="dist-imp-hrow"><span>Nama</span><span>No HP</span><span>Tipe</span><span>Harga</span><span>Status</span></div>
                   {impRows.map((r, i) => (
                     <div key={i} className="dist-imp-row">
-                      <span className="dist-imp-name">{r.name}</span><span>{r.phone}</span><span>{typeLabel(r.type)}</span><span>{r.price ? rpFull(r.price) : '—'}</span>
+                      <span className="dist-imp-name">{r.name}</span>
+                      <span>{r.phone}{r.phoneFixed && <span className="dist-phone-fixed" title={trD('dist.impPhoneFixedT')}>{trD('dist.impPhoneFixed')}</span>}</span>
+                      <span>{typeLabel(r.type)}</span><span>{r.price ? rpFull(r.price) : '—'}</span>
                       <span><span className={`dist-imp-status ${r.status}`}>{r.status === 'ok' ? trD('dist.impReady') : r.status === 'kurang' ? trD('dist.impMissing') : trD('dist.impDup')}</span></span>
                     </div>
                   ))}
