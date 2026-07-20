@@ -218,11 +218,55 @@ function cleanReminder(r) {
 }
 // Per-customer rollups from the (immutable) transactions: total gallons, running
 // bon (sisaBon = bon booked − pelunasan collected, floored at 0), last activity.
-async function listCustomers(user, qFleet, status) {
+// Build the DB-level WHERE for the detailed customer filter. Everything that can be
+// expressed against a column is done here (so a large dataset never ships to the client);
+// only `bon` needs post-filtering because sisaBon is computed from the transaction ledger.
+// `q` searches name / phone / code. Phone is matched on the NORMALISED form as well, so
+// searching "0812…" finds a row stored either way.
+function customerFilterWhere(f) {
+  const w = {};
+  const AND = [];
+  const q = String(f.q || '').trim();
+  if (q) {
+    const phoneDigits = normalizePhone(q);
+    const or = [{ name: { contains: q } }, { code: { contains: q } }, { phone: { contains: q } }];
+    if (phoneDigits && phoneDigits !== q) or.push({ phone: { contains: phoneDigits } });
+    AND.push({ OR: or });
+  }
+  const types = String(f.types || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (types.length) AND.push({ type: { in: types } });
+  const pMin = f.priceMin != null && f.priceMin !== '' ? Math.max(0, Math.round(+f.priceMin || 0)) : null;
+  const pMax = f.priceMax != null && f.priceMax !== '' ? Math.max(0, Math.round(+f.priceMax || 0)) : null;
+  if (pMin != null) AND.push({ masterPrice: { gte: pMin } });
+  if (pMax != null) AND.push({ masterPrice: { lte: pMax } });
+  // "Punya lokasi" = a maps link OR coordinates (mirrors mapsLinkOf / hasLocation).
+  const hasLoc = { OR: [{ mapsUrl: { not: '' } }, { AND: [{ lat: { not: null } }, { lng: { not: null } }] }] };
+  const noLoc = { AND: [{ mapsUrl: '' }, { OR: [{ lat: null }, { lng: null }] }] };
+  if (f.hasLocation === 'ya') AND.push(hasLoc);
+  else if (f.hasLocation === 'tidak') AND.push(noLoc);
+  // Completeness reuses the SAME core rule as customerCompleteness(): phone AND location.
+  if (f.complete === 'lengkap') AND.push({ AND: [{ phone: { not: '' } }, hasLoc] });
+  else if (f.complete === 'belum') AND.push({ OR: [{ phone: '' }, noLoc] });
+  // deliveryDays is a JSON array string — match the quoted code so "Sen" can't hit "Senin".
+  const days = String(f.days || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (days.length) {
+    const conds = days.map((d) => ({ deliveryDays: { contains: '"' + d + '"' } }));
+    AND.push(f.daysMode === 'all' ? { AND: conds } : { OR: conds });
+  }
+  if (AND.length) w.AND = AND;
+  return w;
+}
+
+async function listCustomers(user, qFleet, status, filters) {
   // status: 'active' (default) hides deactivated · 'inactive' shows only deactivated · 'all' shows both.
+  const f = filters || {};
   const st = status === 'inactive' || status === 'all' ? status : 'active';
   const activeWhere = st === 'active' ? { active: { not: false } } : st === 'inactive' ? { active: false } : {};
-  const rows = await prisma.customer.findMany({ where: { ...fleetWhere(user, 'armada', qFleet), ...activeWhere }, orderBy: { name: 'asc' } });
+  const scopeWhere = fleetWhere(user, 'armada', qFleet);
+  // Denominator for "Menampilkan X dari Y": everything this user may see in the chosen
+  // fleet, before any of the detailed criteria are applied.
+  const total = await prisma.customer.count({ where: scopeWhere });
+  const rows = await prisma.customer.findMany({ where: { ...scopeWhere, ...activeWhere, ...customerFilterWhere(f) }, orderBy: { name: 'asc' } });
   const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...NOT_LEGACY }, select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true } });
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const agg = {};
@@ -234,11 +278,17 @@ async function listCustomers(user, qFleet, status) {
     if (t.txnDate > a.lastDate) a.lastDate = t.txnDate;
   });
   const heldMap = await gallonBalances(user, qFleet);   // gallons each customer currently holds
-  const data = rows.map((c) => {
+  let data = rows.map((c) => {
     const a = agg[c.id] || { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 };
     return { ...custClient(c), totalGalon: a.totalGalon, sisaBon: Math.max(0, a.bon - a.pelunasan), lastDate: a.lastDate || null, txnCount: a.txnCount, gallonsHeld: heldMap[c.id] || 0 };
   });
-  return { data };
+  // `bon` is the one criterion that can't be a DB predicate — sisaBon is derived from the
+  // transaction ledger (+ active price adjustments), so it's applied to the computed rows.
+  if (f.bon === 'ada') data = data.filter((c) => (c.sisaBon || 0) > 0);
+  else if (f.bon === 'lunas') data = data.filter((c) => (c.sisaBon || 0) <= 0);
+  const bonMin = f.bonMin != null && f.bonMin !== '' ? Math.max(0, Math.round(+f.bonMin || 0)) : null;
+  if (bonMin != null && bonMin > 0) data = data.filter((c) => (c.sisaBon || 0) >= bonMin);
+  return { data, total, filtered: data.length };
 }
 async function getCustomer(id, user) {
   const c = await prisma.customer.findUnique({ where: { id }, include: { priceHistory: { orderBy: { changedAt: 'desc' } } } });

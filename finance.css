@@ -2341,3 +2341,27 @@ img, svg, canvas, video { max-width: 100%; }
 .sev-hrow input:focus { outline: none; border-color: var(--green-700); }
 @media (max-width: 560px) { .sev-hrow { grid-template-columns: 1fr; gap: 4px; } .sev-head { display: none; } }
 @media (max-width: 560px) { .kb-row { flex-wrap: wrap; } .kb-right { text-align: left; width: 100%; } }
+
+/* ── Pelanggan: detailed filter ─────────────────────────────────────────────── */
+.dist-filter-btn { position: relative; flex-shrink: 0; }
+.dist-filter-btn.on { border-color: var(--green-700); color: var(--green-800); background: var(--mint-100); }
+.dist-filter-n { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; margin-left: 6px; border-radius: 999px; background: var(--green-700); color: #fff; font-size: 10.5px; font-weight: 800; }
+/* Active-criteria chips + result count */
+.dist-filter-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px; }
+.dist-fchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: var(--green-800); background: var(--mint-100); border: 1px solid var(--mint-200); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.dist-fchip:hover { background: var(--mint-200); }
+.dist-filter-count { font-size: 12px; color: var(--text-mut); white-space: nowrap; }
+/* Desktop: a normal centred panel. */
+.dist-filter-sheet { max-width: 520px; }
+
+@media (max-width: 860px) {
+  /* Mobile: a bottom SHEET — anchored to the bottom, one scroller inside, safe-area honoured. */
+  .dist-filter-scrim { align-items: flex-end; padding: 0; }
+  .dist-filter-sheet {
+    width: 100%; max-width: 100%; border-radius: 22px 22px 0 0; max-height: 88dvh;
+    display: flex; flex-direction: column;
+  }
+  .dist-filter-sheet .modal-body { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .dist-filter-sheet .modal-foot { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+  .dist-filter-btn { order: -1; }
+}

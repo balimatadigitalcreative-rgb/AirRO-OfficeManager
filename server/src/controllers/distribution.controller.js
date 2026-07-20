@@ -108,7 +108,22 @@ const closeoutQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60
 const runOpenSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), gallonsOut: z.number().int().positive(), note: z.string().max(300).optional() });
 const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegative(), gallonsEmptyReturned: z.number().int().nonnegative(), diffReason: z.string().max(300).optional() });
 const runQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['open', 'closed']).optional() });
-const custListQuery = z.object({ fleet: z.string().max(60).optional(), status: z.enum(['active', 'inactive', 'all']).optional() });
+// Customer list + detailed multi-criteria filter. Every criterion is optional and they
+// combine with AND. Kept as query params so the list stays a plain cacheable GET.
+const custListQuery = z.object({
+  fleet: z.string().max(60).optional(),
+  status: z.enum(['active', 'inactive', 'all']).optional(),
+  q: z.string().max(80).optional(),                       // name / phone / code
+  types: z.string().max(400).optional(),                  // CSV of CustomerType ids
+  bon: z.enum(['ada', 'lunas']).optional(),
+  bonMin: z.coerce.number().int().min(0).optional(),      // sisa bon ≥ N
+  days: z.string().max(60).optional(),                    // CSV of day codes (Sen…Min)
+  daysMode: z.enum(['any', 'all']).optional(),
+  complete: z.enum(['lengkap', 'belum']).optional(),
+  hasLocation: z.enum(['ya', 'tidak']).optional(),
+  priceMin: z.coerce.number().int().min(0).optional(),
+  priceMax: z.coerce.number().int().min(0).optional(),
+});
 const idParams = z.object({ id: z.string().min(1) });
 const batchParams = z.object({ batchId: z.string().min(1) });
 const invoiceCreateSchema = z.object({
@@ -120,7 +135,7 @@ const invoiceCreateSchema = z.object({
 });
 
 // ── customers ──
-const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet, req.query.status)));
+const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet, req.query.status, req.query)));
 const getCustomer = asyncHandler(async (req, res) => res.json({ data: await service.getCustomer(req.params.id, req.user) }));
 const createCustomer = asyncHandler(async (req, res) => { const c = await service.createCustomer(req.body, req.user); bcast('create', c.id); res.status(201).json({ data: c }); });
 const updateCustomer = asyncHandler(async (req, res) => { const c = await service.updateCustomer(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });

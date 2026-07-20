@@ -115,7 +115,21 @@
       // scoped users are always restricted server-side regardless. Falsy/'all' = no filter.
       customers: {
         // status: undefined/'active' = active only (default); 'inactive' = deactivated only; 'all' = both.
-        list: (fleet, status) => { const q = []; if (fleet && fleet !== 'all') q.push('fleet=' + encodeURIComponent(fleet)); if (status && status !== 'active') q.push('status=' + encodeURIComponent(status)); return req('GET', '/distribusi/customers' + (q.length ? '?' + q.join('&') : '')); },
+        // `filter` = the detailed multi-criteria panel (all optional, combined with AND):
+        // { q, types:[], bon:'ada'|'lunas', bonMin, days:[], daysMode:'any'|'all',
+        //   complete:'lengkap'|'belum', hasLocation:'ya'|'tidak', priceMin, priceMax }.
+        // Sent to the server so filtering happens against the whole dataset, not the loaded page.
+        list: (fleet, status, filter) => {
+          const q = [];
+          if (fleet && fleet !== 'all') q.push('fleet=' + encodeURIComponent(fleet));
+          if (status && status !== 'active') q.push('status=' + encodeURIComponent(status));
+          const f = filter || {};
+          const add = (k, v) => { if (v != null && v !== '' && !(Array.isArray(v) && !v.length)) q.push(k + '=' + encodeURIComponent(Array.isArray(v) ? v.join(',') : v)); };
+          add('q', (f.q || '').trim()); add('types', f.types); add('bon', f.bon); add('bonMin', f.bonMin);
+          add('days', f.days); if ((f.days || []).length && f.daysMode === 'all') add('daysMode', 'all');
+          add('complete', f.complete); add('hasLocation', f.hasLocation); add('priceMin', f.priceMin); add('priceMax', f.priceMax);
+          return req('GET', '/distribusi/customers' + (q.length ? '?' + q.join('&') : ''));
+        },
         get: (id) => req('GET', '/distribusi/customers/' + id),
         create: (data) => req('POST', '/distribusi/customers', data),
         update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),

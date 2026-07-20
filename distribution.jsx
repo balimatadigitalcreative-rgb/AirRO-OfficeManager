@@ -22,6 +22,99 @@ const CUST_TAG = { reguler: 'reg', kos: 'kos', cafe: 'cafe', bulk: 'bulk' };
 const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Reguler');
 // Delivery-day codes (Mon…Sun). Server stores the customer's days as a subset of these.
 const DAY_CODES = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+// Detailed customer filter — "nothing selected" baseline. Every field is optional and the
+// server ANDs whatever is set. Kept at module scope so it's a stable reference for resets.
+const EMPTY_FILTER = { types: [], bon: '', bonMin: '', days: [], daysMode: 'any', complete: '', hasLocation: '', priceMin: '', priceMax: '' };
+const filterIsEmpty = (f) => !f.types.length && !f.bon && !f.bonMin && !f.days.length && !f.complete && !f.hasLocation && !f.priceMin && !f.priceMax;
+const filterCount = (f) => (f.types.length ? 1 : 0) + (f.bon ? 1 : 0) + (f.bonMin ? 1 : 0) + (f.days.length ? 1 : 0)
+  + (f.complete ? 1 : 0) + (f.hasLocation ? 1 : 0) + (f.priceMin || f.priceMax ? 1 : 0);
+
+// One removable chip per ACTIVE criterion. Each chip clears just its own criterion.
+function activeFilterChips(f, setF, typeMap) {
+  const out = [];
+  const set = (patch) => setF({ ...f, ...patch });
+  if (f.types.length) out.push({ key: 'types', label: trD('dist.fTipe') + ': ' + f.types.map((t) => (typeMap[t] && typeMap[t].label) || t).join(', '), clear: () => set({ types: [] }) });
+  if (f.bon) out.push({ key: 'bon', label: f.bon === 'ada' ? trD('dist.fBonAda') : trD('dist.fBonLunas'), clear: () => set({ bon: '' }) });
+  if (f.bonMin) out.push({ key: 'bonMin', label: trD('dist.fBonMin') + ' ' + rpFull(+f.bonMin || 0), clear: () => set({ bonMin: '' }) });
+  if (f.days.length) out.push({ key: 'days', label: trD('dist.fDays') + ': ' + f.days.join(', ') + (f.daysMode === 'all' ? ' (' + trD('dist.fDaysAll') + ')' : ''), clear: () => set({ days: [], daysMode: 'any' }) });
+  if (f.complete) out.push({ key: 'complete', label: f.complete === 'lengkap' ? trD('dist.fComplete') : trD('dist.fIncomplete'), clear: () => set({ complete: '' }) });
+  if (f.hasLocation) out.push({ key: 'hasLocation', label: f.hasLocation === 'ya' ? trD('dist.fLocYes') : trD('dist.fLocNo'), clear: () => set({ hasLocation: '' }) });
+  if (f.priceMin || f.priceMax) out.push({ key: 'price', label: trD('dist.fPrice') + ': ' + (f.priceMin ? rpFull(+f.priceMin) : '—') + ' – ' + (f.priceMax ? rpFull(+f.priceMax) : '—'), clear: () => set({ priceMin: '', priceMax: '' }) });
+  return out;
+}
+
+// The detailed filter. A collapsible panel on desktop; a bottom sheet on mobile (CSS) —
+// single scroll, chips wrap, safe-area honoured. Edits a DRAFT so nothing re-queries until
+// "Terapkan" (or a criterion is cleared from the chip bar).
+function CustomerFilterPanel({ value, types, onApply, onClose }) {
+  const [d, setD] = uSx(value);
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const set = (patch) => setD({ ...d, ...patch });
+  const toggleIn = (arr, v) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const num = (v) => v.replace(/[^0-9]/g, '');
+  const Chip = ({ on, onClick, children }) => <button type="button" className={`cat-chip ${on ? 'on' : ''}`} onClick={onClick}>{on ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{children}</button>;
+
+  return (
+    <div className="modal-scrim dist-filter-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card dist-filter-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.filterT')}</div>
+          <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+        </div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fTipe')}</label>
+          <div className="cat-chips">
+            {(types || []).map((t) => <Chip key={t.id} on={d.types.includes(t.id)} onClick={() => set({ types: toggleIn(d.types, t.id) })}>{t.label}</Chip>)}
+            {!(types || []).length && <div className="dist-empty" style={{ padding: 6 }}>—</div>}
+          </div>
+
+          <label className="fld-label">{trD('dist.fBon')}</label>
+          <div className="cat-chips">
+            <Chip on={d.bon === 'ada'} onClick={() => set({ bon: d.bon === 'ada' ? '' : 'ada' })}>{trD('dist.fBonAda')}</Chip>
+            <Chip on={d.bon === 'lunas'} onClick={() => set({ bon: d.bon === 'lunas' ? '' : 'lunas' })}>{trD('dist.fBonLunas')}</Chip>
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fBonMin')}</label>
+            <input className="fld tnum" inputMode="numeric" value={d.bonMin} placeholder="cth. 50000" onChange={(e) => set({ bonMin: num(e.target.value) })} />
+          </div>
+
+          <label className="fld-label">{trD('dist.fDays')}</label>
+          <div className="cat-chips">
+            {DAY_CODES.map((day) => <Chip key={day} on={d.days.includes(day)} onClick={() => set({ days: toggleIn(d.days, day) })}>{day}</Chip>)}
+          </div>
+          {d.days.length > 1 && (
+            <div className="cat-chips" style={{ marginTop: 6 }}>
+              <Chip on={d.daysMode !== 'all'} onClick={() => set({ daysMode: 'any' })}>{trD('dist.fDaysAny')}</Chip>
+              <Chip on={d.daysMode === 'all'} onClick={() => set({ daysMode: 'all' })}>{trD('dist.fDaysAll')}</Chip>
+            </div>
+          )}
+
+          <label className="fld-label">{trD('dist.fKelengkapan')}</label>
+          <div className="cat-chips">
+            <Chip on={d.complete === 'lengkap'} onClick={() => set({ complete: d.complete === 'lengkap' ? '' : 'lengkap' })}>{trD('dist.fComplete')}</Chip>
+            <Chip on={d.complete === 'belum'} onClick={() => set({ complete: d.complete === 'belum' ? '' : 'belum' })}>{trD('dist.fIncomplete')}</Chip>
+          </div>
+
+          <label className="fld-label">{trD('dist.fLocation')}</label>
+          <div className="cat-chips">
+            <Chip on={d.hasLocation === 'ya'} onClick={() => set({ hasLocation: d.hasLocation === 'ya' ? '' : 'ya' })}>{trD('dist.fLocYes')}</Chip>
+            <Chip on={d.hasLocation === 'tidak'} onClick={() => set({ hasLocation: d.hasLocation === 'tidak' ? '' : 'tidak' })}>{trD('dist.fLocNo')}</Chip>
+          </div>
+
+          <label className="fld-label">{trD('dist.fPrice')}</label>
+          <div className="gud-row2">
+            <div><input className="fld tnum" inputMode="numeric" value={d.priceMin} placeholder={trD('dist.fMin')} onChange={(e) => set({ priceMin: num(e.target.value) })} /></div>
+            <div><input className="fld tnum" inputMode="numeric" value={d.priceMax} placeholder={trD('dist.fMax')} onChange={(e) => set({ priceMax: num(e.target.value) })} /></div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={() => setD(EMPTY_FILTER)}>{trD('dist.fReset')}</button>
+          <button className="btn btn-primary" onClick={() => onApply(d)}>{trD('dist.fApply')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 const fmtDays = (arr) => (Array.isArray(arr) && arr.length ? DAY_CODES.filter((d) => arr.includes(d)).join(', ') : '');
 const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 // Missing-field labels for the "Data belum lengkap" chips (keys match server completeness output).
@@ -1065,6 +1158,11 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
   const [impFileBusy, setImpFileBusy] = uSx(false);
   const impFileRef = React.useRef(null);
   const [typesOpen, setTypesOpen] = uSx(false);
+  // ── Detailed filter (server-side, AND logic). EMPTY_FILTER is the "nothing selected"
+  // baseline; `fTotal` is the denominator for "Menampilkan X dari Y".
+  const [flt, setFlt] = uSx(EMPTY_FILTER);
+  const [fltOpen, setFltOpen] = uSx(false);
+  const [fTotal, setFTotal] = uSx(null);
 
   const ef = effFleet(fleetScope, distFleet);
   // Load the customer list. Never hangs: a stalled request is bounded by a 20s timeout, and any
@@ -1076,8 +1174,10 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000));
     // Only cap holders may view the Nonaktif list; everyone else is forced to 'active'.
     const st = (canDelete && statusFilter === 'inactive') ? 'inactive' : 'active';
-    return Promise.race([window.API.distribusi.customers.list(ef, st), timeout])
-      .then((r) => { setCusts(r.data || []); setLoadErr(''); })
+    // The detailed criteria go to the SERVER so filtering runs against the whole dataset
+    // (not just the rows already loaded), and the response carries the total for the count.
+    return Promise.race([window.API.distribusi.customers.list(ef, st, { ...flt, q }), timeout])
+      .then((r) => { setCusts(r.data || []); setFTotal(r.total != null ? r.total : null); setLoadErr(''); })
       .catch((e) => { setLoadErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
   const retry = () => { setCusts(null); setLoadErr(''); reload(); };
@@ -1095,6 +1195,14 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
     tryLoad(40);   // ~6s grace for the API to become ready
     return () => { cancelled = true; };
   }, [refreshKey, ef, statusFilter]);
+  // Search text + detailed filter re-query the SERVER, debounced so typing doesn't fire a
+  // request per keystroke. Skips the first run — the mount effect above already loaded.
+  const fltMounted = React.useRef(false);
+  uEx(() => {
+    if (!fltMounted.current) { fltMounted.current = true; return; }
+    const t = setTimeout(() => { if (window.API && window.API.distribusi) reload(); }, 300);
+    return () => clearTimeout(t);
+  }, [q, flt]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
   const typeMap = {}; types.forEach((t) => { typeMap[t.id] = t; });
@@ -1457,10 +1565,11 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
   }
 
   // ── LIST ──
-  const rows = (custs || []).filter((c) => {
-    if (q && !((c.name || '') + (c.phone || '') + (c.code || '')).toLowerCase().includes(q.toLowerCase())) return false;
-    return filter === 'all' ? true : filter === 'bon' ? c.sisaBon > 0 : filter === 'bulk' ? c.type === 'bulk' : filter === 'reguler' ? c.type === 'reguler' : filter === 'belum' ? c.complete === false : true;
-  });
+  // Search + the detailed criteria are applied SERVER-side (so they cover the whole dataset,
+  // not just the loaded page); only the quick chips still narrow the returned rows.
+  const rows = (custs || []).filter((c) => (
+    filter === 'all' ? true : filter === 'bon' ? c.sisaBon > 0 : filter === 'bulk' ? c.type === 'bulk' : filter === 'reguler' ? c.type === 'reguler' : filter === 'belum' ? c.complete === false : true
+  ));
   const incompleteN = (custs || []).filter((c) => c.complete === false).length;
   const chips = [['all', trD('dist.fAll')], ['bon', trD('dist.filterBon')], ['reguler', trD('dist.filterReg')], ['bulk', trD('dist.filterBulk')], ['belum', trD('dist.filterIncomplete') + (incompleteN ? ' (' + incompleteN + ')' : '')]];
   return (
@@ -1468,6 +1577,9 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
       <div className="dist-tx-toolbar">
         <div className="dist-search"><IconSearch s={16} /><input value={q} placeholder={trD('dist.searchCust')} onChange={(e) => setQ(e.target.value)} /></div>
+        <button type="button" className={`btn btn-ghost dist-filter-btn ${!filterIsEmpty(flt) ? 'on' : ''}`} onClick={() => setFltOpen(true)}>
+          <IconFilter s={15} />{trD('dist.filter')}{filterCount(flt) ? <span className="dist-filter-n">{filterCount(flt)}</span> : null}
+        </button>
         <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
         {canDelete && (
           <div className="dist-chips dist-status-chips">
@@ -1484,6 +1596,31 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
           </div>
         ) : <div className="dist-lockbtn"><IconLock s={14} />{trD('dist.addOwner')}</div>}
       </div>
+
+      {/* Active criteria as removable chips + the result count, so what's being applied is
+          always visible (a filter you can't see is a filter you forget you set). */}
+      {(!filterIsEmpty(flt) || custs !== null) && (
+        <div className="dist-filter-bar">
+          {activeFilterChips(flt, setFlt, typeMap).map((ch) => (
+            <button key={ch.key} type="button" className="dist-fchip" onClick={ch.clear} title={trD('dist.fRemove')}>
+              {ch.label}<IconClose s={12} />
+            </button>
+          ))}
+          {!filterIsEmpty(flt) && <button type="button" className="dist-link" onClick={() => setFlt(EMPTY_FILTER)}>{trD('dist.fReset')}</button>}
+          <div style={{ flex: 1 }} />
+          {custs !== null && (
+            <span className="dist-filter-count">
+              {fTotal != null ? trD('dist.fShowing', { n: rows.length, total: fTotal }) : trD('dist.fShowingN', { n: rows.length })}
+            </span>
+          )}
+        </div>
+      )}
+
+      {fltOpen && (
+        <CustomerFilterPanel
+          value={flt} types={types} onApply={(v) => { setFlt(v); setFltOpen(false); }} onClose={() => setFltOpen(false)}
+        />
+      )}
 
       <div className="card dist-card" style={{ padding: '6px 18px' }}>
         {loadErr && custs === null && (
