@@ -74,6 +74,26 @@ describe('access — dedicated dataWipe capability, granted to nobody by default
     const { ROLE_PERMS } = require('../src/config/permissions');
     Object.keys(ROLE_PERMS).forEach((role) => expect(ROLE_PERMS[role].dataWipe).toBeUndefined());
   });
+  // The UI groups categories by `group`; a category whose group the client doesn't know
+  // would render nowhere. Pin BOTH that the list is non-empty and that every group is one
+  // the settings panel buckets (WIPE_GROUPS in finance-settings.jsx).
+  it('returns a NON-EMPTY list whose every group the UI knows how to render', async () => {
+    const UI_GROUPS = ['distribusi', 'pelanggan', 'gudang', 'keuangan', 'hrd', 'lain', 'konfigurasi'];
+    const r = await request(app).get('/api/v1/data-wipe/categories').set(auth(wiper));
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body.data)).toBe(true);
+    expect(r.body.data.length).toBeGreaterThan(0);
+    r.body.data.forEach((c) => {
+      expect(typeof c.key).toBe('string');
+      expect(typeof c.label).toBe('string');
+      expect(Array.isArray(c.deps)).toBe(true);
+      expect(UI_GROUPS).toContain(c.group);          // else it would render nowhere
+    });
+    // every declared dependency must itself be a real category (else it can never be satisfied)
+    const keys = new Set(r.body.data.map((c) => c.key));
+    r.body.data.forEach((c) => c.deps.forEach((d) => expect(keys.has(d)).toBe(true)));
+  });
+
   it('a holder can list categories', async () => {
     const r = await request(app).get('/api/v1/data-wipe/categories').set(auth(wiper));
     expect(r.status).toBe(200);

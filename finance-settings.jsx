@@ -12,18 +12,42 @@ const WIPE_GROUPS = [
   ['distribusi', 'Distribusi'], ['pelanggan', 'Pelanggan'], ['gudang', 'Gudang'],
   ['keuangan', 'Keuangan'], ['hrd', 'HRD'], ['lain', 'Lainnya'], ['konfigurasi', 'Konfigurasi aplikasi'],
 ];
+const KNOWN_GROUPS = new Set(WIPE_GROUPS.map(([g]) => g));
+// If the server ever adds a category in a group this client doesn't know about, it must
+// still be shown — bucket it under "Lainnya" rather than rendering it nowhere. (A silently
+// dropped category in a DELETE tool is exactly the kind of gap that bites later.)
+function GROUPS_WITH_FALLBACK(cats) {
+  const hasUnknown = (cats || []).some((c) => !KNOWN_GROUPS.has(c.group));
+  return hasUnknown ? [...WIPE_GROUPS, ['_other', 'Lainnya (baru)']] : WIPE_GROUPS;
+}
 function DataWipePanel() {
   const [cats, setCats] = uSs(null);
   const [sel, setSel] = uSs([]);
   const [step, setStep] = uSs('pick');     // pick → confirm → done
   const [prev, setPrev] = uSs(null);
+  const [loadErr, setLoadErr] = uSs('');   // why the category list is empty (never hide it)
   const [confirmWord, setConfirmWord] = uSs('');
   const [pw, setPw] = uSs('');
   const [busy, setBusy] = uSs(false);
   const [err, setErr] = uSs('');
   const [result, setResult] = uSs(null);
 
-  uEs(() => { if (window.API && window.API.dataWipe) window.API.dataWipe.categories().then((r) => setCats(r.data || [])).catch(() => setCats([])); }, []);
+  // Load the category list. NEVER swallow a failure here: an empty panel with no reason
+  // is indistinguishable from "there is nothing to delete". The common real cause is a
+  // STALE TOKEN — capabilities are baked into the JWT at login, so granting yourself
+  // dataWipe and merely reloading leaves the client showing the panel (it reads fresh
+  // permissions from /auth/me) while the server still rejects with 403. Say so plainly.
+  uEs(() => {
+    if (!(window.API && window.API.dataWipe)) { setLoadErr(trS('wipe.errNoApi')); setCats([]); return; }
+    window.API.dataWipe.categories()
+      .then((r) => { setCats(Array.isArray(r && r.data) ? r.data : []); setLoadErr(''); })
+      .catch((e) => {
+        const status = e && e.status;
+        setLoadErr(status === 403 ? trS('wipe.errStaleToken')
+          : trS('wipe.errLoad', { msg: (e && e.body && e.body.error && e.body.error.message) || (e && e.message) || 'error' }));
+        setCats([]);
+      });
+  }, []);
   const toggle = (k) => { setErr(''); setSel((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); };
   const msg = (e) => (e && e.body && e.body.error && e.body.error.message) || 'Gagal.';
 
@@ -50,8 +74,11 @@ function DataWipePanel() {
       <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3, marginBottom: 12 }}>{trS('wipe.intro')}</div>
 
       {step === 'pick' && (<>
-        {WIPE_GROUPS.map(([g, label]) => {
-          const items = cats.filter((c) => c.group === g);
+        {/* A failed/empty load must EXPLAIN itself rather than look like "nothing to delete". */}
+        {loadErr && <div className="login-err" style={{ marginBottom: 10 }}>{IcS('IconClose', { s: 14 })}{loadErr}</div>}
+        {!loadErr && cats.length === 0 && <div className="dist-empty">{trS('wipe.errEmpty')}</div>}
+        {GROUPS_WITH_FALLBACK(cats).map(([g, label]) => {
+          const items = cats.filter((c) => (KNOWN_GROUPS.has(c.group) ? c.group : '_other') === g);
           if (!items.length) return null;
           return (
             <div key={g} style={{ marginBottom: 10 }}>
