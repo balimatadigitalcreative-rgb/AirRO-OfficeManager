@@ -43,6 +43,26 @@ beforeAll(async () => {
 });
 afterAll(() => prisma.$disconnect());
 
+describe('route surface — every endpoint the client calls is actually mounted', () => {
+  // Regression guard: a handler can exist in the controller but never be wired in the
+  // router, which fails as a 404 at runtime and stalls the UI flow. These paths must match
+  // api.js (window.API.dataWipe) exactly — a 404 here means a route was dropped.
+  const CLIENT_CALLS = [
+    ['get', '/api/v1/data-wipe/categories', undefined],
+    ['get', '/api/v1/data-wipe/history', undefined],
+    ['post', '/api/v1/data-wipe/preview', { categories: ['keu_entries'] }],
+    ['post', '/api/v1/data-wipe', { categories: ['keu_entries'], confirm: 'nope', password: 'nope' }],
+  ];
+  it.each(CLIENT_CALLS)('%s %s is mounted (never 404)', async (method, path, body) => {
+    const r = await request(app)[method](path).set(auth(wiper)).send(body);
+    expect(r.status).not.toBe(404);
+  });
+  it.each(CLIENT_CALLS)('%s %s is capability-gated (403 without dataWipe)', async (method, path, body) => {
+    const r = await request(app)[method](path).set(auth(ownerNoCap)).send(body);
+    expect(r.status).toBe(403);
+  });
+});
+
 describe('access — dedicated dataWipe capability, granted to nobody by default', () => {
   it('an owner WITHOUT the capability is rejected everywhere', async () => {
     expect((await request(app).get('/api/v1/data-wipe/categories').set(auth(ownerNoCap))).status).toBe(403);
