@@ -37,13 +37,16 @@ function navForRole(p, role) {
     { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', caps: ['distribusiCustomers'] },
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi'] },
     { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
-    { id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', caps: ['distribusiGallon'] },
     { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', caps: ['distribusiCashIntegrasi'] },
     { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', caps: ['distribusiHargaMaster'] },
     { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', caps: ['distribusiAudit'] },
   ].forEach((it) => { if (it.caps.some((c) => p[c])) items.push({ id: it.id, label: it.label, icon: it.icon, grp: 'distribusi' }); });
   // GUDANG — warehouse inventory. One screen; shown iff the user may view it.
   if (p.gudangView) items.push({ id: 'gudang', label: tr('nav.gudang'), icon: 'IconStore', grp: 'gudang' });
+  // Stok Galon lives under GUDANG (it is stock, not distribution paperwork) but is still a
+  // DISTRIBUSI screen in every other respect: same id/hash '#dist-gallon', same component,
+  // same 'distribusiGallon' capability and fleet scope. Only the menu position moved.
+  if (p.distribusiGallon) items.push({ id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', grp: 'gudang' });
   if (p.gudangKelola) items.push({ id: 'suppliers', label: tr('nav.suppliers'), icon: 'IconCustomers', grp: 'gudang' });
   return items;
 }
