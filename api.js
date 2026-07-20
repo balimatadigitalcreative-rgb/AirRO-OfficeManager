@@ -201,6 +201,14 @@
       setSupplierActive: (id, active) => req('PATCH', '/gudang/suppliers/' + id + '/active', { active }),
       deleteSupplier: (id) => req('DELETE', '/gudang/suppliers/' + id),
     },
+    // Selective data wipe (cap: dataWipe). The server backs up first and refuses without
+    // the typed word + the caller's password.
+    dataWipe: {
+      categories: () => req('GET', '/data-wipe/categories'),
+      history: () => req('GET', '/data-wipe/history'),
+      preview: (categories) => req('POST', '/data-wipe/preview', { categories }),
+      wipe: (categories, confirm, password) => req('POST', '/data-wipe', { categories, confirm, password }),
+    },
     settings: {
       all: () => req('GET', '/settings'),
       get: (key) => req('GET', '/settings/' + key),

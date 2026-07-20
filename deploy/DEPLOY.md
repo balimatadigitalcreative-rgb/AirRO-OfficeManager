@@ -652,6 +652,50 @@ curl -s -o /dev/null -w '%{http_code}\n' -X PUT $DOMAIN/api/v1/state/airro_bigte
 - `start.bat` / `serve.py` are for **local development only** — production uses
   Nginx + pm2.
 
+## Deleting data after the trial (selective wipe)
+
+There is exactly **one** data-deletion path in the app: **Pengaturan → Hapus Data**. (The old
+blanket "reset", which silently nuked every cash entry behind a single `confirm()` with no
+backup, has been removed.)
+
+**Access.** A dedicated **`dataWipe`** capability, which **no role has by default** — not even
+Owner. The owner grants it deliberately per user in **Pengguna → ⚠ Hapus Data (berbahaya)**,
+and every wipe endpoint enforces it server-side. Revoke it again when the cleanup is done.
+
+**What it can and cannot touch.**
+- Selectable by category: Distribusi (transaksi · pengiriman · koreksi/void · invoice · ledger
+  galon), Pelanggan, Gudang (stok · tutup harian · pemasok · jenis barang), Keuangan (kas ·
+  setoran · transfer · akun), HRD (kasbon · pengajuan · absensi · karyawan), Kalender, Log audit,
+  and — as its own separate box — Konfigurasi aplikasi (armada, kategori, tipe pelanggan).
+- **Never deletable:** users, roles and permissions (so login always survives), the wipe audit
+  trail, and attachment bytes. Anything you don't tick is untouched.
+- A parent whose children are still present is **blocked with an explanation** (e.g. deleting
+  Pelanggan requires their transaksi/pengiriman/invoice/galon to be selected too).
+
+**The flow — every step is a guard:**
+1. Tick categories → **Pratinjau** shows exact row counts per category ("Transaksi distribusi: 132").
+2. Type **HAPUS** (exact case) **and** re-enter your own password.
+3. The server runs **`backup-db.sh` (local + offsite) FIRST**. **If the backup fails, nothing is
+   deleted** and you get an error — this is deliberate and has been verified in practice.
+4. Deletion runs in **one transaction**, with the audit row written inside it.
+5. The result shows what was deleted, the backup filename, and the exact restore command.
+
+**Undo — restore the automatic pre-wipe backup:**
+```bash
+bash deploy/restore-db.sh ~/airro-backups/airro-YYYYMMDD-HHMMSS.db.gz
+```
+The exact filename is shown in the result screen and recorded in the audit trail.
+
+**Audit.** Every wipe writes one row to `DataWipeLog` (who, when, categories, per-category counts,
+backup file). That table is in no category, so **the record survives the deletion it describes** —
+even a wipe of the "Log audit" category. Read it back with
+`GET /api/v1/data-wipe/history`, or on the server:
+```bash
+cd /var/www/airrooffice/server
+sqlite3 prisma/prod.db 'SELECT createdAt, actorName, totalRows, categories, backupFile FROM DataWipeLog ORDER BY createdAt DESC LIMIT 5;'
+```
+The wipe endpoint is also rate-limited (5/hour/IP).
+
 ## Recovery: locked out of user management
 
 Access to the **Pengguna** screen and all user/role administration is gated on the

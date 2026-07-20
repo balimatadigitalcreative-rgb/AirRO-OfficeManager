@@ -872,7 +872,6 @@ function FApp() {
   };
   // Demo reset now clears the REST cash book (real entries only; derived setoran
   // rows regenerate). Deletes each persisted entry, then repaints empty.
-  const resetData = () => { if (!p.reset) return; if (!confirm('Hapus SEMUA catatan kas (kembali kosong)?')) return; realEntries.forEach((e) => { if (window.API && window.API.entries) window.API.entries.remove(e.id).catch(() => {}); }); setRealEntries([]); try { localStorage.setItem('airro_cashbook_cache_v1', '[]'); } catch (e) {} setTimeout(reloadEntries, 400); setToast(tr('toast.demoRestored')); };
 
   const range = PERIOD.resolveRange(gran, anchor);
   const periodLbl = PERIOD.periodLabel(gran, anchor, range);
@@ -1338,7 +1337,7 @@ function FApp() {
           )}
 
           {screen === 'settings' && p.settings && (
-            <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canReset={p.reset} onResetData={resetData} settings={settings} onSettingsChange={applySettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
+            <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canWipe={!!p.dataWipe} settings={settings} onSettingsChange={applySettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
           )}
 
           {screen === 'users' && p.manageUsers && (

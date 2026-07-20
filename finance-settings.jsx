@@ -1,7 +1,121 @@
 /* global React, FS */
-const { useState: uSs } = React;
+const { useState: uSs, useEffect: uEs } = React;
 const trS = (k, v) => window.t(k, v);
 function IcS(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
+
+// ── SELECTIVE DATA WIPE (post-trial cleanup) ─────────────────────────────────
+// Replaces the old vague "reset" (which only nuked cash entries with a bare confirm()).
+// This is the ONE documented path. Flow: pick categories → PREVIEW exact counts → type
+// HAPUS + your password → the server backs up FIRST, then deletes in one transaction.
+// Users/roles are never wipeable, so login always survives.
+const WIPE_GROUPS = [
+  ['distribusi', 'Distribusi'], ['pelanggan', 'Pelanggan'], ['gudang', 'Gudang'],
+  ['keuangan', 'Keuangan'], ['hrd', 'HRD'], ['lain', 'Lainnya'], ['konfigurasi', 'Konfigurasi aplikasi'],
+];
+function DataWipePanel() {
+  const [cats, setCats] = uSs(null);
+  const [sel, setSel] = uSs([]);
+  const [step, setStep] = uSs('pick');     // pick → confirm → done
+  const [prev, setPrev] = uSs(null);
+  const [confirmWord, setConfirmWord] = uSs('');
+  const [pw, setPw] = uSs('');
+  const [busy, setBusy] = uSs(false);
+  const [err, setErr] = uSs('');
+  const [result, setResult] = uSs(null);
+
+  uEs(() => { if (window.API && window.API.dataWipe) window.API.dataWipe.categories().then((r) => setCats(r.data || [])).catch(() => setCats([])); }, []);
+  const toggle = (k) => { setErr(''); setSel((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); };
+  const msg = (e) => (e && e.body && e.body.error && e.body.error.message) || 'Gagal.';
+
+  const doPreview = () => {
+    if (!sel.length) { setErr(trS('wipe.errNone')); return; }
+    setBusy(true); setErr('');
+    window.API.dataWipe.preview(sel)
+      .then((r) => { setPrev(r.data); setStep('confirm'); setBusy(false); })
+      .catch((e) => { setErr(msg(e)); setBusy(false); });   // dependency errors land here
+  };
+  const doWipe = () => {
+    setBusy(true); setErr('');
+    window.API.dataWipe.wipe(sel, confirmWord.trim(), pw)
+      .then((r) => { setResult(r.data); setStep('done'); setBusy(false); setPw(''); setConfirmWord(''); })
+      .catch((e) => { setErr(msg(e)); setBusy(false); });
+  };
+  const restart = () => { setSel([]); setPrev(null); setResult(null); setStep('pick'); setErr(''); setPw(''); setConfirmWord(''); };
+
+  if (!cats) return null;
+
+  return (
+    <div className="card danger-zone" style={{ display: 'block' }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--neg)' }}>{trS('wipe.title')}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3, marginBottom: 12 }}>{trS('wipe.intro')}</div>
+
+      {step === 'pick' && (<>
+        {WIPE_GROUPS.map(([g, label]) => {
+          const items = cats.filter((c) => c.group === g);
+          if (!items.length) return null;
+          return (
+            <div key={g} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-mut)', marginBottom: 5 }}>{label}</div>
+              <div className="cat-chips">
+                {items.map((c) => (
+                  <button key={c.key} type="button" className={`cat-chip ${sel.includes(c.key) ? 'on' : ''}`} onClick={() => toggle(c.key)}
+                    title={c.deps.length ? trS('wipe.needs') + ': ' + c.deps.join(', ') : undefined}>
+                    {sel.includes(c.key) ? IcS('IconCheck', { s: 14 }) : <span style={{ width: 14 }} />}{c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '8px 0 10px' }}>{trS('wipe.neverNote')}</div>
+        {err && <div className="login-err" style={{ marginBottom: 8 }}>{IcS('IconClose', { s: 14 })}{err}</div>}
+        <button className="btn" style={{ background: 'var(--neg)', color: '#fff' }} disabled={busy || !sel.length} onClick={doPreview}>
+          {busy ? '…' : trS('wipe.previewBtn', { n: sel.length })}
+        </button>
+      </>)}
+
+      {step === 'confirm' && prev && (<>
+        <div className="dist-infobox" style={{ marginBottom: 10 }}>{IcS('IconWarn', { s: 16 })}<span>{trS('wipe.willDelete')}</span></div>
+        {prev.categories.map((c) => (
+          <div key={c.key} className="dist-txn" style={{ padding: '8px 0' }}>
+            <div className="dist-txn-mid"><div className="dist-txn-name">{c.label}</div></div>
+            <b className="tnum" style={{ color: c.count ? 'var(--neg)' : 'var(--text-faint)' }}>{c.count}</b>
+          </div>
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+          <span>{trS('wipe.total')}</span><span className="tnum" style={{ color: 'var(--neg)' }}>{prev.total}</span>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-mut)', margin: '10px 0 4px' }}>{trS('wipe.backupNote')}</div>
+        <label className="fld-label">{trS('wipe.typeLabel')}</label>
+        <input className="fld" value={confirmWord} placeholder="HAPUS" autoComplete="off" onChange={(e) => setConfirmWord(e.target.value)} />
+        <label className="fld-label">{trS('wipe.pwLabel')}</label>
+        <input className="fld" type="password" value={pw} autoComplete="current-password" onChange={(e) => setPw(e.target.value)} />
+        {err && <div className="login-err" style={{ marginTop: 8 }}>{IcS('IconClose', { s: 14 })}{err}</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button className="btn btn-ghost" disabled={busy} onClick={restart}>{trS('wipe.back')}</button>
+          <button className="btn" style={{ background: 'var(--neg)', color: '#fff' }}
+            disabled={busy || confirmWord.trim() !== 'HAPUS' || !pw} onClick={doWipe}>
+            {busy ? trS('wipe.working') : trS('wipe.confirmBtn', { n: prev.total })}
+          </button>
+        </div>
+      </>)}
+
+      {step === 'done' && result && (<>
+        <div className="dist-infobox" style={{ marginBottom: 10 }}>{IcS('IconCheck', { s: 16 })}<span>{trS('wipe.doneMsg', { n: result.total })}</span></div>
+        {result.categories.filter((c) => c.count).map((c) => (
+          <div key={c.key} style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>· {c.label}: <b>{c.count}</b></div>
+        ))}
+        <div style={{ marginTop: 12, fontSize: 12.5 }}>
+          <div>{trS('wipe.backupMade')}</div>
+          <code style={{ display: 'block', wordBreak: 'break-all', background: 'var(--card-soft)', padding: '6px 8px', borderRadius: 8, marginTop: 4 }}>{result.backupFile}</code>
+          <div style={{ marginTop: 8 }}>{trS('wipe.restoreHow')}</div>
+          <code style={{ display: 'block', wordBreak: 'break-all', background: 'var(--card-soft)', padding: '6px 8px', borderRadius: 8, marginTop: 4 }}>{result.restoreHint}</code>
+        </div>
+        <button className="btn btn-ghost" style={{ marginTop: 12 }} onClick={restart}>{trS('wipe.done')}</button>
+      </>)}
+    </div>
+  );
+}
 
 /* icon picker popover */
 function IconPicker({ value, onPick }) {
@@ -88,7 +202,7 @@ function BackupSection({ entries, accounts, catLabel }) {
   );
 }
 
-function SettingsScreen({ cats, onChange, canReset, onResetData, settings, onSettingsChange, entries, accounts, catLabel }) {
+function SettingsScreen({ cats, onChange, canWipe, settings, onSettingsChange, entries, accounts, catLabel }) {
   const setIncome = (income) => onChange({ ...cats, income });
   const setExpense = (expense) => onChange({ ...cats, expense });
   const setThresh = (key, val) => onSettingsChange({ ...settings, [key]: val });
@@ -136,15 +250,9 @@ function SettingsScreen({ cats, onChange, canReset, onResetData, settings, onSet
 
       <BackupSection entries={entries} accounts={accounts} catLabel={catLabel} />
 
-      {canReset && (
-        <div className="card danger-zone">
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--neg)' }}>{trS('set.resetTitle')}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trS('set.resetIntro')}</div>
-          </div>
-          <button className="btn" style={{ background: 'var(--neg)', color: '#fff' }} onClick={onResetData}>{trS('set.resetBtn')}</button>
-        </div>
-      )}
+      {/* The ONE data-deletion path. The old blanket "reset" (cash entries only, single
+          confirm(), no backup) is gone — this is selective, previewed, backed up and audited. */}
+      {canWipe && <DataWipePanel />}
     </div>
   );
 }

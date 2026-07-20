@@ -42,4 +42,13 @@ const apiLimiter = rateLimit({
   skip: (req) => isExemptPath(req) || testInert(req), handler: send429(API_MSG),
 });
 
-module.exports = { loginLimiter, forgotLimiter, apiLimiter, LOGIN_MSG, FORGOT_MSG, API_MSG };
+// Data wipe: the most destructive endpoint in the app. Deliberately tight — a handful of
+// attempts per hour is far more than any legitimate cleanup needs, and it blunts any
+// scripted abuse of a borrowed session.
+const WIPE_MSG = 'Terlalu banyak percobaan penghapusan data. Coba lagi nanti.';
+const wipeLimiter = rateLimit({
+  ...common, windowMs: 60 * 60 * 1000, limit: 5,
+  skip: testInert, handler: send429(WIPE_MSG),
+});
+
+module.exports = { loginLimiter, forgotLimiter, apiLimiter, wipeLimiter, LOGIN_MSG, FORGOT_MSG, API_MSG, WIPE_MSG };

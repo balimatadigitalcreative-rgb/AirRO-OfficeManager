@@ -798,6 +798,24 @@ model Supplier {
   @@index([active])
 }
 
+// ── DATA WIPE AUDIT ──────────────────────────────────────────────────────────
+// The permanent record of every selective data wipe. This table is NEVER itself wiped
+// (it is in no category), so the trail survives the deletion it describes. Written in
+// the same transaction as the deletes, so a rolled-back wipe leaves no false entry.
+model DataWipeLog {
+  id           String   @id @default(cuid())
+  categories   String                            // JSON array of category keys wiped
+  counts       String                            // JSON {category: rowsDeleted}
+  totalRows    Int      @default(0)
+  backupFile   String   @default("")             // the pre-wipe backup (restore with deploy/restore-db.sh)
+  actorId      String?
+  actorName    String?
+  actorRole    String?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 // Monotonic counter for Supplier.code — one row per code ever issued; never reused.
 model SupplierCode {
   id        String   @id @default(cuid())
