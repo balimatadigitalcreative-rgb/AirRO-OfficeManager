@@ -678,7 +678,9 @@ select.fld::-ms-expand { display: none; }
 .del-spacer { width: 28px; }
 
 /* ============ Login ============ */
-.login-stage { min-height: 100vh; display: grid; grid-template-columns: 1.15fr 0.85fr; background: var(--canvas); }
+/* The login screen renders INSTEAD of .app, so with the viewport locked it needs to own
+   its scroll too — otherwise a short screen would clip the form with no way to reach it. */
+.login-stage { height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; display: grid; grid-template-columns: 1.15fr 0.85fr; background: var(--canvas); }
 .login-hero { position: relative; overflow: hidden; display: flex; flex-direction: column; padding: 38px 48px; color: #fff;
   background: linear-gradient(135deg, #0B7EB1 0%, #065489 60%, #06334F 100%); }
 .lh-wave { position: absolute; border-radius: 50%; pointer-events: none; }
@@ -1980,9 +1982,12 @@ select.fld::-ms-expand { display: none; }
 @media print {
   .sidebar, .mobile-nav, .scrim, .drawer, .topbar, .app-footer, .fin-toast, .alert-wrap,
   .rep-actions, .range-picker, .rep-subhead, .modal-scrim { display: none !important; }
-  html, body, .app { background: #fff !important; }
-  .main { padding: 0 !important; }
-  .content { border-radius: 0 !important; box-shadow: none !important; padding: 0 !important; min-height: auto !important; gap: 14px !important; }
+  /* UNDO the locked app shell for printing: a fixed-height, overflow-hidden viewport would
+     print only the first screenful of a report. Everything must flow to full height here. */
+  html, body, .app { background: #fff !important; height: auto !important; overflow: visible !important; }
+  #root { height: auto !important; }
+  .main { padding: 0 !important; height: auto !important; overflow: visible !important; }
+  .content { border-radius: 0 !important; box-shadow: none !important; padding: 0 !important; height: auto !important; min-height: auto !important; overflow: visible !important; gap: 14px !important; }
   .print-only { display: block !important; }
   .rep-kpi-row { grid-template-columns: repeat(4, 1fr) !important; }
   .rep-grid { grid-template-columns: 1fr 1fr !important; }
@@ -2015,9 +2020,16 @@ select.fld::-ms-expand { display: none; }
   overscroll-behavior-x: contain;
 }
 
-/* Guarantee no element forces horizontal page scroll */
+/* Guarantee no element forces horizontal page scroll. The VERTICAL lock (height:100% +
+   overflow:hidden) lives with the shell in app.css — this only pins the horizontal axis,
+   so the two rules complement rather than fight each other. */
 html, body { max-width: 100%; overflow-x: hidden; }
 .content { max-width: 100%; }
+/* A modal freezes the background scroller so the page behind can't move while it's open
+   (the modal card keeps its own inner scroll). Covers EVERY modal without touching any
+   component; browsers without :has() simply keep the old behaviour. */
+body:has(.modal-scrim) .content,
+body:has(.modal-scrim) .login-stage { overflow: hidden; }
 img, svg, canvas, video { max-width: 100%; }
 
 /* Phones (≤560px): keep the employee detail + attendance readable and un-cramped;

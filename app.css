@@ -1,12 +1,21 @@
 /* AirRO Water — layout & component styles */
 
 /* ============ App shell ============ */
-.app { display: flex; min-height: 100vh; background: var(--canvas); }
+/* The VIEWPORT IS LOCKED: the page itself never scrolls, so there is exactly ONE vertical
+   scrollbar — on the right content pane. Previously the page scrolled AND .content had its
+   own height, giving two scrollbars and making the sticky sidebar drift with the content.
+   The sidebar now fills the shell and scrolls independently only if its menu is taller
+   than the screen. (Print resets these — see finance.css @media print.) */
+html, body { height: 100%; overflow: hidden; }
+#root { height: 100%; }
+.app { display: flex; height: 100vh; height: 100dvh; background: var(--canvas); overflow: hidden; }
 
 .sidebar {
   width: var(--sidebar-w); flex-shrink: 0; padding: 22px 16px;
   display: flex; flex-direction: column; gap: 6px;
-  position: sticky; top: 0; height: 100vh;
+  height: 100%;                    /* fills the locked shell — never moves with the content */
+  overflow-y: auto;                /* its OWN scroll, only when the menu is taller than the screen */
+  overscroll-behavior: contain;    /* and it never chains its scroll anywhere else */
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 20px; }
 .brand-lockup { display: flex; flex-direction: column; line-height: 1.05; }
@@ -39,12 +48,30 @@
 .upsell p { margin: 6px 0 14px; font-size: 12px; color: rgba(255,255,255,.7); line-height: 1.5; }
 
 /* ============ Main content ============ */
-.main { flex: 1; min-width: 0; padding: 16px 16px 16px 0; }
+.main { flex: 1; min-width: 0; padding: 16px 16px 16px 0; height: 100%; overflow: hidden; }
+/* THE single vertical scroller. No min-height: it must be free to shrink to the shell so
+   its own overflow (not the page's) does the scrolling. */
 .content {
-  background: var(--surface); border-radius: 24px; min-height: calc(100vh - 32px);
+  background: var(--surface); border-radius: 24px; height: 100%;
   padding: 22px 26px; display: flex; flex-direction: column; gap: 20px;
+  overflow-y: auto; overscroll-behavior: contain;
 }
 .topbar { display: flex; align-items: center; gap: 16px; }
+/* Desktop only: pin the topbar to the top of the content scroller so it stays visible
+   while the body scrolls. Negative margins let it span the card's padding, so content
+   passes cleanly BEHIND it instead of peeking above. (Left off on mobile — a short
+   screen shouldn't spend height on a pinned header; it has the bottom nav instead.) */
+@media (min-width: 861px) {
+  .topbar {
+    position: sticky;
+    /* -22px = minus the card's padding-top. Sticky clamps to the scroller's CONTENT box,
+       so top:0 would pin it 22px down and let scrolled content peek through that gap;
+       the negative offset pins it flush to the card's top edge instead. The negative
+       margins + matching padding let its background span the card's padding. */
+    top: -22px; z-index: 20; background: var(--surface);
+    margin: -22px -26px 0; padding: 22px 26px 14px;
+  }
+}
 .topbar h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
 .topbar .sub { font-size: 13px; color: var(--text-mut); margin-top: 2px; }
 .top-search {
@@ -180,9 +207,11 @@
 }
 @media (max-width: 860px) {
   .sidebar { display: none; }
-  .main { padding: 0; }
-  /* Bottom padding clears the fixed bottom-nav (~62px) AND the iOS home indicator. */
-  .content { border-radius: 0; min-height: 100vh; padding: calc(16px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(74px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); gap: 16px; overflow-x: hidden; }
+  .main { padding: 0; height: 100%; }
+  /* Still exactly ONE scroller on mobile: .content owns it (height, not min-height — a
+     min-height would make the page scroll too and bring the double scrollbar back).
+     Bottom padding clears the fixed bottom-nav (~62px) AND the iOS home indicator. */
+  .content { border-radius: 0; height: 100%; padding: calc(16px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(74px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); gap: 16px; overflow-x: hidden; }
   .hamburger { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); color: var(--ink); }
   .topbar h1 { font-size: 21px; }
   .topbar .sub { display: none; }
@@ -209,7 +238,10 @@
   .drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--canvas); z-index: 60; padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)) 16px; transform: translateX(-100%); transition: transform .26s ease; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-lg); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .drawer.open { transform: none; }
   /* Lock the page behind the open drawer so only the drawer scrolls. */
-  body.drawer-lock { overflow: hidden; }
+  /* Body no longer scrolls (the shell is locked), so freezing the background while the
+     drawer is open means freezing the REAL scroller — the content pane. The drawer keeps
+     its own overflow-y:auto + overscroll-behavior:contain, so it scrolls independently. */
+  body.drawer-lock .content { overflow: hidden; }
   .scrim { display: block; position: fixed; inset: 0; background: rgba(20,32,29,.4); z-index: 50; opacity: 0; pointer-events: none; transition: opacity .26s; }
   .scrim.open { opacity: 1; pointer-events: auto; }
   .tx-summary { gap: 12px; }
