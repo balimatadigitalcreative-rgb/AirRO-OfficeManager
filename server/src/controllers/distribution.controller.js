@@ -110,6 +110,13 @@ const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegat
 const runQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['open', 'closed']).optional() });
 // Customer list + detailed multi-criteria filter. Every criterion is optional and they
 // combine with AND. Kept as query params so the list stays a plain cacheable GET.
+// Opening / carry-over bon (cap: distribusiKoreksi). Nominal + the date the admin picks +
+// a mandatory keterangan. It is stored as a real bon, so it counts toward sisa bon.
+const openingBonSchema = z.object({
+  amount: z.number().int().positive(),
+  txnDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  note: z.string().trim().min(1).max(300),
+});
 const custListQuery = z.object({
   fleet: z.string().max(60).optional(),
   status: z.enum(['active', 'inactive', 'all']).optional(),
@@ -135,6 +142,7 @@ const invoiceCreateSchema = z.object({
 });
 
 // ── customers ──
+const createOpeningBon = asyncHandler(async (req, res) => res.status(201).json({ data: await service.createOpeningBon(req.params.id, req.body, req.user) }));
 const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet, req.query.status, req.query)));
 const getCustomer = asyncHandler(async (req, res) => res.json({ data: await service.getCustomer(req.params.id, req.user) }));
 const createCustomer = asyncHandler(async (req, res) => { const c = await service.createCustomer(req.body, req.user); bcast('create', c.id); res.status(201).json({ data: c }); });
@@ -213,12 +221,12 @@ const setOpeningStock = asyncHandler(async (req, res) => { const r = await servi
 const resetGallon = asyncHandler(async (req, res) => { const r = await service.resetGallon(req.body, req.user); bcast('gallon', 'reset'); res.status(201).json({ data: r }); });
 
 module.exports = {
-  listCustomers, getCustomer, createCustomer, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
+  listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns,
-  schemas: { customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

@@ -526,6 +526,11 @@ model DistTransaction {
   legacy          Boolean  @default(false)       // imported historical row — ARCHIVE ONLY: excluded from every
                                                  // KPI / cash / gallon / receivable aggregate; never writes a GallonMovement
   importBatchId   String?                        // groups the rows of one legacy import (for undo)
+  // Opening / carry-over receivable typed in by an admin (the old spreadsheet couldn't be
+  // imported). Unlike `legacy` this is a REAL bon: method='bon', legacy=FALSE — so every
+  // existing aggregation already counts it and a 'pelunasan' reduces it. The flag exists
+  // only to LABEL the row ("Bon Awal") and to make it auditable/queryable.
+  openingBon      Boolean  @default(false)
   createdAt       DateTime @default(now())
 
   customer    Customer     @relation(fields: [customerId], references: [id])

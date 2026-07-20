@@ -9,6 +9,10 @@ router.use(requireAuth);
 
 // ── Customers ──
 // Viewing the customer list/detail is part of base module access ('distribusi').
+// Opening / carry-over bon — a REAL receivable created from nothing, so it sits at the
+// CORRECTION tier (distribusiKoreksi), not plain input: a field helper who only records
+// sales must not be able to invent receivables. Owner/GM hold this cap by default.
+router.post('/customers/:id/opening-bon', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.openingBonSchema }), ctrl.createOpeningBon);
 router.get('/customers', requireCap('distribusi'), validate({ query: ctrl.schemas.custListQuery }), ctrl.listCustomers);
 router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getCustomer);
 // NOTE: the delivery-fleet list is NOT served here — armada has a single app-wide

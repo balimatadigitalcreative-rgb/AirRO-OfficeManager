@@ -1060,6 +1060,10 @@ select.fld::-ms-expand { display: none; }
 .dist-staffnote svg { color: var(--warn); flex-shrink: 0; }
 .dist-infobox { display: flex; align-items: flex-start; gap: 10px; background: #EAF4FB; border: 1px solid #CFE6F4; border-radius: 12px; padding: 13px 15px; font-size: 12px; color: #2b5c7a; line-height: 1.5; margin-bottom: 16px; }
 .dist-infobox svg { flex-shrink: 0; margin-top: 1px; color: #1a7fb8; }
+/* Same shape as .dist-infobox but amber — used for warnings that must be READ, not obeyed
+   (e.g. "this customer already has a bon"): we warn, we never block. */
+.dist-warnbox { display: flex; align-items: flex-start; gap: 10px; background: var(--warn-bg, #fff7ed); border: 1px solid var(--sand-soft, #F6D9A6); border-radius: 12px; padding: 13px 15px; font-size: 12px; color: var(--warn); line-height: 1.5; margin-bottom: 16px; font-weight: 600; }
+.dist-warnbox svg { flex-shrink: 0; margin-top: 1px; }
 /* form summary (navy) */
 .dist-form-sum { width: 280px; flex: 1 1 240px; min-width: 240px; max-width: 320px; padding: 22px; background: linear-gradient(150deg,#0B7EB1,#053F66); color: #fff; border: none; box-shadow: 0 14px 30px -16px rgba(6,51,79,.6); }
 .dist-fs-t { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.7); }
@@ -2365,3 +2369,6 @@ img, svg, canvas, video { max-width: 100%; }
   .dist-filter-sheet .modal-foot { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
   .dist-filter-btn { order: -1; }
 }
+
+/* Opening / carry-over bon badge — a REAL receivable, so it reads distinct from "Arsip" */
+.dist-badge.obon { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--sand-soft, #F6D9A6); }

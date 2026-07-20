@@ -307,7 +307,7 @@ async function getCustomer(id, user) {
       // does not become a new receivable (money already settled at the old price).
       if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount;
     }
-    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, importBatchId: t.importBatchId || null };
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null };
   });
   // Legacy import batches (for the "Batalkan" undo list): one entry per importBatchId.
   const impMap = {};
@@ -741,6 +741,37 @@ async function createTransaction(body, actor) {
 
 // Append a correction to an immutable transaction. reason required; byStaff flags a
 // staff-level actor (has 'distribusi' but none of the owner distribusi caps).
+// ── OPENING / CARRY-OVER BON ────────────────────────────────────────────────
+// Record a customer's PRIOR outstanding receivable (e.g. carried over from last year's
+// spreadsheet, which couldn't be imported). Deliberately stored as an ORDINARY bon
+// transaction — method:'bon', legacy:FALSE — so it needs no special-casing anywhere:
+// every existing aggregation (list, detail, receivables/aging, cash integration, invoices)
+// already sums method==='bon', and a 'pelunasan' reduces it like any other bon. The
+// openingBon flag only labels the row and makes it auditable.
+// Dated by the ADMIN (txnDate), so the receivable appears as of the real date, not today.
+// Allowed for a deactivated customer too: this is historical debt, and collecting it via
+// pelunasan is already permitted for inactive customers.
+async function createOpeningBon(customerId, body, actor) {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');
+  const amount = int(body.amount);
+  if (amount <= 0) throw ApiError.badRequest('Nominal bon awal harus lebih dari 0.');
+  const note = String(body.note || '').trim();
+  if (!note) throw ApiError.badRequest('Keterangan wajib diisi.');
+  const txnDate = String(body.txnDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(txnDate)) throw ApiError.badRequest('Tanggal bon tidak valid.');
+  const snap = await actorSnap(actor);
+  const before = await customerBonBalance(customer.id);
+  const txn = await prisma.distTransaction.create({ data: {
+    customerId: customer.id, fleetId: customer.armada || '', qty: 0, unitPriceLocked: 0,
+    amount, method: 'bon', openingBon: true, legacy: false, note,
+    txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+  } });
+  await logAudit('input', `Bon awal: ${customer.name}`, `${amount} per ${txnDate} · ${note} · sisa bon ${before} → ${before + amount}`, snap, customer.armada || '');
+  return { ...txn, isOpeningBon: true, sisaBon: before + amount, sisaBonBefore: before };
+}
+
 async function addCorrection(txnId, body, actor, isStaff) {
   const txn = await prisma.distTransaction.findUnique({ where: { id: txnId } });
   if (!txn) throw ApiError.notFound('Transaction not found');
@@ -1393,7 +1424,7 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
-  listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
+  listTransactions, createTransaction, createOpeningBon, addCorrection, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns,

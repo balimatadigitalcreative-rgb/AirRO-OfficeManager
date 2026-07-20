@@ -939,7 +939,7 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
                   <tr key={t.id}>
                     <td className="tnum">{shortRef(t.id)}</td>
                     <td className="tnum">{t.txnDate}</td>
-                    <td>{methodLabel(t.method)}</td>
+                    <td>{methodLabel(t.method)}{t.openingBon ? ' · ' + trD('dist.obLabel') : ''}{t.note ? ' · ' + t.note : ''}</td>
                     <td className="r tnum">{t.method === 'pelunasan' ? '—' : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}</td>
                     <td className="r tnum">{rpFull(eff)}</td>
                   </tr>
@@ -1128,7 +1128,64 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   );
 }
 
-function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyImport, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
+// ── BON AWAL / MANUAL ────────────────────────────────────────────────────────
+// Record a customer's PRIOR outstanding receivable (carried over from the old books).
+// It is saved as a REAL bon dated on the day the admin picks, so it counts toward sisa
+// bon from that date and a later pelunasan reduces it. Deliberately NOT the legacy/archive
+// flag, which is excluded from every aggregate.
+function OpeningBonModal({ customer, onClose, onSaved }) {
+  const [amount, setAmount] = uSx('');
+  const [date, setDate] = uSx((window.FIN && FIN.TODAY) || new Date().toISOString().slice(0, 10));
+  const [note, setNote] = uSx('');
+  const [busy, setBusy] = uSx(false);
+  const [err, setErr] = uSx('');
+  const [confirming, setConfirming] = uSx(false);
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const amt = parseInt(String(amount).replace(/[^0-9]/g, ''), 10) || 0;
+  const valid = amt > 0 && /^\d{4}-\d{2}-\d{2}$/.test(date) && note.trim();
+  const save = () => {
+    if (!valid || busy) return;
+    setBusy(true); setErr('');
+    window.API.distribusi.customers.openingBon(customer.id, { amount: amt, txnDate: date, note: note.trim() })
+      .then((r) => { setBusy(false); onSaved(r.data); })
+      .catch((e) => { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.obTitle')}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.name}</div></div>
+          <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.obInfo')}</span></div>
+          {/* Double-count guard: warn (never block) if this customer already carries a bon. */}
+          {(customer.sisaBon || 0) > 0 && (
+            <div className="dist-warnbox"><IconWarn s={16} /><span>{trD('dist.obDupWarn', { amt: rpFull(customer.sisaBon) })}</span></div>
+          )}
+          <label className="fld-label">{trD('dist.obAmount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <input className="fld tnum" inputMode="numeric" value={amount} placeholder="cth. 500000" onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))} />
+          <label className="fld-label">{trD('dist.obDate')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <input className="fld" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <div className="gud-hint">{trD('dist.obDateHint')}</div>
+          <label className="fld-label">{trD('dist.obNote')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <input className="fld" value={note} placeholder={trD('dist.obNotePh')} onChange={(e) => setNote(e.target.value)} />
+          {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+          {confirming && <div className="dist-warnbox" style={{ marginTop: 10 }}><IconWarn s={16} /><span>{trD('dist.obConfirm', { amt: rpFull(amt), date })}</span></div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
+          {!confirming
+            ? <button className="btn btn-primary" disabled={!valid} onClick={() => setConfirming(true)}>{trD('dist.obNext')}</button>
+            : <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? '…' : trD('dist.obSave')}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DistCustomers({ canCustomers, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [statusFilter, setStatusFilter] = uSx('active');   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
@@ -1158,6 +1215,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
   const [impFileBusy, setImpFileBusy] = uSx(false);
   const impFileRef = React.useRef(null);
   const [typesOpen, setTypesOpen] = uSx(false);
+  const [obFor, setObFor] = uSx(null);   // customer whose opening/carry-over bon is being entered
   // ── Detailed filter (server-side, AND logic). EMPTY_FILTER is the "nothing selected"
   // baseline; `fTotal` is the denominator for "Menampilkan X dari Y".
   const [flt, setFlt] = uSx(EMPTY_FILTER);
@@ -1485,6 +1543,9 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
               {canLegacyImport && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLegacyOpen(true)}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('dist.liBtn')}</button>}
               {(canInput || canCustomers) && <GpsButton custId={d.id} hasLoc={d.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }} onFlash={flash} />}
               {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
+              {/* Carry-over receivable from the old books. Correction-tier cap: this creates a
+                  real bon out of nothing, so a plain input helper must not be able to. */}
+              {canKoreksi && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setObFor(d)}><IconInvoice s={14} />{trD('dist.obBtn')}</button>}
               {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
               {canDelete && d.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={() => doReactivate(d)}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
               {canDelete && <button type="button" className="btn btn-ghost btn-sm dist-del-btn" onClick={() => setDelFor(d)}><IconTrash s={14} />{trD('dist.delCust')}</button>}
@@ -1517,8 +1578,8 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
                 <div key={t.id} className={`dist-txn ${t.legacy ? 'is-legacy' : ''}`}>
                   <span className="dist-cd-bar" style={{ background: t.legacy ? '#94a3b8' : t.method === 'bon' ? '#e0a13c' : t.method === 'pelunasan' ? '#2f6fb0' : '#17b083' }} />
                   <div className="dist-txn-mid">
-                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.legacy && <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span>}{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}{t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}</div>
-                    <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · {t.txnDate} {hhmm(t.createdAt)}{t.actorName ? ' · ' + t.actorName : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
+                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.legacy && <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span>}{t.openingBon && <span className="dist-badge obon"><IconInvoice s={10} />{trD('dist.obLabel')}</span>}{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}{t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}</div>
+                    <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · {t.txnDate} {hhmm(t.createdAt)}{t.actorName ? ' · ' + t.actorName : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}{t.note ? ' · ' + t.note : ''}</div>
                   </div>
                   <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                 </div>
@@ -1556,6 +1617,7 @@ function DistCustomers({ canCustomers, canPrice, canInput, canDelete, canLegacyI
         {histOpen && d && <TxnHistoryDoc customer={d} userName={userName} onClose={() => setHistOpen(false)} />}
         {legacyOpen && d && <LegacyImportModal customer={d} onClose={() => setLegacyOpen(false)} onDone={(res) => { setLegacyOpen(false); flash(trD('dist.liDone', { n: res.imported, m: res.skipped })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
+        {obFor && <OpeningBonModal customer={obFor} onClose={() => setObFor(null)} onSaved={(res) => { setObFor(null); flash(trD('dist.obSaved', { amt: rpFull(res.amount) })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {renderForm()}
         {typesModal()}
         {delFor && <DeleteCustomerModal customer={delFor} busy={delBusy} onDeactivate={doDeactivate} onDelete={doDeletePermanent} onClose={() => setDelFor(null)} />}

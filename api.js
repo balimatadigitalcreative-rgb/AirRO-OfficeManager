@@ -135,6 +135,8 @@
         update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),
         setLocation: (id, data) => req('PATCH', '/distribusi/customers/' + id + '/location', data),   // { lat, lng, accuracy?, address? }
         setLocationPhoto: (id, photoId) => req('PATCH', '/distribusi/customers/' + id + '/location-photo', { photoId: photoId || null }),
+        // Opening / carry-over bon (cap: distribusiKoreksi) — a REAL receivable dated by the admin.
+        openingBon: (id, data) => req('POST', '/distribusi/customers/' + id + '/opening-bon', data),   // { amount, txnDate, note }
         import: (customers, skipped) => req('POST', '/distribusi/customers/import', { customers, skipped: skipped || 0 }),
         // Per-customer legacy (archive) transaction import + undo a batch.
         importLegacyTxns: (id, rows, skipped) => req('POST', '/distribusi/customers/' + id + '/transactions/import', { rows, skipped: skipped || 0 }),
