@@ -2,6 +2,7 @@
 const prisma = require('../src/lib/prisma');
 const { seedBuiltinRoles } = require('../src/config/permissions');
 const distribution = require('../src/services/distribution.service');
+const businessUnit = require('../src/services/businessUnit.service');
 
 // Wipe mutable tables so each test file starts from a clean slate.
 async function resetDb() {
@@ -37,9 +38,11 @@ async function resetDb() {
   await prisma.employee.deleteMany();
   await prisma.user.deleteMany();
   await prisma.setting.deleteMany();
+  await prisma.businessUnit.deleteMany();   // reset the unit dictionary between suites
   await prisma.role.deleteMany();
   await seedBuiltinRoles();       // built-in roles must exist for user creation (role FK-by-id)
   await distribution.seedCustomerTypes();   // seed customer types (reguler/kos/cafe/bulk)
+  await businessUnit.seedBusinessUnits();   // seed the starter units (air/manufaktur/unit3)
 }
 
 module.exports = { resetDb, prisma };

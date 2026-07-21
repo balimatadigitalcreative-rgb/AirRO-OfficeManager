@@ -2372,3 +2372,6 @@ img, svg, canvas, video { max-width: 100%; }
 
 /* Opening / carry-over bon badge — a REAL receivable, so it reads distinct from "Arsip" */
 .dist-badge.obon { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--sand-soft, #F6D9A6); }
+
+/* Header business-unit selector (Stage 1 no-op placeholder, flag-gated). */
+.unit-select { height: 34px; padding: 0 30px 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }

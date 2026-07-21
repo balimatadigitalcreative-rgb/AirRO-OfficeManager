@@ -37,6 +37,7 @@ const CAP_GROUPS = [
     ['approvals', 'Pengajuan'],
     ['settings', 'Pengaturan'],
     ['manageUsers', 'Kelola Pengguna'],
+    ['manageBusinessUnits', 'Kelola Unit Bisnis'],
     // The most destructive capability in the app — no role has it by default; the owner
     // grants it deliberately, and it is server-enforced on every wipe endpoint.
     ['dataWipe', '⚠ Hapus Data (berbahaya)'],

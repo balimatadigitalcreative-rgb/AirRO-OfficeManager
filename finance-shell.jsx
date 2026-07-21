@@ -79,6 +79,27 @@ function PROOFMOUNT() {
   return proof ? <UI.ProofViewer proof={proof} onClose={() => setProof(null)} /> : null;
 }
 
+// Global business-unit selector — STAGE 1 NO-OP PLACEHOLDER. It lists the units and lets one
+// be picked, but the choice is LOCAL state that nothing reads: no query, no filter, no data
+// change. Hidden by default; only rendered when the flag window.AIRRO_FLAGS.unitSelector is on,
+// so it can be demoed without affecting staff. Later stages wire the selection into queries.
+function UnitSelector() {
+  const [units, setUnits] = uSh([]);
+  const [sel, setSel] = uSh('all');
+  uEh(() => {
+    if (!(window.API && window.API.businessUnits)) return;
+    window.API.businessUnits.list().then((r) => setUnits((r && r.data) || [])).catch(() => {});
+  }, []);
+  if (!units.length) return null;
+  return (
+    <select className="unit-select" value={sel} onChange={(e) => setSel(e.target.value)} title={tr('unit.label')} aria-label={tr('unit.label')}>
+      <option value="all">{tr('unit.all')}</option>
+      {units.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+    </select>
+  );
+}
+const UNIT_SELECTOR_ON = () => !!(window.AIRRO_FLAGS && window.AIRRO_FLAGS.unitSelector);
+
 function FApp() {
   // Auth is backend-only: never auto-login from a stale LOCAL session (left over
   // from the old localStorage build). The session is restored solely from a
@@ -1194,6 +1215,7 @@ function FApp() {
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
               {(screen === 'overview' || screen === 'entries') && periodBar}
+              {UNIT_SELECTOR_ON() && <UnitSelector />}
               {window.CLOUD && (window.CLOUD.active || syncStatus === 'expired') && (
                 <span className={`sync-pill ${syncStatus}`} title={tr('sync.' + syncStatus)}>
                   <span className="sync-dot" /><span className="sync-txt">{tr('sync.' + syncStatus)}</span>
@@ -1341,7 +1363,7 @@ function FApp() {
           )}
 
           {screen === 'settings' && p.settings && (
-            <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canWipe={!!p.dataWipe} settings={settings} onSettingsChange={applySettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
+            <SETTINGS.SettingsScreen cats={cats} onChange={applyCats} canWipe={!!p.dataWipe} canManageUnits={!!p.manageBusinessUnits} settings={settings} onSettingsChange={applySettings} entries={entries} accounts={accounts} catLabel={(k) => FS.catInfo(catMap, k).label} />
           )}
 
           {screen === 'users' && p.manageUsers && (

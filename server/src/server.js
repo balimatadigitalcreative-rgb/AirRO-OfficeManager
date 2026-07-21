@@ -6,6 +6,7 @@ const { seedBuiltinRoles } = require('./config/permissions');
 const distribution = require('./services/distribution.service');
 const gudang = require('./services/gudang.service');
 const attachments = require('./services/attachment.service');
+const businessUnits = require('./services/businessUnit.service');
 
 const app = createApp();
 // Ensure built-in roles exist + warm the permission cache (idempotent). resolvePerms
@@ -15,6 +16,13 @@ seedBuiltinRoles().catch(() => {});
 distribution.seedCustomerTypes().catch(() => {});
 // Ensure the seed warehouse items (Galon/Sticker/Tutup/Segel) exist (idempotent).
 gudang.seedInventoryItems().catch(() => {});
+// Business unit (Stage 1): ensure the seed units exist, then backfill any still-unlabelled
+// core row to "Air". Both idempotent — the migration already did this; this covers rows a
+// pre-migration build may have created between deploy and migrate. Never changes any number.
+businessUnits.seedBusinessUnits()
+  .then(() => businessUnits.backfillBusinessUnit())
+  .then((filled) => { if (Object.keys(filled).length) console.log('[business-unit] backfilled → Air:', JSON.stringify(filled)); })
+  .catch(() => {});
 // One-time: move any inline base64 proofs out of Entry/Setoran into the Attachment
 // table so old records stop dragging photos through the sync payload (idempotent).
 attachments.migrateInlineProofs().catch(() => {});

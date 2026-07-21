@@ -229,7 +229,98 @@ function BackupSection({ entries, accounts, catLabel }) {
   );
 }
 
-function SettingsScreen({ cats, onChange, canWipe, settings, onSettingsChange, entries, accounts, catLabel }) {
+// ── BUSINESS UNIT (unit bisnis) — STAGE 1: labels only ───────────────────────
+// Manage the dictionary (add / rename / deactivate). Editing a unit here changes NO number:
+// core records keep the same unit id, and this stage never filters or splits by unit. Owner-
+// only (cap: manageBusinessUnits). Deactivate rather than delete — a unit may label history.
+function BusinessUnitsPanel() {
+  const [units, setUnits] = uSs(null);
+  const [loadErr, setLoadErr] = uSs('');
+  const [adding, setAdding] = uSs('');
+  const [code, setCode] = uSs('');
+  const [editId, setEditId] = uSs(null);
+  const [editName, setEditName] = uSs('');
+  const [busy, setBusy] = uSs(false);
+  const [err, setErr] = uSs('');
+
+  const load = () => {
+    if (!(window.API && window.API.businessUnits)) { setLoadErr(trS('bu.errNoApi')); setUnits([]); return; }
+    window.API.businessUnits.list()
+      .then((r) => { setUnits(Array.isArray(r && r.data) ? r.data : []); setLoadErr(''); })
+      .catch((e) => { setLoadErr((e && e.status === 403) ? trS('bu.errPerm') : ((e && e.body && e.body.error && e.body.error.message) || trS('common.loadFail'))); setUnits([]); });
+  };
+  uEs(() => { load(); }, []);
+  const msg = (e) => (e && e.body && e.body.error && e.body.error.message) || trS('common.loadFail');
+
+  const add = () => {
+    const name = adding.trim();
+    if (!name || busy) return;
+    setBusy(true); setErr('');
+    window.API.businessUnits.create({ name, code: code.trim() })
+      .then(() => { setAdding(''); setCode(''); setBusy(false); load(); })
+      .catch((e) => { setErr(msg(e)); setBusy(false); });
+  };
+  const saveEdit = () => {
+    const name = editName.trim();
+    if (!name || busy) return;
+    setBusy(true); setErr('');
+    window.API.businessUnits.update(editId, { name })
+      .then(() => { setEditId(null); setEditName(''); setBusy(false); load(); })
+      .catch((e) => { setErr(msg(e)); setBusy(false); });
+  };
+  const toggleActive = (u) => {
+    setBusy(true); setErr('');
+    window.API.businessUnits.update(u.id, { active: !u.active })
+      .then(() => { setBusy(false); load(); })
+      .catch((e) => { setErr(msg(e)); setBusy(false); });
+  };
+
+  return (
+    <div className="card alert-settings">
+      <div className="cat-group-head" style={{ marginBottom: 6 }}>
+        <span className="icon-tile" style={{ background: 'var(--navy-50, #EAF1F4)', color: 'var(--brand, #065489)', flexShrink: 0 }}>{IcS('IconStore', { s: 19 })}</span>
+        <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap' }}>{trS('bu.title')}</div>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginBottom: 16 }}>{trS('bu.intro')}</div>
+
+      {loadErr && <div className="login-err" style={{ marginBottom: 12 }}>{IcS('IconClose', { s: 14 })}{loadErr}</div>}
+      {units === null && !loadErr && <div className="dist-empty">{trS('common.loading')}</div>}
+
+      {(units || []).map((u) => (
+        <div key={u.id} className="bu-row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
+          {editId === u.id ? (
+            <>
+              <input className="fld" style={{ flex: 1, margin: 0 }} value={editName} autoFocus onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveEdit()} />
+              <button className="btn btn-primary btn-sm" disabled={busy} onClick={saveEdit}>{trS('bu.save')}</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setEditId(null); setErr(''); }}>{trS('bu.cancel')}</button>
+            </>
+          ) : (
+            <>
+              {u.code ? <span className="dist-badge" style={{ background: 'var(--navy-50, #EAF1F4)', color: 'var(--brand, #065489)' }}>{u.code}</span> : null}
+              <span style={{ flex: 1, fontWeight: 600, opacity: u.active ? 1 : 0.5 }}>{u.name}{u.id === 'air' ? ' · ' + trS('bu.default') : ''}</span>
+              {!u.active && <span className="dist-badge arsip">{trS('bu.inactive')}</span>}
+              <button className="dist-link" onClick={() => { setEditId(u.id); setEditName(u.name); setErr(''); }}>{trS('bu.rename')}</button>
+              {u.id !== 'air' && <button className="dist-link" style={{ color: u.active ? 'var(--neg)' : 'var(--green-800)' }} disabled={busy} onClick={() => toggleActive(u)}>{u.active ? trS('bu.deactivate') : trS('bu.activate')}</button>}
+            </>
+          )}
+        </div>
+      ))}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+        <input className="fld" style={{ flex: '1 1 160px', margin: 0 }} placeholder={trS('bu.namePh')} value={adding}
+          onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+        <input className="fld" style={{ width: 90, margin: 0, textTransform: 'uppercase' }} placeholder={trS('bu.codePh')} value={code}
+          onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+        <button className="btn btn-primary" disabled={!adding.trim() || busy} onClick={add}>{IcS('IconPlus', { s: 16 })}{trS('bu.add')}</button>
+      </div>
+      {err && <div className="login-err" style={{ marginTop: 10 }}>{IcS('IconClose', { s: 14 })}{err}</div>}
+      <div className="dist-infobox" style={{ marginTop: 14, marginBottom: 0 }}>{IcS('IconInvoice', { s: 16 })}<span>{trS('bu.stageNote')}</span></div>
+    </div>
+  );
+}
+
+function SettingsScreen({ cats, onChange, canWipe, canManageUnits, settings, onSettingsChange, entries, accounts, catLabel }) {
   const setIncome = (income) => onChange({ ...cats, income });
   const setExpense = (expense) => onChange({ ...cats, expense });
   const setThresh = (key, val) => onSettingsChange({ ...settings, [key]: val });
@@ -274,6 +365,9 @@ function SettingsScreen({ cats, onChange, canWipe, settings, onSettingsChange, e
           </div>
         </div>
       )}
+
+      {/* Business unit dictionary (Stage 1 — labels only, changes no numbers). Owner-only. */}
+      {canManageUnits && <BusinessUnitsPanel />}
 
       <BackupSection entries={entries} accounts={accounts} catLabel={catLabel} />
 

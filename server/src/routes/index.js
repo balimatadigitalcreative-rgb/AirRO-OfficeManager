@@ -51,6 +51,7 @@ router.use('/calendar', require('./calendar.routes'));
 router.use('/payroll', require('./payroll.routes'));
 router.use('/attachments', require('./attachment.routes'));   // proof photos, out of the record payload
 router.use('/settings', require('./settings.routes'));
+router.use('/business-units', require('./businessUnit.routes'));   // unit bisnis dictionary (labels only, Stage 1)
 router.use('/reports', require('./report.routes'));
 router.use('/data-wipe', require('./dataWipe.routes'));   // selective, guarded data wipe (cap: dataWipe)
 router.use('/state', require('./state.routes'));   // shared app-state document store

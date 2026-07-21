@@ -66,9 +66,13 @@ model Account {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
+  businessUnitId String? // STAGE 1 label; null = "Air". Not yet filtered on. @@index below.
+
   entries       Entry[]
   transfersFrom Transfer[] @relation("TransferFrom")
   transfersTo   Transfer[] @relation("TransferTo")
+
+  @@index([businessUnitId])
 }
 
 model Category {
@@ -121,9 +125,12 @@ model Entry {
   createdByName String?
   createdByRole String?
 
+  businessUnitId String? // STAGE 1 label; null = "Air". Not yet filtered on.
+
   @@index([date])
   @@index([type])
   @@index([updatedAt])
+  @@index([businessUnitId])
 }
 
 model Transfer {
@@ -168,8 +175,11 @@ model Setoran {
   createdBy   User?  @relation(fields: [createdById], references: [id])
   createdById String?
 
+  businessUnitId String? // STAGE 1 label; null = "Air". Not yet filtered on.
+
   @@index([date])
   @@index([updatedAt])
+  @@index([businessUnitId])
 }
 
 // ── HRD / payroll ────────────────────────────────────────────────────────
@@ -243,11 +253,16 @@ model Employee {
   createdByName String?
   createdByRole String?
 
+  businessUnitId String? // STAGE 1 label; null = "Air". Not yet filtered on. (BPJS/payroll
+                         // data lives on this record + on posted Entries, both now labelled.)
+
   cashbons          Cashbon[]
   trainings         Training[]
   calendarEvents    CalendarEvent[]
   orientation       Orientation?
   orientationDays   OrientationAttendance[]
+
+  @@index([businessUnitId])
 }
 
 // ── New-hire orientation (paid daily, lump-sum at the end; separate from payroll) ──
@@ -842,4 +857,17 @@ model WarehouseCloseout {
   summary      String   @default("{}")                // JSON day summary (runs out/in, damage/loss, restock, rusak sales)
   note         String   @default("")                  // kendala / catatan
   diffCount    Int      @default(0)                   // items with an opname difference (quick "selisih menonjol")
+}
+
+// ── Business unit (unit bisnis) — STAGE 1: labels on ONE company, NOT separate ledgers ──
+// An editable dictionary (like CustomerType). Core records carry a nullable businessUnitId;
+// existing rows are backfilled to "Air" and null is treated as "Air" everywhere, so no number,
+// balance, payroll or report changes at this stage. Later stages add filtering/splitting.
+model BusinessUnit {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @default("")                     // short label (AIR / MFG / …), for chips + future filters
+  active    Boolean  @default(true)                   // deactivate (never delete) once data references it
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
 }

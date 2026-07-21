@@ -232,6 +232,13 @@
       get: (key) => req('GET', '/settings/' + key),
       set: (key, value) => req('PUT', '/settings/' + key, { value }),
     },
+    // Business unit (unit bisnis) dictionary — Stage 1 labels only. Read is open to any
+    // authed user; write needs manageBusinessUnits (owner). Nothing is filtered by unit yet.
+    businessUnits: {
+      list: () => req('GET', '/business-units'),
+      create: (data) => req('POST', '/business-units', data),          // { name, code? }
+      update: (id, data) => req('PATCH', '/business-units/' + id, data), // { name?, code?, active? }
+    },
     reports: {
       summary: (qs) => req('GET', '/reports/summary' + (qs ? '?' + qs : '')),
       cashflow: (qs) => req('GET', '/reports/cashflow' + (qs ? '?' + qs : '')),
