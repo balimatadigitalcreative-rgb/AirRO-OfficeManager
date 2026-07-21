@@ -47,7 +47,7 @@ function navForRole(p, role) {
   // DISTRIBUSI screen in every other respect: same id/hash '#dist-gallon', same component,
   // same 'distribusiGallon' capability and fleet scope. Only the menu position moved.
   if (p.distribusiGallon) items.push({ id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', grp: 'gudang' });
-  if (p.gudangKelola) items.push({ id: 'suppliers', label: tr('nav.suppliers'), icon: 'IconCustomers', grp: 'gudang' });
+  if (p.gudangSupplier) items.push({ id: 'suppliers', label: tr('nav.suppliers'), icon: 'IconCustomers', grp: 'gudang' });
   return items;
 }
 const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'];
@@ -1221,7 +1221,7 @@ function FApp() {
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
-            <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canDelete={!!p.distribusiCustomerDelete}
+            <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canDelete={!!p.distribusiCustomerDelete}
               canLegacyImport={!!p.distribusiLegacyImport} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
@@ -1248,9 +1248,10 @@ function FApp() {
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'gudang' && p.gudangView && (
-            <GUDANG.Dept refreshKey={distTick} canManage={!!p.gudangKelola} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} fleet={fleet} today={FIN.TODAY} />
+            <GUDANG.Dept refreshKey={distTick} canAddStock={!!p.gudangAddStock} canKoreksi={!!p.gudangKoreksi} canBuffer={!!p.gudangBuffer}
+              canItems={!!p.gudangItems} canSupplier={!!p.gudangSupplier} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} fleet={fleet} today={FIN.TODAY} />
           )}
-          {screen === 'suppliers' && p.gudangKelola && (
+          {screen === 'suppliers' && p.gudangSupplier && (
             <GUDANG.Suppliers />
           )}
 

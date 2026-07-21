@@ -200,7 +200,9 @@
       report: () => req('GET', '/gudang/report'),
       item: (id) => req('GET', '/gudang/items/' + id),
       createItem: (data) => req('POST', '/gudang/items', data),          // { name, kind?, unit?, bufferMin? }
-      updateItem: (id, data) => req('PATCH', '/gudang/items/' + id, data), // { name?, unit?, bufferMin? }
+      updateItem: (id, data) => req('PATCH', '/gudang/items/' + id, data), // { name?, unit?, form?, description?, photoId? }
+      // Buffer is its own action/capability (gudangBuffer), not part of item details.
+      setBuffer: (id, bufferMin) => req('PATCH', '/gudang/items/' + id + '/buffer', { bufferMin }),
       addStock: (id, data) => req('POST', '/gudang/items/' + id + '/stock', data),   // { type:in|purchase|opening|correction, qty, reason }
       addDamage: (id, data) => req('POST', '/gudang/items/' + id + '/damage', data), // { type:damage|loss, qty, reason }
       reportGallonDamage: (data) => req('POST', '/gudang/gallon/damage', data),      // { kind:pecah|rusak|hilang, qty, reason, fleet?, culprit?, proof? }

@@ -126,6 +126,21 @@ async function updateItem(id, body, actor) {
   return itemClient(updated, stock);
 }
 
+// Set an item's restock threshold. Split out of updateItem so it can be gated by its own
+// capability (gudangBuffer): the buffer drives the "perlu restock" alerts, so moving it is a
+// different decision from renaming an item or changing its photo.
+async function setBuffer(id, bufferMin, actor) {
+  const i = await prisma.inventoryItem.findUnique({ where: { id } });
+  if (!i) throw ApiError.notFound('Item tidak ditemukan');
+  const snap = await actorSnap(actor);
+  const updated = await prisma.inventoryItem.update({ where: { id }, data: {
+    bufferMin: Math.max(0, Math.round(+bufferMin || 0)),
+    editedById: snap.actorId, editedByName: snap.actorName, editedAt: new Date(),
+  } });
+  const stock = updated.kind === 'galon' ? await galonOwned({ role: 'owner' }) : (await stockMap())[id] || 0;
+  return itemClient(updated, stock);
+}
+
 // Append a stock movement. `allowed` restricts which types this endpoint may write (so the
 // damage/loss endpoint can be gated by a separate capability). Reason is always required.
 async function addMovement(id, body, actor, allowed) {
@@ -397,7 +412,7 @@ async function deleteSupplier(id, actor) {
 }
 
 module.exports = {
-  seedInventoryItems, gudangSummary, getItem, createItem, updateItem, addMovement, report,
+  seedInventoryItems, gudangSummary, getItem, createItem, updateItem, setBuffer, addMovement, report,
   reportGallonDamage, sellGalonRusak,
   closeoutPreview, closeWarehouse, listCloseouts,
   listSuppliers, getSupplier, createSupplier, updateSupplier, setSupplierActive, deleteSupplier,

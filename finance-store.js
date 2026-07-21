@@ -124,9 +124,9 @@
   const ROLE_COLORS = { owner: '#065489', gm: '#0B7EB1', hrd: '#138FB3', finance: '#22A7A1', adminfin: '#3FB8B2' };
   const ROLES = {
     owner:   { label: 'Owner',           blurb: 'Executive read-only overview', readonly: true,
-      perms: { company: true,  cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: true,  advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, manageUsers: true, kasbon: false, kasbonApprove: false, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true } },
+      perms: { company: true,  cashflow: true,  employees: false, empDetail: false, attendance: false, addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: true,  advisor: false, payroll: false, approvals: false, delete: false, settings: false, reset: false, manageUsers: true, kasbon: false, kasbonApprove: false, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true, gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true } },
     gm:      { label: 'General Manager', blurb: 'Full access to everything',
-      perms: { company: true,  cashflow: true,  employees: true,  empDetail: true,  attendance: true,  addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: true, manageUsers: true, kasbon: true, kasbonApprove: true, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true } },
+      perms: { company: true,  cashflow: true,  employees: true,  empDetail: true,  attendance: true,  addEntry: true,  edit: true,  seeMoney: true,  allEntries: true,  reports: true,  advisor: true,  payroll: true,  approvals: true,  delete: true,  settings: true,  reset: true, manageUsers: true, kasbon: true, kasbonApprove: true, distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true, distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true, gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true } },
     hrd:     { label: 'HRD',             blurb: 'People, payroll & attendance',
       perms: { company: false, cashflow: false, employees: true,  empDetail: true,  attendance: true,  addEntry: false, edit: false, seeMoney: true,  allEntries: false, reports: false, advisor: false, payroll: true,  approvals: true,  delete: false, settings: false, reset: false, kasbon: true, kasbonApprove: true, distribusiInput: false, distribusiKoreksi: false, distribusiCustomers: false, distribusiHargaMaster: false, distribusiAudit: false } },
     finance: { label: 'Finance',         blurb: 'Cash book, reports & payroll posting',
@@ -184,9 +184,22 @@
     if (p.distribusiOrder === undefined) p.distribusiOrder = legacyDist;
     if (p.distribusiRute === undefined) p.distribusiRute = legacyDist;   // reorder — derives from legacy only, not from Pengiriman
     if (p.distribusiCustomerDelete === undefined) p.distribusiCustomerDelete = legacyDist;   // delete/deactivate — legacy-only default
+    // BULK customer import split off distribusiCustomers — back-fill so existing users keep it.
+    if (p.distribusiCustomerImport === undefined) p.distribusiCustomerImport = !!p.distribusiCustomers;
     p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
       || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-      || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete);
+      || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiCustomerImport);
+    // Gudang: the coarse `gudangKelola` split into gudangAddStock / gudangKoreksi /
+    // gudangBuffer / gudangItems / gudangSupplier. Mirror the server's deriveGudangCaps —
+    // WITHOUT this the buttons vanish for anyone whose stored permissions predate the split,
+    // even though the server would still allow them. `gudangKelola` stays as an alias.
+    const legacyGud = !!p.gudangKelola;
+    if (p.gudangAddStock === undefined) p.gudangAddStock = legacyGud;
+    if (p.gudangKoreksi === undefined) p.gudangKoreksi = legacyGud;
+    if (p.gudangBuffer === undefined) p.gudangBuffer = legacyGud;
+    if (p.gudangItems === undefined) p.gudangItems = legacyGud;
+    if (p.gudangSupplier === undefined) p.gudangSupplier = legacyGud;
+    p.gudangKelola = !!(p.gudangAddStock || p.gudangKoreksi || p.gudangBuffer || p.gudangItems || p.gudangSupplier);
     return p;
   }
   const landingScreen = (role) => { const p = perms(role); return p.setoranOnly ? 'setoran' : p.company ? 'company' : p.cashflow ? 'overview' : p.employees ? 'employees' : p.payroll ? 'payroll' : p.kasbon ? 'kasbon' : 'overview'; };

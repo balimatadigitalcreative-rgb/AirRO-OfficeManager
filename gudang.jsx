@@ -49,7 +49,9 @@ function GudThumb({ photoId, kind }) {
   return <span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX(GUD_KIND_ICON[kind] || 'IconDots', { s: 18 })}</span>;
 }
 
-function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today }) {
+// Capabilities are PER ACTION (server-enforced in gudang.routes.js); the buttons below
+// mirror them one-for-one, so a user only ever sees what they may actually do.
+function GudangDept({ refreshKey, canAddStock, canKoreksi, canBuffer, canItems, canSupplier, canDamage, canReport, fleet, today }) {
   const [data, setData] = uSg(null);
   const [err, setErr] = uSg('');
   const [toast, setToast] = uSg('');
@@ -63,7 +65,7 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
   const reload = () => {
     if (!(window.API && window.API.gudang)) return Promise.resolve();
     window.API.gudang.closeouts().then((r) => setCloseouts(r.data || [])).catch(() => {});
-    if (canManage) window.API.gudang.suppliers('status=active').then((r) => setSuppliers(r.data || [])).catch(() => {});
+    if (canSupplier) window.API.gudang.suppliers('status=active').then((r) => setSuppliers(r.data || [])).catch(() => {});
     return window.API.gudang.summary().then((r) => { setData(r.data); setErr(''); })
       .catch((e) => setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
   };
@@ -110,13 +112,13 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
     const done = (msg) => { setSaving(false); setModal(null); flash(msg); reload(); };
     const fail = (e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); };
     if (modal.kind === 'buffer') {
-      window.API.gudang.updateItem(modal.item.id, { bufferMin: Math.max(0, parseInt(modal.bufferMin || '0', 10) || 0) }).then(() => done(trD('gud.bufferSaved'))).catch(fail);
+      window.API.gudang.setBuffer(modal.item.id, Math.max(0, parseInt(modal.bufferMin || '0', 10) || 0)).then(() => done(trD('gud.bufferSaved'))).catch(fail);
       return;
     }
     if (modal.kind === 'new') {
       const name = (modal.name || '').trim();
       if (!name) { setSaving(false); setErr(trD('gud.errName')); return; }
-      window.API.gudang.createItem({ name, kind: modal.itemKind, unit: (modal.unit || 'pcs').trim() || 'pcs', bufferMin: Math.max(0, parseInt(modal.bufferMin || '0', 10) || 0) }).then(() => done(trD('gud.itemAdded'))).catch(fail);
+      window.API.gudang.createItem(Object.assign({ name, kind: modal.itemKind, unit: (modal.unit || 'pcs').trim() || 'pcs' }, canBuffer ? { bufferMin: Math.max(0, parseInt(modal.bufferMin || '0', 10) || 0) } : {})).then(() => done(trD('gud.itemAdded'))).catch(fail);
       return;
     }
     if (modal.kind === 'edit') {
@@ -127,8 +129,8 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
       const photoId = (modal.photo && modal.photo.ref) ? modal.photo.ref : null;
       window.API.gudang.updateItem(modal.item.id, {
         name, unit: (modal.unit || '').trim() || 'pcs', form: (modal.form || '').trim(),
-        description: (modal.description || '').trim(), bufferMin: Math.max(0, parseInt(modal.bufferMin || '0', 10) || 0),
-        photoId,
+        description: (modal.description || '').trim(),
+        photoId,   // buffer is NOT here — it is its own action/capability ("Atur Buffer")
       }).then(() => done(trD('gud.itemSaved'))).catch(fail);
       return;
     }
@@ -190,7 +192,7 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
         <div className="sec-title">{trD('gud.title')}</div>
         <div style={{ display: 'flex', gap: 8 }}>
           {canReport && !todayCo && <button type="button" className="btn btn-ghost btn-sm" onClick={openCloseout}><IconCheck s={15} />{trD('gud.coBtn')}</button>}
-          {canManage && <button type="button" className="btn btn-primary btn-sm" onClick={openNew}><IconPlus s={15} />{trD('gud.addItem')}</button>}
+          {canItems && <button type="button" className="btn btn-primary btn-sm" onClick={openNew}><IconPlus s={15} />{trD('gud.addItem')}</button>}
         </div>
       </div>
 
@@ -227,27 +229,27 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
               {statusBadge(it)}
             </div>
             <div className="gud-card-stock"><span className="tnum gud-card-num">{numX(it.stock)}</span><span className="gud-card-numunit">{it.unit}</span></div>
-            <div className="gud-card-buffer">{trD('gud.buffer')}: <b>{it.bufferMin > 0 ? numX(it.bufferMin) : '—'}</b>{canManage && <button type="button" className="dist-link" onClick={() => openBuffer(it)} style={{ marginLeft: 8 }}>{trD('gud.setBuffer')}</button>}</div>
+            <div className="gud-card-buffer">{trD('gud.buffer')}: <b>{it.bufferMin > 0 ? numX(it.bufferMin) : '—'}</b>{canBuffer && <button type="button" className="dist-link" onClick={() => openBuffer(it)} style={{ marginLeft: 8 }}>{trD('gud.setBuffer')}</button>}</div>
             {it.kind === 'galon' ? (
               <>
                 <div className="gud-card-note"><IconLock s={12} />{trD('gud.galonManaged')}</div>
-                {(canManage || canDamage) && <div className="gud-card-actions">
-                  {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
+                {(canItems || canDamage) && <div className="gud-card-actions">
+                  {canItems && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
                   {canDamage && <button type="button" className="btn btn-ghost btn-sm gud-dmg" onClick={openReport}><IconWarn s={13} />{trD('gud.report')}</button>}
                 </div>}
               </>
             ) : it.kind === 'galon_rusak' ? (
               <div className="gud-card-actions">
-                {canManage && <button type="button" className="btn btn-primary btn-sm" onClick={() => openSell(it)} disabled={it.stock <= 0}><IconCoinIn s={13} />{trD('gud.sell')}</button>}
-                {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openCorrection(it)}><IconPencil s={13} />{trD('gud.correct')}</button>}
-                {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
+                {canSupplier && <button type="button" className="btn btn-primary btn-sm" onClick={() => openSell(it)} disabled={it.stock <= 0}><IconCoinIn s={13} />{trD('gud.sell')}</button>}
+                {canKoreksi && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openCorrection(it)}><IconPencil s={13} />{trD('gud.correct')}</button>}
+                {canItems && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
               </div>
             ) : (
               <div className="gud-card-actions">
-                {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openStock(it)}><IconPlus s={13} />{trD('gud.addStock')}</button>}
-                {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openCorrection(it)}><IconPencil s={13} />{trD('gud.correct')}</button>}
+                {canAddStock && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openStock(it)}><IconPlus s={13} />{trD('gud.addStock')}</button>}
+                {canKoreksi && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openCorrection(it)}><IconPencil s={13} />{trD('gud.correct')}</button>}
                 {canDamage && <button type="button" className="btn btn-ghost btn-sm gud-dmg" onClick={() => openDamage(it)}><IconWarn s={13} />{trD('gud.damage')}</button>}
-                {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
+                {canItems && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
               </div>
             )}
           </div>
@@ -299,7 +301,7 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
                 </select>
                 <div className="gud-row2">
                   <div><label className="fld-label">{trD('gud.unit')}</label><input className="fld" value={modal.unit} placeholder="pcs" onChange={(e) => setModal({ ...modal, unit: e.target.value })} /></div>
-                  <div><label className="fld-label">{trD('gud.buffer')}</label><input className="fld tnum" value={modal.bufferMin} inputMode="numeric" placeholder="0" onChange={(e) => setModal({ ...modal, bufferMin: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                  {canBuffer && <div><label className="fld-label">{trD('gud.buffer')}</label><input className="fld tnum" value={modal.bufferMin} inputMode="numeric" placeholder="0" onChange={(e) => setModal({ ...modal, bufferMin: e.target.value.replace(/[^0-9]/g, '') })} /></div>}
                 </div>
               </>)}
               {modal.kind === 'edit' && (<>
@@ -309,8 +311,6 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
                   <div><label className="fld-label">{trD('gud.unit')}</label><input className="fld" value={modal.unit} placeholder="pcs" onChange={(e) => setModal({ ...modal, unit: e.target.value })} /></div>
                   <div><label className="fld-label">{trD('gud.form')}</label><input className="fld" value={modal.form} placeholder={trD('gud.formPh')} onChange={(e) => setModal({ ...modal, form: e.target.value })} /></div>
                 </div>
-                <label className="fld-label">{trD('gud.buffer')}</label>
-                <input className="fld tnum" value={modal.bufferMin} inputMode="numeric" placeholder="0" onChange={(e) => setModal({ ...modal, bufferMin: e.target.value.replace(/[^0-9]/g, '') })} />
                 <label className="fld-label">{trD('gud.desc')}</label>
                 <textarea className="fld" style={{ height: 56, padding: 12, resize: 'vertical' }} value={modal.description} placeholder={trD('gud.descPh')} onChange={(e) => setModal({ ...modal, description: e.target.value })} />
                 <label className="fld-label">{trD('gud.photo')}</label>
@@ -480,7 +480,7 @@ function GudangDept({ refreshKey, canManage, canDamage, canReport, fleet, today 
   );
 }
 
-// ── SUPPLIER (Pemasok) screen — Gudang group, gudangKelola cap (server-enforced) ──────
+// ── SUPPLIER (Pemasok) screen — Gudang group, gudangSupplier cap (server-enforced) ────
 function GudangSuppliers() {
   const [list, setList] = uSg([]);
   const [q, setQ] = uSg('');

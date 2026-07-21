@@ -18,7 +18,8 @@ router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.s
 // NOTE: the delivery-fleet list is NOT served here — armada has a single app-wide
 // source (the `airro_fleet` /settings key managed in Setoran → Kelola Armada), read
 // by the client directly. No duplicate fleet source lives in this module.
-// Adding / editing / importing customers needs the dedicated capability.
+// Adding / editing a customer needs the customer capability. BULK import does NOT ride
+// along with it — see /customers/import below.
 router.post('/customers', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.customerSchema }), ctrl.createCustomer);
 router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.customerUpdateSchema }), ctrl.updateCustomer);
 // GPS location tagging by the delivery crew (needs only the delivery caps, not full
@@ -27,7 +28,10 @@ router.patch('/customers/:id/location', requireAnyCap(['distribusiInput', 'distr
 // Location photo (bytes already in the Attachment store; this stores only the id + who/when).
 // Delivery helpers may photograph while delivering; customer managers may replace/remove.
 router.patch('/customers/:id/location-photo', requireAnyCap(['distribusiInput', 'distribusiPengiriman', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationPhotoSchema }), ctrl.setLocationPhoto);
-router.post('/customers/import', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
+// BULK spreadsheet import — its own capability. Creating one customer is routine; creating
+// hundreds in one call is a different risk (duplicates, bad phone/price data at scale), so it
+// is granted separately. Back-filled from distribusiCustomers so nobody loses it on upgrade.
+router.post('/customers/import', requireCap('distribusiCustomerImport'), validate({ body: ctrl.schemas.importSchema }), ctrl.importCustomers);
 // Per-customer LEGACY (archive) transaction import — its own capability. customerId is from the
 // route; rows are stored legacy=true (excluded from every aggregate; no gallon movement). Undo a
 // whole batch is GM/Owner-only (enforced in the service). Fleet scope enforced.

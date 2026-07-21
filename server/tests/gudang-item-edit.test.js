@@ -28,9 +28,12 @@ beforeAll(async () => {
 afterAll(() => prisma.$disconnect());
 
 describe('Gudang — edit item details', () => {
-  it('edits a built-in item (name/unit/form/description/buffer) and records the audit', async () => {
+  it('edits a built-in item (name/unit/form/description) and records the audit', async () => {
+    // NOTE: bufferMin is NOT part of item details any more — it is its own action/capability
+    // (gudangBuffer, PATCH /items/:id/buffer), so it is set separately here.
+    await request(app).patch('/api/v1/gudang/items/sticker/buffer').set(auth(owner)).send({ bufferMin: 25 });
     const r = await request(app).patch('/api/v1/gudang/items/sticker').set(auth(owner))
-      .send({ name: 'Stiker Galon', unit: 'lembar', form: 'roll', description: 'stiker merek', bufferMin: 25 });
+      .send({ name: 'Stiker Galon', unit: 'lembar', form: 'roll', description: 'stiker merek' });
     expect(r.status).toBe(200);
     const d = r.body.data;
     expect(d).toMatchObject({ id: 'sticker', name: 'Stiker Galon', unit: 'lembar', form: 'roll', description: 'stiker merek', bufferMin: 25 });

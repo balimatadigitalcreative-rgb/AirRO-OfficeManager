@@ -44,7 +44,8 @@ const CAP_GROUPS = [
   { title: 'Distribusi', caps: [
     ['distribusiInput', 'Input Transaksi Distribusi'],
     ['distribusiKoreksi', 'Koreksi Transaksi Distribusi'],
-    ['distribusiCustomers', 'Kelola Pelanggan (tambah/impor)'],
+    ['distribusiCustomers', 'Kelola Pelanggan (tambah/ubah)'],
+    ['distribusiCustomerImport', 'Impor Pelanggan (massal)'],
     ['distribusiDashboard', 'Lihat Dashboard'],
     ['distribusiCashIntegrasi', 'Lihat Integrasi Kas'],
     ['distribusiGallon', 'Lihat Stok Galon'],
@@ -59,7 +60,13 @@ const CAP_GROUPS = [
   ] },
   { title: 'Gudang', caps: [
     ['gudangView', 'Lihat Gudang'],
-    ['gudangKelola', 'Kelola Stok (tambah/koreksi/buffer)'],
+    // The old coarse 'gudangKelola' is split per action. It survives as a derived alias for
+    // old tokens/clients, so it gets NO checkbox — ticking it would be misleading.
+    ['gudangAddStock', 'Tambah Stok'],
+    ['gudangKoreksi', 'Koreksi Stok'],
+    ['gudangBuffer', 'Atur Buffer'],
+    ['gudangItems', 'Kelola Barang'],
+    ['gudangSupplier', 'Kelola Supplier'],
     ['gudangDamage', 'Catat Rusak / Hilang'],
     ['gudangReport', 'Lihat Laporan Gudang'],
   ] },

@@ -43,7 +43,8 @@ describe('Gudang — inventory ledger, buffer/restock, permissions', () => {
   });
 
   it('buffer 100 with stock 500 = OK; lowering stock to 80 flags "perlu restock"', async () => {
-    await request(app).patch('/api/v1/gudang/items/sticker').set(auth(owner)).send({ bufferMin: 100 });
+    // buffer has its own endpoint + capability (gudangBuffer) since the per-action split
+    await request(app).patch('/api/v1/gudang/items/sticker/buffer').set(auth(owner)).send({ bufferMin: 100 });
     let d = await sum(owner);
     expect(itemOf(d, 'sticker').needsRestock).toBe(false);   // 500 > 100
     // consume 420 → stock 80 (≤ buffer 100)

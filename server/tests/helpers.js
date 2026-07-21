@@ -29,8 +29,10 @@ async function resetDb() {
   await prisma.customerCode.deleteMany();       // customer-code counter (append-only in prod)
   await prisma.customerType.deleteMany();
   // Gudang (children before parents): stock movements → inventory items.
-  await prisma.stockMovement.deleteMany();
+  await prisma.stockMovement.deleteMany();   // FK → supplier, so it goes first
   await prisma.inventoryItem.deleteMany();
+  await prisma.supplier.deleteMany();
+  await prisma.supplierCode.deleteMany();   // code counter — otherwise codes leak across suites
   await prisma.warehouseCloseout.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.user.deleteMany();

@@ -1185,7 +1185,7 @@ function OpeningBonModal({ customer, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [statusFilter, setStatusFilter] = uSx('active');   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
@@ -1650,11 +1650,12 @@ function DistCustomers({ canCustomers, canPrice, canInput, canKoreksi, canDelete
           </div>
         )}
         <div style={{ flex: 1 }} />
-        {canCustomers ? (
+        {(canCustomers || canCustImport) ? (
           <div className="dist-cust-actions">
-            <button type="button" className="btn btn-ghost" onClick={() => setTypesOpen(true)}><IconSettings s={15} />{trD('dist.kelolaTipe')}</button>
-            <button type="button" className="btn btn-ghost" onClick={() => setImpOpen(true)}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.import')}</button>
-            <button type="button" className="btn btn-primary" onClick={openAdd}><IconPlus s={16} />{trD('dist.addCust')}</button>
+            {canCustomers && <button type="button" className="btn btn-ghost" onClick={() => setTypesOpen(true)}><IconSettings s={15} />{trD('dist.kelolaTipe')}</button>}
+            {/* Bulk spreadsheet import is a SEPARATE capability from add/edit. */}
+            {canCustImport && <button type="button" className="btn btn-ghost" onClick={() => setImpOpen(true)}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.import')}</button>}
+            {canCustomers && <button type="button" className="btn btn-primary" onClick={openAdd}><IconPlus s={16} />{trD('dist.addCust')}</button>}
           </div>
         ) : <div className="dist-lockbtn"><IconLock s={14} />{trD('dist.addOwner')}</div>}
       </div>

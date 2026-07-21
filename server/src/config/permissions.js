@@ -12,9 +12,11 @@ const ROLE_PERMS = {
     kasbon: false, kasbonApprove: false, manageUsers: true,
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
+    // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
+    gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
   },
   gm: {
     company: true, cashflow: true, employees: true, empDetail: true, attendance: true, addEntry: true, edit: true,
@@ -22,8 +24,10 @@ const ROLE_PERMS = {
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true, manageUsers: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
+    // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
+    gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
   },
   hrd: {
     company: false, cashflow: false, employees: true, empDetail: true, attendance: true, addEntry: false, edit: false,
@@ -90,10 +94,10 @@ async function seedBuiltinRoles() {
         // Then materialize the split kasbon caps from the (merged) legacy value so the
         // Role editor shows them as explicit checkboxes, consistent with old behaviour.
         const cur = parsePerms(existing.permissions) || {};
-        const merged = deriveDistribusiCaps(deriveKasbonCaps({ ...seed, ...cur }));
+        const merged = deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps({ ...seed, ...cur })));
         await prisma.role.update({ where: { id }, data: { builtin: true, permissions: JSON.stringify(merged) } });
       } else {
-        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveDistribusiCaps(deriveKasbonCaps(seed))), builtin: true, sortOrder: i } });
+        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(seed)))), builtin: true, sortOrder: i } });
       }
     }
   } catch (e) { /* table may not exist yet on very first migrate; ignored */ }
@@ -178,9 +182,35 @@ function deriveDistribusiCaps(perms) {
   // Legacy import writes archive rows to a customer — a deliberate admin action, so it is never
   // derived from the legacy combined `distribusi` cap either.
   if (p.distribusiLegacyImport === undefined) p.distribusiLegacyImport = false;
+  // BULK customer import (spreadsheet) used to ride along on `distribusiCustomers`, which also
+  // gates ordinary create/edit. It is higher-risk (hundreds of rows at once), so it now has its
+  // own cap — back-filled from distribusiCustomers so nobody loses access on upgrade.
+  if (p.distribusiCustomerImport === undefined) p.distribusiCustomerImport = !!p.distribusiCustomers;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport);
+  return p;
+}
+
+// Gudang used to hang almost everything off ONE coarse cap: `gudangKelola` (add stock +
+// stock corrections + buffer + item create/edit + suppliers + selling damaged gallons). It
+// is now split PER-ACTION: gudangAddStock / gudangKoreksi / gudangBuffer / gudangItems /
+// gudangSupplier. Exactly like the kasbon + distribusi splits before it, every ABSENT
+// granular cap is derived from the legacy value, so old role rows, per-user overrides and
+// already-issued JWTs keep working: whoever had `gudangKelola` still does everything.
+// Explicit granular values are never overridden — that is how an admin narrows someone down.
+// `gudangKelola` survives only as a DEPRECATED live alias ("holds any manage action") so
+// stale clients and old tokens don't break; NO endpoint gates on it any more.
+function deriveGudangCaps(perms) {
+  if (!perms || typeof perms !== 'object') return perms;
+  const p = { ...perms };
+  const legacy = !!p.gudangKelola;
+  if (p.gudangAddStock === undefined) p.gudangAddStock = legacy;
+  if (p.gudangKoreksi === undefined) p.gudangKoreksi = legacy;
+  if (p.gudangBuffer === undefined) p.gudangBuffer = legacy;
+  if (p.gudangItems === undefined) p.gudangItems = legacy;
+  if (p.gudangSupplier === undefined) p.gudangSupplier = legacy;
+  p.gudangKelola = !!(p.gudangAddStock || p.gudangKoreksi || p.gudangBuffer || p.gudangItems || p.gudangSupplier);
   return p;
 }
 
@@ -202,8 +232,8 @@ function deriveManageUsers(perms, role) {
 
 function resolvePerms(role, permsStrOrObj) {
   const override = parsePerms(permsStrOrObj);
-  const resolved = deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance));
+  const resolved = deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance)));
   return deriveManageUsers(resolved, role);
 }
 
-module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, deriveDistribusiCaps, refreshRoleCache, seedBuiltinRoles };
+module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, deriveDistribusiCaps, deriveGudangCaps, refreshRoleCache, seedBuiltinRoles };
