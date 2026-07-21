@@ -405,7 +405,7 @@ function FApp() {
   // Same model as setoran: each entry is its own row, so concurrent edits never
   // clobber each other. Derived setoran rows (stinc-/stmfg-) are NEVER persisted —
   // they are recomputed in-memory from the setoran table below.
-  const ENTRY_TAGS = ['custPay', 'party', 'payroll', 'thr', 'orientation'];
+  const ENTRY_TAGS = ['custPay', 'party', 'payroll', 'thr', 'orientation', 'payrollUnits'];
   const isDerivedEntry = (id) => /^st(inc|mfg)-/.test(String(id || ''));
   const entryToApi = (e) => {
     const tags = {}; ENTRY_TAGS.forEach((k) => { if (e[k] != null) tags[k] = e[k]; });
@@ -1042,7 +1042,7 @@ function FApp() {
   // separation month, and fold in the running cycle's kasbon — matches PayrollScreen.
   const hrdTotals = uMh(() => HRD.totals(HRD.payrollStaff(hrdStaff, curMonthKey, hrdRates).map((s) => HRD.withCashbon(s, cashbons, HRD.payCycle().anchor)), hrdRates), [hrdStaff, hrdRates, cashbons, curMonthKey]);
   const payrollPosted = uMh(() => entries.find((e) => e.payroll === curMonthKey) || null, [entries, curMonthKey]);
-  const postPayroll = (amount, label) => {
+  const postPayroll = (amount, label, unitBreakdown) => {
     if (!p.payroll || !amount) return;
     const existing = entries.find((e) => e.payroll === curMonthKey);
     const msg = existing ? tr('hrd.repostConfirm', { amt: FIN.fmt(amount), m: label }) : tr('hrd.postConfirm', { amt: FIN.fmt(amount), m: label });
@@ -1051,7 +1051,10 @@ function FApp() {
     const lastDay = new Date(+yy, +mm, 0).getDate();
     const date = curMonthKey === FIN.TODAY.slice(0, 7) ? FIN.TODAY : `${curMonthKey}-${String(lastDay).padStart(2, '0')}`;
     const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: salaryCatKey, amount, acct: (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id,
-      note: tr('hrd.payrollNote', { m: label, n: hrdStaff.length }), method: 'Transfer BCA', date, time: '09:00', payroll: curMonthKey };
+      note: tr('hrd.payrollNote', { m: label, n: hrdStaff.length }), method: 'Transfer BCA', date, time: '09:00', payroll: curMonthKey,
+      // Snapshot each unit's share AS OF this run (Stage 2). Frozen on the posted entry so a
+      // later placement change never rewrites a past payslip. Does not affect the amount.
+      payrollUnits: Array.isArray(unitBreakdown) ? unitBreakdown : undefined };
     realEntries.filter((e) => e.payroll === curMonthKey).forEach((e) => removeEntry(e.id));   // drop the previous month's posting
     addEntry(entry);
     // Kasbon of the payroll cycle just paid → mark settled ('paid') so they stop

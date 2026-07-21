@@ -1,6 +1,15 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const businessUnit = require('./businessUnit.service');
+
+// Read the actor's name/role from the DB (never trust the client) so a placement change is
+// audited to a real, unforgeable identity.
+async function actorSnap(userId) {
+  if (!userId) return { byId: null, byName: null, byRole: null };
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
+  return { byId: userId, byName: (u && u.name) || null, byRole: (u && u.role) || null };
+}
 
 // Posisi kantor → KODE NIP. Office value IS the code (AIRRO/NSN/MFG).
 const OFFICES = ['AIRRO', 'NSN', 'MFG'];
@@ -83,6 +92,9 @@ function toColumns(o) {
 function toClient(row) {
   let obj = {}; try { obj = row.data ? JSON.parse(row.data) : {}; } catch (e) {}
   return { ...obj, id: row.id, nip: row.nip || obj.nip || '',
+    // Business unit is AUTHORITATIVE from the column (Stage 1 backfilled every row to "Air");
+    // null = "Air" so an old row never reads blank. The placement audit trail lives in `data`.
+    businessUnitId: row.businessUnitId || 'air',
     createdBy: row.createdByName ? { name: row.createdByName, role: row.createdByRole || null } : null,
     createdById: row.createdById || null, createdAt: row.createdAt ? new Date(row.createdAt).getTime() : null };
 }
@@ -118,12 +130,16 @@ async function create(body, userId) {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
     if (u) { snap.createdByName = u.name; snap.createdByRole = u.role; }
   }
-  const data = { ...cols, ...snap, nip, data: JSON.stringify(full) };
+  // Business-unit placement (Stage 2): stamp the authoritative column from the resolved unit
+  // (defaults to "Air"). Purely a label — it changes no pay amount, only grouping.
+  const businessUnitId = await businessUnit.resolveUnitId(body.businessUnitId);
+  full.businessUnitId = businessUnitId;
+  const data = { ...cols, ...snap, nip, businessUnitId, data: JSON.stringify(full) };
   if (body.id) data.id = String(body.id);           // keep the client id (optimistic insert)
   const row = await prisma.employee.create({ data });
   return toClient(row);
 }
-async function update(id, body) {
+async function update(id, body, userId) {
   const existing = await getRow(id);
   let prev = {}; try { prev = existing.data ? JSON.parse(existing.data) : {}; } catch (e) {}
   const merged = { ...prev, ...body };
@@ -131,7 +147,24 @@ async function update(id, body) {
   delete merged._isNew;
   const cols = toColumns(merged);
   delete cols.nip;                                    // never change NIP here
-  const row = await prisma.employee.update({ where: { id }, data: { ...cols, data: JSON.stringify(merged) } });
+
+  // The placement audit trail is SERVER-OWNED: seed it from the stored record only, never from
+  // the request body, so a client can't inject or rewrite historical entries.
+  merged.businessUnitAudit = Array.isArray(prev.businessUnitAudit) ? prev.businessUnitAudit : [];
+  // Business-unit placement: only re-resolve when the request actually carries a unit, so a
+  // normal edit that omits it keeps the current placement (never silently reset to "Air").
+  const curUnit = existing.businessUnitId || 'air';
+  let businessUnitId = curUnit;
+  if (body.businessUnitId !== undefined) {
+    businessUnitId = await businessUnit.resolveUnitId(body.businessUnitId);
+    if (businessUnitId !== curUnit) {
+      // Audit the move to an unforgeable identity (from the token, not the client body).
+      const snap = await actorSnap(userId);
+      merged.businessUnitAudit = [...merged.businessUnitAudit.slice(-49), { from: curUnit, to: businessUnitId, at: new Date().toISOString(), ...snap }];
+    }
+  }
+  merged.businessUnitId = businessUnitId;
+  const row = await prisma.employee.update({ where: { id }, data: { ...cols, businessUnitId, data: JSON.stringify(merged) } });
   return toClient(row);
 }
 // Explicit "Regenerasi NIP" — allocates a fresh NIP using current office/contract.

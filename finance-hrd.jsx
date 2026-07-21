@@ -15,6 +15,25 @@ const ALLOW_LIST = [
   { fk: 'allowance', ck: 'allowOther', t: 'hrd.allowOther' },
 ];
 
+// ── Business units (Stage 2) ────────────────────────────────────────────────
+// A tiny module-level cache so the payroll screen + staff modal share one fetch. The list
+// rarely changes; a stale entry only affects labels, never amounts. Always includes "Air".
+const AIR_UNIT = { id: 'air', name: 'Air', code: 'AIR', active: true };
+let _buCache = null;
+function useBusinessUnits() {
+  const [units, setUnits] = uShr(_buCache || [AIR_UNIT]);
+  uEhr(() => {
+    if (_buCache) { setUnits(_buCache); return; }
+    if (!(window.API && window.API.businessUnits)) return;
+    window.API.businessUnits.list().then((r) => { _buCache = (r && r.data && r.data.length) ? r.data : [AIR_UNIT]; setUnits(_buCache); }).catch(() => {});
+  }, []);
+  return units;
+}
+// An employee's unit, defaulting to "Air" (Stage 1 backfilled everyone; new/edited rows carry
+// it explicitly). null/blank/unknown → 'air', so grouping never drops a person.
+const unitOf = (s) => (s && s.businessUnitId) || 'air';
+const unitName = (units, id) => { const u = (units || []).find((x) => x.id === (id || 'air')); return u ? u.name : (id || 'Air'); };
+
 function SBRow({ label, val, strong, neg, muted, note }) {
   return (
     <div className={`sb-row ${strong ? 'strong' : ''} ${muted ? 'muted' : ''}`}>
@@ -202,6 +221,15 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
   const ADD_POS = '__add_pos__';
   const posOptions = [...posList.map((p) => ({ value: p, label: p })), { value: ADD_POS, label: '+ ' + trH('pos.addNew') }];
   const [f, setF] = uShr(staff);
+  // Business-unit options (active only, but keep the staff's current unit even if it was
+  // deactivated so the dropdown never loses their placement).
+  const buUnits = useBusinessUnits();
+  const buOptions = (() => {
+    const act = buUnits.filter((u) => u.active !== false);
+    const cur = f.businessUnitId || 'air';
+    if (cur && !act.some((u) => u.id === cur)) { const c = buUnits.find((u) => u.id === cur); if (c) act.push(c); }
+    return act.map((u) => ({ value: u.id, label: u.name }));
+  })();
   const [showSalary, setShowSalary] = uShr(!ident);   // identity: salary collapsed
   const [showIdent, setShowIdent] = uShr(true);        // payroll: identity shown below salary
   const [nipBusy, setNipBusy] = uShr(false);
@@ -270,6 +298,8 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
       <div className="ed-grp-t">{trH('co.grpContract')}</div>
       <label className="ed-af"><span>{trH('hrd.position')}</span><UI.Dropdown value={f.pos || ''} options={posOptions} placeholder={trH('pos.placeholder')} onChange={onPosChange} /></label>
       <label className="ed-af"><span>{trH('hrd.dept')}</span><UI.Dropdown value={f.dept || deptList[0]} options={deptList} onChange={(v) => set({ dept: v })} /></label>
+      {/* Business-unit placement (Stage 2). Drives payroll grouping; changes NO pay amount. */}
+      <label className="ed-af"><span>{trH('bu.unitLabel')}</span><UI.Dropdown value={f.businessUnitId || 'air'} options={buOptions} onChange={(v) => set({ businessUnitId: v })} /></label>
       <label className="ed-af"><span>{trH('co.empStatus')}</span><UI.Dropdown value={f.status || 'Tetap'} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => set({ status: v })} /></label>
       <label className="ed-af"><span>{trH('co.noSurat')}</span><input value={f.noSurat || ''} onChange={(e) => set({ noSurat: e.target.value })} /></label>
       <label className="ed-af"><span>{trH('co.joined')}</span><DP.DateField value={f.joinedDate || ''} max={today} onChange={(v) => set({ joinedDate: v })} /></label>
@@ -568,8 +598,46 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
   // Exclude the orientation/DW bucket (paid via daily lump sum, never monthly payroll)
   // and staff who left before this payroll month; prorate the separation month.
   const period = HRD.payPeriod(monthKey);   // 16→15 cycle → BPJS enrollment gating/proration
-  const rows = staff.filter((s) => !HRD.isOrientationStage(s)).map((s) => ({ o: s, pr: HRD.prorateForMonth(s, monthKey, rates) })).filter((x) => x.pr.included);
+  const allRows = staff.filter((s) => !HRD.isOrientationStage(s)).map((s) => ({ o: s, pr: HRD.prorateForMonth(s, monthKey, rates) })).filter((x) => x.pr.included);
+
+  // ── Business-unit grouping (Stage 2) ──
+  // Placement filters/groups the SAME rows — it never changes an employee's computed pay. With
+  // the filter on "Semua" the table + totals are byte-for-byte what they were before Stage 2.
+  const buUnits = useBusinessUnits();
+  const [unitFilter, setUnitFilter] = uShr('all');
+  const rows = unitFilter === 'all' ? allRows : allRows.filter((x) => unitOf(x.o) === unitFilter);
   const t = HRD.totals(rows.map((x) => aug(x.pr.staff)), rates, period);
+  // Posting ALWAYS uses the whole company (all units) — the filter only changes the VIEW, never
+  // what gets posted to the cash book. So payroll posting is identical to before Stage 2.
+  const tAll = HRD.totals(allRows.map((x) => aug(x.pr.staff)), rates, period);
+  // Per-unit subtotals (only the units actually present, in dictionary order). Their
+  // companyCost sums to the combined total — the invariant the test checks.
+  const unitOrder = buUnits.map((u) => u.id);
+  const presentUnits = [...new Set(allRows.map((x) => unitOf(x.o)))].sort((a, b) => (unitOrder.indexOf(a) < 0 ? 99 : unitOrder.indexOf(a)) - (unitOrder.indexOf(b) < 0 ? 99 : unitOrder.indexOf(b)));
+  const unitSubtotals = presentUnits.map((uid) => ({
+    id: uid, name: unitName(buUnits, uid),
+    t: HRD.totals(allRows.filter((x) => unitOf(x.o) === uid).map((x) => aug(x.pr.staff)), rates, period),
+  }));
+
+  // Export the CURRENT view as CSV (respects the filter → single unit or combined). Per-unit
+  // and combined both fall out of this one control, matching "exportable per unit and combined".
+  const exportCsv = () => {
+    const head = ['Unit Bisnis', trH('hrd.cEmployee'), trH('hrd.cGross'), trH('hrd.cKes'), trH('hrd.cTk'), trH('hrd.cDeduct'), trH('hrd.cTakehome'), trH('hrd.cCost')];
+    const lines = [head];
+    rows.forEach(({ o, pr }) => {
+      const c = HRD.compute(aug(pr.staff), rates, period);
+      const bpjsKes = c.kesEmployer + c.kesEmployee;
+      const bpjsTk = c.jhtEmployer + c.jhtEmployee + c.jpEmployer + c.jpEmployee + c.jkk + c.jkm;
+      lines.push([unitName(buUnits, unitOf(o)), o.name, c.gross, bpjsKes, bpjsTk, c.employeeDeduct, c.takeHome, c.companyCost]);
+    });
+    if (unitFilter === 'all') unitSubtotals.forEach((u) => lines.push([`Subtotal ${u.name}`, u.t.count + ' staff', u.t.gross, u.t.bpjsKes, u.t.bpjsTk, u.t.employeeDeduct, u.t.takeHome, u.t.companyCost]));
+    lines.push([unitFilter === 'all' ? 'TOTAL' : `TOTAL ${unitName(buUnits, unitFilter)}`, t.count + ' staff', t.gross, t.bpjsKes, t.bpjsTk, t.employeeDeduct, t.takeHome, t.companyCost]);
+    const csv = lines.map((r) => r.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `payroll-${monthKey}-${unitFilter === 'all' ? 'semua' : unitFilter}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
 
   const saveStaff = (s) => {
     setStaff((prev) => { const ex = prev.find((x) => x.id === s.id); const clean = { ...s }; delete clean._isNew; return ex ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
@@ -585,9 +653,20 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
       <div className="hrd-actionbar">
         {canEdit && <button className="btn btn-primary" onClick={addStaff}><IconPlus s={17} />{trH('hrd.addEmp')}</button>}
         <button className={`btn btn-ghost ${showRates ? 'on' : ''}`} onClick={() => setShowRates((v) => !v)}><IconSettings s={16} />{trH('hrd.rates')}</button>
+        <button className="btn btn-ghost" onClick={exportCsv}><IconDownload s={16} />{trH('hrd.exportCsv')}</button>
         <div style={{ flex: 1 }} />
-        {canEdit && <button className="btn btn-lime" onClick={() => onPost(t.companyCost, monLabel)}><IconCoinOut s={16} />{trH('hrd.post', { m: monLabel })}</button>}
+        {/* Post always books the FULL company cost (tAll), regardless of the view filter. */}
+        {canEdit && <button className="btn btn-lime" onClick={() => onPost(tAll.companyCost, monLabel, unitSubtotals.map((u) => ({ id: u.id, name: u.name, count: u.t.count, companyCost: Math.round(u.t.companyCost) })))}><IconCoinOut s={16} />{trH('hrd.post', { m: monLabel })}</button>}
       </div>
+
+      {/* Business-unit filter — "Semua" reproduces exactly the pre-Stage-2 numbers. */}
+      {buUnits.length > 1 && (
+        <div className="hrd-unit-bar">
+          <span className="hrd-unit-lbl">{trH('unit.label')}:</span>
+          <button type="button" className={`dist-chip ${unitFilter === 'all' ? 'on' : ''}`} onClick={() => setUnitFilter('all')}>{trH('unit.all')}</button>
+          {presentUnits.map((uid) => <button key={uid} type="button" className={`dist-chip ${unitFilter === uid ? 'on' : ''}`} onClick={() => setUnitFilter(uid)}>{unitName(buUnits, uid)}</button>)}
+        </div>
+      )}
 
       {showRates && <RatesPanel rates={rates} onChange={setRates} onReset={() => setRates(HRD.resetRates())} />}
 
@@ -620,7 +699,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
                         <span className="hemp-av">{o.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
                         <div style={{ minWidth: 0 }}>
                           <div className="hemp-name">{o.name}</div>
-                          <div className="hemp-pos">{o.pos || '—'} · <span style={{ color: 'var(--text-faint)' }}>{o.risk}</span></div>
+                          <div className="hemp-pos">{o.pos || '—'} · <span style={{ color: 'var(--text-faint)' }}>{o.risk}</span>{buUnits.length > 1 ? <span className="hemp-unit">{unitName(buUnits, unitOf(o))}</span> : null}</div>
                           {(partial || c.offDays > 0 || c.otherDeduct > 0) && (
                             <div className="hemp-badges">
                               {partial && <span className="hbadge off" title={o.separationDate}>{trH('hrd.proratedBadge', { n: pr.daysWorked, w: pr.workDays })}</span>}
@@ -650,8 +729,22 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
               })}
             </tbody>
             <tfoot>
+              {/* Per-unit subtotals — shown only in the combined "Semua" view when >1 unit is
+                  present. Their companyCost column sums to the grand-total row below. */}
+              {unitFilter === 'all' && unitSubtotals.length > 1 && unitSubtotals.map((u) => (
+                <tr key={u.id} className="hrd-subtotal">
+                  <td className="hcell-name">{trH('hrd.subtotalUnit', { u: u.name, n: u.t.count })}</td>
+                  <td className="tnum">{rp(u.t.gross)}</td>
+                  <td className="tnum mut">{rp(u.t.bpjsKes)}</td>
+                  <td className="tnum mut">{rp(u.t.bpjsTk)}</td>
+                  <td className="tnum amt-neg">−{rp(u.t.employeeDeduct)}</td>
+                  <td className="tnum">{rp(u.t.takeHome)}</td>
+                  <td className="tnum">{rp(u.t.companyCost)}</td>
+                  <td></td>
+                </tr>
+              ))}
               <tr>
-                <td className="hcell-name" style={{ fontWeight: 700 }}>{trH('hrd.totalStaff', { n: t.count })}</td>
+                <td className="hcell-name" style={{ fontWeight: 700 }}>{unitFilter === 'all' ? trH('hrd.totalStaff', { n: t.count }) : trH('hrd.totalUnit', { u: unitName(buUnits, unitFilter), n: t.count })}</td>
                 <td className="tnum">{rp(t.gross)}</td>
                 <td className="tnum mut">{rp(t.bpjsKes)}</td>
                 <td className="tnum mut">{rp(t.bpjsTk)}</td>

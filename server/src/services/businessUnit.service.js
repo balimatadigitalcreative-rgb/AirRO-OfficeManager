@@ -42,6 +42,15 @@ async function backfillBusinessUnit() {
   return filled;
 }
 
+// Resolve a unit id to a REAL, existing unit id — or fall back to the default "Air". Used
+// when stamping a record's placement so an unknown/blank id can never orphan a row (mirrors
+// distribution.validTypeId). Returns 'air' for null/blank/unknown.
+async function resolveUnitId(id) {
+  if (!id) return DEFAULT_UNIT_ID;
+  const u = await prisma.businessUnit.findUnique({ where: { id: String(id) } });
+  return u ? u.id : DEFAULT_UNIT_ID;
+}
+
 async function listUnits(includeInactive = true) {
   const data = await prisma.businessUnit.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] });
   return includeInactive ? data : data.filter((u) => u.active);
@@ -83,5 +92,5 @@ async function updateUnit(id, body) {
 
 module.exports = {
   DEFAULT_UNIT_ID, SEED_UNITS, LABELLED_MODELS,
-  seedBusinessUnits, backfillBusinessUnit, listUnits, createUnit, updateUnit,
+  seedBusinessUnits, backfillBusinessUnit, listUnits, createUnit, updateUnit, resolveUnitId,
 };
