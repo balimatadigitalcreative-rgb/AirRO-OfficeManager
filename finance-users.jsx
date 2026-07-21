@@ -38,6 +38,7 @@ const CAP_GROUPS = [
     ['settings', 'Pengaturan'],
     ['manageUsers', 'Kelola Pengguna'],
     ['manageBusinessUnits', 'Kelola Unit Bisnis'],
+    ['interUnitTransfer', 'Transfer Antar-Unit'],
     // The most destructive capability in the app — no role has it by default; the owner
     // grants it deliberately, and it is server-enforced on every wipe endpoint.
     ['dataWipe', '⚠ Hapus Data (berbahaya)'],

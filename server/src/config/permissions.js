@@ -11,6 +11,7 @@ const ROLE_PERMS = {
     payroll: false, approvals: false, settings: false, reset: false, setoran: false, setoranOnly: false,
     kasbon: false, kasbonApprove: false, manageUsers: true,
     manageBusinessUnits: true,   // owner-tier: add/rename/deactivate business units (Stage 1 labels)
+    interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true,
@@ -24,7 +25,7 @@ const ROLE_PERMS = {
     delete: true, seeMoney: true, allEntries: true, reports: true, advisor: true,
     payroll: true, approvals: true, settings: true, reset: true, setoran: true, setoranOnly: false,
     kasbon: true, kasbonApprove: true, manageUsers: true,
-    manageBusinessUnits: true,
+    manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,

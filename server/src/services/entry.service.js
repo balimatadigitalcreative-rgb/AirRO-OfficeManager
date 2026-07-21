@@ -88,7 +88,10 @@ async function create(data, actor) {
 }
 
 async function update(id, data, actor) {
-  await getById(id); // 404 if missing
+  const cur = await getById(id); // 404 if missing
+  // An inter-unit leg is half of a linked pair — editing it in isolation would desync the two
+  // books. It must be voided (which reverses BOTH legs) and re-created, never patched.
+  if (cur.interUnit) throw ApiError.badRequest('Transaksi antar-unit tidak bisa diedit — batalkan lalu buat ulang.');
   // Never let a PATCH overwrite the original creator snapshot (the fields aren't in
   // the update schema anyway, but strip defensively).
   const { createdById, createdByName, createdByRole, ...safe } = data;
@@ -103,9 +106,15 @@ async function update(id, data, actor) {
 }
 
 async function remove(id) {
-  await getById(id);
+  const cur = await getById(id);
   await distribution.retractPurchaseMovement(id);   // pull back any gallon stock this entry added
-  await prisma.entry.delete({ where: { id } });
+  // Deleting one leg of an inter-unit transfer deletes BOTH (atomic), so a leg is never orphaned
+  // — whether removed here or via the dedicated void endpoint.
+  if (cur.interUnit && cur.transferGroupId) {
+    await prisma.entry.deleteMany({ where: { transferGroupId: cur.transferGroupId, interUnit: true } });
+  } else {
+    await prisma.entry.delete({ where: { id } });
+  }
 }
 
 module.exports = { list, getById, create, update, remove };

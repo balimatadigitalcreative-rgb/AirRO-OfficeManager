@@ -127,10 +127,21 @@ model Entry {
 
   businessUnitId String? // STAGE 1 label; null = "Air". Not yet filtered on.
 
+  // STAGE 4 — inter-unit transfer. An internal money movement between two business units is ONE
+  // economic event stored as a LINKED PAIR of entries (an expense in the payer unit + an income
+  // in the receiver unit) sharing transferGroupId with interUnit=true. In the combined view the
+  // pair is eliminated from company income/expense (it nets to zero); each single-unit view sees
+  // its own leg as real income/expense. counterpart* point at the OTHER leg's unit/account.
+  interUnit           Boolean @default(false)
+  transferGroupId     String? // shared by the two legs of one transfer
+  counterpartUnitId   String? // the other leg's business unit
+  counterpartAccountId String? // the other leg's money-spot (account id)
+
   @@index([date])
   @@index([type])
   @@index([updatedAt])
   @@index([businessUnitId])
+  @@index([transferGroupId])
 }
 
 model Transfer {

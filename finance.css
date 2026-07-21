@@ -2396,3 +2396,8 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .ub-bal { font-weight: 800; color: var(--ink); }
 .ub-row.ub-total { border-top: 2px solid var(--border); cursor: default; }
 .ub-row.ub-total .ub-name { color: var(--text-mut); }
+/* Inter-unit elimination row — internal trade removed from the combined total. */
+.ub-row.ub-elim { cursor: help; color: var(--text-faint); font-style: italic; }
+.ub-row.ub-elim .ub-name { display: inline-flex; align-items: center; gap: 5px; color: var(--text-faint); font-weight: 600; }
+/* Inter-unit transfer modal — from/to unit+account pairs side by side. */
+.iu-legrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

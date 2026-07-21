@@ -478,6 +478,75 @@ function XferModal({ accounts, onSave, onClose }) {
   );
 }
 
+// Inter-unit transfer (Stage 4) — record an internal money movement between two business units.
+// It posts as a linked PAIR (expense in the payer unit, income in the receiver unit); the server
+// creates both legs atomically. Combined view eliminates the pair (net zero); each unit sees its
+// own leg. Account pickers are scoped to the chosen unit so money-spots stay coherent.
+function InterUnitModal({ accounts, units, defaultUnit, onSave, onClose }) {
+  const BU = (units || []).filter((u) => u.active !== false);
+  const acctsOf = (uid) => (accounts || []).filter((a) => (a.businessUnitId || 'air') === uid);
+  const dFrom = defaultUnit && defaultUnit !== 'all' ? defaultUnit : (BU[0] && BU[0].id);
+  const [fromUnit, setFromUnit] = uS(dFrom);
+  const [toUnit, setToUnit] = uS((BU.find((u) => u.id !== dFrom) || {}).id);
+  const [fromAcct, setFromAcct] = uS((acctsOf(dFrom)[0] || {}).id || '');
+  const [toAcct, setToAcct] = uS((acctsOf((BU.find((u) => u.id !== dFrom) || {}).id)[0] || {}).id || '');
+  const [amount, setAmount] = uS(0);
+  const [note, setNote] = uS('');
+  const [date, setDate] = uS(TODAY);
+  const [busy, setBusy] = uS(false);
+  const [err, setErr] = uS('');
+  uE(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  // keep the account selection valid when its unit changes
+  uE(() => { const a = acctsOf(fromUnit); if (!a.some((x) => x.id === fromAcct)) setFromAcct((a[0] || {}).id || ''); }, [fromUnit]);
+  uE(() => { const a = acctsOf(toUnit); if (!a.some((x) => x.id === toAcct)) setToAcct((a[0] || {}).id || ''); }, [toUnit]);
+  const unitOpts = BU.map((u) => ({ value: u.id, label: u.name }));
+  const nameU = (id) => (BU.find((u) => u.id === id) || {}).name || id;
+  const valid = fromUnit && toUnit && fromUnit !== toUnit && fromAcct && toAcct && fromAcct !== toAcct && amount > 0 && date;
+  const submit = () => {
+    if (!valid || busy) return;
+    setBusy(true); setErr('');
+    Promise.resolve(onSave({ fromUnitId: fromUnit, toUnitId: toUnit, fromAccountId: fromAcct, toAccountId: toAcct, amount, date, note: note.trim() }))
+      .then(() => { setBusy(false); onClose(); })
+      .catch((e) => { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || (window.t && window.t('st.syncErr')) || 'Gagal.'); });
+  };
+  const acctOpts = (uid) => acctsOf(uid).map((a) => ({ value: a.id, label: a.name }));
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{(window.t && window.t('iu.title')) || 'Transfer Antar-Unit'}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{(window.t && window.t('iu.sub')) || ''}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="iu-legrow">
+            <div><label className="fld-label" style={{ marginTop: 0 }}>{(window.t && window.t('iu.fromUnit')) || 'Dari unit'}</label>
+              <UI.Dropdown value={fromUnit} options={unitOpts} onChange={setFromUnit} /></div>
+            <div><label className="fld-label" style={{ marginTop: 0 }}>{(window.t && window.t('iu.fromAcct')) || 'Akun asal'}</label>
+              <UI.Dropdown value={fromAcct} options={acctOpts(fromUnit)} onChange={setFromAcct} placeholder="—" /></div>
+          </div>
+          <div style={{ display: 'grid', placeItems: 'center', margin: '8px 0' }}><span className="xf-arrow"><IconArrowDown s={18} /></span></div>
+          <div className="iu-legrow">
+            <div><label className="fld-label" style={{ marginTop: 0 }}>{(window.t && window.t('iu.toUnit')) || 'Ke unit'}</label>
+              <UI.Dropdown value={toUnit} options={unitOpts.filter((o) => o.value !== fromUnit)} onChange={setToUnit} /></div>
+            <div><label className="fld-label" style={{ marginTop: 0 }}>{(window.t && window.t('iu.toAcct')) || 'Akun tujuan'}</label>
+              <UI.Dropdown value={toAcct} options={acctOpts(toUnit)} onChange={setToAcct} placeholder="—" /></div>
+          </div>
+          <label className="fld-label">{trF('add.amount')}</label>
+          <div className="amt-input" style={{ padding: '8px 13px' }}><span className="amt-rp" style={{ fontSize: 14 }}>Rp</span><input inputMode="numeric" style={{ fontSize: 16 }} value={amount ? amount.toLocaleString('id-ID') : ''} onChange={(e) => setAmount(+e.target.value.replace(/\D/g, '') || 0)} /></div>
+          <label className="fld-label">{trF('add.note')}</label>
+          <input className="fld" value={note} placeholder={(window.t && window.t('iu.notePh')) || 'cth. Air bayar Manufaktur — air isi ulang'} onChange={(e) => setNote(e.target.value)} />
+          <label className="fld-label">{trF('add.date')}</label>
+          <DP.DateField value={date} max={TODAY} onChange={setDate} />
+          {amount > 0 && fromUnit !== toUnit && <div className="dist-infobox" style={{ marginTop: 12 }}>{Icn('IconRefresh', { s: 16 })}<span>{(window.t && window.t('iu.preview', { a: nameU(fromUnit), b: nameU(toUnit), amt: fmt(amount) })) || ''}</span></div>}
+          {!acctsOf(fromUnit).length && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{(window.t && window.t('iu.noAcct', { u: nameU(fromUnit) })) || 'Unit ini belum punya akun.'}</div>}
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trF('common.cancel') || 'Cancel'}</button>
+          <button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : ((window.t && window.t('iu.do')) || 'Catat Transfer')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Build the full chronological ledger (passbook) for ONE account, with a running balance
 // that reconciles exactly to FS.acctBalance. Same attribution as acctBalance: income entry
 // = credit (Masuk), expense = debit (Keluar); an entry with no/unknown acct falls to the
@@ -575,10 +644,11 @@ function AcctDetail({ acct, accounts, entries, transfers, catMap, canEdit, onEdi
   );
 }
 
-function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, canEdit, catMap, onOpenEntry, units, activeUnit, defaultUnit }) {
+function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, canEdit, catMap, onOpenEntry, units, activeUnit, defaultUnit, canInterUnit, onInterUnit }) {
   const [edit, setEdit] = uS(null);
   const [detail, setDetail] = uS(null);
   const [xfer, setXfer] = uS(false);
+  const [iuOpen, setIuOpen] = uS(false);
   const thisMonth = (TODAY || '').slice(0, 7);
   // Balance math ALWAYS uses the FULL accounts array (opening + that account's entries), so a
   // filter never shifts the null-acct fallback. Only the DISPLAYED set is scoped. A 'shared'
@@ -612,6 +682,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
         <div><div style={{ fontSize: 12.5, color: 'rgba(255,255,255,.7)' }}>{trF('ms.totalBal')}</div><div className="tnum" style={{ fontSize: 28, fontWeight: 800, color: '#fff' }}>{fmt(total)}</div></div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {canEdit && <button className="btn btn-ghost" style={{ background: 'rgba(255,255,255,.14)', color: '#fff', border: 'none' }} onClick={() => setXfer(true)}><IconArrowUp s={16} />{trF('xf.title')}</button>}
+          {canInterUnit && (units || []).filter((u) => u.active !== false).length > 1 && <button className="btn btn-ghost" style={{ background: 'rgba(255,255,255,.14)', color: '#fff', border: 'none' }} onClick={() => setIuOpen(true)}><IconRefresh s={16} />{(window.t && window.t('iu.btn')) || 'Antar-Unit'}</button>}
           {canEdit && <button className="btn btn-lime" onClick={addNew}><IconPlus s={16} />{trF('ms.add')}</button>}
         </div>
       </div>
@@ -658,6 +729,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
       {detail && <AcctDetail acct={detail} accounts={accounts} entries={entries} transfers={transfers} catMap={catMap} canEdit={canEdit} onEdit={(a) => { setDetail(null); setEdit(a); }} onOpenEntry={(e) => { setDetail(null); if (onOpenEntry) onOpenEntry(e); }} onClose={() => setDetail(null)} />}
       {edit && <AcctModal acct={edit} units={units} onSave={save} onClose={() => setEdit(null)} />}
       {xfer && <XferModal accounts={accounts} onSave={doXfer} onClose={() => setXfer(false)} />}
+      {iuOpen && <InterUnitModal accounts={accounts} units={units} defaultUnit={defaultUnit} onSave={onInterUnit} onClose={() => setIuOpen(false)} />}
     </div>
   );
 }

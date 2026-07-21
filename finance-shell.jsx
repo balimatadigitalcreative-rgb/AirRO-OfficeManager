@@ -434,6 +434,9 @@ function FApp() {
     const o = { id: row.id, type: row.type, amount: row.amount, note: row.note || '', method: row.method || 'Cash',
       date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined,
       businessUnitId: row.businessUnitId || 'air', gallonQty: row.gallonQty || 0 };
+    // Inter-unit transfer legs (Stage 4) — carried read-only so aggregation can eliminate the pair
+    // in the combined view and the UI can offer "void" (which reverses both legs).
+    if (row.interUnit) { o.interUnit = true; o.transferGroupId = row.transferGroupId || null; o.counterpartUnitId = row.counterpartUnitId || null; o.counterpartAccountId = row.counterpartAccountId || null; }
     const pf = proofFromApi(row.proof); if (pf) o.proof = pf;
     if (row.createdBy && row.createdBy.name) o.createdBy = { name: row.createdBy.name, role: row.createdBy.role || null };   // "input by" snapshot
     if (row.createdById) o.createdById = row.createdById;   // identity → drives "My Activity"
@@ -912,7 +915,22 @@ function FApp() {
   // screen where the source lives (or explains it if they have no setoran access).
   const editEntryRow = (e) => {
     if (isDerivedEntry(e.id)) { if (p.setoran) navigate('setoran'); else setToast(tr('entries.derivedInfo')); return; }
+    // Inter-unit legs can't be edited in isolation (that would desync the pair) — offer to VOID
+    // the whole transfer, which reverses BOTH legs.
+    if (e.interUnit) { if (p.interUnitTransfer) voidInterUnit(e); else setToast(tr('iu.noPerm')); return; }
     openEditing(e);
+  };
+  // Create an inter-unit transfer (linked pair) via the atomic endpoint, then re-sync the cash
+  // book so both legs appear.
+  const doInterUnitTransfer = (payload) => {
+    if (!(window.API && window.API.interUnitTransfers)) return Promise.reject();
+    return window.API.interUnitTransfers.create(payload).then((r) => { reloadEntries(); setToast(tr('iu.posted', { amt: FIN.fmt(payload.amount) })); return r; });
+  };
+  // Void an inter-unit transfer → reverses BOTH legs (permanent). Confirmed first.
+  const voidInterUnit = (e) => {
+    if (!e.transferGroupId || !(window.API && window.API.interUnitTransfers)) return;
+    if (!confirm(tr('iu.voidConfirm', { amt: FIN.fmt(e.amount) }))) return;
+    window.API.interUnitTransfers.void(e.transferGroupId).then(() => { reloadEntries(); setToast(tr('iu.voided')); }).catch((err) => setToast(tr(err && err.status === 403 ? 'iu.noPerm' : 'st.syncErr')));
   };
   // Demo reset now clears the REST cash book (real entries only; derived setoran
   // rows regenerate). Deletes each persisted entry, then repaints empty.
@@ -930,11 +948,17 @@ function FApp() {
   const scopedEntries = uMh(() => (activeUnit === 'all' ? entries : entries.filter((e) => unitOfRec(e) === activeUnit)), [entries, activeUnit]);
   const scopedAccounts = uMh(() => (activeUnit === 'all' ? accounts : accounts.filter((a) => unitOfRec(a) === activeUnit)), [accounts, activeUnit]);
 
-  const computeStats = (ents, accts) => {
+  // `combined` = the "Semua" view. In it, inter-unit transfer legs are ELIMINATED from company
+  // income/expense/profit (internal trade nets to zero — not new company revenue/cost); they are
+  // still counted in CASH (they moved money between accounts and net to zero, so combined cash is
+  // unchanged). In a single-unit view every leg counts as that unit's real income/expense.
+  const computeStats = (ents, accts, combined) => {
     let balIn = 0, balOut = 0, pIn = 0, pOut = 0;
     ents.forEach((e) => {
-      if (!e.reference) { if (e.type === 'income') balIn += e.amount; else balOut += e.amount; }
-      if (e.date >= range.start && e.date <= range.end) { if (e.type === 'income') pIn += e.amount; else pOut += e.amount; }
+      if (!e.reference) { if (e.type === 'income') balIn += e.amount; else balOut += e.amount; }   // cash: always
+      if (e.date >= range.start && e.date <= range.end && !(combined && e.interUnit)) {              // P&L: eliminate internal legs when combined
+        if (e.type === 'income') pIn += e.amount; else pOut += e.amount;
+      }
     });
     const profit = pIn - pOut;
     const openingTotal = accts.reduce((s, a) => s + (+a.opening || 0), 0);
@@ -942,7 +966,10 @@ function FApp() {
   };
   // Cash Balance = REAL cash on hand = opening balances + every inflow − every outflow (all-time),
   // over the SCOPED sets. NOT the same as Net Profit (period income − expense, no opening).
-  const stats = uMh(() => computeStats(scopedEntries, scopedAccounts), [scopedEntries, scopedAccounts, range.start, range.end, periodLbl]);
+  const stats = uMh(() => computeStats(scopedEntries, scopedAccounts, activeUnit === 'all'), [scopedEntries, scopedAccounts, activeUnit, range.start, range.end, periodLbl]);
+  // Reports read a P&L-only view: in "Semua" the inter-unit legs are removed entirely (they are
+  // internal), while a single-unit report keeps that unit's own leg.
+  const reportEntries = uMh(() => (activeUnit === 'all' ? entries.filter((e) => !e.interUnit) : scopedEntries), [entries, scopedEntries, activeUnit]);
 
   // Per-unit breakdown for the combined view — its columns sum EXACTLY to the combined stats
   // (the Stage-3 invariant, mirroring payroll). Only shown on the overview when >1 unit is present.
@@ -950,14 +977,26 @@ function FApp() {
     if (businessUnits.length < 2) return [];
     const rows = businessUnits.filter((u) => u.active !== false).map((u) => ({
       id: u.id, name: u.name,
-      // Entries always belong to a REAL unit; account openings may be 'shared' (below).
-      t: computeStats(entries.filter((e) => unitOfRec(e) === u.id), accounts.filter((a) => unitOfRec(a) === u.id)),
+      // Single-unit semantics (combined=false) → each unit's own inter-unit leg counts as its
+      // real income/expense. Entries always belong to a REAL unit; openings may be 'shared'.
+      t: computeStats(entries.filter((e) => unitOfRec(e) === u.id), accounts.filter((a) => unitOfRec(a) === u.id), false),
     }));
     // 'shared' (Bersama) accounts belong to no single unit — surface them as their own row so
     // the rows still sum EXACTLY to the combined total (no double-count, nothing dropped).
     const sharedAccts = accounts.filter((a) => a.businessUnitId === 'shared');
-    if (sharedAccts.length) rows.push({ id: 'shared', name: tr('bu.shared'), t: computeStats([], sharedAccts) });
-    return rows.filter((u) => u.t.totalIn || u.t.totalOut || u.t.opening);
+    if (sharedAccts.length) rows.push({ id: 'shared', name: tr('bu.shared'), t: computeStats([], sharedAccts, false) });
+    const kept = rows.filter((u) => u.t.totalIn || u.t.totalOut || u.t.opening);
+    // Inter-unit ELIMINATION row: the per-unit rows count internal legs (they're each unit's real
+    // income/expense), but the combined total excludes them. Show the removed amounts as a
+    // negative "internal" row so per-unit rows + elimination === the combined total (its cash
+    // effect is zero). Only appears when there ARE inter-unit legs in the period.
+    const iu = entries.filter((e) => e.interUnit && e.date >= range.start && e.date <= range.end);
+    if (iu.length) {
+      const inc = iu.filter((e) => e.type === 'income').reduce((s, e) => s + e.amount, 0);
+      const exp = iu.filter((e) => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
+      kept.push({ id: '__iu__', name: tr('unit.internal'), elim: true, t: { income: -inc, expense: -exp, balance: 0 } });
+    }
+    return kept;
   }, [entries, accounts, businessUnits, range.start, range.end, periodLbl, lang]);
 
   const deltas = uMh(() => {
@@ -1330,7 +1369,7 @@ function FApp() {
           )}
 
           {screen === 'moneyspots' && p.cashflow && (
-            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} catMap={catMap} onOpenEntry={p.edit ? editEntryRow : null} units={businessUnits} activeUnit={activeUnit} defaultUnit={unitDefaultForNew()} />
+            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} catMap={catMap} onOpenEntry={p.edit ? editEntryRow : null} units={businessUnits} activeUnit={activeUnit} defaultUnit={unitDefaultForNew()} canInterUnit={!!p.interUnitTransfer} onInterUnit={doInterUnitTransfer} />
           )}
 
           {screen === 'overview' && p.cashflow && (
@@ -1343,14 +1382,21 @@ function FApp() {
                 <div className="card unit-breakdown">
                   <div className="ub-head"><IconStore s={15} />{tr('unit.byUnit')}</div>
                   <div className="ub-rows">
-                    {unitStats.map((u) => (
+                    {unitStats.map((u) => (u.elim ? (
+                      <div key={u.id} className="ub-row ub-elim" title={tr('unit.internalHint')}>
+                        <span className="ub-name"><IconRefresh s={12} /> {u.name}</span>
+                        <span className="ub-cell tnum amt-neg">{FIN.fmt(u.t.income)}</span>
+                        <span className="ub-cell tnum amt-pos">+{FIN.fmt(-u.t.expense)}</span>
+                        <span className="ub-cell tnum">—</span>
+                      </div>
+                    ) : (
                       <button key={u.id} type="button" className="ub-row" onClick={() => setActiveUnit(u.id)}>
                         <span className="ub-name">{u.name}</span>
                         <span className="ub-cell tnum amt-pos">+{FIN.fmt(u.t.income)}</span>
                         <span className="ub-cell tnum amt-neg">−{FIN.fmt(u.t.expense)}</span>
                         <span className="ub-cell tnum ub-bal">{FIN.fmt(u.t.balance)}</span>
                       </button>
-                    ))}
+                    )))}
                     <div className="ub-row ub-total">
                       <span className="ub-name">{tr('unit.all')}</span>
                       <span className="ub-cell tnum amt-pos">+{FIN.fmt(stats.income)}</span>
@@ -1422,7 +1468,7 @@ function FApp() {
           )}
 
           {screen === 'reports' && p.reports && (
-            <REPORTS.ReportsScreen entries={scopedEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={hrdStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} />
+            <REPORTS.ReportsScreen entries={reportEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={hrdStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} />
           )}
 
           {screen === 'thr' && p.payroll && (

@@ -239,6 +239,12 @@
       create: (data) => req('POST', '/business-units', data),          // { name, code? }
       update: (id, data) => req('PATCH', '/business-units/' + id, data), // { name?, code?, active? }
     },
+    // Inter-unit transfer (Stage 4) — an internal money movement posted as a linked pair of
+    // entries. Owner-tier (cap: interUnitTransfer). Void reverses BOTH legs.
+    interUnitTransfers: {
+      create: (data) => req('POST', '/inter-unit-transfers', data),    // { fromUnitId,toUnitId,fromAccountId,toAccountId,amount,date,note? }
+      void: (groupId) => req('DELETE', '/inter-unit-transfers/' + groupId),
+    },
     reports: {
       summary: (qs) => req('GET', '/reports/summary' + (qs ? '?' + qs : '')),
       cashflow: (qs) => req('GET', '/reports/cashflow' + (qs ? '?' + qs : '')),
