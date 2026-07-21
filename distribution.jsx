@@ -1248,6 +1248,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [impFileName, setImpFileName] = uSx('');
   const [impFileErr, setImpFileErr] = uSx('');
   const [impFileBusy, setImpFileBusy] = uSx(false);
+  const [impFilter, setImpFilter] = uSx('all');   // preview status chip: all | ok | skip | kurang | dup
   const impFileRef = React.useRef(null);
   const [typesOpen, setTypesOpen] = uSx(false);
   const [obFor, setObFor] = uSx(null);   // customer whose opening/carry-over bon is being entered
@@ -1390,35 +1391,69 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   // paste/file still reads Hari Kirim · Armada · Alamat · Maps (not just the first four).
   let colMap = { name: 0, phone: 1, type: 2, price: 3, days: 4, armada: 5, address: 6, mapsUrl: 7 };
   let dataRows = rawCells;
+  let headerOffset = 0;   // +1 when the first row is a header, so srcRow maps to the spreadsheet line
   if (rawCells.length) {
     const h = rawCells[0].join(' ');
     if (HRE.name.test(h) && HRE.price.test(h)) {   // looks like a header row
       const hdr = rawCells[0]; const idx = (re) => hdr.findIndex((c) => re.test(c));
       colMap = { name: Math.max(0, idx(HRE.name)), phone: idx(HRE.phone), type: idx(HRE.type), price: idx(HRE.price), days: idx(HRE.days), armada: idx(HRE.armada), address: idx(HRE.address), mapsUrl: idx(HRE.mapsUrl) };
-      dataRows = rawCells.slice(1);
+      dataRows = rawCells.slice(1); headerOffset = 1;
     }
   }
   const cellAt = (row, i) => (i >= 0 && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
-  const seen = new Set();
-  const impRows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim())).map((cols) => {
-    const name = cellAt(cols, colMap.name); const phoneRaw = cellAt(cols, colMap.phone);
-    // Auto-repair the number for BOTH the preview and the payload — the user never reformats Excel.
-    const phone = normalizePhone(phoneRaw); const phoneFixed = phoneWasFixed(phoneRaw);
-    const type = typeByLabel[cellAt(cols, colMap.type).toLowerCase()] || 'reguler';
-    const num = parseInt(cellAt(cols, colMap.price).replace(/[^0-9]/g, ''), 10);
-    const days = parseDeliveryDays(cellAt(cols, colMap.days));
-    // Normalise the armada value to the fleet dictionary (case-insensitive): "merah"/"MERAH" →
-    // "Merah". Unknown or empty → blank (not an error), so a customer never lands on a fleet the
-    // filters don't know about.
-    const armada = armadaMatch(cellAt(cols, colMap.armada)); const address = cellAt(cols, colMap.address);
-    const mu = cellAt(cols, colMap.mapsUrl); const mapsUrl = /^https?:\/\//i.test(mu) ? mu : '';
-    const key = dupKey(name, phone); const dup = existing.has(key) || seen.has(key);
-    if (name) seen.add(key);
-    const valid = !!name && !!num && !dup;
-    return { name: name || '(kosong)', phone: phone || '—', phoneFixed, type, price: num || 0, days, armada, address, mapsUrl, valid, status: valid ? 'ok' : (!name || !num) ? 'kurang' : 'dup' };
-  });
+  // Existing customers by dedupe key → so a duplicate can name what it clashes with.
+  const existingByKey = {}; (custs || []).forEach((c) => { existingByKey[dupKey(c.name, c.phone)] = c; });
+  const seenAt = {};   // dedupe key → the source-row number of its FIRST occurrence in this file
+  const impRows = dataRows
+    .map((cols, di) => ({ cols, srcRow: di + 1 + headerOffset }))   // 1-based spreadsheet line (incl. header)
+    .filter((x) => x.cols && x.cols.some((c) => String(c || '').trim()))
+    .map(({ cols, srcRow }) => {
+      const name = cellAt(cols, colMap.name); const phoneRaw = cellAt(cols, colMap.phone);
+      // Auto-repair the number for BOTH the preview and the payload — the user never reformats Excel.
+      const phone = normalizePhone(phoneRaw); const phoneFixed = phoneWasFixed(phoneRaw);
+      const type = typeByLabel[cellAt(cols, colMap.type).toLowerCase()] || 'reguler';
+      const num = parseInt(cellAt(cols, colMap.price).replace(/[^0-9]/g, ''), 10);
+      const days = parseDeliveryDays(cellAt(cols, colMap.days));
+      // Normalise the armada value to the fleet dictionary (case-insensitive): "merah"/"MERAH" →
+      // "Merah". Unknown or empty → blank (not an error), so a customer never lands on a fleet the
+      // filters don't know about.
+      const armada = armadaMatch(cellAt(cols, colMap.armada)); const address = cellAt(cols, colMap.address);
+      const mu = cellAt(cols, colMap.mapsUrl); const mapsUrl = /^https?:\/\//i.test(mu) ? mu : '';
+      const key = dupKey(name, phone);
+      const dbHit = name ? existingByKey[key] : null;                 // clashes with an existing customer
+      const fileDup = name && seenAt[key] != null ? seenAt[key] : null; // clashes with an earlier row here
+      const dup = !!dbHit || fileDup != null;
+      if (name && seenAt[key] == null && !dbHit) seenAt[key] = srcRow;   // remember the first occurrence
+      const status = (!name || !num) ? 'kurang' : (dup ? 'dup' : 'ok');
+      // A precise, human reason for every skipped row so it reads as an intended skip, not a mystery.
+      let reason = '';
+      if (status === 'kurang') {
+        const miss = []; if (!name) miss.push(trD('dist.impRNama')); if (!num) miss.push(trD('dist.impRHarga'));
+        reason = miss.join(' · ');
+      } else if (status === 'dup') {
+        reason = dbHit ? trD('dist.impRDupDb', { who: dbHit.name + (dbHit.phone ? ' / ' + normalizePhone(dbHit.phone) : '') })
+          : trD('dist.impRDupRow', { n: fileDup });
+      }
+      return { srcRow, name: name || '(kosong)', phone: phone || '—', phoneFixed, type, price: num || 0, days, armada, address, mapsUrl, valid: status === 'ok', status, reason };
+    });
   const impValid = impRows.filter((r) => r.valid);
-  const resetImport = () => { setImpText(''); setImpFileRows(null); setImpFileName(''); setImpFileErr(''); };
+  const impSkipped = impRows.filter((r) => !r.valid);
+  const impNKurang = impSkipped.filter((r) => r.status === 'kurang').length;
+  const impNDup = impSkipped.filter((r) => r.status === 'dup').length;
+  // Which rows the preview table shows, per the active status chip.
+  const impShown = impFilter === 'ok' ? impValid : impFilter === 'skip' ? impSkipped
+    : impFilter === 'kurang' ? impSkipped.filter((r) => r.status === 'kurang')
+    : impFilter === 'dup' ? impSkipped.filter((r) => r.status === 'dup') : impRows;
+  // Download ONLY the skipped rows + their reason, so the user fixes them in Excel and re-imports.
+  const downloadSkipped = () => {
+    const head = ['Baris', 'Nama', 'No HP', 'Tipe', 'Harga', 'Hari Kirim', 'Armada', 'Alamat', 'Maps', 'Keterangan'];
+    const rows = [head, ...impSkipped.map((r) => [r.srcRow, r.name === '(kosong)' ? '' : r.name, r.phone === '—' ? '' : r.phone, typeLabel(r.type), r.price || '', r.days.join(';'), r.armada, r.address, r.mapsUrl, r.reason])];
+    const csv = rows.map((row) => row.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'pelanggan-dilewati.csv';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const resetImport = () => { setImpText(''); setImpFileRows(null); setImpFileName(''); setImpFileErr(''); setImpFilter('all'); };
   const commitImport = () => {
     if (!impValid.length || impSaving) return;
     setImpSaving(true);
@@ -1792,17 +1827,34 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
               {impFileErr && <div className="add-err" style={{ margin: '4px 0 8px' }}><IconClose s={14} />{impFileErr}</div>}
               {!impFileRows && !impFileBusy && <textarea className="fld dist-imp-ta" value={impText} placeholder={'Warung Sejahtera\t0821-1122-3344\tReguler\t12500'} onChange={(e) => setImpText(e.target.value)} />}
               {impRows.length > 0 && (<>
-                <div className="dist-imp-counts"><span className="dist-imp-ok">{impValid.length} {trD('dist.importReady')}</span><span className="dist-imp-skip">{impRows.length - impValid.length} {trD('dist.importSkip')}</span></div>
+                {/* Summary — tappable when there are skips, jumping straight to the Dilewati filter. */}
+                <div className={`dist-imp-summary ${impSkipped.length ? 'has-skip' : ''}`} onClick={() => impSkipped.length && setImpFilter('skip')}>
+                  <b>{impValid.length}</b> {trD('dist.importReady')}
+                  {impSkipped.length > 0 && <> · <b>{impSkipped.length}</b> {trD('dist.importSkip')} <span className="dist-imp-sumbreak">({trD('dist.importSumBreak', { d: impNDup, k: impNKurang })})</span></>}
+                </div>
+                {/* Status filter chips — "Dilewati" is always one tap away; when both kinds exist it
+                    splits into Data kurang / Duplikat so each problem is isolated. */}
+                <div className="dist-imp-chips">
+                  {[['all', trD('dist.importChipAll'), impRows.length], ['ok', trD('dist.importChipReady'), impValid.length], ['skip', trD('dist.importChipSkip'), impSkipped.length]]
+                    .concat(impNDup > 0 && impNKurang > 0 ? [['kurang', trD('dist.importChipMissing'), impNKurang], ['dup', trD('dist.importChipDup'), impNDup]] : [])
+                    .map(([k, label, n]) => <button key={k} type="button" className={`dist-imp-chip ${impFilter === k ? 'on' : ''} ${k !== 'all' && k !== 'ok' ? 'skip' : ''}`} onClick={() => setImpFilter(k)}>{label} <span className="dist-imp-chipn">{n}</span></button>)}
+                  {impSkipped.length > 0 && <button type="button" className="dist-link dist-imp-dl" onClick={downloadSkipped}><IconDownload s={13} />{trD('dist.importDlSkipped')}</button>}
+                </div>
                 <div className="dist-imp-preview">
-                  <div className="dist-imp-hrow c8"><span>Nama</span><span>No HP</span><span>Tipe</span><span>Harga</span><span>Armada</span><span>{trD('dist.importColDays')}</span><span>Status</span></div>
-                  {impRows.map((r, i) => (
-                    <div key={i} className="dist-imp-row c8">
+                  <div className="dist-imp-hrow c9"><span>#</span><span>Nama</span><span>No HP</span><span>Tipe</span><span>Harga</span><span>Armada</span><span>{trD('dist.importColDays')}</span><span>Status</span></div>
+                  {impShown.length === 0 && <div className="dist-imp-empty">{trD('dist.importNoneInFilter')}</div>}
+                  {impShown.map((r, i) => (
+                    <div key={i} className={`dist-imp-row c9 ${r.status}`}>
+                      <span className="dist-imp-srcn">{r.srcRow}</span>
                       <span className="dist-imp-name">{r.name}</span>
                       <span>{r.phone}{r.phoneFixed && <span className="dist-phone-fixed" title={trD('dist.impPhoneFixedT')}>{trD('dist.impPhoneFixed')}</span>}</span>
                       <span>{typeLabel(r.type)}</span><span>{r.price ? rpFull(r.price) : '—'}</span>
                       <span>{r.armada || '—'}</span>
                       <span>{r.days.length ? r.days.join(', ') : '—'}</span>
-                      <span><span className={`dist-imp-status ${r.status}`}>{r.status === 'ok' ? trD('dist.impReady') : r.status === 'kurang' ? trD('dist.impMissing') : trD('dist.impDup')}</span></span>
+                      <span className="dist-imp-statuscell">
+                        <span className={`dist-imp-status ${r.status}`}>{r.status === 'ok' ? trD('dist.impReady') : r.status === 'kurang' ? trD('dist.impMissing') : trD('dist.impDup')}</span>
+                        {r.reason && <span className="dist-imp-reason" title={r.reason}>{r.reason}</span>}
+                      </span>
                     </div>
                   ))}
                 </div>
