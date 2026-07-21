@@ -37,7 +37,7 @@ function AmountInput({ value, onChange, accent, big }) {
 }
 
 /* ---------------- Add entry form ---------------- */
-function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
+function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit }) {
   const INC = incomeCats && incomeCats.length ? incomeCats : FS.INCOME_CATS;
   const EXP = expenseCats && expenseCats.length ? expenseCats : FS.EXPENSE_CATS;
   const ACCTS = accounts && accounts.length ? accounts : [{ id: 'cash', name: 'Cash' }];
@@ -45,11 +45,16 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
   const [amount, setAmount] = uS(0);
   const [cat, setCat] = uS(INC[0].key);
   const [acct, setAcct] = uS(ACCTS[0].id);
+  const [unit, setUnit] = uS(defaultUnit || 'air');   // Stage 3: business unit of this entry
   const [date, setDate] = uS(TODAY);
   const [note, setNote] = uS('');
   const [proof, setProof] = uS(null);
   const [gallonQty, setGallonQty] = uS(0);   // "Pembelian Galon" stock qty (expense only)
   const [err, setErr] = uS(null);
+  // Follow the global unit selector: when the active-unit context changes, default new entries
+  // to it (until the user overrides for this entry).
+  uE(() => { setUnit(defaultUnit || 'air'); }, [defaultUnit]);
+  const BU = (units || []).filter((u) => u.active !== false);
   const cats = type === 'income' ? INC : EXP;
   const accent = type === 'income' ? '#065489' : '#E5484D';
 
@@ -77,6 +82,7 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
     const now = new Date();
     onAdd({
       id: 'e' + Date.now().toString(36), type, category: cat, amount, note: note.trim() || catLabel(cat), acct, proof,
+      businessUnitId: unit || 'air',
       gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0,
       method: ACCTS.find((a) => a.id === acct) ? (ACCTS.find((a) => a.id === acct).type === 'cash' ? 'Cash' : 'Transfer') : 'Cash', date, time: String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'),
     });
@@ -115,6 +121,15 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts }) {
           </button>
         ))}
       </div>
+
+      {BU.length > 1 && (<>
+        <label className="fld-label">{(window.t && window.t('bu.unitLabel')) || 'Unit Bisnis'}</label>
+        <div className="cat-chips">
+          {BU.map((u) => (
+            <button key={u.id} className={`cat-chip ${unit === u.id ? 'on' : ''}`} onClick={() => setUnit(u.id)}>{u.name}</button>
+          ))}
+        </div>
+      </>)}
 
       <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
         <div style={{ flex: '0 0 150px' }}>
@@ -387,11 +402,15 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
 }
 
 /* ---------------- Money Spots (cash + bank accounts) ---------------- */
-function AcctModal({ acct, onSave, onClose }) {
+function AcctModal({ acct, units, onSave, onClose }) {
   const [f, setF] = uS(acct);
   uE(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const set = (p) => setF({ ...f, ...p });
   const valid = f.name.trim();
+  // Unit options + a "Bersama" (shared) choice that appears only in the combined view so its
+  // balance is never double-counted into a single unit.
+  const BU = (units || []).filter((u) => u.active !== false);
+  const unitOpts = [...BU.map((u) => ({ value: u.id, label: u.name })), { value: 'shared', label: (window.t && window.t('bu.shared')) || 'Bersama (semua)' }];
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
@@ -407,6 +426,10 @@ function AcctModal({ acct, onSave, onClose }) {
           </>)}
           <label className="fld-label">{trF('ms.opening')}</label>
           <div className="amt-input" style={{ padding: '8px 13px' }}><span className="amt-rp" style={{ fontSize: 14 }}>Rp</span><input inputMode="numeric" style={{ fontSize: 16 }} value={f.opening ? (+f.opening).toLocaleString('id-ID') : ''} onChange={(e) => set({ opening: +e.target.value.replace(/\D/g, '') || 0 })} /></div>
+          {BU.length > 1 && (<>
+            <label className="fld-label">{(window.t && window.t('bu.unitLabel')) || 'Unit Bisnis'}</label>
+            <UI.Dropdown value={f.businessUnitId || 'air'} options={unitOpts} onChange={(v) => set({ businessUnitId: v })} />
+          </>)}
           <label className="fld-label">{trF('ms.color')}</label>
           <div className="cat-chips">{['#22A7A1', '#065489', '#0B7EB1', '#138FB3', '#F7CB6C', '#5E7A88'].map((c) => (
             <button key={c} onClick={() => set({ color: c })} style={{ width: 30, height: 30, borderRadius: 9, background: c, border: f.color === c ? '3px solid var(--ink)' : '2px solid var(--border)' }} />
@@ -552,25 +575,34 @@ function AcctDetail({ acct, accounts, entries, transfers, catMap, canEdit, onEdi
   );
 }
 
-function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, canEdit, catMap, onOpenEntry }) {
+function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, canEdit, catMap, onOpenEntry, units, activeUnit, defaultUnit }) {
   const [edit, setEdit] = uS(null);
   const [detail, setDetail] = uS(null);
   const [xfer, setXfer] = uS(false);
   const thisMonth = (TODAY || '').slice(0, 7);
+  // Balance math ALWAYS uses the FULL accounts array (opening + that account's entries), so a
+  // filter never shifts the null-acct fallback. Only the DISPLAYED set is scoped. A 'shared'
+  // (Bersama) account shows only in the combined view → never double-counted into a unit. So
+  // Σ(per-unit shown totals) == combined total minus any shared accounts (the Stage-3 invariant).
+  const au = activeUnit || 'all';
+  const unitOfA = (a) => a.businessUnitId || 'air';
+  const shown = au === 'all' ? accounts : accounts.filter((a) => unitOfA(a) === au);   // 'shared' only matches 'all'
   const monthMut = (a) => {
     let inc = 0, out = 0; const fid = accounts[0] && accounts[0].id;
     (entries || []).forEach((e) => { if (e.reference) return; const aid = e.acct && accounts.some((x) => x.id === e.acct) ? e.acct : fid; if (aid === a.id && (e.date || '').slice(0, 7) === thisMonth) { if (e.type === 'income') inc += e.amount; else out += e.amount; } });
     (transfers || []).forEach((t) => { if ((t.date || '').slice(0, 7) === thisMonth) { if (t.to === a.id) inc += +t.amount || 0; if (t.from === a.id) out += +t.amount || 0; } });
     return { inc, out };
   };
-  const total = accounts.reduce((s, a) => s + FS.acctBalance(a, entries, accounts, transfers), 0);
+  // Total over the DISPLAYED accounts; each balance is the account's full balance (computed
+  // against the FULL arrays), so per-unit totals sum to the combined total.
+  const total = shown.reduce((s, a) => s + FS.acctBalance(a, entries, accounts, transfers), 0);
   const save = (a, remove) => {
     if (remove) { if (accounts.length <= 1) { setEdit(null); return; } if (!confirm(trF('ms.removeConfirm'))) return; setAccounts((p) => p.filter((x) => x.id !== a.id)); setEdit(null); return; }
     const clean = { ...a }; delete clean._new;
-    setAccounts((p) => p.find((x) => x.id === a.id) ? p.map((x) => x.id === a.id ? clean : x) : [...p, clean]);
+    setAccounts((p) => p.find((x) => x.id === a.id) ? p.map((x) => x.id === a.id ? clean : x) : [...p, clean]);   // mutate the FULL array
     setEdit(null);
   };
-  const addNew = () => setEdit({ id: FS.newAcctId(), name: '', type: 'bank', bank: '', number: '', opening: 0, color: '#065489', _new: true });
+  const addNew = () => setEdit({ id: FS.newAcctId(), name: '', type: 'bank', bank: '', number: '', opening: 0, color: '#065489', businessUnitId: (defaultUnit || 'air'), _new: true });
   const doXfer = (t) => { setTransfers((p) => [t, ...p]); setXfer(false); };
   const acctName = (id) => (accounts.find((a) => a.id === id) || {}).name || '—';
   const recentX = (transfers || []).slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
@@ -584,7 +616,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
         </div>
       </div>
       <div className="ms-grid">
-        {accounts.map((a) => {
+        {shown.map((a) => {
           const bal = FS.acctBalance(a, entries, accounts, transfers);
           const txn = entries.filter((e) => !e.reference && (e.acct || accounts[0].id) === a.id).length;
           const mm = monthMut(a);
@@ -624,7 +656,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
       )}
 
       {detail && <AcctDetail acct={detail} accounts={accounts} entries={entries} transfers={transfers} catMap={catMap} canEdit={canEdit} onEdit={(a) => { setDetail(null); setEdit(a); }} onOpenEntry={(e) => { setDetail(null); if (onOpenEntry) onOpenEntry(e); }} onClose={() => setDetail(null)} />}
-      {edit && <AcctModal acct={edit} onSave={save} onClose={() => setEdit(null)} />}
+      {edit && <AcctModal acct={edit} units={units} onSave={save} onClose={() => setEdit(null)} />}
       {xfer && <XferModal accounts={accounts} onSave={doXfer} onClose={() => setXfer(false)} />}
     </div>
   );

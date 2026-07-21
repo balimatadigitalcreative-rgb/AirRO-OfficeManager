@@ -1,6 +1,15 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const businessUnit = require('./businessUnit.service');
+
+// Resolve an account's unit: 'shared' (Bersama) is kept verbatim; anything else resolves to a
+// real unit id or defaults to "Air". A shared account shows only in the combined view, so its
+// balance is never added into a single-unit total (no double-counting).
+async function resolveAcctUnit(id) {
+  if (id === 'shared') return 'shared';
+  return businessUnit.resolveUnitId(id);
+}
 
 async function list() {
   return prisma.account.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
@@ -13,12 +22,15 @@ async function getById(id) {
 }
 
 async function create(data) {
-  return prisma.account.create({ data });
+  const businessUnitId = await resolveAcctUnit(data.businessUnitId);
+  return prisma.account.create({ data: { ...data, businessUnitId } });
 }
 
 async function update(id, data) {
   await getById(id);
-  return prisma.account.update({ where: { id }, data });
+  const safe = { ...data };
+  if (safe.businessUnitId !== undefined) safe.businessUnitId = await resolveAcctUnit(safe.businessUnitId);
+  return prisma.account.update({ where: { id }, data: safe });
 }
 
 async function remove(id) {

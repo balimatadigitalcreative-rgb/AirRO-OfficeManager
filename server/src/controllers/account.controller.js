@@ -14,6 +14,9 @@ const createSchema = z.object({
   opening: z.number().int().optional().default(0),
   color: z.string().max(20).optional(),
   sortOrder: z.number().int().optional(),
+  // Stage 3: the unit this money-spot belongs to. A real unit id, or 'shared' (Bersama) which
+  // appears ONLY in the combined view so its balance is never double-counted. null → "Air".
+  businessUnitId: z.string().max(60).nullable().optional(),
 });
 const updateSchema = createSchema.partial();
 const idParams = z.object({ id: z.string().min(1) });

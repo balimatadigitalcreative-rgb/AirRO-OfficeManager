@@ -2381,3 +2381,16 @@ img, svg, canvas, video { max-width: 100%; }
 .hrd-unit-lbl { font-size: 12.5px; font-weight: 700; color: var(--text-mut); }
 .hemp-unit { display: inline-block; margin-left: 7px; padding: 1px 7px; border-radius: 999px; background: var(--navy-50, #EAF1F4); color: var(--brand, #065489); font-size: 10.5px; font-weight: 700; }
 .hrd-table tfoot tr.hrd-subtotal td { font-weight: 600; color: var(--text-mut); background: var(--surface-2, #f7fafc); border-top: 1px dashed var(--border); }
+
+/* Overview per-business-unit breakdown (Stage 3) — rows sum to the combined StatRow. */
+.unit-breakdown { padding: 14px 16px; margin-bottom: 16px; }
+.ub-head { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 800; color: var(--text-mut); margin-bottom: 8px; }
+.ub-rows { display: flex; flex-direction: column; }
+.ub-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.1fr; align-items: center; gap: 8px; padding: 8px 6px; border: none; background: none; width: 100%; text-align: left; cursor: pointer; border-radius: 8px; font: inherit; }
+button.ub-row:hover { background: var(--surface-2, #f7fafc); }
+.ub-row + .ub-row { border-top: 1px solid var(--border); }
+.ub-name { font-weight: 700; color: var(--ink); }
+.ub-cell { text-align: right; font-size: 13px; }
+.ub-bal { font-weight: 800; color: var(--ink); }
+.ub-row.ub-total { border-top: 2px solid var(--border); cursor: default; }
+.ub-row.ub-total .ub-name { color: var(--text-mut); }

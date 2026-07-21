@@ -2,12 +2,14 @@
 const { useState: uSe, useEffect: uEe } = React;
 function IcE(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
-function EntryModal({ entry, incomeCats, expenseCats, accounts, onSave, onClose }) {
+function EntryModal({ entry, incomeCats, expenseCats, accounts, units, onSave, onClose }) {
   const ACCTS = accounts && accounts.length ? accounts : [{ id: 'cash', name: 'Cash', type: 'cash' }];
+  const BU = (units || []).filter((u) => u.active !== false);
   const [type, setType] = uSe(entry.type);
   const [amount, setAmount] = uSe(entry.amount);
   const [cat, setCat] = uSe(entry.category);
   const [acct, setAcct] = uSe(entry.acct || (ACCTS[0] && ACCTS[0].id));   // money spot; default first if unset
+  const [unit, setUnit] = uSe(entry.businessUnitId || 'air');   // Stage 3: business unit
   const [date, setDate] = uSe(entry.date);
   const [note, setNote] = uSe(entry.note);
   const [proof, setProof] = uSe(entry.proof || null);
@@ -28,7 +30,7 @@ function EntryModal({ entry, incomeCats, expenseCats, accounts, onSave, onClose 
     // Persist the chosen money spot + a consistent method (cash→'Cash', else→'Transfer')
     // exactly like the Add form, so each account's balance in Money Spots stays correct.
     const a = ACCTS.find((x) => x.id === acct);
-    onSave({ ...entry, type, category: cat, amount, date, note: note.trim() || label(cat), proof, acct, method: a ? (a.type === 'cash' ? 'Cash' : 'Transfer') : (entry.method || 'Cash'), gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0 });
+    onSave({ ...entry, type, category: cat, amount, date, note: note.trim() || label(cat), proof, acct, businessUnitId: unit || 'air', method: a ? (a.type === 'cash' ? 'Cash' : 'Transfer') : (entry.method || 'Cash'), gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0 });
   };
   const disp = amount ? amount.toLocaleString('id-ID') : '';
 
@@ -73,6 +75,15 @@ function EntryModal({ entry, incomeCats, expenseCats, accounts, onSave, onClose 
             </button>
           ))}
         </div>
+
+        {BU.length > 1 && (<>
+          <label className="fld-label">{(window.t && window.t('bu.unitLabel')) || 'Unit Bisnis'}</label>
+          <div className="cat-chips">
+            {BU.map((u) => (
+              <button key={u.id} className={`cat-chip ${unit === u.id ? 'on' : ''}`} onClick={() => setUnit(u.id)}>{u.name}</button>
+            ))}
+          </div>
+        </>)}
 
         {type === 'expense' && (
           <div className="gal-buy">

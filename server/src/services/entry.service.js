@@ -2,6 +2,7 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const distribution = require('./distribution.service');   // gallon-purchase movement sync (intentional cash-flow ↔ distribusi link)
+const businessUnit = require('./businessUnit.service');   // Stage 3: unit label on each entry (default "Air")
 
 // Build a Prisma `where` clause from validated list filters.
 function buildWhere(q) {
@@ -17,6 +18,9 @@ function buildWhere(q) {
     if (q.dateTo) where.date.lte = q.dateTo;
   }
   if (q.since) where.updatedAt = { gte: new Date(q.since) };
+  // Stage 3 unit filter. Every row is stamped (backfilled + create/update default to "Air"),
+  // so an exact match is correct and complete; null-as-Air legacy rows can't exist post-Stage-3.
+  if (q.businessUnit) where.businessUnitId = q.businessUnit;
   if (q.search) {
     where.OR = [
       { note: { contains: q.search } },
@@ -74,7 +78,10 @@ async function create(data, actor) {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
     if (u) { snap.createdByName = u.name; snap.createdByRole = u.role; }
   }
-  const entry = await prisma.entry.create({ data: { ...data, ...snap } });
+  // Stage 3: stamp the unit label (defaults to "Air"; unknown ids fall back too). Purely a
+  // label — it changes no amount, only which unit view the entry appears under.
+  const businessUnitId = await businessUnit.resolveUnitId(data.businessUnitId);
+  const entry = await prisma.entry.create({ data: { ...data, businessUnitId, ...snap } });
   // A "Pembelian Galon" expense mirrors into the gallon ledger (purchase movement).
   if (entry.type === 'expense' && +entry.gallonQty > 0) await distribution.syncPurchaseMovement(entry.id, entry.gallonQty, actor);
   return shapeCreator(entry);
@@ -85,6 +92,9 @@ async function update(id, data, actor) {
   // Never let a PATCH overwrite the original creator snapshot (the fields aren't in
   // the update schema anyway, but strip defensively).
   const { createdById, createdByName, createdByRole, ...safe } = data;
+  // Only re-resolve the unit when the request carries it, so a normal edit that omits it keeps
+  // the entry's current unit (never silently reset to "Air").
+  if (safe.businessUnitId !== undefined) safe.businessUnitId = await businessUnit.resolveUnitId(safe.businessUnitId);
   const entry = await prisma.entry.update({ where: { id }, data: safe });
   // Re-sync the gallon purchase movement (replace-on-change) so an edit never leaves
   // stock out of step; a non-gallon or income entry clears any prior movement.

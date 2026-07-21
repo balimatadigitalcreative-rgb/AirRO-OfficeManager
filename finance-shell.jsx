@@ -79,26 +79,23 @@ function PROOFMOUNT() {
   return proof ? <UI.ProofViewer proof={proof} onClose={() => setProof(null)} /> : null;
 }
 
-// Global business-unit selector — STAGE 1 NO-OP PLACEHOLDER. It lists the units and lets one
-// be picked, but the choice is LOCAL state that nothing reads: no query, no filter, no data
-// change. Hidden by default; only rendered when the flag window.AIRRO_FLAGS.unitSelector is on,
-// so it can be demoed without affecting staff. Later stages wire the selection into queries.
-function UnitSelector() {
-  const [units, setUnits] = uSh([]);
-  const [sel, setSel] = uSh('all');
-  uEh(() => {
-    if (!(window.API && window.API.businessUnits)) return;
-    window.API.businessUnits.list().then((r) => setUnits((r && r.data) || [])).catch(() => {});
-  }, []);
-  if (!units.length) return null;
+// Global business-unit selector — STAGE 3: sets the active-unit VIEW context for the finance
+// screens (cash flow, money spots, reports) and the default unit for new records. "Semua" =
+// combined (exactly today's numbers). It only changes the view + the default; it never rewrites
+// existing data. The choice is lifted to FApp and persisted so it survives a reload.
+const ACTIVE_UNIT_KEY = 'airro_active_unit_v1';
+function loadActiveUnit() { try { return localStorage.getItem(ACTIVE_UNIT_KEY) || 'all'; } catch (e) { return 'all'; } }
+function UnitSelector({ units, value, onChange }) {
+  if (!units || units.length < 2) return null;   // only meaningful once >1 unit exists
   return (
-    <select className="unit-select" value={sel} onChange={(e) => setSel(e.target.value)} title={tr('unit.label')} aria-label={tr('unit.label')}>
+    <select className="unit-select" value={value} onChange={(e) => onChange(e.target.value)} title={tr('unit.label')} aria-label={tr('unit.label')}>
       <option value="all">{tr('unit.all')}</option>
       {units.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
     </select>
   );
 }
-const UNIT_SELECTOR_ON = () => !!(window.AIRRO_FLAGS && window.AIRRO_FLAGS.unitSelector);
+// null/blank/unknown → "Air" (Stage 1 backfilled everyone); keeps grouping from ever dropping a row.
+const unitOfRec = (r) => (r && r.businessUnitId) || 'air';
 
 function FApp() {
   // Auth is backend-only: never auto-login from a stale LOCAL session (left over
@@ -151,6 +148,14 @@ function FApp() {
   // SKIP-listed cache; GET /approvals is authoritative.
   const [approvals, setApprovals] = uSh(() => { try { const c = localStorage.getItem('airro_approvals_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a)) return a; } } catch (e) {} return []; });
   const [accounts, setAccounts] = uSh(() => { try { const c = localStorage.getItem('airro_accounts_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a) && a.length) return a; } } catch (e) {} return FS.loadAccts(); });
+  // Business units (Stage 3): the dictionary + the active-unit VIEW context. `activeUnit`
+  // filters the finance screens and defaults new records; 'all' = combined (today's numbers).
+  const [businessUnits, setBusinessUnits] = uSh(() => { try { const c = localStorage.getItem('airro_bunits_cache_v1'); if (c) { const a = JSON.parse(c); if (Array.isArray(a) && a.length) return a; } } catch (e) {} return [{ id: 'air', name: 'Air', code: 'AIR', active: true }]; });
+  const [activeUnit, setActiveUnitState] = uSh(loadActiveUnit);
+  const setActiveUnit = (u) => { setActiveUnitState(u); try { localStorage.setItem(ACTIVE_UNIT_KEY, u); } catch (e) {} };
+  // If the active unit was deactivated/removed, fall back to combined so nothing looks empty.
+  uEh(() => { if (activeUnit !== 'all' && businessUnits.length && !businessUnits.some((u) => u.id === activeUnit && u.active !== false)) setActiveUnit('all'); }, [businessUnits]);
+  const unitDefaultForNew = () => (activeUnit === 'all' ? 'air' : activeUnit);
   // Setoran now lives in the REST table (per-record), NOT the /state blob — so
   // concurrent edits by different users never overwrite each other. We seed from a
   // local read-cache (SKIP-listed, not mirrored) just for instant paint on reload;
@@ -182,6 +187,14 @@ function FApp() {
   // ABSENT value from the legacy `reset` toggle or the role default — mirrors the server's
   // resolvePerms exactly, so the sidebar and the API agree on who may administer users.
   if (p.manageUsers === undefined) p.manageUsers = !!(p.reset || (FS.perms(user ? user.role : 'cashier') || {}).manageUsers);
+
+  // Load the unit dictionary once the user is authenticated (keyed on a cap that flips true
+  // after login, so the request carries a token — an at-mount fetch would 401). Placed after
+  // `p` is defined so the dependency array can safely read it.
+  uEh(() => {
+    if (!(p.cashflow || p.employees) || !(window.API && window.API.businessUnits)) return;
+    window.API.businessUnits.list().then((r) => { const list = (r && r.data && r.data.length) ? r.data : null; if (list) { setBusinessUnits(list); try { localStorage.setItem('airro_bunits_cache_v1', JSON.stringify(list)); } catch (e) {} } }).catch(() => {});
+  }, [p.cashflow, p.employees]);
 
   // ── Browser history: hash routing (#screen) + Back-to-close overlays ─────────
   // Screen changes push a `#id` entry so the browser Back/Forward buttons walk the app
@@ -412,13 +425,15 @@ function FApp() {
     return { id: e.id, type: e.type === 'income' ? 'income' : 'expense', amount: Math.max(0, Math.round(+e.amount || 0)),
       note: e.note || '', method: e.method || 'Cash', date: e.date, time: e.time || '00:00',
       category: e.category != null ? e.category : null, acct: e.acct != null ? e.acct : null,
+      businessUnitId: e.businessUnitId || 'air',   // Stage 3 unit label (real column, not a meta tag)
       gallonQty: Math.max(0, Math.round(+e.gallonQty || 0)),   // "Pembelian Galon" → syncs a gallon purchase movement
       proof: proofToApi(e.proof), meta: Object.keys(tags).length ? JSON.stringify(tags) : null };
   };
   const apiToEntry = (row) => {
     let tags = {}; try { tags = row.meta ? JSON.parse(row.meta) : {}; } catch (e) {}
     const o = { id: row.id, type: row.type, amount: row.amount, note: row.note || '', method: row.method || 'Cash',
-      date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined, gallonQty: row.gallonQty || 0 };
+      date: row.date, time: row.time || '00:00', category: row.category || undefined, acct: row.acct || undefined,
+      businessUnitId: row.businessUnitId || 'air', gallonQty: row.gallonQty || 0 };
     const pf = proofFromApi(row.proof); if (pf) o.proof = pf;
     if (row.createdBy && row.createdBy.name) o.createdBy = { name: row.createdBy.name, role: row.createdBy.role || null };   // "input by" snapshot
     if (row.createdById) o.createdById = row.createdById;   // identity → drives "My Activity"
@@ -495,14 +510,17 @@ function FApp() {
       const items = byDay[day];
       const totalSetoran = items.reduce((s, r) => s + FS.setoranOf(r), 0);
       const galon = items.reduce((s, r) => s + (+r.galon || 0), 0);
+      // Setoran auto-entries belong to the WATER business → always "Air" (Stage 3). Keeping
+      // them on Air means existing behaviour and every combined total is unchanged. (Cross-unit
+      // posting like "Air pays Manufaktur" is Stage 4 — not built here.)
       if (totalSetoran !== 0) out.push({ id: 'stinc-' + day, type: 'income', category: salesCat, amount: totalSetoran,
-        acct: cashAcct, note: tr('st.noteEntry', { d: day, n: galon, c: items.length }), method: 'Cash', date: day, time: '18:00', setoranDay: day, proof: (items.find((r) => r.proof) || {}).proof });
+        acct: cashAcct, note: tr('st.noteEntry', { d: day, n: galon, c: items.length }), method: 'Cash', date: day, time: '18:00', setoranDay: day, businessUnitId: 'air', proof: (items.find((r) => r.proof) || {}).proof });
       const mfg = galon * costPer;
       if (mfg > 0) {
         const note = tr('st.mfgNote', { d: day, n: galon, c: FIN.fmt(costPer) }) + (mfgReference ? ' · ' + (tr('st.mfgRefTag') || 'acuan') : '');
         out.push(mfgReference
-          ? { id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg, acct: null, reference: true, note, method: 'Reference', date: day, time: '18:05', setoranMfg: day }
-          : { id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg, acct: mfgAcctId, note, method: 'Transfer', date: day, time: '18:05', setoranMfg: day });
+          ? { id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg, acct: null, reference: true, note, method: 'Reference', date: day, time: '18:05', setoranMfg: day, businessUnitId: 'air' }
+          : { id: 'stmfg-' + day, type: 'expense', category: supCat, amount: mfg, acct: mfgAcctId, note, method: 'Transfer', date: day, time: '18:05', setoranMfg: day, businessUnitId: 'air' });
       }
     });
     return out;
@@ -862,7 +880,9 @@ function FApp() {
     return () => document.body.classList.remove('drawer-lock');
   }, [drawer]);
 
-  const add = (e) => { addEntry(e); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
+  // New manual entries default to the active-unit context (Air when "Semua"). The AddEntry
+  // form also carries its own selector; this is the fallback so a unit is always stamped.
+  const add = (e) => { addEntry({ ...e, businessUnitId: e.businessUnitId || unitDefaultForNew() }); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
   // Upsert one staff into the roster (used by orientation actions + detail edits).
   const upsertStaff = (s) => applyStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
   // ---- Orientation actions (new-hire lifecycle) ----
@@ -902,30 +922,51 @@ function FApp() {
   const monthKey = anchor.slice(0, 7);                 // for payroll / alerts / tips (month-based)
   const nextDisabled = range.end >= FIN.TODAY;
 
-  const stats = uMh(() => {
+  // ── Business-unit VIEW scoping (Stage 3) ──
+  // The finance screens read SCOPED copies of the entries/accounts arrays. With activeUnit ===
+  // 'all' the scoped arrays ARE the full arrays (identity), so every number is byte-for-byte the
+  // pre-Stage-3 value. Under a unit they narrow to that unit's records. Accounts marked 'shared'
+  // (Bersama) show only in the combined view, so their balance is never double-counted.
+  const scopedEntries = uMh(() => (activeUnit === 'all' ? entries : entries.filter((e) => unitOfRec(e) === activeUnit)), [entries, activeUnit]);
+  const scopedAccounts = uMh(() => (activeUnit === 'all' ? accounts : accounts.filter((a) => unitOfRec(a) === activeUnit)), [accounts, activeUnit]);
+
+  const computeStats = (ents, accts) => {
     let balIn = 0, balOut = 0, pIn = 0, pOut = 0;
-    entries.forEach((e) => {
-      // Cash balance (balIn/balOut) skips non-cash reference costs; profit (pIn/pOut)
-      // still counts them, so gross margin is identical in both modes — only cash differs.
+    ents.forEach((e) => {
       if (!e.reference) { if (e.type === 'income') balIn += e.amount; else balOut += e.amount; }
       if (e.date >= range.start && e.date <= range.end) { if (e.type === 'income') pIn += e.amount; else pOut += e.amount; }
     });
     const profit = pIn - pOut;
-    const openingTotal = accounts.reduce((s, a) => s + (+a.opening || 0), 0);
-    // Cash Balance = REAL cash on hand across all accounts = opening balances + every
-    // inflow − every outflow (all-time). This matches the per-account totals in Kas &
-    // Bank (FS.acctBalance also starts from each account's opening). It is deliberately
-    // NOT the same as Net Profit, which is period income − expense (no opening).
+    const openingTotal = accts.reduce((s, a) => s + (+a.opening || 0), 0);
     return { balance: openingTotal + balIn - balOut, opening: openingTotal, totalIn: balIn, totalOut: balOut, income: pIn, expense: pOut, profit, margin: pIn ? Math.round((profit / pIn) * 1000) / 10 : 0, monLabel: periodLbl };
-  }, [entries, accounts, range.start, range.end, periodLbl]);
+  };
+  // Cash Balance = REAL cash on hand = opening balances + every inflow − every outflow (all-time),
+  // over the SCOPED sets. NOT the same as Net Profit (period income − expense, no opening).
+  const stats = uMh(() => computeStats(scopedEntries, scopedAccounts), [scopedEntries, scopedAccounts, range.start, range.end, periodLbl]);
+
+  // Per-unit breakdown for the combined view — its columns sum EXACTLY to the combined stats
+  // (the Stage-3 invariant, mirroring payroll). Only shown on the overview when >1 unit is present.
+  const unitStats = uMh(() => {
+    if (businessUnits.length < 2) return [];
+    const rows = businessUnits.filter((u) => u.active !== false).map((u) => ({
+      id: u.id, name: u.name,
+      // Entries always belong to a REAL unit; account openings may be 'shared' (below).
+      t: computeStats(entries.filter((e) => unitOfRec(e) === u.id), accounts.filter((a) => unitOfRec(a) === u.id)),
+    }));
+    // 'shared' (Bersama) accounts belong to no single unit — surface them as their own row so
+    // the rows still sum EXACTLY to the combined total (no double-count, nothing dropped).
+    const sharedAccts = accounts.filter((a) => a.businessUnitId === 'shared');
+    if (sharedAccts.length) rows.push({ id: 'shared', name: tr('bu.shared'), t: computeStats([], sharedAccts) });
+    return rows.filter((u) => u.t.totalIn || u.t.totalOut || u.t.opening);
+  }, [entries, accounts, businessUnits, range.start, range.end, periodLbl, lang]);
 
   const deltas = uMh(() => {
     const pm = PERIOD.prevMatched(gran, anchor, null, null, FIN.TODAY);
     const curEnd = pm.curEnd < range.end ? pm.curEnd : range.end;
-    const cur = PERIOD.aggregate(entries, range.start, curEnd);
-    const prv = PERIOD.aggregate(entries, pm.start, pm.end);
+    const cur = PERIOD.aggregate(scopedEntries, range.start, curEnd);
+    const prv = PERIOD.aggregate(scopedEntries, pm.start, pm.end);
     return { income: PERIOD.pctDelta(cur.income, prv.income), expense: PERIOD.pctDelta(cur.expense, prv.expense), profit: PERIOD.pctDelta(cur.profit, prv.profit) };
-  }, [entries, gran, anchor, range.start, range.end]);
+  }, [scopedEntries, gran, anchor, range.start, range.end]);
 
   const curMonthKey = FIN.TODAY.slice(0, 7);
   const curPayLabel = FIN.MONTHS[+curMonthKey.split('-')[1] - 1] + ' ' + curMonthKey.split('-')[0];
@@ -934,25 +975,25 @@ function FApp() {
     const arr = []; const end = new Date(FIN.TODAY + 'T00:00');
     for (let i = 6; i >= 0; i--) { const d = new Date(end); d.setDate(end.getDate() - i); arr.push({ date: d.toISOString().slice(0, 10), income: 0, expense: 0 }); }
     const byDate = {}; arr.forEach((a) => byDate[a.date] = a);
-    entries.forEach((e) => { const a = byDate[e.date]; if (a) { if (e.type === 'income') a.income += e.amount; else a.expense += e.amount; } });
+    scopedEntries.forEach((e) => { const a = byDate[e.date]; if (a) { if (e.type === 'income') a.income += e.amount; else a.expense += e.amount; } });
     return arr;
-  }, [entries]);
+  }, [scopedEntries]);
 
   const breakdown = uMh(() => {
     const map = {};
-    entries.filter((e) => e.type === 'expense' && e.date >= range.start && e.date <= range.end).forEach((e) => { map[e.category] = (map[e.category] || 0) + e.amount; });
+    scopedEntries.filter((e) => e.type === 'expense' && e.date >= range.start && e.date <= range.end).forEach((e) => { map[e.category] = (map[e.category] || 0) + e.amount; });
     const total = Object.values(map).reduce((a, b) => a + b, 0);
     return { total, segs: Object.entries(map).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ key: k, label: FS.catInfo(catMap, k).label, value: v, pct: total ? Math.round((v / total) * 100) : 0 })) };
-  }, [entries, range.start, range.end, catMap]);
+  }, [scopedEntries, range.start, range.end, catMap]);
 
   const today = uMh(() => {
     let income = 0, expense = 0, count = 0;
-    entries.forEach((e) => { if (e.date === FIN.TODAY) { count++; if (e.type === 'income') income += e.amount; else expense += e.amount; } });
+    scopedEntries.forEach((e) => { if (e.date === FIN.TODAY) { count++; if (e.type === 'income') income += e.amount; else expense += e.amount; } });
     return { income, expense, count };
-  }, [entries]);
+  }, [scopedEntries]);
 
-  const recent = uMh(() => entries.slice().sort(FS.byNewest).slice(0, 12), [entries]);
-  const periodEntries = uMh(() => entries.filter((e) => e.date >= range.start && e.date <= range.end).sort(FS.byNewest), [entries, range.start, range.end]);
+  const recent = uMh(() => scopedEntries.slice().sort(FS.byNewest).slice(0, 12), [scopedEntries]);
+  const periodEntries = uMh(() => scopedEntries.filter((e) => e.date >= range.start && e.date <= range.end).sort(FS.byNewest), [scopedEntries, range.start, range.end]);
 
   const prevAgg = uMh(() => {
     const [y, m] = monthKey.split('-').map(Number);
@@ -1052,6 +1093,10 @@ function FApp() {
     const date = curMonthKey === FIN.TODAY.slice(0, 7) ? FIN.TODAY : `${curMonthKey}-${String(lastDay).padStart(2, '0')}`;
     const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: salaryCatKey, amount, acct: (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id,
       note: tr('hrd.payrollNote', { m: label, n: hrdStaff.length }), method: 'Transfer BCA', date, time: '09:00', payroll: curMonthKey,
+      // The posting is ONE company-wide cash entry, tagged "Air" so the combined view is
+      // unchanged; the per-unit split lives in payrollUnits below (splitting it into separate
+      // per-unit cash entries is Stage 4). Does not affect the amount.
+      businessUnitId: 'air',
       // Snapshot each unit's share AS OF this run (Stage 2). Frozen on the posted entry so a
       // later placement change never rewrites a past payslip. Does not affect the amount.
       payrollUnits: Array.isArray(unitBreakdown) ? unitBreakdown : undefined };
@@ -1072,7 +1117,7 @@ function FApp() {
     if (!confirm(tr('thr.confirm', { amt: FIN.fmt(amount), d: label }))) return;
     const entry = { id: 'e' + Date.now().toString(36), type: 'expense', category: salaryCatKey, amount,
       acct: (accounts.find((a) => a.type === 'bank') || accounts[0] || {}).id,
-      note: tr('thr.noteEntry', { d: label, n: hrdStaff.length }), method: 'Transfer BCA', date: FIN.TODAY, time: '09:30', thr: true };
+      note: tr('thr.noteEntry', { d: label, n: hrdStaff.length }), method: 'Transfer BCA', date: FIN.TODAY, time: '09:30', thr: true, businessUnitId: 'air' };
     realEntries.filter((e) => e.thr).forEach((e) => removeEntry(e.id));   // replace the previous THR posting
     addEntry(entry);
     setToast(tr('thr.toast', { amt: FIN.fmt(amount) }));
@@ -1086,7 +1131,7 @@ function FApp() {
   const addPayment = (pay) => {
     const salesCat = (cats.income.find((c) => /refill|galon|jual|sales|bon|piutang/i.test(c.label)) || cats.income[0] || {}).key || 'Refill';
     addEntry({ id: 'cp' + Date.now().toString(36), type: 'income', category: salesCat, amount: +pay.amount || 0,
-      acct: pay.acct, note: tr('cp.note', { who: pay.party || '—', m: pay.method }), method: pay.method || 'Transfer', date: pay.date, time: '12:00', custPay: true, party: pay.party, proof: pay.proof });
+      acct: pay.acct, note: tr('cp.note', { who: pay.party || '—', m: pay.method }), method: pay.method || 'Transfer', date: pay.date, time: '12:00', custPay: true, party: pay.party, businessUnitId: 'air', proof: pay.proof });
     setToast(tr('cp.toast', { amt: FIN.fmt(+pay.amount || 0) }));
   };
   const delPayment = (id) => removeEntry(id);
@@ -1218,7 +1263,7 @@ function FApp() {
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
               {(screen === 'overview' || screen === 'entries') && periodBar}
-              {UNIT_SELECTOR_ON() && <UnitSelector />}
+              {p.cashflow && <UnitSelector units={businessUnits} value={activeUnit} onChange={setActiveUnit} />}
               {window.CLOUD && (window.CLOUD.active || syncStatus === 'expired') && (
                 <span className={`sync-pill ${syncStatus}`} title={tr('sync.' + syncStatus)}>
                   <span className="sync-dot" /><span className="sync-txt">{tr('sync.' + syncStatus)}</span>
@@ -1285,16 +1330,39 @@ function FApp() {
           )}
 
           {screen === 'moneyspots' && p.cashflow && (
-            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} catMap={catMap} onOpenEntry={p.edit ? editEntryRow : null} />
+            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} catMap={catMap} onOpenEntry={p.edit ? editEntryRow : null} units={businessUnits} activeUnit={activeUnit} defaultUnit={unitDefaultForNew()} />
           )}
 
           {screen === 'overview' && p.cashflow && (
             <div className="screen-enter">
               {p.seeMoney && <ALERTS.AlertBanner alerts={alerts} />}
               <FIN.StatRow stats={stats} seeMoney={p.seeMoney} deltas={deltas} />
+              {/* Per-unit breakdown — only in the combined view. Its columns sum EXACTLY to the
+                  StatRow above (the Stage-3 invariant). Clicking a unit focuses the whole view. */}
+              {p.seeMoney && activeUnit === 'all' && unitStats.length > 1 && (
+                <div className="card unit-breakdown">
+                  <div className="ub-head"><IconStore s={15} />{tr('unit.byUnit')}</div>
+                  <div className="ub-rows">
+                    {unitStats.map((u) => (
+                      <button key={u.id} type="button" className="ub-row" onClick={() => setActiveUnit(u.id)}>
+                        <span className="ub-name">{u.name}</span>
+                        <span className="ub-cell tnum amt-pos">+{FIN.fmt(u.t.income)}</span>
+                        <span className="ub-cell tnum amt-neg">−{FIN.fmt(u.t.expense)}</span>
+                        <span className="ub-cell tnum ub-bal">{FIN.fmt(u.t.balance)}</span>
+                      </button>
+                    ))}
+                    <div className="ub-row ub-total">
+                      <span className="ub-name">{tr('unit.all')}</span>
+                      <span className="ub-cell tnum amt-pos">+{FIN.fmt(stats.income)}</span>
+                      <span className="ub-cell tnum amt-neg">−{FIN.fmt(stats.expense)}</span>
+                      <span className="ub-cell tnum ub-bal">{FIN.fmt(stats.balance)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="fin-grid">
                 <div className="fin-col">
-                  {p.addEntry ? <FIN.AddEntry onAdd={add} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} /> : null}
+                  {p.addEntry ? <FIN.AddEntry onAdd={add} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={businessUnits} defaultUnit={unitDefaultForNew()} /> : null}
                   <FIN.EntriesList entries={recent} onDelete={del} onEdit={editEntryRow} title={tr('recent.title')} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
                 </div>
                 <div className="fin-col">
@@ -1354,7 +1422,7 @@ function FApp() {
           )}
 
           {screen === 'reports' && p.reports && (
-            <REPORTS.ReportsScreen entries={entries} catMap={catMap} userName={user.name} rates={hrdRates} staff={hrdStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} />
+            <REPORTS.ReportsScreen entries={scopedEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={hrdStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} />
           )}
 
           {screen === 'thr' && p.payroll && (
@@ -1416,7 +1484,7 @@ function FApp() {
       )}
       <PROOFMOUNT />
       {editing && p.edit && (
-        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} onSave={saveEdit} onClose={dismissOverlay} />
+        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={businessUnits} onSave={saveEdit} onClose={dismissOverlay} />
       )}
       {empDetail && p.empDetail && (
         <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => navigateFromOverlay('payroll')} onClose={dismissOverlay} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />

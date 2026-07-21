@@ -23,6 +23,7 @@ const createSchema = z.object({
   acct: z.string().max(60).nullable().optional(),
   proof: z.string().nullable().optional(),           // may be a base64 data URL → large
   meta: z.string().max(4000).nullable().optional(),  // JSON string of extra tags
+  businessUnitId: z.string().max(60).nullable().optional(),   // Stage 3 unit label; null → "Air"
   gallonQty: z.number().int().nonnegative().max(1000000).optional(),   // "Pembelian Galon" quantity
   // Legacy relational fields — still accepted (the server-side account-balance
   // endpoint and existing API tests reference categoryKey/accountId). The frontend
@@ -46,6 +47,7 @@ const listQuerySchema = z.object({
   dateTo: DATE.optional(),
   since: z.string().optional(),
   search: z.string().max(120).optional(),
+  businessUnit: z.string().max(60).optional(),   // Stage 3: filter to one unit (server-side option)
 });
 
 const idParams = z.object({ id: z.string().min(1) });
