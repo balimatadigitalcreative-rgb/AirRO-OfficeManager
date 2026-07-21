@@ -22,6 +22,30 @@ const CUST_TAG = { reguler: 'reg', kos: 'kos', cafe: 'cafe', bulk: 'bulk' };
 const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Reguler');
 // Delivery-day codes (Mon…Sun). Server stores the customer's days as a subset of these.
 const DAY_CODES = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+// Map a single day token → canonical code. Accepts Indonesian (Sen/Senin), English (Mon/Monday)
+// and numeric (1=Mon … 7=Sun, 0=Sun) forms, case-insensitive. Unknown → null.
+const DAY_TOKEN = {
+  sen: 'Sen', senin: 'Sen', mon: 'Sen', monday: 'Sen', '1': 'Sen',
+  sel: 'Sel', selasa: 'Sel', tue: 'Sel', tues: 'Sel', tuesday: 'Sel', '2': 'Sel',
+  rab: 'Rab', rabu: 'Rab', wed: 'Rab', weds: 'Rab', wednesday: 'Rab', '3': 'Rab',
+  kam: 'Kam', kamis: 'Kam', thu: 'Kam', thur: 'Kam', thurs: 'Kam', thursday: 'Kam', '4': 'Kam',
+  jum: 'Jum', jumat: 'Jum', "jum'at": 'Jum', fri: 'Jum', friday: 'Jum', '5': 'Jum',
+  sab: 'Sab', sabtu: 'Sab', sat: 'Sab', saturday: 'Sab', '6': 'Sab',
+  min: 'Min', minggu: 'Min', mgg: 'Min', sun: 'Min', sunday: 'Min', '7': 'Min', '0': 'Min',
+};
+// Parse a "Hari Kirim" cell (comma / space / pipe / slash / semicolon separated) → ordered,
+// de-duplicated day codes. Tolerates a full name by also trying its first 3 letters.
+function parseDeliveryDays(cell) {
+  const raw = String(cell == null ? '' : cell).trim();
+  if (!raw) return [];
+  const set = {};
+  raw.split(/[\s,;|/]+/).forEach((tok) => {
+    const t = tok.trim().toLowerCase(); if (!t) return;
+    const code = DAY_TOKEN[t] || DAY_TOKEN[t.slice(0, 3)];
+    if (code) set[code] = true;
+  });
+  return DAY_CODES.filter((d) => set[d]);   // canonical Sen→Min order
+}
 // Detailed customer filter — "nothing selected" baseline. Every field is optional and the
 // server ANDs whatever is set. Kept at module scope so it's a stable reference for resets.
 const EMPTY_FILTER = { types: [], bon: '', bonMin: '', days: [], daysMode: 'any', complete: '', hasLocation: '', priceMin: '', priceMax: '' };
@@ -127,17 +151,28 @@ const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { 
 // stored "08…" form — staff never have to reformat a spreadsheet.
 //   "" → ""  ·  "+62 812-1122-3344" → "081211223344"  ·  "81211223344" → "081211223344"
 //   "6281…" → "081…"  ·  "081…" → "081…"  ·  other digits kept as-is (landline/short)
+// Excel often stores a long phone column as a NUMBER and renders it in scientific notation
+// (e.g. "8.1234E+11"). Stripping non-digits from that literal would mangle it ("8123411"), so
+// expand any scientific-notation value back to its full integer digits BEFORE normalising.
+function expandSciDigits(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (/^[+-]?\d(?:\.\d+)?[eE][+-]?\d+$/.test(s)) {
+    const n = Number(s);
+    if (isFinite(n)) return Math.round(n).toLocaleString('fullwide', { useGrouping: false });
+  }
+  return s;
+}
 function normalizePhone(raw) {
-  const d = String(raw == null ? '' : raw).replace(/\D/g, '');
+  const d = expandSciDigits(raw).replace(/\D/g, '');   // strips +, spaces, dashes, dots
   if (!d) return '';
-  if (d.startsWith('62')) return '0' + d.slice(2);
+  if (d.startsWith('62')) return '0' + d.slice(2);   // +62… / 62… → 0…
   if (d.startsWith('0')) return d;
-  if (d.startsWith('8')) return '0' + d;
-  return d;
+  if (d.startsWith('8')) return '0' + d;             // bare 8… (Excel dropped the 0) → 0…
+  return d;                                          // 62-without-8, landline, short code → as-is
 }
 // Did normalisation actually repair the number (vs just strip formatting)? Drives the
 // "0 dipulihkan" hint in the import preview so the fix is transparent, not silent.
-const phoneWasFixed = (raw) => { const d = String(raw == null ? '' : raw).replace(/\D/g, ''); return !!d && normalizePhone(d) !== d; };
+const phoneWasFixed = (raw) => { const d = expandSciDigits(raw).replace(/\D/g, ''); return !!d && normalizePhone(raw) !== d; };
 // WhatsApp wants the international form. Numbers are stored "08…", so: 62 + rest.
 const waNumber = (raw) => { const p = normalizePhone(raw); return p.startsWith('0') ? '62' + p.slice(1) : p; };
 
@@ -1262,6 +1297,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     return () => clearTimeout(t);
   }, [q, flt]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+  // Match an imported armada string to the fleet dictionary, case-insensitive; unknown/empty → ''.
+  const armadaMatch = (raw) => { const v = String(raw == null ? '' : raw).trim(); if (!v) return ''; return fleetList.find((f) => String(f).trim().toLowerCase() === v.toLowerCase()) || ''; };
 
   const typeMap = {}; types.forEach((t) => { typeMap[t.id] = t; });
   const typeLabelOf = (id) => (typeMap[id] && typeMap[id].label) || typeLabel(id);
@@ -1349,7 +1386,9 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   // Flexible header mapping: recognise common headers in ANY order; if the first row isn't a
   // header, fall back to the positional order (Nama · No HP · Tipe · Harga).
   const HRE = { name: /nama|name/i, phone: /hp|phone|telp|telepon|wa\b/i, type: /tipe|type|jenis/i, price: /harga|price|tarif/i, days: /hari|kirim|days/i, armada: /armada|fleet|mobil|kendaraan/i, address: /alamat|address/i, mapsUrl: /maps|link|gmaps|lokasi/i };
-  let colMap = { name: 0, phone: 1, type: 2, price: 3, days: -1, armada: -1, address: -1, mapsUrl: -1 };
+  // Positional fallback matches the downloadable template's full 8-column order, so a headerless
+  // paste/file still reads Hari Kirim · Armada · Alamat · Maps (not just the first four).
+  let colMap = { name: 0, phone: 1, type: 2, price: 3, days: 4, armada: 5, address: 6, mapsUrl: 7 };
   let dataRows = rawCells;
   if (rawCells.length) {
     const h = rawCells[0].join(' ');
@@ -1367,8 +1406,11 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     const phone = normalizePhone(phoneRaw); const phoneFixed = phoneWasFixed(phoneRaw);
     const type = typeByLabel[cellAt(cols, colMap.type).toLowerCase()] || 'reguler';
     const num = parseInt(cellAt(cols, colMap.price).replace(/[^0-9]/g, ''), 10);
-    const dc = cellAt(cols, colMap.days); const days = dc ? DAY_CODES.filter((d) => new RegExp(d, 'i').test(dc)) : [];
-    const armada = cellAt(cols, colMap.armada); const address = cellAt(cols, colMap.address);
+    const days = parseDeliveryDays(cellAt(cols, colMap.days));
+    // Normalise the armada value to the fleet dictionary (case-insensitive): "merah"/"MERAH" →
+    // "Merah". Unknown or empty → blank (not an error), so a customer never lands on a fleet the
+    // filters don't know about.
+    const armada = armadaMatch(cellAt(cols, colMap.armada)); const address = cellAt(cols, colMap.address);
     const mu = cellAt(cols, colMap.mapsUrl); const mapsUrl = /^https?:\/\//i.test(mu) ? mu : '';
     const key = dupKey(name, phone); const dup = existing.has(key) || seen.has(key);
     if (name) seen.add(key);
@@ -1736,7 +1778,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
           <div className="modal-card" style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.importT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('dist.importSub')}</div></div><button className="jp-icon" onClick={() => setImpOpen(false)}><IconClose s={18} /></button></div>
             <div className="modal-body">
-              <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Nama · No HP · Tipe · Harga</b></span><button type="button" className="dist-link" onClick={downloadImportTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+              <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Nama · No HP · Tipe · Harga · Hari Kirim · Armada · Alamat · Maps</b></span><button type="button" className="dist-link" onClick={downloadImportTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+              <div className="dist-hint" style={{ marginBottom: 8 }}>{trD('dist.importXlsxOk')}</div>
               {/* Excel drops the leading 0 from phone columns — we repair it, so nobody has to reformat. */}
               <div className="dist-infobox" style={{ marginBottom: 10 }}><IconCheck s={16} /><span>{trD('dist.impPhoneNote')}</span></div>
               <div className="dist-imp-upload">
@@ -1751,12 +1794,14 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
               {impRows.length > 0 && (<>
                 <div className="dist-imp-counts"><span className="dist-imp-ok">{impValid.length} {trD('dist.importReady')}</span><span className="dist-imp-skip">{impRows.length - impValid.length} {trD('dist.importSkip')}</span></div>
                 <div className="dist-imp-preview">
-                  <div className="dist-imp-hrow"><span>Nama</span><span>No HP</span><span>Tipe</span><span>Harga</span><span>Status</span></div>
+                  <div className="dist-imp-hrow c8"><span>Nama</span><span>No HP</span><span>Tipe</span><span>Harga</span><span>Armada</span><span>{trD('dist.importColDays')}</span><span>Status</span></div>
                   {impRows.map((r, i) => (
-                    <div key={i} className="dist-imp-row">
+                    <div key={i} className="dist-imp-row c8">
                       <span className="dist-imp-name">{r.name}</span>
                       <span>{r.phone}{r.phoneFixed && <span className="dist-phone-fixed" title={trD('dist.impPhoneFixedT')}>{trD('dist.impPhoneFixed')}</span>}</span>
                       <span>{typeLabel(r.type)}</span><span>{r.price ? rpFull(r.price) : '—'}</span>
+                      <span>{r.armada || '—'}</span>
+                      <span>{r.days.length ? r.days.join(', ') : '—'}</span>
                       <span><span className={`dist-imp-status ${r.status}`}>{r.status === 'ok' ? trD('dist.impReady') : r.status === 'kurang' ? trD('dist.impMissing') : trD('dist.impDup')}</span></span>
                     </div>
                   ))}
