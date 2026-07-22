@@ -978,6 +978,18 @@ select.fld::-ms-expand { display: none; }
 .dist-txn-mid { min-width: 0; flex: 1; }
 .dist-txn-line1 { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .dist-txn-name { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* Customer CARD variant ONLY: the name is the card's key info, so show it in FULL — wrap to up to
+   2 lines (with an ellipsis + title tooltip on the rare 3rd-line-long name) instead of truncating.
+   Applies at every breakpoint. Tight one-line contexts (txn rows, dropdowns, harga/gm lists) keep
+   the base single-line ellipsis above — they don't get this modifier. */
+.dist-txn-name--card { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; line-height: 1.28; word-break: break-word; }
+/* Code chip + type tag each on their OWN line so neither steals the name's width. */
+.dist-cust-code { margin-bottom: 3px; }
+.dist-cust-tagline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 3px; }
+/* Right-hand group (price · bon · reactivate · chevron). On desktop it sits at the right of the
+   row; on narrow phones it WRAPS to its own full-width line below the name so the name keeps the
+   whole row width and never gets squeezed to a truncated sliver. */
+.dist-cust-side { display: flex; align-items: center; gap: 14px; flex-shrink: 0; margin-left: auto; }
 .dist-txn-sub { font-size: 11.5px; color: var(--text-mut); margin-top: 2px; }
 .dist-txn-right { text-align: right; flex-shrink: 0; }
 .dist-txn-amt { font-size: 14px; font-weight: 800; }
@@ -1469,6 +1481,14 @@ select.fld::-ms-expand { display: none; }
 .dist-imp-status.dup { background: var(--warn-bg); color: var(--warn); }
 .dist-imp-status.baddate { background: var(--neg-bg); color: var(--neg); }
 @media (max-width: 560px) { .dist-cust-pricecap { display: none; } .dist-cust-bon { width: auto; } }
+/* Narrow phones: the price/bon/chevron group drops to its own full-width line below the name, so
+   the name (avatar aside) gets the whole row width and wraps cleanly to 2 lines instead of being
+   squeezed. Chevron/actions stay right-aligned on that line — never overlapping the name. */
+@media (max-width: 480px) {
+  .dist-cust-row { flex-wrap: wrap; row-gap: 9px; align-items: flex-start; }
+  .dist-cust-main { flex: 1 1 62%; }
+  .dist-cust-side { flex-basis: 100%; justify-content: flex-end; margin-left: 52px; }
+}
 
 /* ---- Distribusi Harga Master + locked panel ---- */
 .dist-lockedpanel { padding: 44px; text-align: center; }

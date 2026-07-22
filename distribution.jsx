@@ -1777,7 +1777,12 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
             <div key={c.id} className={`dist-cust-row ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetail(c.id)}>
               <span className="dist-txn-av">{initialsOf(c.name)}</span>
               <div className="dist-cust-main">
-                <div className="dist-txn-line1">{c.code && <span className="dist-code">{c.code}</span>}<span className="dist-txn-name">{c.name}</span>{tag(c.type)}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
+                {/* Card order: code → name (FULL, wraps to 2 lines) → type. The code chip and
+                    type tag sit on their OWN lines so they never steal the name's width and the
+                    name — the card's key info — is never truncated to "A.A. AN…". */}
+                {c.code && <div className="dist-cust-code"><span className="dist-code">{c.code}</span></div>}
+                <div className="dist-txn-name dist-txn-name--card" title={c.name}>{c.name}</div>
+                <div className="dist-cust-tagline">{tag(c.type)}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
                 <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
                 {c.active !== false && c.complete === false && (
                   <div className="dist-incomplete" onClick={(e) => { e.stopPropagation(); canCustomers ? openEdit(c) : openDetail(c.id); }}>
@@ -1792,13 +1797,17 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   </div>
                 )}
               </div>
-              <div className="dist-cust-price">
-                <div className="dist-cust-priceval">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
-                <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
+              {/* Price/bon/chevron grouped so they can WRAP below the name on narrow phones,
+                  giving the name the full row width (never squeezed to a cut-off sliver). */}
+              <div className="dist-cust-side">
+                <div className="dist-cust-price">
+                  <div className="dist-cust-priceval">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
+                  <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
+                </div>
+                <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpFull(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
+                {canDelete && c.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={(e) => { e.stopPropagation(); doReactivate(c); }}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
+                <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
               </div>
-              <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpFull(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
-              {canDelete && c.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={(e) => { e.stopPropagation(); doReactivate(c); }}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
-              <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
             </div>
           );
         })}
