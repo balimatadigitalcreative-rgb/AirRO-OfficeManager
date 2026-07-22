@@ -2624,7 +2624,7 @@ function DeliveryTxnModal({ stop, today, onClose, onCreated }) {
 // Delivery runs (rit) panel — MUAT (load out) / TUTUP (return + reconcile) + a per-day report
 // with the difference highlighted. Gallon STOCK is unchanged by this (it's driven by the
 // per-customer movements); a run is a truck-level control that surfaces shortfalls.
-function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChanged }) {
+function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshKey, onChanged }) {
   const [runs, setRuns] = uSx(null);      // runs for the selected date (report)
   const [openRuns, setOpenRuns] = uSx([]); // currently-open runs (any date)
   const [modal, setModal] = uSx(null);    // { kind:'open'|'close', run?, ...fields }
@@ -2642,6 +2642,9 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
   const fleetOpts = (fleet || []).filter(Boolean);
   const openModal = () => { setErr(''); setModal({ kind: 'open', gallonsOut: '', note: '', fleet: (distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || '')) }); };
   const closeModal = (run) => { setErr(''); setModal({ kind: 'close', run, full: '', empty: '', diffReason: '' }); };
+  // Koreksi Rit — prefill the fields with the run's current (effective) figures; the user edits
+  // the wrong one and gives a reason. Only changed fields are sent (append-only signed deltas).
+  const correctModal = (run) => { setErr(''); setModal({ kind: 'correct', run, out: String(run.gallonsOut), full: String(run.gallonsFullReturned), empty: String(run.gallonsEmptyReturned), reason: '' }); };
   const commit = () => {
     if (!modal || saving) return;
     setSaving(true); setErr('');
@@ -2652,6 +2655,20 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
       if (!(g > 0)) { setSaving(false); setErr(trD('run.errOut')); return; }
       if (!scoped && !modal.fleet) { setSaving(false); setErr(trD('run.errFleet')); return; }
       window.API.distribusi.runs.open({ date, fleet: modal.fleet || undefined, gallonsOut: g, note: (modal.note || '').trim() || undefined }).then(() => done(trD('run.opened'))).catch(fail);
+      return;
+    }
+    if (modal.kind === 'correct') {
+      const r = modal.run;
+      const num = (v) => parseInt(String(v).replace(/[^0-9]/g, ''), 10) || 0;
+      const payload = { reason: (modal.reason || '').trim() };
+      if (num(modal.out) !== r.gallonsOut) payload.out = num(modal.out);
+      if (r.status === 'closed') {   // isi-kembali/kosong only exist once the rit is closed
+        if (num(modal.full) !== r.gallonsFullReturned) payload.full = num(modal.full);
+        if (num(modal.empty) !== r.gallonsEmptyReturned) payload.empty = num(modal.empty);
+      }
+      if (payload.out === undefined && payload.full === undefined && payload.empty === undefined) { setSaving(false); setErr(trD('run.errNoChange')); return; }
+      if (!payload.reason) { setSaving(false); setErr(trD('run.errReason')); return; }
+      window.API.distribusi.runs.correct(r.id, payload).then(() => done(trD('run.corrected'))).catch(fail);
       return;
     }
     const full = parseInt(String(modal.full).replace(/[^0-9]/g, ''), 10) || 0;
@@ -2680,12 +2697,12 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
 
       <div className="run-table-wrap">
         <table className="run-table">
-          <thead><tr><th>{trD('run.rit')}</th><th>{trD('run.armada')}</th><th className="num">{trD('run.keluar')}</th><th className="num">{trD('run.terjual')}</th><th className="num">{trD('run.sisa')}</th><th className="num">{trD('run.dikembalikan')}</th><th className="num">{trD('run.selisih')}</th><th className="num">{trD('run.kosong')}</th><th>{trD('run.status')}</th></tr></thead>
+          <thead><tr><th>{trD('run.rit')}</th><th>{trD('run.armada')}</th><th className="num">{trD('run.keluar')}</th><th className="num">{trD('run.terjual')}</th><th className="num">{trD('run.sisa')}</th><th className="num">{trD('run.dikembalikan')}</th><th className="num">{trD('run.selisih')}</th><th className="num">{trD('run.kosong')}</th><th>{trD('run.status')}</th>{canKoreksi && <th />}</tr></thead>
           <tbody>
-            {dayRuns.length === 0 && <tr><td colSpan={9} className="run-empty">{runs === null ? (trD('common.loading') || '…') : trD('run.none')}</td></tr>}
+            {dayRuns.length === 0 && <tr><td colSpan={canKoreksi ? 10 : 9} className="run-empty">{runs === null ? (trD('common.loading') || '…') : trD('run.none')}</td></tr>}
             {dayRuns.map((r) => (
               <tr key={r.id} className={r.status === 'closed' && r.diff !== 0 ? 'run-diff' : ''}>
-                <td>{trD('run.ritN', { n: r.runNo })}</td>
+                <td><span className="run-ritcell">{trD('run.ritN', { n: r.runNo })}{r.corrected && <span className="run-corr-badge" title={trD('run.correctedTip')} onClick={() => canKoreksi && correctModal(r)}>{trD('run.correctedTag')}</span>}</span></td>
                 <td>{r.fleetId}</td>
                 <td className="num">{numX(r.gallonsOut)}</td>
                 <td className="num">{numX(r.sold)}</td>
@@ -2694,10 +2711,11 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
                 <td className="num">{r.status === 'closed' ? (r.diff === 0 ? <span className="run-ok">0</span> : <span className="run-bad" title={r.diffReason}>{(r.diff > 0 ? '+' : '') + numX(r.diff)}</span>) : <span className="run-pending" title={trD('run.pendingClose')}>—</span>}</td>
                 <td className="num">{r.status === 'closed' ? numX(r.gallonsEmptyReturned) : <span className="run-pending" title={trD('run.pendingClose')}>—</span>}</td>
                 <td>{r.status === 'closed' ? <span className="run-st closed">{trD('run.closed_')}</span> : <span className="run-st open">{trD('run.open')}</span>}</td>
+                {canKoreksi && <td className="run-act"><button type="button" className="btn btn-ghost btn-xs" onClick={() => correctModal(r)}><IconPencil s={13} />{trD('run.koreksi')}</button></td>}
               </tr>
             ))}
             {dayRuns.length > 0 && (
-              <tr className="run-total"><td colSpan={2}>{trD('run.total')}</td><td className="num">{numX(totals.out)}</td><td className="num">{numX(totals.sold)}</td><td className="num">—</td><td className="num">{numX(totals.full)}</td><td className="num">—</td><td className="num">{numX(totals.empty)}</td><td /></tr>
+              <tr className="run-total"><td colSpan={2}>{trD('run.total')}</td><td className="num">{numX(totals.out)}</td><td className="num">{numX(totals.sold)}</td><td className="num">—</td><td className="num">{numX(totals.full)}</td><td className="num">—</td><td className="num">{numX(totals.empty)}</td><td />{canKoreksi && <td />}</tr>
             )}
           </tbody>
         </table>
@@ -2707,7 +2725,7 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
       {modal && (
         <div className="modal-scrim" onClick={() => setModal(null)} style={{ zIndex: 200 }}>
           <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{modal.kind === 'open' ? trD('run.muatT') : trD('run.tutupT')}</div>{modal.run && <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('run.ritN', { n: modal.run.runNo })} · {modal.run.fleetId}</div>}</div><button className="jp-icon" onClick={() => setModal(null)}><IconClose s={18} /></button></div>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{modal.kind === 'open' ? trD('run.muatT') : modal.kind === 'correct' ? trD('run.koreksiT') : trD('run.tutupT')}</div>{modal.run && <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('run.ritN', { n: modal.run.runNo })} · {modal.run.fleetId}</div>}</div><button className="jp-icon" onClick={() => setModal(null)}><IconClose s={18} /></button></div>
             <div className="modal-body">
               {modal.kind === 'open' ? (<>
                 <div className="dist-infobox"><IconTruck s={16} /><span>{trD('run.muatInfo')}</span></div>
@@ -2719,6 +2737,29 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
                 <input className="fld tnum" value={modal.gallonsOut} inputMode="numeric" placeholder="cth. 100" onChange={(e) => setModal({ ...modal, gallonsOut: e.target.value.replace(/[^0-9]/g, '') })} />
                 <label className="fld-label">{trD('run.note')}</label>
                 <input className="fld" value={modal.note} placeholder={trD('run.notePh')} onChange={(e) => setModal({ ...modal, note: e.target.value })} />
+              </>) : modal.kind === 'correct' ? (<>
+                <div className="dist-infobox"><IconPencil s={16} /><span>{trD('run.koreksiInfo')}</span></div>
+                <label className="fld-label">{trD('run.keluar')} <span className="run-corr-sub">({trD('run.fldOut')})</span></label>
+                <input className="fld tnum" value={modal.out} inputMode="numeric" onChange={(e) => setModal({ ...modal, out: e.target.value.replace(/[^0-9]/g, '') })} />
+                {modal.run.status === 'closed' ? (<>
+                  <label className="fld-label">{trD('run.dikembalikan')} <span className="run-corr-sub">({trD('run.fldFull')})</span></label>
+                  <input className="fld tnum" value={modal.full} inputMode="numeric" onChange={(e) => setModal({ ...modal, full: e.target.value.replace(/[^0-9]/g, '') })} />
+                  <label className="fld-label">{trD('run.kosong')} <span className="run-corr-sub">({trD('run.fldEmpty')})</span></label>
+                  <input className="fld tnum" value={modal.empty} inputMode="numeric" onChange={(e) => setModal({ ...modal, empty: e.target.value.replace(/[^0-9]/g, '') })} />
+                </>) : <div className="dist-fieldhint" style={{ marginTop: 6 }}><IconClock s={12} />{trD('run.koreksiOpenHint')}</div>}
+                <label className="fld-label">{trD('run.koreksiReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={modal.reason} placeholder={trD('run.koreksiReasonPh')} onChange={(e) => setModal({ ...modal, reason: e.target.value })} />
+                {(modal.run.corrections || []).length > 0 && (
+                  <div className="run-corr-hist">
+                    <div className="run-corr-hist-h">{trD('run.koreksiHist')}</div>
+                    {modal.run.corrections.map((c) => (
+                      <div key={c.id} className="run-corr-hist-row">
+                        <span className="run-corr-hist-f">{trD('run.fld_' + c.field)} <b>{(c.delta > 0 ? '+' : '') + numX(c.delta)}</b></span>
+                        <span className="run-corr-hist-m">{c.reason} · {c.actorName || '—'}{c.createdAt ? ' · ' + fmtDT(c.createdAt) : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>) : (<>
                 <div className="run-recon">
                   <div><span>{trD('run.keluar')}</span><b>{numX(modal.run.gallonsOut)}</b></div>
@@ -2737,7 +2778,7 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
               </>)}
               {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
             </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setModal(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commit}>{saving ? '…' : (modal.kind === 'open' ? trD('run.muat') : trD('run.tutup'))}</button></div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setModal(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commit}>{saving ? '…' : (modal.kind === 'open' ? trD('run.muat') : modal.kind === 'correct' ? trD('run.koreksiSave') : trD('run.tutup'))}</button></div>
           </div>
         </div>
       )}
@@ -2746,7 +2787,7 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
   );
 }
 
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [closeouts, setCloseouts] = uSx([]);
@@ -2798,7 +2839,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, fleet
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
-      <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} refreshKey={refreshKey} onChanged={reload} />
+      <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />
       {closeouts.map((c) => (
         <div key={c.id} className="card dist-closed-banner">
           <span className="dist-closed-ic"><IconCheck s={17} /></span>

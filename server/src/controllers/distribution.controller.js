@@ -114,6 +114,9 @@ const closeoutQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60
 // Delivery runs (rit)
 const runOpenSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), gallonsOut: z.number().int().positive(), note: z.string().max(300).optional() });
 const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegative(), gallonsEmptyReturned: z.number().int().nonnegative(), diffReason: z.string().max(300).optional() });
+// Koreksi Rit (append-only): CORRECTED absolute value(s) for muat/isi-kembali/kosong + a required
+// reason. At least one field must be present (enforced in the service via a zero-change check).
+const runCorrectionSchema = z.object({ out: z.number().int().nonnegative().optional(), full: z.number().int().nonnegative().optional(), empty: z.number().int().nonnegative().optional(), reason: z.string().min(1).max(300) });
 const runQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['open', 'closed']).optional() });
 // Customer list + detailed multi-criteria filter. Every criterion is optional and they
 // combine with AND. Kept as query params so the list stays a plain cacheable GET.
@@ -221,6 +224,7 @@ const listCloseouts = asyncHandler(async (req, res) => res.json(await service.li
 // ── Delivery runs (rit) ──
 const openRun = asyncHandler(async (req, res) => { const r = await service.openRun(req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.status(201).json({ data: r }); });
 const closeRun = asyncHandler(async (req, res) => { const r = await service.closeRun(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.json({ data: r }); });
+const correctRun = asyncHandler(async (req, res) => { const r = await service.correctRun(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.json({ data: r }); });
 const listRuns = asyncHandler(async (req, res) => res.json(await service.listRuns(req.user, req.query)));
 
 // ── gallon stock ──
@@ -236,6 +240,6 @@ module.exports = {
   listTransactions, createTransaction, addCorrection, voidTransaction, hardDeleteTransaction, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
-  openRun, closeRun, listRuns,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  openRun, closeRun, correctRun, listRuns,
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

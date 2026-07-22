@@ -102,6 +102,10 @@ router.patch('/deliveries/:id', requireCap('distribusiPengiriman'), validate({ p
 router.get('/runs', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.runQuery }), ctrl.listRuns);
 router.post('/runs/open', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.runOpenSchema }), ctrl.openRun);
 router.post('/runs/:id/close', requireCap('distribusiPengiriman'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.runCloseSchema }), ctrl.closeRun);
+// Koreksi Rit — append-only correction of a run's figures. Gated on distribusiKoreksi (the same
+// correction tier as transaction corrections): a helper with only input/pengiriman can VIEW runs
+// but never correct one.
+router.post('/runs/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.runCorrectionSchema }), ctrl.correctRun);
 
 // ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──
 router.get('/gallon', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);

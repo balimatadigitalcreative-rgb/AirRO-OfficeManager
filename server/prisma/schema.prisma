@@ -602,9 +602,34 @@ model DeliveryRun {
   closedByName String?
   closedAt     DateTime?
 
+  corrections RunCorrection[]
+
   @@unique([date, fleetId, runNo])
   @@index([fleetId, status])
   @@index([date, fleetId])
+}
+
+// Append-only correction for a delivery run — mirrors the transaction/gallon ledger pattern:
+// a mistake made when closing a rit (forgot empties, wrong full-returned, wrong muat) is fixed
+// by appending a SIGNED delta per field, never by overwriting the stored figure. The run's
+// EFFECTIVE value = base + Σ active deltas; the reconciliation "Selisih" recomputes from those.
+// No GallonMovement is written (a run is a truck-level tally; stock stays driven by the
+// per-customer movements). `active` is reserved for a future reversal, kept for consistency.
+model RunCorrection {
+  id        String   @id @default(cuid())
+  runId     String
+  field     String                              // out | full | empty  (gallonsOut / FullReturned / EmptyReturned)
+  delta     Int                                 // signed adjustment to the field
+  reason    String                              // required
+  active    Boolean  @default(true)
+  actorId   String?
+  actorRole String?
+  actorName String?
+  createdAt DateTime @default(now())
+
+  run DeliveryRun @relation(fields: [runId], references: [id])
+
+  @@index([runId])
 }
 
 // Delivery board — one row per stop, per fleet, per date. `jadwal` rows are generated

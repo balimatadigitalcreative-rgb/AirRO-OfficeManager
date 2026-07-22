@@ -1352,15 +1352,38 @@ async function listCloseouts(user, query) {
 // came back, then reconciles against what was actually sold — surfacing any shortfall (theft/
 // breakage) the per-customer ledger can't see. No extra stock movements → no second number.
 const runMs = (d) => (d ? new Date(d).getTime() : null);
-function runClient(r, sold) {
-  const expectedRemaining = r.gallonsOut - sold;                       // full gallons that SHOULD be left on the truck
-  const diff = r.status === 'closed' ? (r.gallonsFullReturned - expectedRemaining) : null;   // returned − expected
+// The three correctable run figures and their base column + human label (audit / UI).
+const RUN_FIELDS = { out: { col: 'gallonsOut', label: 'muat' }, full: { col: 'gallonsFullReturned', label: 'isi kembali' }, empty: { col: 'gallonsEmptyReturned', label: 'kosong' } };
+// EFFECTIVE run figures = base column + Σ active correction deltas for that field. Append-only:
+// the stored gallonsOut/…Returned columns are never overwritten; a correction is a signed row.
+function effectiveRun(r, corrs) {
+  const eff = { out: r.gallonsOut, full: r.gallonsFullReturned, empty: r.gallonsEmptyReturned };
+  (corrs || []).forEach((c) => { if (c.active && RUN_FIELDS[c.field]) eff[c.field] += c.delta; });
+  return eff;
+}
+function runClient(r, sold, corrs) {
+  const cs = corrs || [];
+  const eff = effectiveRun(r, cs);
+  const expectedRemaining = eff.out - sold;                            // full gallons that SHOULD be left on the truck
+  const diff = r.status === 'closed' ? (eff.full - expectedRemaining) : null;   // returned − expected (from EFFECTIVE values)
+  const active = cs.filter((c) => c.active);
   return {
     id: r.id, date: r.date, fleetId: r.fleetId, runNo: r.runNo, status: r.status,
-    gallonsOut: r.gallonsOut, gallonsFullReturned: r.gallonsFullReturned, gallonsEmptyReturned: r.gallonsEmptyReturned,
+    // displayed figures are the EFFECTIVE (corrected) values; base kept for the history view
+    gallonsOut: eff.out, gallonsFullReturned: eff.full, gallonsEmptyReturned: eff.empty,
+    baseGallonsOut: r.gallonsOut, baseGallonsFullReturned: r.gallonsFullReturned, baseGallonsEmptyReturned: r.gallonsEmptyReturned,
     sold, expectedRemaining, diff, diffReason: r.diffReason || '', note: r.note || '',
+    corrected: active.length > 0,
+    corrections: cs.map((c) => ({ id: c.id, field: c.field, delta: c.delta, reason: c.reason, active: c.active, actorName: c.actorName || null, createdAt: runMs(c.createdAt) })),
     openedByName: r.openedByName || null, openedAt: runMs(r.openedAt), closedByName: r.closedByName || null, closedAt: runMs(r.closedAt),
   };
+}
+// Active corrections for a set of runs, grouped by runId (one query for the whole report).
+async function correctionsForRuns(runIds) {
+  if (!runIds.length) return {};
+  const rows = await prisma.runCorrection.findMany({ where: { runId: { in: runIds } }, orderBy: { createdAt: 'asc' } });
+  const m = {}; rows.forEach((c) => { (m[c.runId] = m[c.runId] || []).push(c); });
+  return m;
 }
 // Σ gallons sold (lunas/bon) per run, from the linked transactions.
 async function soldForRuns(runIds) {
@@ -1403,7 +1426,9 @@ async function closeRun(id, body, actor) {
   const full = int(body.gallonsFullReturned);
   const empty = int(body.gallonsEmptyReturned);
   const sold = (await soldForRuns([id]))[id] || 0;
-  const expectedRemaining = run.gallonsOut - sold;
+  // Reconcile against the EFFECTIVE muat (base + any 'out' corrections made while open).
+  const corrs = (await correctionsForRuns([id]))[id] || [];
+  const expectedRemaining = effectiveRun(run, corrs).out - sold;
   const diff = full - expectedRemaining;
   const reason = String(body.diffReason || '').trim();
   if (diff !== 0 && !reason) throw ApiError.badRequest(`Selisih ${diff > 0 ? '+' : ''}${diff} galon (seharusnya ${expectedRemaining}, dikembalikan ${full}) — alasan wajib diisi.`, { diff, expectedRemaining, sold });
@@ -1413,8 +1438,49 @@ async function closeRun(id, body, actor) {
     closedById: snap.actorId, closedByName: snap.actorName, closedAt: new Date(),
   } });
   await logAudit('pengiriman', `Tutup rit-${run.runNo}: ${run.fleetId}`,
-    `muat ${run.gallonsOut} · terjual ${sold} · sisa seharusnya ${expectedRemaining} · dikembalikan ${full} · selisih ${diff}${diff !== 0 ? ' (' + reason + ')' : ''} · kosong ${empty}`, snap, run.fleetId);
-  return runClient(updated, sold);
+    `muat ${effectiveRun(run, corrs).out} · terjual ${sold} · sisa seharusnya ${expectedRemaining} · dikembalikan ${full} · selisih ${diff}${diff !== 0 ? ' (' + reason + ')' : ''} · kosong ${empty}`, snap, run.fleetId);
+  return runClient(updated, sold, corrs);
+}
+// KOREKSI RIT (append-only) — fix a mistake in a run's muat / isi-kembali / kosong without
+// overwriting the stored figure. The caller submits the CORRECTED absolute value(s); we append
+// one signed RunCorrection per changed field (delta = new − current effective) with a required
+// reason, and one immutable audit row per field. Displayed figures + reconciliation then use the
+// effective totals. No GallonMovement is touched (a run is a truck-level tally — stock stays
+// driven by the per-customer movements). Cap: distribusiKoreksi.
+async function correctRun(id, body, actor) {
+  const run = await prisma.deliveryRun.findUnique({ where: { id } });
+  if (!run) throw ApiError.notFound('Rit tidak ditemukan.');
+  if (!fleetAllows(actor, run.fleetId)) throw ApiError.notFound('Rit tidak ditemukan.');
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan koreksi wajib diisi.');
+  // On an OPEN run only the muat (out) is known; isi-kembali/kosong are entered at close.
+  if (run.status !== 'closed' && (body.full != null || body.empty != null)) {
+    throw ApiError.badRequest('Rit masih terbuka — hanya galon muat yang bisa dikoreksi. Tutup rit dulu untuk mengoreksi isi/kosong.');
+  }
+  const existing = (await correctionsForRuns([id]))[id] || [];
+  const eff = effectiveRun(run, existing);
+  // Build one signed correction per field the caller actually changed.
+  const changes = [];
+  for (const field of ['out', 'full', 'empty']) {
+    if (body[field] == null) continue;
+    const target = int(body[field]);
+    const delta = target - eff[field];
+    if (delta !== 0) changes.push({ field, delta, from: eff[field], to: target });
+  }
+  if (!changes.length) throw ApiError.badRequest('Tidak ada perubahan nilai untuk dikoreksi.');
+  const snap = await actorSnap(actor);
+  for (const ch of changes) {
+    await prisma.runCorrection.create({ data: {
+      runId: id, field: ch.field, delta: ch.delta, reason,
+      actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    } });
+    // One immutable audit entry per field (run, field, delta, reason, actor).
+    await logAudit('koreksi', `Koreksi rit-${run.runNo}: ${run.fleetId}`,
+      `${RUN_FIELDS[ch.field].label} ${ch.from} → ${ch.to} (${ch.delta > 0 ? '+' : ''}${ch.delta}) · ${reason}`, snap, run.fleetId);
+  }
+  const corrs = (await correctionsForRuns([id]))[id] || [];
+  const sold = (await soldForRuns([id]))[id] || 0;
+  return runClient(run, sold, corrs);
 }
 // Report: runs within the user's scope (by date/fleet/status), each with sold + reconciliation.
 async function listRuns(user, query) {
@@ -1423,8 +1489,10 @@ async function listRuns(user, query) {
   if (q.date) where.date = q.date;
   if (q.status === 'open' || q.status === 'closed') where.status = q.status;
   const rows = await prisma.deliveryRun.findMany({ where, orderBy: [{ date: 'desc' }, { fleetId: 'asc' }, { runNo: 'asc' }], take: 500 });
-  const sold = await soldForRuns(rows.map((r) => r.id));
-  return { data: rows.map((r) => runClient(r, sold[r.id] || 0)) };
+  const ids = rows.map((r) => r.id);
+  const sold = await soldForRuns(ids);
+  const corrs = await correctionsForRuns(ids);
+  return { data: rows.map((r) => runClient(r, sold[r.id] || 0, corrs[r.id] || [])) };
 }
 
 // Add a 'tambahan' order (admin). fleetId comes from the chosen customer. Idempotent per
@@ -1494,5 +1562,5 @@ module.exports = {
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, hardDeleteTransaction, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
-  openRun, closeRun, listRuns,
+  openRun, closeRun, listRuns, correctRun,
 };
