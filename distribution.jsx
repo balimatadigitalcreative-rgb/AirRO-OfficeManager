@@ -20,6 +20,12 @@ const BIZ_SUB = 'Air Minum Reverse Osmosis';
 // Colour class per seed type id; anything else (custom types) uses the neutral 'other'.
 const CUST_TAG = { reguler: 'reg', kos: 'kos', cafe: 'cafe', bulk: 'bulk' };
 const typeLabel = (t) => (t === 'bulk' ? 'Bulk' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Reguler');
+// A hidden search string for a customer dropdown option — matches on code, name, phone AND type
+// even when the visible label doesn't show all of them (so typing "C-0136" or a phone fragment
+// finds the customer). Used by the searchable UI.Dropdown.
+const custSearchStr = (c) => [c.code, c.name, c.phone, c.type].filter(Boolean).join(' ');
+// Readable label for a customer option: "C-0136 · A.A. Wintara · Reguler" (type only when not reguler).
+const custOptLabel = (c) => (c.code ? c.code + ' · ' : '') + c.name + (c.type && c.type !== 'reguler' ? ' · ' + typeLabel(c.type) : '');
 // Delivery-day codes (Mon…Sun). Server stores the customer's days as a subset of these.
 const DAY_CODES = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 // Map a single day token → canonical code. Accepts Indonesian (Sen/Senin), English (Mon/Monday)
@@ -622,7 +628,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     return filter === 'all' ? true : filter === 'void' ? voided : filter === 'corrected' ? corrected : filter === 'arsip' ? t.legacy : t.method === filter;
   });
   const voidN = (txns || []).filter((t) => t.status === 'void').length;
-  const custOpts = customers.map((c) => ({ value: c.id, label: c.name + (c.type && c.type !== 'reguler' ? ' · ' + c.type : '') }));
+  const custOpts = customers.map((c) => ({ value: c.id, label: custOptLabel(c), search: custSearchStr(c) }));
 
   // ── FORM ──
   if (view === 'form') {
@@ -861,7 +867,7 @@ function PaymentModal({ customers, staffMode, today, onClose, onSaved, presetCus
         <div className="modal-body">
           <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fCust')}</label>
           {withBon.length === 0 ? <div className="dist-note">{trD('dist.noBonCust')}</div>
-            : <UI.Dropdown value={cust} options={withBon.map((c) => ({ value: c.id, label: c.name + ' · ' + trD('dist.sisaBon') + ' ' + rpFull(c.sisaBon) }))} placeholder={trD('dist.fCustPh')} onChange={(v) => { setCust(v); setAmount(0); }} fluid />}
+            : <UI.Dropdown value={cust} options={withBon.map((c) => ({ value: c.id, label: (c.code ? c.code + ' · ' : '') + c.name + ' · ' + trD('dist.sisaBon') + ' ' + rpFull(c.sisaBon), search: custSearchStr(c) }))} placeholder={trD('dist.fCustPh')} onChange={(v) => { setCust(v); setAmount(0); }} fluid />}
           {sel && <div className="dist-lockrow" style={{ marginTop: 10 }}><span className="dist-lockrow-l"><IconInvoice s={14} />{trD('dist.sisaBon')}</span><span className="dist-lockrow-r">{rpFull(sisa)}</span></div>}
           <label className="fld-label">{trD('dist.payAmount')}</label>
           <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={amount ? amount.toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setAmount(Math.min(sisa, +e.target.value.replace(/\D/g, '') || 0))} /></div>
@@ -2549,7 +2555,7 @@ function DeliveryOrderModal({ date, customers, onClose, onSaved }) {
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
   uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  const opts = (customers || []).filter((c) => (c.armada || '').trim()).map((c) => ({ value: c.id, label: c.name + ' · ' + c.armada }));
+  const opts = (customers || []).filter((c) => (c.armada || '').trim()).map((c) => ({ value: c.id, label: (c.code ? c.code + ' · ' : '') + c.name + ' · ' + c.armada, search: custSearchStr(c) }));
   const save = () => {
     if (!cust) { setErr(trD('dist.orderCustReq')); return; }
     if (saving) return;

@@ -494,6 +494,19 @@
 .ui-dd-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 11px; border-radius: 9px; font-family: 'Inter'; font-size: 13.5px; font-weight: 500; color: var(--ink); text-align: left; transition: background .12s; }
 .ui-dd-item:hover { background: var(--card-soft); }
 .ui-dd-item.on { background: var(--mint-100); color: var(--green-800); font-weight: 700; }
+/* Keyboard-highlighted row (Up/Down) — same tint as hover so mouse + keyboard read alike. */
+.ui-dd-item.hi { background: var(--card-soft); }
+.ui-dd-item.on.hi { background: var(--mint-200, var(--mint-100)); }
+/* Searchable menu: a pinned search box on top + a single-scroll results list beneath, so the
+   input never scrolls away and there is only one scrollbar. */
+.ui-dd-menu.has-search { display: flex; flex-direction: column; overflow: hidden; padding: 6px; }
+.ui-dd-search { display: flex; align-items: center; gap: 8px; padding: 7px 9px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--card-soft); flex-shrink: 0; }
+.ui-dd-search svg { color: var(--text-faint); flex-shrink: 0; }
+.ui-dd-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: var(--ink); }
+.ui-dd-clear { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: var(--text-faint); background: none; border: none; cursor: pointer; flex-shrink: 0; }
+.ui-dd-clear:hover { background: var(--card); color: var(--ink); }
+.ui-dd-list { min-height: 0; }   /* the scroller when .scroll-y is applied (searchable menus) */
+.ui-dd-empty { padding: 16px 10px; text-align: center; font-size: 12.5px; color: var(--text-faint); }
 .ui-dd-item svg { flex-shrink: 0; color: var(--green-700); }
 .ui-dd-ic { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--card-soft); color: var(--green-700); flex-shrink: 0; }
 .ui-tp .ui-dd-text { flex: 1; text-align: left; font-weight: 600; }

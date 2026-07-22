@@ -3,15 +3,34 @@
 const { useState: uSd, useRef: uRd, useEffect: uEd } = React;
 function IcD(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
-function Dropdown({ value, options, onChange, placeholder, compact, color, fluid, menuColor }) {
+const ddT = (k, f) => (window.t ? window.t(k) : f) || f;
+const ddNorm = (s) => String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
+
+function Dropdown({ value, options, onChange, placeholder, compact, color, fluid, menuColor, searchable }) {
   const [open, setOpen] = uSd(false);
   const [pos, setPos] = uSd(null);   // fixed coords {left, top, width} from the control
+  const [q, setQ] = uSd('');         // live search text (searchable menus only)
+  const [hi, setHi] = uSd(0);        // highlighted index within the FILTERED list (keyboard nav)
   const btnRef = uRd(null);
+  const inputRef = uRd(null);
+  const listRef = uRd(null);
   const norm = (options || []).map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
   const sel = norm.find((o) => o.value === value);
-  // Float the menu with position:fixed anchored to the control (portaled to <body>),
-  // so it's never clipped by a modal's overflow — same pattern as the calendar/time
-  // picker. The menu keeps its own max-height + internal scroll for long lists.
+  // Auto-enable the search box on long lists; an explicit `searchable` prop always wins. Short
+  // dropdowns (armada/tipe) stay simple.
+  const canSearch = searchable != null ? !!searchable : norm.length > 8;
+  // Forgiving filter: case- + whitespace-insensitive substring on the option's `search` string
+  // (falls back to the label) — so a code / phone fragment matches even if not shown in the label.
+  const nq = ddNorm(q);
+  const filtered = (!canSearch || !nq) ? norm : norm.filter((o) => ddNorm(o.search != null ? o.search : o.label).includes(nq));
+  // Reset the search + highlight and focus the input each time the menu opens.
+  uEd(() => { if (open) { setQ(''); setHi(0); if (canSearch) { const t = setTimeout(() => inputRef.current && inputRef.current.focus(), 30); return () => clearTimeout(t); } } }, [open]);
+  uEd(() => { setHi(0); }, [q]);
+  // Keep the highlighted row in view while arrowing through a long filtered list.
+  uEd(() => { if (!open || !listRef.current) return; const el = listRef.current.querySelector('.ui-dd-item.hi'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); }, [hi, open]);
+  // Float the menu with position:fixed anchored to the control (portaled to <body>), so it's never
+  // clipped by a modal's overflow — same pattern as the calendar/time picker. The list keeps its
+  // own max-height + internal scroll for long results; the search box (if any) stays pinned.
   uEd(() => {
     if (!open) { setPos(null); return; }
     const place = () => {
@@ -21,11 +40,14 @@ function Dropdown({ value, options, onChange, placeholder, compact, color, fluid
       const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
       const r = el.getBoundingClientRect();
       const M = 8;
-      const hCss = Math.min(norm.length * 38 + 10, 272);   // menu height estimate (CSS px)
+      const searchH = canSearch ? 46 : 0;   // the pinned search box adds height
+      const hCss = Math.min(norm.length * 38 + 10 + searchH, 300);   // menu height estimate (CSS px)
       const H = hCss * zoom, vw = window.innerWidth * zoom, vh = window.innerHeight * zoom;
       let left = Math.max(M, Math.min(r.left, vw - r.width - M));
       let top = r.bottom + 4;
-      if (top + H > vh - M) { const up = r.top - 4 - H; top = up >= M ? up : Math.max(M, vh - H - M); }
+      // Prefer opening DOWNWARD for searchable menus so the on-screen keyboard (bottom) never
+      // covers the list; only flip up when there's genuinely no room below.
+      if (top + H > vh - M) { const up = r.top - 4 - H; top = (up >= M && !canSearch) ? up : Math.max(M, Math.min(top, vh - H - M)); }
       setPos({ left: left / zoom, top: top / zoom, width: r.width / zoom });
     };
     place();
@@ -33,7 +55,14 @@ function Dropdown({ value, options, onChange, placeholder, compact, color, fluid
     const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('resize', on); window.addEventListener('scroll', on, true); window.addEventListener('keydown', esc);
     return () => { window.removeEventListener('resize', on); window.removeEventListener('scroll', on, true); window.removeEventListener('keydown', esc); };
-  }, [open]);
+  }, [open, q]);
+  const commit = (o) => { if (o) { onChange(o.value); setOpen(false); } };
+  const onSearchKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi((i) => Math.min(filtered.length - 1, i + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((i) => Math.max(0, i - 1)); }
+    else if (e.key === 'Enter') { e.preventDefault(); commit(filtered[hi]); }
+    else if (e.key === 'Escape') { e.preventDefault(); setOpen(false); }
+  };
   return (
     <div className={`ui-dd ${open ? 'open' : ''} ${compact ? 'compact' : ''} ${fluid ? 'fluid' : ''}`}>
       <button type="button" ref={btnRef} className="ui-dd-control" onClick={() => setOpen((o) => !o)}
@@ -44,15 +73,25 @@ function Dropdown({ value, options, onChange, placeholder, compact, color, fluid
       {open && ReactDOM.createPortal(
         <React.Fragment>
           <div className="pop-cal-backdrop dd-back" onClick={() => setOpen(false)} />
-          <div className="ui-dd-menu ui-dd-menu-fixed scroll-y" style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { visibility: 'hidden' }}>
-            {norm.map((o) => (
-              <button type="button" key={o.value} className={`ui-dd-item ${o.value === value ? 'on' : ''}`}
-                onClick={() => { onChange(o.value); setOpen(false); }}>
-                {o.icon ? <span className="ui-dd-ic">{IcD(o.icon, { s: 16 })}</span> : null}
-                <span style={{ flex: 1, minWidth: 0 }}>{o.label}</span>
-                {o.value === value && <IconCheck s={15} />}
-              </button>
-            ))}
+          <div className={`ui-dd-menu ui-dd-menu-fixed ${canSearch ? 'has-search' : 'scroll-y'}`} style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { visibility: 'hidden' }}>
+            {canSearch && (
+              <div className="ui-dd-search">
+                <IconSearch s={15} />
+                <input ref={inputRef} value={q} placeholder={ddT('dd.search', 'Cari…')} onChange={(e) => setQ(e.target.value)} onKeyDown={onSearchKey} />
+                {q && <button type="button" className="ui-dd-clear" onClick={() => { setQ(''); inputRef.current && inputRef.current.focus(); }}><IconClose s={13} /></button>}
+              </div>
+            )}
+            <div ref={listRef} className={`ui-dd-list ${canSearch ? 'scroll-y' : ''}`}>
+              {filtered.length === 0 ? <div className="ui-dd-empty">{ddT('dd.none', 'Tidak ditemukan')}</div>
+                : filtered.map((o, idx) => (
+                  <button type="button" key={o.value} className={`ui-dd-item ${o.value === value ? 'on' : ''} ${idx === hi ? 'hi' : ''}`}
+                    onMouseEnter={() => setHi(idx)} onClick={() => commit(o)}>
+                    {o.icon ? <span className="ui-dd-ic">{IcD(o.icon, { s: 16 })}</span> : null}
+                    <span style={{ flex: 1, minWidth: 0 }}>{o.label}</span>
+                    {o.value === value && <IconCheck s={15} />}
+                  </button>
+                ))}
+            </div>
           </div>
         </React.Fragment>, document.body)}
     </div>
