@@ -2077,15 +2077,24 @@ img, svg, canvas, video { max-width: 100%; }
   .modal-card .fld, .modal-card .amt-input, .modal-card .ui-dd, .modal-card .ui-dd-control { width: 100%; }
   .modal-foot { flex-wrap: wrap; }
   .modal-foot .btn { min-height: 44px; flex: 1 1 auto; }
-  /* iOS safe-area: keep the footer buttons clear of the home indicator. */
+  /* iOS SAFE-AREA (standalone PWA + notch) — GENERAL rule. The scrim is the shared position:fixed
+     container behind EVERY modal/detail sheet, so insetting all four sides there makes any modal
+     inherit it: content sits BELOW the status bar, ABOVE the home indicator, and clear of the
+     landscape notch. Capping the modal height to the safe area stops a tall sheet (employee /
+     customer / account detail — 92–96vh, centered) from overflowing back under the status bar. */
+  .modal-scrim { padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); }
+  .modal-card, .emp-detail, .payslip-sheet, .acct-detail-modal, .dist-hist-sheet, .invoice-sheet { max-height: calc(100vh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .modal-card { padding-bottom: max(20px, calc(16px + env(safe-area-inset-bottom))); }
-  .modal-scrim { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  /* Top-anchored overlays (printed statement / invoice) scroll from the top edge — inset their
+     top/bottom so the sheet still clears the status bar and home indicator. */
+  .invoice-overlay { padding-top: calc(20px + env(safe-area-inset-top)); padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
 }
 
 /* Small phones (≤380px, e.g. iPhone SE / mini): tighten chrome */
 @media (max-width: 380px) {
   .content { padding: calc(12px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) calc(74px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left)); }
-  .modal-scrim { padding: 12px; }
+  /* Keep the safe-area insets from the ≤560 rule (this ≤380 rule comes later + would clobber them). */
+  .modal-scrim { padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); }
   .modal-card { padding: 18px 16px; border-radius: 18px; }
   /* Match the sticky header's bleed to the mobile card padding (18/16) so it
      doesn't extend past the card edges and cause a sliver of horizontal overflow. */
@@ -2096,10 +2105,12 @@ img, svg, canvas, video { max-width: 100%; }
   .mnav span { font-size: 9.5px; }
 }
 
-/* Landscape phones (short viewports): let modals scroll fully, shrink drawer header gap */
+/* Landscape phones (short viewports): let modals scroll fully, shrink drawer header gap.
+   Landscape width usually exceeds 560px, so the phone safe-area rule above doesn't match here —
+   re-apply the insets so the notch (now on the LEFT/RIGHT) and the home indicator are cleared. */
 @media (max-height: 480px) and (orientation: landscape) {
-  .modal-card { max-height: 96vh; }
-  .emp-detail, .payslip-sheet { max-height: 96vh; }
+  .modal-scrim { padding: calc(10px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left)); }
+  .modal-card, .emp-detail, .payslip-sheet { max-height: calc(100vh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .jernih-pop { height: 88vh; }
 }
 
