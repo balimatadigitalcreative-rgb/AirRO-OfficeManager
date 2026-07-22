@@ -161,6 +161,10 @@
         list: (qs) => req('GET', '/distribusi/transactions' + (qs ? '?' + qs : '')),
         create: (data) => req('POST', '/distribusi/transactions', data),
         correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),
+        // VOID (cap distribusiVoid) — recorded cancellation; row stays, excluded from aggregates.
+        void: (id, data) => req('POST', '/distribusi/transactions/' + id + '/void', data),   // { reason }
+        // HARD DELETE (cap distribusiHardDelete, owner) — permanent; audit written first.
+        hardDelete: (id, data) => req('DELETE', '/distribusi/transactions/' + id, data),     // { reason, confirm, password }
       },
       // Customer invoices / notas (documents). create/list are per-customer; get by id.
       invoices: {

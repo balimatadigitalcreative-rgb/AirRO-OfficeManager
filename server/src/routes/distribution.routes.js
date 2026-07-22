@@ -62,6 +62,13 @@ router.delete('/customer-types/:id', requireCap('distribusiCustomers'), validate
 router.get('/transactions', requireCap('distribusi'), validate({ query: ctrl.schemas.listTxnQuery }), ctrl.listTransactions);
 router.post('/transactions', requireCap('distribusiInput'), validate({ body: ctrl.schemas.txnSchema }), ctrl.createTransaction);
 router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.addCorrection);
+// VOID (recorded cancellation) — the default everyday cancel path. Row stays, excluded from all
+// aggregates, gallons reversed, audited. Cap: distribusiVoid (owner/GM default). Fleet-scoped.
+router.post('/transactions/:id/void', requireCap('distribusiVoid'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.voidSchema }), ctrl.voidTransaction);
+// HARD DELETE (permanent) — OWNER-ONLY last resort. Cap: distribusiHardDelete (granted to no one
+// but owner by default). Typed ref/HAPUS + password + reason enforced in the service; an audit
+// entry is written BEFORE the row is removed, so a trace always survives. Fleet-scoped.
+router.delete('/transactions/:id', requireCap('distribusiHardDelete'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.hardDeleteSchema }), ctrl.hardDeleteTransaction);
 
 // ── Invoices / notas ── (documents; never mutate transactions). Any distribusi user can
 // view; creating one needs input or customer-management (so staff can bill on the spot).

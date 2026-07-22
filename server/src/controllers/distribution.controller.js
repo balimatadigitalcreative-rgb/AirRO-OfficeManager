@@ -90,6 +90,13 @@ const correctionSchema = z.object({
   oldValue: z.any().optional(),
   newValue: z.any().optional(),
 });
+// VOID — a mandatory reason. HARD DELETE — reason + typed confirmation (ref or "HAPUS") + password.
+const voidSchema = z.object({ reason: z.string().trim().min(1, 'reason is required').max(1000) });
+const hardDeleteSchema = z.object({
+  reason: z.string().trim().min(1, 'reason is required').max(1000),
+  confirm: z.string().min(1).max(40),
+  password: z.string().min(1).max(200),
+});
 const listTxnQuery = z.object({
   date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(),
   customerId: z.string().optional(), method: z.enum(['lunas', 'bon', 'pelunasan']).optional(),
@@ -177,6 +184,8 @@ const addCorrection = asyncHandler(async (req, res) => {
   bcast('correction', req.params.id);
   res.status(201).json({ data: c });
 });
+const voidTransaction = asyncHandler(async (req, res) => { const t = await service.voidTransaction(req.params.id, req.body, req.user); bcast('void', req.params.id); res.json({ data: t }); });
+const hardDeleteTransaction = asyncHandler(async (req, res) => { const r = await service.hardDeleteTransaction(req.params.id, req.body, req.user); bcast('delete', req.params.id); res.json({ data: r }); });
 
 // ── invoices / notas ──
 const createInvoice = asyncHandler(async (req, res) => { const inv = await service.createInvoice(req.params.id, req.body, req.user); bcast('invoice', inv.id); res.status(201).json({ data: inv }); });
@@ -224,9 +233,9 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
-  listTransactions, createTransaction, addCorrection, listAudit, dashboardSummary,
+  listTransactions, createTransaction, addCorrection, voidTransaction, hardDeleteTransaction, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

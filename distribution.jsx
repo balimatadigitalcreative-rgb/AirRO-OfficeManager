@@ -144,7 +144,7 @@ const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((
 // Missing-field labels for the "Data belum lengkap" chips (keys match server completeness output).
 const MISSING_KEYS = { phone: 'dist.mPhone', location: 'dist.mLoc', armada: 'dist.mArmada', deliveryDays: 'dist.mDays', price: 'dist.mPrice' };
 const missChips = (missing) => (missing || []).map((k) => <span key={k} className="dist-miss-chip">{trD(MISSING_KEYS[k] || k)}</span>);
-const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' } };
+const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' }, batal: { cls: 'koreksi', k: 'dist.akBatal' }, hapus: { cls: 'harga', k: 'dist.akHapus' } };
 // Indonesian phone normalisation — MIRRORS server/src/utils/phone.js exactly (that one is
 // authoritative; this is for live preview/dedupe in the browser). Excel silently drops the
 // leading 0 from a phone column and people paste "+62 …", so every number is repaired to the
@@ -535,7 +535,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -559,6 +559,32 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
   const [corrReason, setCorrReason] = uSx('');
   const [corrValue, setCorrValue] = uSx('');
   const [corrSaving, setCorrSaving] = uSx(false);
+  // void (recorded cancellation) + hard delete (owner-only, permanent)
+  const [voidTxn, setVoidTxn] = uSx(null);
+  const [voidReason, setVoidReason] = uSx('');
+  const [voidSaving, setVoidSaving] = uSx(false);
+  const [delTxn, setDelTxn] = uSx(null);           // hard-delete danger modal
+  const [delReason, setDelReason] = uSx('');
+  const [delConfirm, setDelConfirm] = uSx('');
+  const [delPw, setDelPw] = uSx('');
+  const [delSaving, setDelSaving] = uSx(false);
+  const [delErr, setDelErr] = uSx('');
+  const [menuFor, setMenuFor] = uSx(null);          // which txn row's action menu is open
+
+  const doVoid = () => {
+    if (!voidTxn || !voidReason.trim() || voidSaving) return;
+    setVoidSaving(true);
+    window.API.distribusi.transactions.void(voidTxn.id, { reason: voidReason.trim() })
+      .then(() => { setVoidSaving(false); setVoidTxn(null); setVoidReason(''); flash(trD('dist.voidDone')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setVoidSaving(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const doHardDelete = () => {
+    if (!delTxn || !delReason.trim() || !delConfirm.trim() || !delPw || delSaving) return;
+    setDelSaving(true); setDelErr('');
+    window.API.distribusi.transactions.hardDelete(delTxn.id, { reason: delReason.trim(), confirm: delConfirm.trim(), password: delPw })
+      .then(() => { setDelSaving(false); setDelTxn(null); setDelReason(''); setDelConfirm(''); setDelPw(''); flash(trD('dist.hardDelDone')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setDelSaving(false); setDelErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
 
   const ef = effFleet(fleetScope, distFleet);
   const fleetQs = (ef && ef !== 'all') ? 'fleet=' + encodeURIComponent(ef) : '';
@@ -592,8 +618,10 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
 
   const rows = (txns || []).filter((t) => {
     const corrected = (t.corrections || []).length > 0;
-    return filter === 'all' ? true : filter === 'corrected' ? corrected : filter === 'arsip' ? t.legacy : t.method === filter;
+    const voided = t.status === 'void';
+    return filter === 'all' ? true : filter === 'void' ? voided : filter === 'corrected' ? corrected : filter === 'arsip' ? t.legacy : t.method === filter;
   });
+  const voidN = (txns || []).filter((t) => t.status === 'void').length;
   const custOpts = customers.map((c) => ({ value: c.id, label: c.name + (c.type && c.type !== 'reguler' ? ' · ' + c.type : '') }));
 
   // ── FORM ──
@@ -682,7 +710,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
   }
 
   // ── LIST ──
-  const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')], ['arsip', trD('dist.arsip')]];
+  const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')], ...(voidN ? [['void', trD('dist.voidFilter') + ' (' + voidN + ')']] : []), ['arsip', trD('dist.arsip')]];
   return (
     <div className="dist-dash screen-enter">
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
@@ -701,25 +729,47 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
         {rows.map((t) => {
           const corrected = t.correctedManual != null ? t.correctedManual : (t.corrections || []).some((x) => x.kind !== 'price');
           const isNew = newIds.includes(t.id);
+          const voided = t.status === 'void';
+          // A voided txn can't be corrected/voided again; only a hard-delete holder can still act.
+          const showKoreksi = canKoreksi && !voided && !t.legacy;
+          const showVoid = canVoid && !voided && !t.legacy;
+          const showDelete = canHardDelete;
+          const hasMenu = showVoid || showDelete;
           return (
-            <div key={t.id} className="dist-txn dist-txn-full">
+            <div key={t.id} className={`dist-txn dist-txn-full ${voided ? 'is-void' : ''}`}>
               <span className="dist-txn-av">{(t.customer && t.customer.name || '?').slice(0, 1).toUpperCase()}</span>
               <div className="dist-txn-mid">
                 <div className="dist-txn-line1">
                   {t.customer && t.customer.code && <span className="dist-code">{t.customer.code}</span>}
                   <span className="dist-txn-name">{t.customer ? t.customer.name : '—'}</span>
-                  {t.legacy ? <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span> : <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>}
-                  {isNew ? <span className="dist-badge new">{trD('dist.baru')}</span> : null}
-                  {corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
-                  {t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
+                  {voided ? <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>
+                    : t.legacy ? <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span> : <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>}
+                  {isNew && !voided ? <span className="dist-badge new">{trD('dist.baru')}</span> : null}
+                  {corrected && !voided ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
+                  {t.adjusted && !voided ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
                 </div>
-                <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {t.method === 'pelunasan' ? trD('dist.payLine') : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
+                <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {t.method === 'pelunasan' ? trD('dist.payLine') : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}{t.adjusted && !voided ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
+                {voided && <div className="dist-txn-voidline">{trD('dist.voidBy', { who: t.voidedByName || '—' })}{t.voidReason ? ' · ' + t.voidReason : ''}</div>}
               </div>
               <div className="dist-txn-right">
                 <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                 <span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>
               </div>
-              {canKoreksi && <button type="button" className="dist-corr-btn" onClick={() => { setCorrTxn(t); setCorrReason(''); setCorrValue(''); }}><IconPencil s={13} />{trD('dist.korek')}</button>}
+              {showKoreksi && <button type="button" className="dist-corr-btn" onClick={() => { setCorrTxn(t); setCorrReason(''); setCorrValue(''); }}><IconPencil s={13} />{trD('dist.korek')}</button>}
+              {hasMenu && (
+                <div className="dist-txn-menu">
+                  <button type="button" className="icon-btn" title={trD('dist.moreActions')} onClick={() => setMenuFor(menuFor === t.id ? null : t.id)}><IconDots s={16} /></button>
+                  {menuFor === t.id && (
+                    <>
+                      <div className="dist-menu-scrim" onClick={() => setMenuFor(null)} />
+                      <div className="dist-menu-pop">
+                        {showVoid && <button type="button" className="dist-menu-item" onClick={() => { setMenuFor(null); setVoidTxn(t); setVoidReason(''); }}><IconClose s={14} />{trD('dist.voidBtn')}</button>}
+                        {showDelete && <button type="button" className="dist-menu-item danger" onClick={() => { setMenuFor(null); setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }}><IconTrash s={14} />{trD('dist.hardDelBtn')}</button>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -740,6 +790,39 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, refreshKey, 
               {staffMode && <div className="dist-staffnote"><IconShield s={14} />{trD('dist.korekStaff')}</div>}
             </div>
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCorrTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrReason.trim() || corrSaving} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSave')}</button></div>
+          </div>
+        </div>
+      )}
+      {/* VOID (recorded cancellation) — the recommended everyday cancel. Reason required + confirm. */}
+      {voidTxn && (
+        <div className="modal-scrim" onClick={() => setVoidTxn(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.voidT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(voidTxn.id)} · {voidTxn.customer ? voidTxn.customer.name : ''} · {rpFull(voidTxn.amount)}</div></div><button className="jp-icon" onClick={() => setVoidTxn(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.voidInfo')}</span></div>
+              <label className="fld-label">{trD('dist.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={voidReason} placeholder={trD('dist.voidReasonPh')} onChange={(e) => setVoidReason(e.target.value)} />
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoidTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!voidReason.trim() || voidSaving} onClick={doVoid}>{voidSaving ? '…' : trD('dist.voidConfirm')}</button></div>
+          </div>
+        </div>
+      )}
+      {/* HARD DELETE — owner-only, permanent, the heavier/rarer action. Typed ref/HAPUS + password + reason. */}
+      {delTxn && (
+        <div className="modal-scrim" onClick={() => setDelTxn(null)} style={{ zIndex: 210 }}>
+          <div className="modal-card dist-danger-modal" style={{ maxWidth: 470 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800, color: 'var(--neg)' }}>{trD('dist.hardDelT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(delTxn.id)} · {delTxn.customer ? delTxn.customer.name : ''} · {rpFull(delTxn.amount)}</div></div><button className="jp-icon" onClick={() => setDelTxn(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-warnbox"><IconWarn s={16} /><span>{trD('dist.hardDelWarn')}</span></div>
+              <label className="fld-label">{trD('dist.hardDelReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 60, padding: 12, resize: 'vertical' }} value={delReason} placeholder={trD('dist.hardDelReasonPh')} onChange={(e) => setDelReason(e.target.value)} />
+              <label className="fld-label">{trD('dist.hardDelType', { ref: shortRef(delTxn.id) })} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <input className="fld" value={delConfirm} placeholder={shortRef(delTxn.id)} autoComplete="off" onChange={(e) => setDelConfirm(e.target.value)} />
+              <label className="fld-label">{trD('dist.hardDelPw')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <input className="fld" type="password" value={delPw} autoComplete="off" onChange={(e) => setDelPw(e.target.value)} />
+              {delErr && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={14} />{delErr}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setDelTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-danger" disabled={!delReason.trim() || !delConfirm.trim() || !delPw || delSaving} onClick={doHardDelete}>{delSaving ? '…' : trD('dist.hardDelConfirm')}</button></div>
           </div>
         </div>
       )}

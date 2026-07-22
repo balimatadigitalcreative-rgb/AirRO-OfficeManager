@@ -557,6 +557,16 @@ model DistTransaction {
   // existing aggregation already counts it and a 'pelunasan' reduces it. The flag exists
   // only to LABEL the row ("Bon Awal") and to make it auditable/queryable.
   openingBon      Boolean  @default(false)
+  // VOID (recorded cancellation) — the default cancel path. The row STAYS (shown "Dibatalkan",
+  // filterable) but is EXCLUDED from every aggregate (sisa bon, gallons, KPIs); its gallon
+  // movements are reversed. Permanent hard-delete removes the row entirely (owner-only) but always
+  // writes an audit entry first. status: active | void.
+  status          String   @default("active")
+  voidedById      String?
+  voidedByName    String?
+  voidedByRole    String?
+  voidedAt        DateTime?
+  voidReason      String?
   createdAt       DateTime @default(now())
 
   customer    Customer     @relation(fields: [customerId], references: [id])
@@ -567,6 +577,7 @@ model DistTransaction {
   @@index([fleetId])
   @@index([deliveryRunId])
   @@index([importBatchId])
+  @@index([status])
 }
 
 // Delivery run (rit) — one trip of a fleet: gallons loaded out, then full/empty returned,

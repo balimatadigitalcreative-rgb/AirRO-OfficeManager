@@ -76,10 +76,15 @@ describe('Distribusi — permissions, price lock, immutability, audit', () => {
     expect(after.body.data.find((t) => t.id === txnId).qty).toBe(3);   // original untouched
   });
 
-  it('transactions cannot be deleted (no delete route exists)', async () => {
+  it('transactions are not casually deletable — hard delete needs the safeguards (see inter-unit/void test)', async () => {
+    // A hard-delete route now exists (owner-only), but it demands a typed ref/HAPUS + password +
+    // reason: a bare DELETE with no body is rejected and the row survives. (Full flow: void test.)
     const list = await request(app).get('/api/v1/distribusi/transactions').set(auth(owner));
-    const del = await request(app).delete(`/api/v1/distribusi/transactions/${list.body.data[0].id}`).set(auth(owner));
-    expect(del.status).toBe(404);
+    const id = list.body.data[0].id;
+    const del = await request(app).delete(`/api/v1/distribusi/transactions/${id}`).set(auth(owner)).send({});
+    expect(del.status).toBe(400);   // validation: missing confirm/password/reason
+    const after = await request(app).get('/api/v1/distribusi/transactions').set(auth(owner));
+    expect(after.body.data.some((t) => t.id === id)).toBe(true);   // still there
   });
 
   it('owner sees the immutable audit log covering every write kind', async () => {
