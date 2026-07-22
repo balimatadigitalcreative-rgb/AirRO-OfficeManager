@@ -971,8 +971,22 @@ select.fld::-ms-expand { display: none; }
 .dist-th-lbl { font-size: 11px; color: rgba(255,255,255,.7); margin-bottom: 4px; }
 .dist-th-val { font-size: 17px; font-weight: 800; white-space: nowrap; }
 .dist-th-val.pos { color: #8fe0c0; } .dist-th-val.warn { color: #f4c874; }
+/* Tunai/Transfer split shown under the today "Uang Masuk" figure on the dark hero. */
+.dist-th-split { display: flex; flex-wrap: wrap; gap: 3px 14px; margin-top: 7px; }
+.dist-th-split > span { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: rgba(255,255,255,.72); white-space: nowrap; }
+.dist-th-split b { color: #fff; font-weight: 700; }
 .dist-th-avg { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.14); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: rgba(255,255,255,.7); }
 .dist-th-avg b { font-size: 15px; color: #fff; }
+/* Cash-vs-transfer breakdown: a coloured dot legend + the per-fleet cash a driver must deposit. */
+.dist-cash-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.dist-cash-dot.cash { background: var(--green-600, #16a34a); }
+.dist-cash-dot.xfer { background: #6b93c4; }
+.dist-kpi-sub { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 8px; }
+.dist-kpi-cash { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--text-mut); white-space: nowrap; }
+.dist-th-fleetcash { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.14); }
+.dist-th-fleetcash-h { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: rgba(255,255,255,.6); margin-bottom: 7px; }
+.dist-th-fleetcash-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 12.5px; color: rgba(255,255,255,.9); }
+.dist-th-fleetcash-row b { font-size: 13px; color: #8fe0c0; }
 .dist-card { padding: 18px; }
 .dist-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .dist-card .sec-title { font-size: 15.5px; font-weight: 700; }

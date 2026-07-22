@@ -984,16 +984,44 @@ async function dashboardSummary(date, user, qFleet) {
   // chart, the recent list and the top-customers list, so the headline numbers can never
   // disagree with what is shown right below them. Gallons sold = Σ qty; Money in = cash
   // actually received in the window (lunas sales + pelunasan payments). ──
-  let periodQty = 0, periodIn = 0;
-  rows.forEach((r) => { periodQty += r.qty; if (r.method === 'lunas') periodIn += effOf(r); else if (r.method === 'pelunasan') periodIn += r.amount; });
+  // Money-in splits into CASH vs TRANSFER. Delivery staff hand over CASH in the field, so this is
+  // what a driver must physically deposit: a `lunas` sale is always cash, and a `pelunasan` (bon
+  // settlement) is cash UNLESS it was paid by bank transfer — recorded as the trailing " · Transfer"
+  // tag on the note at pay time (see createTransaction). Transfers land straight in the company
+  // account and must NOT count toward the cash owed. Older/untagged pelunasan default to cash (safe).
+  const payTag = (r) => { const parts = String(r.note || '').split(' · '); return parts[parts.length - 1].trim().toLowerCase(); };
+  const isTransferPay = (r) => r.method === 'pelunasan' && payTag(r) === 'transfer';
+  // moneyIn amount of a row (0 for bon/other), and whether it is a transfer.
+  const moneyInOf = (r) => (r.method === 'lunas' ? effOf(r) : r.method === 'pelunasan' ? r.amount : 0);
+
+  let periodQty = 0, periodIn = 0, periodInCash = 0, periodInTransfer = 0;
+  rows.forEach((r) => {
+    periodQty += r.qty;
+    const inc = moneyInOf(r);
+    if (!inc) return;
+    periodIn += inc;
+    if (isTransferPay(r)) periodInTransfer += inc; else periodInCash += inc;
+  });
 
   // ── TODAY — powers the "today" rail + the "Transactions today" KPI. ──
   const todayRows = rows.filter((r) => r.txnDate === day);
   const byMethod = { lunas: 0, bon: 0, pelunasan: 0 };
-  let amount = 0;
-  todayRows.forEach((r) => { const e = effOf(r); amount += e; if (byMethod[r.method] != null) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e); });
-  const uangMasuk = byMethod.lunas + byMethod.pelunasan;
+  let amount = 0, todayCash = 0, todayTransfer = 0;
+  const cashFleet = {};   // per-fleet CASH owed today (reconcile what each driver deposits)
+  todayRows.forEach((r) => {
+    const e = effOf(r); amount += e;
+    if (byMethod[r.method] != null) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e);
+    const inc = moneyInOf(r);
+    if (!inc) return;
+    const transfer = isTransferPay(r);
+    if (transfer) todayTransfer += inc; else todayCash += inc;
+    const f = r.fleetId || '';
+    const slot = cashFleet[f] || (cashFleet[f] = { fleetId: f, cash: 0, transfer: 0 });
+    if (transfer) slot.transfer += inc; else slot.cash += inc;
+  });
+  const uangMasuk = byMethod.lunas + byMethod.pelunasan;   // == todayCash + todayTransfer
   const piutang = byMethod.bon;
+  const todayCashByFleet = Object.values(cashFleet).sort((a, b) => b.cash - a.cash);
 
   // ── RUNNING RECEIVABLES — outstanding bon across ALL time (fleet-scoped), computed
   // per-customer and floored at 0, identical to the Customers screen's sisaBon so the
@@ -1031,8 +1059,10 @@ async function dashboardSummary(date, user, qFleet) {
   return {
     date: day, periodDays: 7,
     periodQty, periodIn,            // last-7-days headline KPIs (same source as chart/recent/top)
+    periodInCash, periodInTransfer, // …split: cash driver deposits vs bank transfers (sum = periodIn)
     receivable,                     // all-time outstanding bon (running balance)
     count: todayRows.length, amount, byMethod, uangMasuk, piutang,   // TODAY (rail + "Transactions today")
+    todayCash, todayTransfer, todayCashByFleet,   // TODAY money-in split + per-fleet cash to reconcile
     customers, last7, recent, topCustomers, reminders,
   };
 }

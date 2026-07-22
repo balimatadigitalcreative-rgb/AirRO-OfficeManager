@@ -245,7 +245,7 @@ function FleetBar({ fleetScope, fleet, value, onChange }) {
   );
 }
 
-function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero }) {
+function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero, sub }) {
   // Every KPI is a `stat-box` → identical padding/size on all four. `dist-kpi-hero`
   // is a COLOUR-ONLY modifier (gradient + light text); it must not change the size.
   return (
@@ -256,6 +256,7 @@ function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero }) {
       </div>
       <div className={`tnum dist-kpi-val ${cls || ''}`}>{value}{unit ? <span className="dist-kpi-unit"> {unit}</span> : null}</div>
       <div className="dist-kpi-lbl">{label}</div>
+      {sub ? <div className="dist-kpi-sub">{sub}</div> : null}
     </div>
   );
 }
@@ -298,7 +299,8 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
         <div className="dist-main">
           <div className="dist-kpis">
             <Kpi hero icon="IconDrop" value={numX(sum.periodQty)} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={trD('dist.pill7d')} pillCls="hero" />
-            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpFull(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={trD('dist.pill7d')} pillCls="pos" />
+            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpFull(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={trD('dist.pill7d')} pillCls="pos"
+              sub={<><span className="dist-kpi-cash"><span className="dist-cash-dot cash" />{trD('dist.cashLbl')} {rpFull(sum.periodInCash || 0)}</span><span className="dist-kpi-cash"><span className="dist-cash-dot xfer" />{trD('dist.xferLbl')} {rpFull(sum.periodInTransfer || 0)}</span></>} />
             <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpFull(sum.receivable)} label={trD('dist.kpiBon')} pill={trD('dist.pillRunning')} pillCls="warn" />
             <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={trD('dist.pillToday')} pillCls="blue" />
           </div>
@@ -362,10 +364,29 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
           <div className="card dist-today-hero">
             <div className="dist-th-top"><span>{trD('dist.today')}</span><span className="dist-th-count">{numX(sum.count)} {trD('dist.notaWord')}</span></div>
             <div className="dist-th-metrics">
-              <div><div className="dist-th-lbl">{trD('dist.kpiIn')}</div><div className="dist-th-val pos">{rpFull(sum.uangMasuk)}</div></div>
+              {/* Money-in, split so it's obvious which part is CASH the driver must deposit. */}
+              <div>
+                <div className="dist-th-lbl">{trD('dist.kpiIn')}</div>
+                <div className="dist-th-val pos">{rpFull(sum.uangMasuk)}</div>
+                <div className="dist-th-split">
+                  <span><span className="dist-cash-dot cash" />{trD('dist.cashLbl')} <b>{rpFull(sum.todayCash || 0)}</b></span>
+                  <span><span className="dist-cash-dot xfer" />{trD('dist.xferLbl')} <b>{rpFull(sum.todayTransfer || 0)}</b></span>
+                </div>
+              </div>
               <div><div className="dist-th-lbl">{trD('dist.bonBaru')}</div><div className="dist-th-val warn">{rpFull(sum.piutang)}</div></div>
             </div>
             <div className="dist-th-avg"><span>{trD('dist.avgNota')}</span><b className="tnum">{rpFull(avgNota)}</b></div>
+            {(sum.todayCashByFleet || []).length > 1 && (
+              <div className="dist-th-fleetcash">
+                <div className="dist-th-fleetcash-h">{trD('dist.cashPerFleet')}</div>
+                {sum.todayCashByFleet.map((f) => (
+                  <div key={f.fleetId || '—'} className="dist-th-fleetcash-row">
+                    <span className="dist-th-fleetcash-name">{f.fleetId || trD('dist.noFleet')}</span>
+                    <b className="tnum">{rpFull(f.cash)}</b>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {canInput && (
