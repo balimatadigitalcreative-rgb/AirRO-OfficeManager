@@ -663,18 +663,21 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               </div>
             </div>
 
-            {/* Gallon flow (loan/exchange): full gallons out (default = qty) + empties in */}
+            {/* Gallon flow (loan/exchange): full gallons out (default = qty) + empties in.
+                A one-line legend + per-field help so staff can't confuse the two directions. */}
+            <div className="dist-gal-legend"><IconRefresh s={13} />{trD('dist.galLegend')}</div>
             <div className="dist-form-row">
               <div style={{ flex: 1, minWidth: 150 }}>
                 <label className="fld-label">{trD('dist.fGalOut')}</label>
                 <input className="fld tnum" inputMode="numeric" value={fGalOut} onChange={(e) => setFGalOut(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+                <div className="dist-fieldhint">{trD('dist.fGalOutHelp')}</div>
               </div>
               <div style={{ flex: 1, minWidth: 150 }}>
                 <label className="fld-label">{trD('dist.fGalIn')}</label>
                 <input className="fld tnum" inputMode="numeric" value={fGalIn} onChange={(e) => setFGalIn(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+                <div className="dist-fieldhint">{trD('dist.fGalInHelp')}</div>
               </div>
             </div>
-            <div className="dist-hint" style={{ marginTop: 6 }}>{trD('dist.galFlowHint')}</div>
 
             <label className="fld-label">{trD('dist.fMethod')}</label>
             <div className="dist-method">
@@ -2687,9 +2690,9 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
                 <td className="num">{numX(r.gallonsOut)}</td>
                 <td className="num">{numX(r.sold)}</td>
                 <td className="num">{numX(r.expectedRemaining)}</td>
-                <td className="num">{r.status === 'closed' ? numX(r.gallonsFullReturned) : '—'}</td>
-                <td className="num">{r.status === 'closed' ? (r.diff === 0 ? <span className="run-ok">0</span> : <span className="run-bad" title={r.diffReason}>{(r.diff > 0 ? '+' : '') + numX(r.diff)}</span>) : '—'}</td>
-                <td className="num">{r.status === 'closed' ? numX(r.gallonsEmptyReturned) : '—'}</td>
+                <td className="num">{r.status === 'closed' ? numX(r.gallonsFullReturned) : <span className="run-pending" title={trD('run.pendingClose')}>—</span>}</td>
+                <td className="num">{r.status === 'closed' ? (r.diff === 0 ? <span className="run-ok">0</span> : <span className="run-bad" title={r.diffReason}>{(r.diff > 0 ? '+' : '') + numX(r.diff)}</span>) : <span className="run-pending" title={trD('run.pendingClose')}>—</span>}</td>
+                <td className="num">{r.status === 'closed' ? numX(r.gallonsEmptyReturned) : <span className="run-pending" title={trD('run.pendingClose')}>—</span>}</td>
                 <td>{r.status === 'closed' ? <span className="run-st closed">{trD('run.closed_')}</span> : <span className="run-st open">{trD('run.open')}</span>}</td>
               </tr>
             ))}
@@ -2699,6 +2702,7 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChange
           </tbody>
         </table>
       </div>
+      <div className="dist-fieldhint" style={{ marginTop: 8 }}><IconClock s={12} />{trD('run.reconcileHint')}</div>
 
       {modal && (
         <div className="modal-scrim" onClick={() => setModal(null)} style={{ zIndex: 200 }}>
