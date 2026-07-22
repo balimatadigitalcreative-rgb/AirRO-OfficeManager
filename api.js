@@ -191,6 +191,13 @@
         close: (id, data) => req('POST', '/distribusi/runs/' + id + '/close', data), // { gallonsFullReturned, gallonsEmptyReturned, diffReason? }
         correct: (id, data) => req('POST', '/distribusi/runs/' + id + '/corrections', data), // { out?, full?, empty?, reason } — corrected absolute values
       },
+      // Field expenses (pengeluaran lapangan): cash a driver paid out, with an optional receipt photo.
+      expenses: {
+        list: (qs) => { const p = []; if (qs) { for (const k in qs) if (qs[k] != null && qs[k] !== '' && qs[k] !== 'all') p.push(k + '=' + encodeURIComponent(qs[k])); } return req('GET', '/distribusi/expenses' + (p.length ? '?' + p.join('&') : '')); },
+        categories: () => req('GET', '/distribusi/expenses/categories'),
+        create: (data) => req('POST', '/distribusi/expenses', data),          // { date, fleet?, amount, category, note?, photoId? }
+        void: (id, data) => req('POST', '/distribusi/expenses/' + id + '/void', data), // { reason }
+      },
       // Gallon stock (loan/exchange): summary + per-customer balances + ledger; correction.
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),

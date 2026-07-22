@@ -987,6 +987,35 @@ select.fld::-ms-expand { display: none; }
 .dist-th-fleetcash-h { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: rgba(255,255,255,.6); margin-bottom: 7px; }
 .dist-th-fleetcash-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 12.5px; color: rgba(255,255,255,.9); }
 .dist-th-fleetcash-row b { font-size: 13px; color: #8fe0c0; }
+.dist-th-fleetcash-nums { display: inline-flex; align-items: baseline; gap: 8px; }
+.dist-th-fleetcash-exp { font-size: 10.5px; color: rgba(255,255,255,.5); }
+/* Net cash to deposit = cash − field expenses (shown on the dark today rail). */
+.dist-th-net { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.14); }
+.dist-th-net-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: rgba(255,255,255,.72); padding: 2px 0; }
+.dist-th-net-row b { font-size: 13px; color: #fff; } .dist-th-net-row b.neg { color: #f4b0b0; }
+.dist-th-net-row.total { font-weight: 700; color: #fff; } .dist-th-net-row.total b { font-size: 16px; color: #8fe0c0; }
+.dist-th-net-formula { font-size: 10px; color: rgba(255,255,255,.5); margin-top: 4px; }
+/* Field-expense list (pengeluaran lapangan). */
+.exp-total-pill { margin-left: 8px; font-size: 12px; font-weight: 800; color: var(--danger, #dc2626); }
+.exp-list { display: flex; flex-direction: column; }
+.exp-row { display: flex; align-items: center; gap: 11px; padding: 10px 2px; border-bottom: 1px solid var(--border-soft); }
+.exp-row:last-child { border-bottom: 0; }
+.exp-row.is-void { opacity: .6; }
+.exp-nophoto, .dist-locphoto-thumb, .dist-locphoto-ph { width: 40px; height: 40px; border-radius: 9px; flex-shrink: 0; object-fit: cover; }
+.exp-nophoto, .dist-locphoto-ph { display: grid; place-items: center; background: var(--card-soft); color: var(--text-faint); }
+.exp-mid { flex: 1; min-width: 0; }
+.exp-line1 { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.exp-cat { font-size: 12.5px; font-weight: 700; color: var(--ink); text-transform: capitalize; }
+.exp-cat.c-bensin { color: #c2660c; } .exp-cat.c-makan { color: #b0398a; } .exp-cat.c-parkir { color: #2f6fb0; }
+.exp-fleet { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--card-soft); color: var(--text-mut); }
+.exp-sub { font-size: 11px; color: var(--text-mut); margin-top: 2px; line-height: 1.35; }
+.exp-right { text-align: right; flex-shrink: 0; }
+.exp-amt { font-size: 14px; font-weight: 800; color: var(--danger, #dc2626); }
+.exp-amt.struck { text-decoration: line-through; color: var(--text-faint); }
+.exp-void { margin-top: 2px; font-size: 11px; }
+.exp-cat-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.exp-void-sum { padding: 9px 12px; background: var(--card-soft); border-radius: 10px; font-size: 13px; margin-bottom: 10px; }
+.dist-integ-dot.exp { background: #dc6a6a; }
 .dist-card { padding: 18px; }
 .dist-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .dist-card .sec-title { font-size: 15.5px; font-weight: 700; }

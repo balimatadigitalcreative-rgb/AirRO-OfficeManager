@@ -118,6 +118,11 @@ const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegat
 // reason. At least one field must be present (enforced in the service via a zero-change check).
 const runCorrectionSchema = z.object({ out: z.number().int().nonnegative().optional(), full: z.number().int().nonnegative().optional(), empty: z.number().int().nonnegative().optional(), reason: z.string().min(1).max(300) });
 const runQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['open', 'closed']).optional() });
+// Field expenses (pengeluaran lapangan). Amount + category required; a receipt photoId (Attachment
+// ref) is optional. Void takes a mandatory reason (append-only correction, never a silent delete).
+const expenseSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), amount: z.number().int().positive(), category: z.string().min(1).max(40), note: z.string().max(300).optional(), photoId: z.string().max(60).optional(), businessUnitId: z.string().max(60).optional() });
+const expenseVoidSchema = z.object({ reason: z.string().min(1).max(300) });
+const expenseQuery = z.object({ date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['active', 'void']).optional() });
 // Customer list + detailed multi-criteria filter. Every criterion is optional and they
 // combine with AND. Kept as query params so the list stays a plain cacheable GET.
 // Opening / carry-over bon (cap: distribusiKoreksi). Nominal + the date the admin picks +
@@ -227,6 +232,12 @@ const closeRun = asyncHandler(async (req, res) => { const r = await service.clos
 const correctRun = asyncHandler(async (req, res) => { const r = await service.correctRun(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.json({ data: r }); });
 const listRuns = asyncHandler(async (req, res) => res.json(await service.listRuns(req.user, req.query)));
 
+// ── Field expenses (pengeluaran lapangan) ──
+const listExpenses = asyncHandler(async (req, res) => res.json(await service.listExpenses(req.user, req.query)));
+const createExpense = asyncHandler(async (req, res) => { const e = await service.createExpense(req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'expense', id: e.id, fleetId: e.fleetId }); res.status(201).json({ data: e }); });
+const voidExpense = asyncHandler(async (req, res) => { const e = await service.voidExpense(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'expense', id: e.id, fleetId: e.fleetId }); res.json({ data: e }); });
+const expenseCats = asyncHandler(async (req, res) => res.json({ data: service.DEFAULT_EXP_CATS }));
+
 // ── gallon stock ──
 const gallonSummary = asyncHandler(async (req, res) => res.json({ data: await service.gallonSummary(req.user, req.query.fleet) }));
 const gallonCorrection = asyncHandler(async (req, res) => { const m = await service.gallonCorrection(req.body, req.user); bcast('gallon', m.id); res.status(201).json({ data: m }); });
@@ -241,5 +252,6 @@ module.exports = {
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  listExpenses, createExpense, voidExpense, expenseCats,
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

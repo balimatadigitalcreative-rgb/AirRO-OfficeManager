@@ -21,6 +21,7 @@ async function resetDb() {
   await prisma.distAuditLog.deleteMany();
   await prisma.runCorrection.deleteMany();     // run corrections (FK → deliveryRun) — before the run
   await prisma.deliveryRun.deleteMany();       // delivery runs (rit)
+  await prisma.distExpense.deleteMany();        // field expenses (no FK — Attachment ref is soft)
   await prisma.distTransaction.deleteMany();
   await prisma.priceHistory.deleteMany();
   await prisma.gallonMovement.deleteMany();   // gallon ledger (also feeds the Gudang galon card)

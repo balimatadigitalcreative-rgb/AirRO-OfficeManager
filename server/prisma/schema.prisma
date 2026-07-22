@@ -632,6 +632,35 @@ model RunCorrection {
   @@index([runId])
 }
 
+// FIELD EXPENSE — cash a delivery person paid out in the field (fuel/bensin, meals, parking…),
+// itemised. This is the per-item detail behind the old single Setoran.expense number; it never
+// posts to the cash book (Entry) or to Setoran — the distribusi module stays separate — so it can
+// never double-count. It only (a) reduces the "net cash to deposit" shown on the dashboard and
+// (b) surfaces as an informational expense line in the Integrasi Kas bridge. Append-only: a
+// mistake is fixed by VOID (recorded, reason required) + re-log, never a silent delete. The
+// receipt photo lives in Attachment (a small ref here, bytes fetched lazily) — never base64 inline.
+model DistExpense {
+  id             String   @id @default(cuid())
+  date           String                          // YYYY-MM-DD (the field date)
+  fleetId        String   @default("")           // fleet scope (the driver's armada)
+  amount         Int                             // IDR, > 0
+  category       String   @default("lainnya")    // bensin | makan | parkir | lainnya | <custom>
+  note           String   @default("")
+  photoId        String?                         // Attachment.id of the receipt photo (optional)
+  businessUnitId String   @default("air")        // STAGE 1 label; 'air' by default
+  status         String   @default("active")     // active | void (append-only correction)
+  voidedById     String?
+  voidedByName   String?
+  voidedAt       DateTime?
+  voidReason     String?
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime @default(now())
+
+  @@index([date, fleetId])
+  @@index([fleetId, status])
+}
+
 // Delivery board — one row per stop, per fleet, per date. `jadwal` rows are generated
 // (idempotent) from a customer's deliveryDays; `tambahan` rows are added by an admin.
 model Delivery {

@@ -375,6 +375,12 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
               </div>
               <div><div className="dist-th-lbl">{trD('dist.bonBaru')}</div><div className="dist-th-val warn">{rpFull(sum.piutang)}</div></div>
             </div>
+            {/* Net cash to deposit = cash money-in − field expenses paid from that cash. */}
+            <div className="dist-th-net">
+              <div className="dist-th-net-row"><span>{trD('dist.fieldExpense')}</span><b className="tnum neg">− {rpFull(sum.todayExpense || 0)}</b></div>
+              <div className="dist-th-net-row total"><span>{trD('dist.netCash')}</span><b className="tnum">{rpFull(sum.todayNetCash != null ? sum.todayNetCash : (sum.todayCash || 0))}</b></div>
+              <div className="dist-th-net-formula">{trD('dist.netCashFormula')}</div>
+            </div>
             <div className="dist-th-avg"><span>{trD('dist.avgNota')}</span><b className="tnum">{rpFull(avgNota)}</b></div>
             {(sum.todayCashByFleet || []).length > 1 && (
               <div className="dist-th-fleetcash">
@@ -382,7 +388,7 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
                 {sum.todayCashByFleet.map((f) => (
                   <div key={f.fleetId || '—'} className="dist-th-fleetcash-row">
                     <span className="dist-th-fleetcash-name">{f.fleetId || trD('dist.noFleet')}</span>
-                    <b className="tnum">{rpFull(f.cash)}</b>
+                    <span className="dist-th-fleetcash-nums">{(f.expense || 0) > 0 ? <span className="dist-th-fleetcash-exp">{rpFull(f.cash)} − {rpFull(f.expense)}</span> : null}<b className="tnum">{rpFull(f.netCash != null ? f.netCash : f.cash)}</b></span>
                   </div>
                 ))}
               </div>
@@ -2244,6 +2250,7 @@ function DistIntegration({ refreshKey, today }) {
   const [txns, setTxns] = uSx(null);
   const [audit, setAudit] = uSx([]);
   const [custs, setCusts] = uSx([]);
+  const [expenses, setExpenses] = uSx([]);
   const [toast, setToast] = uSx('');
   const range = periodRange(period, today);
 
@@ -2251,10 +2258,10 @@ function DistIntegration({ refreshKey, today }) {
     if (!(window.API && window.API.distribusi)) { setTxns([]); return; }
     let live = true; setTxns(null);
     // One gated read (distribusiCashIntegrasi) returns everything the view composes:
-    // transactions in range + customers (outstanding bon) + adjustment audit.
+    // transactions in range + customers (outstanding bon) + adjustment audit + field expenses.
     window.API.distribusi.cashIntegration('dateFrom=' + range.from + '&dateTo=' + range.to)
-      .then((r) => { if (!live) return; const d = (r && r.data) || {}; setTxns(d.transactions || []); setAudit(d.audit || []); setCusts(d.customers || []); })
-      .catch(() => { if (live) { setTxns([]); setAudit([]); setCusts([]); } });
+      .then((r) => { if (!live) return; const d = (r && r.data) || {}; setTxns(d.transactions || []); setAudit(d.audit || []); setCusts(d.customers || []); setExpenses(d.expenses || []); })
+      .catch(() => { if (live) { setTxns([]); setAudit([]); setCusts([]); setExpenses([]); } });
     return () => { live = false; };
   }, [refreshKey, period]);
 
@@ -2272,12 +2279,17 @@ function DistIntegration({ refreshKey, today }) {
     else { lunas += e; cnt.lunas++; }
   });
   const masukKas = lunas + pelunasan;
+  // Field expenses (pengeluaran lapangan) — an INFORMATIONAL line only. This bridge never posts to
+  // the cash book, so it can't double-count the separate Setoran.expense number. Shown so the owner
+  // sees field cash-out mapped to cash-book terms; the NET cash-in = masukKas − field expenses.
+  const fieldExpense = (expenses || []).reduce((s, e) => s + (e.amount || 0), 0);
+  const masukBersih = masukKas - fieldExpense;
   const adjRows = (audit || []).filter((a) => { if (a.kind !== 'koreksi' && a.kind !== 'harga') return false; const d = isoDay(a.createdAt); return d >= range.from && d <= range.to; });
   const koreksiN = adjRows.filter((a) => a.kind === 'koreksi').length;
   const hargaN = adjRows.filter((a) => a.kind === 'harga').length;
   const adjN = koreksiN + hargaN;
   const piutangBerjalan = (custs || []).reduce((s, c) => s + (c.sisaBon || 0), 0);
-  const empty = rows.length === 0 && adjN === 0;
+  const empty = rows.length === 0 && adjN === 0 && fieldExpense === 0;
 
   const copySummary = () => {
     const lines = [
@@ -2285,6 +2297,8 @@ function DistIntegration({ refreshKey, today }) {
       trD('dist.integLineLunas') + ': ' + rpFull(lunas),
       trD('dist.integLinePelunasan') + ': ' + rpFull(pelunasan),
       trD('dist.integTotalIn') + ': ' + rpFull(masukKas),
+      trD('dist.integLineExpense') + ': ' + rpFull(fieldExpense),
+      trD('dist.integNetIn') + ': ' + rpFull(masukBersih),
       trD('dist.integLineBon') + ': ' + rpFull(bon) + ' (' + trD('dist.integBonMemo') + ')',
       trD('dist.integLineAdjust') + ': ' + adjN + ' (' + koreksiN + ' ' + trD('dist.akKoreksi') + ', ' + hargaN + ' ' + trD('dist.akHarga') + ')',
     ];
@@ -2343,6 +2357,16 @@ function DistIntegration({ refreshKey, today }) {
               <span className="dist-integ-line-l"><IconCoinIn s={14} /><span>{trD('dist.integTotalIn')}</span></span>
               <b className="tnum amt-pos">{rpFull(masukKas)}</b>
             </div>
+            {fieldExpense > 0 && (<>
+              <div className="dist-integ-line">
+                <span className="dist-integ-line-l"><span className="dist-integ-dot exp" /><span>{trD('dist.integLineExpense')}</span><small>{numX(expenses.length)} {trD('exp.itemWord')}</small></span>
+                <b className="tnum amt-neg">−{rpFull(fieldExpense)}</b>
+              </div>
+              <div className="dist-integ-line total">
+                <span className="dist-integ-line-l"><IconWallet s={14} /><span>{trD('dist.integNetIn')}</span></span>
+                <b className="tnum amt-pos">{rpFull(masukBersih)}</b>
+              </div>
+            </>)}
             <div className="dist-integ-line memo">
               <span className="dist-integ-line-l"><span className="dist-integ-dot bon" /><span>{trD('dist.integLineBon')}</span><small>{trD('dist.integBonMemo')}</small></span>
               <b className="tnum" style={{ color: 'var(--warn)' }}>{rpFull(bon)}</b>
@@ -2808,7 +2832,120 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
   );
 }
 
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+// Field expenses (pengeluaran lapangan) — cash a delivery person paid out (fuel/bensin, meals,
+// parking…) with an optional receipt photo (stored via the Attachment system, never base64 inline).
+// Append-only: a mistake is VOIDED (recorded, reason) not deleted. The day's total reduces the
+// "net cash to deposit" shown on the dashboard — it never posts to the cash book, so no double-count.
+function ExpensePanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChanged }) {
+  const [rows, setRows] = uSx(null);
+  const [cats, setCats] = uSx(['bensin', 'makan', 'parkir', 'lainnya']);
+  const [modal, setModal] = uSx(null);   // { kind:'add', ...fields } | { kind:'void', row, reason }
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  const [toast, setToast] = uSx('');
+  const scoped = isScoped(fleetScope);
+  const fleetOpts = (fleet || []).filter(Boolean);
+  const reload = () => {
+    if (!(window.API && window.API.distribusi && window.API.distribusi.expenses)) return;
+    window.API.distribusi.expenses.list({ date, fleet: ef }).then((r) => setRows(r.data || [])).catch(() => setRows([]));
+  };
+  uEx(() => { reload(); }, [refreshKey, ef, date]);
+  uEx(() => { if (window.API && window.API.distribusi && window.API.distribusi.expenses) window.API.distribusi.expenses.categories().then((r) => { if (r.data && r.data.length) setCats(r.data); }).catch(() => {}); }, []);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+  const openAdd = () => { setErr(''); setModal({ kind: 'add', category: 'bensin', amount: '', note: '', photo: null, fleet: (distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || '')) }); };
+  const openVoid = (row) => { setErr(''); setModal({ kind: 'void', row, reason: '' }); };
+  const commit = () => {
+    if (!modal || saving) return;
+    setSaving(true); setErr('');
+    const done = (m) => { setSaving(false); setModal(null); flash(m); reload(); if (onChanged) onChanged(); };
+    const fail = (e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); };
+    if (modal.kind === 'void') {
+      if (!(modal.reason || '').trim()) { setSaving(false); setErr(trD('exp.reasonReq')); return; }
+      window.API.distribusi.expenses.void(modal.row.id, { reason: modal.reason.trim() }).then(() => done(trD('exp.voided'))).catch(fail);
+      return;
+    }
+    const amount = parseInt(String(modal.amount).replace(/[^0-9]/g, ''), 10) || 0;
+    if (!(amount > 0)) { setSaving(false); setErr(trD('exp.amtReq')); return; }
+    if (!scoped && !modal.fleet) { setSaving(false); setErr(trD('run.errFleet')); return; }
+    const cat = (modal.category || '').trim() || 'lainnya';
+    const photoId = modal.photo && modal.photo.ref ? modal.photo.ref : undefined;
+    window.API.distribusi.expenses.create({ date, fleet: modal.fleet || undefined, amount, category: cat, note: (modal.note || '').trim() || undefined, photoId })
+      .then(() => done(trD('exp.saved'))).catch(fail);
+  };
+  const active = (rows || []).filter((r) => r.status === 'active');
+  const total = active.reduce((s, r) => s + r.amount, 0);
+  const catLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
+  const viewPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
+  return (
+    <div className="card dist-card">
+      <div className="dist-card-head">
+        <div className="sec-title"><IconCoinOut s={15} /> {trD('exp.title')}{total > 0 ? <span className="exp-total-pill">{rpFull(total)}</span> : null}</div>
+        <button type="button" className="btn btn-primary btn-sm" onClick={openAdd}><IconPlus s={14} />{trD('exp.add')}</button>
+      </div>
+      {rows === null ? <div className="dist-empty">{trD('common.loading') || '…'}</div>
+        : rows.length === 0 ? <div className="dist-empty">{trD('exp.none')}</div>
+        : (
+          <div className="exp-list">
+            {rows.map((r) => {
+              const voided = r.status === 'void';
+              return (
+                <div key={r.id} className={`exp-row ${voided ? 'is-void' : ''}`}>
+                  {r.photoId ? <LocThumb photoId={r.photoId} onView={() => viewPhoto(r.photoId)} /> : <div className="exp-nophoto"><IconCoinOut s={16} /></div>}
+                  <div className="exp-mid">
+                    <div className="exp-line1"><span className={`exp-cat ${'c-' + r.category}`}>{catLabel(r.category)}</span>{r.fleetId ? <span className="exp-fleet">{r.fleetId}</span> : null}{voided && <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>}</div>
+                    <div className="exp-sub">{r.createdByName ? r.createdByName + ' · ' : ''}{fmtDT(r.createdAt)}{r.note ? ' · ' + r.note : ''}{voided && r.voidReason ? ' · ' + trD('exp.voidReason') + ': ' + r.voidReason : ''}</div>
+                  </div>
+                  <div className="exp-right">
+                    <div className={`tnum exp-amt ${voided ? 'struck' : ''}`}>{rpFull(r.amount)}</div>
+                    {!voided && <button type="button" className="dist-link danger exp-void" onClick={() => openVoid(r)}><IconClose s={12} />{trD('exp.void')}</button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      <div className="dist-fieldhint" style={{ marginTop: 8 }}><IconClock s={12} />{trD('exp.hint')}</div>
+
+      {modal && (
+        <div className="modal-scrim" onClick={() => setModal(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{modal.kind === 'void' ? trD('exp.voidT') : trD('exp.addT')}</div><button className="jp-icon" onClick={() => setModal(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              {modal.kind === 'void' ? (<>
+                <div className="dist-infobox"><IconClose s={16} /><span>{trD('exp.voidInfo')}</span></div>
+                <div className="exp-void-sum"><span className={`exp-cat ${'c-' + modal.row.category}`}>{catLabel(modal.row.category)}</span> · <b>{rpFull(modal.row.amount)}</b>{modal.row.note ? ' · ' + modal.row.note : ''}</div>
+                <label className="fld-label">{trD('exp.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={modal.reason} placeholder={trD('exp.voidReasonPh')} onChange={(e) => setModal({ ...modal, reason: e.target.value })} />
+              </>) : (<>
+                {!scoped && (<>
+                  <label className="fld-label">{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                  <select className="fld" value={modal.fleet} onChange={(e) => setModal({ ...modal, fleet: e.target.value })}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
+                </>)}
+                <label className="fld-label">{trD('exp.category')}</label>
+                <div className="exp-cat-chips">
+                  {cats.map((c) => <button key={c} type="button" className={`cat-chip ${modal.category === c ? 'on' : ''}`} onClick={() => setModal({ ...modal, category: c })}>{catLabel(c)}</button>)}
+                </div>
+                {!cats.includes(modal.category) && <input className="fld" style={{ marginTop: 8 }} value={modal.category} placeholder={trD('exp.catOther')} onChange={(e) => setModal({ ...modal, category: e.target.value })} />}
+                <button type="button" className="dist-link" style={{ marginTop: 8 }} onClick={() => setModal({ ...modal, category: cats.includes(modal.category) ? '' : 'bensin' })}>{cats.includes(modal.category) ? trD('exp.catCustom') : trD('exp.catPreset')}</button>
+                <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={modal.amount ? (parseInt(String(modal.amount).replace(/[^0-9]/g, ''), 10) || 0).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setModal({ ...modal, amount: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                <label className="fld-label">{trD('exp.note')}</label>
+                <input className="fld" value={modal.note} maxLength={300} placeholder={trD('exp.notePh')} onChange={(e) => setModal({ ...modal, note: e.target.value })} />
+                <label className="fld-label">{trD('exp.photo')}</label>
+                <UI.FileAttach value={modal.photo} onChange={(v) => setModal({ ...modal, photo: v })} camera accept="image/*" label={trD('exp.photoAdd')} />
+              </>)}
+              {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setModal(null)}>{trD('dist.cancel')}</button><button className={`btn ${modal.kind === 'void' ? 'btn-danger' : 'btn-primary'}`} disabled={saving} onClick={commit}>{saving ? '…' : (modal.kind === 'void' ? trD('exp.void') : trD('exp.save'))}</button></div>
+          </div>
+        </div>
+      )}
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canExpense, canRun, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [closeouts, setCloseouts] = uSx([]);
@@ -2860,7 +2997,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
-      <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />
+      {canRun && <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />}
+      {canExpense && <ExpensePanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} refreshKey={refreshKey} onChanged={reload} />}
       {closeouts.map((c) => (
         <div key={c.id} className="card dist-closed-banner">
           <span className="dist-closed-ic"><IconCheck s={17} /></span>

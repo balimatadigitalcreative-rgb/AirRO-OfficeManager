@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
@@ -27,7 +27,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -189,9 +189,12 @@ function deriveDistribusiCaps(perms) {
   // gates ordinary create/edit. It is higher-risk (hundreds of rows at once), so it now has its
   // own cap — back-filled from distribusiCustomers so nobody loses access on upgrade.
   if (p.distribusiCustomerImport === undefined) p.distribusiCustomerImport = !!p.distribusiCustomers;
+  // Field-expense logging is a field-staff action, so it back-fills from the legacy combined
+  // `distribusi` cap (a full-distribusi user keeps it) — same as input/koreksi/pengiriman.
+  if (p.distribusiExpense === undefined) p.distribusiExpense = legacy;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense);
   return p;
 }
 

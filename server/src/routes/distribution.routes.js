@@ -107,6 +107,14 @@ router.post('/runs/:id/close', requireCap('distribusiPengiriman'), validate({ pa
 // but never correct one.
 router.post('/runs/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.runCorrectionSchema }), ctrl.correctRun);
 
+// ── Field expenses (pengeluaran lapangan) — cap distribusiExpense. Fleet scope enforced: a scoped
+// delivery staff logs/sees only their fleet; owner/admin (no scope) see & manage all. Append-only:
+// a mistake is VOIDED (recorded, reason) not deleted. ──
+router.get('/expenses/categories', requireCap('distribusiExpense'), ctrl.expenseCats);
+router.get('/expenses', requireCap('distribusiExpense'), validate({ query: ctrl.schemas.expenseQuery }), ctrl.listExpenses);
+router.post('/expenses', requireCap('distribusiExpense'), validate({ body: ctrl.schemas.expenseSchema }), ctrl.createExpense);
+router.post('/expenses/:id/void', requireCap('distribusiExpense'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.expenseVoidSchema }), ctrl.voidExpense);
+
 // ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──
 router.get('/gallon', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
 router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);

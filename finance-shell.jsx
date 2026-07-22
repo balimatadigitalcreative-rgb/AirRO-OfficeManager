@@ -35,7 +35,7 @@ function navForRole(p, role) {
     { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', caps: ['distribusiDashboard'] },
     { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', caps: ['distribusiCustomers'] },
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi'] },
-    { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
+    { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman', 'distribusiExpense'] },
     // Setoran lives under DISTRIBUSI (it is field-delivery paperwork) but is otherwise UNCHANGED:
     // same screen id 'setoran' (so navigate('setoran'), the isDerivedEntry jump-back, #setoran
     // deeplink and the setoranDay/setoranMfg cash-book auto-sync all keep working), same icon, and
@@ -1340,8 +1340,8 @@ function FApp() {
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen === 'dist-deliveries' && p.distribusiPengiriman && (
-            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}
+          {screen === 'dist-deliveries' && (p.distribusiPengiriman || p.distribusiExpense) && (
+            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi} canExpense={!!p.distribusiExpense} canRun={!!p.distribusiPengiriman}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}

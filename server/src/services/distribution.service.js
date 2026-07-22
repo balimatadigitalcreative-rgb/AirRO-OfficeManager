@@ -12,6 +12,7 @@ const ApiError = require('../utils/ApiError');
 const { normalizePhone } = require('../utils/phone');
 const { resolvePerms } = require('../config/permissions');
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
+const { resolveUnitId } = require('./businessUnit.service');   // business-unit label (defaults to 'air')
 
 const METHODS = ['lunas', 'bon', 'pelunasan'];
 // Legacy (imported archive) transactions must NEVER touch any aggregate — KPIs, cash integration,
@@ -1021,7 +1022,15 @@ async function dashboardSummary(date, user, qFleet) {
   });
   const uangMasuk = byMethod.lunas + byMethod.pelunasan;   // == todayCash + todayTransfer
   const piutang = byMethod.bon;
-  const todayCashByFleet = Object.values(cashFleet).sort((a, b) => b.cash - a.cash);
+  // Field expenses paid in cash today reduce what the driver must physically deposit:
+  //   net cash to deposit = cash money-in − field expenses. Per-fleet too, for reconciliation.
+  const exp = await expensesForDate(user, day, qFleet);
+  const todayExpense = exp.total;
+  const todayNetCash = todayCash - todayExpense;
+  const todayCashByFleet = Object.values(cashFleet).map((f) => {
+    const e = exp.byFleet[f.fleetId] || 0;
+    return { ...f, expense: e, netCash: f.cash - e };
+  }).sort((a, b) => b.netCash - a.netCash);
 
   // ── RUNNING RECEIVABLES — outstanding bon across ALL time (fleet-scoped), computed
   // per-customer and floored at 0, identical to the Customers screen's sisaBon so the
@@ -1063,6 +1072,7 @@ async function dashboardSummary(date, user, qFleet) {
     receivable,                     // all-time outstanding bon (running balance)
     count: todayRows.length, amount, byMethod, uangMasuk, piutang,   // TODAY (rail + "Transactions today")
     todayCash, todayTransfer, todayCashByFleet,   // TODAY money-in split + per-fleet cash to reconcile
+    todayExpense, todayNetCash,   // field expenses paid today + net cash to deposit (cash − expenses)
     customers, last7, recent, topCustomers, reminders,
   };
 }
@@ -1570,17 +1580,87 @@ async function reorderDeliveries(user, body) {
   return { ok: true, count: seq };
 }
 
-// Cash Integration view — one authorized read (gated distribusiCashIntegrasi) that
-// composes exactly the datasets the screen needs: transactions in the range, all
-// customers (for outstanding bon), and the adjustment audit rows for the counts.
+// ── FIELD EXPENSES (pengeluaran lapangan) ────────────────────────────────────────
+// Cash a delivery person paid out in the field (fuel/bensin, meals, parking…). Itemised, fleet-
+// scoped, append-only (a mistake is VOIDED with a reason + re-logged, never silently deleted). It
+// never posts to Entry/Setoran — so it can't double-count the old Setoran.expense number; it only
+// reduces the dashboard's "net cash to deposit" and shows as an informational bridge line.
+const DEFAULT_EXP_CATS = ['bensin', 'makan', 'parkir', 'lainnya'];
+function expenseClient(e) {
+  return {
+    id: e.id, date: e.date, fleetId: e.fleetId, amount: e.amount, category: e.category, note: e.note || '',
+    photoId: e.photoId || null, businessUnitId: e.businessUnitId || 'air', status: e.status,
+    voidedByName: e.voidedByName || null, voidedAt: e.voidedAt ? new Date(e.voidedAt).getTime() : null, voidReason: e.voidReason || '',
+    createdByName: e.createdByName || null, createdAt: e.createdAt ? new Date(e.createdAt).getTime() : null,
+  };
+}
+// List field expenses in the user's fleet scope. Owner/admin (no scope) see all fleets; a scoped
+// staff sees only their fleet(s). Filter by date and/or fleet; voided rows are included but marked.
+async function listExpenses(user, query) {
+  const q = query || {};
+  const where = { ...fleetWhere(user, 'fleetId', q.fleet) };
+  if (q.date) where.date = q.date;
+  if (q.dateFrom || q.dateTo) where.date = { ...(q.dateFrom ? { gte: q.dateFrom } : {}), ...(q.dateTo ? { lte: q.dateTo } : {}) };
+  if (q.status === 'active' || q.status === 'void') where.status = q.status;
+  const rows = await prisma.distExpense.findMany({ where, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500 });
+  return { data: rows.map(expenseClient) };
+}
+async function createExpense(body, actor) {
+  const date = String(body.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw ApiError.badRequest('Tanggal wajib diisi.');
+  const amount = int(body.amount);
+  if (amount <= 0) throw ApiError.badRequest('Nominal pengeluaran harus lebih dari 0.');
+  const fleetId = resolveWriteFleet(actor, body.fleet);
+  if (!fleetId) throw ApiError.badRequest('Pilih armada.');
+  const category = String(body.category || 'lainnya').trim().slice(0, 40) || 'lainnya';
+  const businessUnitId = await resolveUnitId(body.businessUnitId);
+  const snap = await actorSnap(actor);
+  const e = await prisma.distExpense.create({ data: {
+    date, fleetId, amount, category, note: String(body.note || '').slice(0, 300),
+    photoId: body.photoId ? String(body.photoId).slice(0, 60) : null, businessUnitId,
+    createdById: snap.actorId, createdByName: snap.actorName,
+  } });
+  await logAudit('input', `Pengeluaran lapangan: ${fleetId}`, `${category} ${amount}${e.note ? ' · ' + e.note : ''} · ${date}`, snap, fleetId);
+  return expenseClient(e);
+}
+// VOID a field expense (recorded cancellation) — the append-only correction path. Row STAYS
+// (status='void', excluded from totals); a reason is required and the action is audited.
+async function voidExpense(id, body, actor) {
+  const e = await prisma.distExpense.findUnique({ where: { id } });
+  if (!e) throw ApiError.notFound('Pengeluaran tidak ditemukan.');
+  if (!fleetAllows(actor, e.fleetId)) throw ApiError.notFound('Pengeluaran tidak ditemukan.');
+  if (e.status === 'void') throw ApiError.badRequest('Pengeluaran ini sudah dibatalkan.');
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan pembatalan wajib diisi.');
+  const snap = await actorSnap(actor);
+  const upd = await prisma.distExpense.update({ where: { id }, data: {
+    status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedAt: new Date(), voidReason: reason,
+  } });
+  await logAudit('koreksi', `Batalkan pengeluaran: ${e.fleetId}`, `${e.category} ${e.amount} · ${reason}`, snap, e.fleetId);
+  return expenseClient(upd);
+}
+// Σ active field expenses per fleet for a date, in the user's scope (drives dashboard net cash).
+async function expensesForDate(user, day, qFleet) {
+  const rows = await prisma.distExpense.findMany({ where: { date: day, status: 'active', ...fleetWhere(user, 'fleetId', qFleet) }, select: { fleetId: true, amount: true } });
+  let total = 0; const byFleet = {};
+  rows.forEach((r) => { total += r.amount; byFleet[r.fleetId || ''] = (byFleet[r.fleetId || ''] || 0) + r.amount; });
+  return { total, byFleet };
+}
+
+// Cash Integration view — one authorized read (gated distribusiCashIntegrasi) that composes exactly
+// the datasets the screen needs: transactions in the range, all customers (for outstanding bon), the
+// adjustment audit rows for the counts, and field expenses (informational net-cash line).
 async function cashIntegration(user, query) {
   const q = query || {};
-  const [t, c, a] = await Promise.all([
+  const [t, c, a, e] = await Promise.all([
     listTransactions({ dateFrom: q.dateFrom, dateTo: q.dateTo, fleet: q.fleet }, user),
     listCustomers(user, q.fleet, 'all'),   // include deactivated — they may still carry outstanding bon
     listAudit({ limit: 500, fleet: q.fleet }, user),
+    listExpenses(user, { dateFrom: q.dateFrom, dateTo: q.dateTo, fleet: q.fleet, status: 'active' }),
   ]);
-  return { transactions: t.data.filter((x) => !x.legacy), customers: c.data, audit: a.data };   // cash integration excludes archive rows
+  // Field expenses ride along as an INFORMATIONAL line only — the bridge never posts to the cash
+  // book, so surfacing them here can't double-count the separate Setoran.expense number.
+  return { transactions: t.data.filter((x) => !x.legacy), customers: c.data, audit: a.data, expenses: e.data };
 }
 
 module.exports = {
@@ -1593,4 +1673,5 @@ module.exports = {
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns, correctRun,
+  listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,
 };
