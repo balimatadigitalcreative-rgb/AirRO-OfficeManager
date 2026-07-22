@@ -13,7 +13,6 @@ function navForRole(p, role) {
   if (p.company && p.reset) items.push({ id: 'projects', label: tr('nav.projects'), icon: 'IconBolt', grp: 'overview' });
   if (p.cashflow) items.push({ id: 'overview', label: tr('nav.overview'), icon: 'IconDashboard', grp: 'finance' });
   if (p.cashflow) items.push({ id: 'moneyspots', label: tr('nav.moneyspots'), icon: 'IconWallet', grp: 'finance' });
-  if (p.setoran) items.push({ id: 'setoran', label: tr('nav.setoran'), icon: 'IconTruck', grp: 'finance' });
   if (p.allEntries) items.push({ id: 'entries', label: tr('nav.entries'), icon: 'IconTx', grp: 'finance' });
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
   if (p.employees) items.push({ id: 'employees', label: tr('nav.employees'), icon: 'IconCustomers', grp: 'hr' });
@@ -37,6 +36,11 @@ function navForRole(p, role) {
     { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', caps: ['distribusiCustomers'] },
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi'] },
     { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
+    // Setoran lives under DISTRIBUSI (it is field-delivery paperwork) but is otherwise UNCHANGED:
+    // same screen id 'setoran' (so navigate('setoran'), the isDerivedEntry jump-back, #setoran
+    // deeplink and the setoranDay/setoranMfg cash-book auto-sync all keep working), same icon, and
+    // gated on the SAME p.setoran flag (caps:['setoran']). Only its menu group moved.
+    { id: 'setoran', label: tr('nav.setoran'), icon: 'IconTruck', caps: ['setoran'] },
     { id: 'dist-integration', label: tr('nav.distIntegration'), icon: 'IconRefresh', caps: ['distribusiCashIntegrasi'] },
     { id: 'dist-prices', label: tr('nav.distPrices'), icon: 'IconCoinIn', caps: ['distribusiHargaMaster'] },
     { id: 'dist-audit', label: tr('nav.distAudit'), icon: 'IconShield', caps: ['distribusiAudit'] },
