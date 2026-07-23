@@ -9,8 +9,12 @@ function IcX(name, props) { const C = window[name]; return C ? <C {...props} /> 
 const rpFull = (n) => (window.FIN && FIN.fmt ? FIN.fmt(n) : String(n));
 const numX = (n) => (n || 0).toLocaleString('id-ID');
 // Warn (client-side) before saving when a computed amount looks absurd — likely a typo in qty/price.
-// The server enforces a hard ceiling of Rp 1,000,000,000 per row; this softer warning fires earlier.
+// The server enforces a HARD ceiling of Rp 1,000,000,000 per row (overCeiling in the service — the
+// value 4,282,500,000 that broke the transaction list was above it); this softer warning fires far
+// earlier so a typo is caught at entry with a confirm step. MAX_ROW_AMOUNT mirrors the server ceiling
+// so imports can flag an over-ceiling row as "Dilewati" client-side instead of silently dropping it.
 const WARN_AMOUNT = 100000000;
+const MAX_ROW_AMOUNT = 1000000000;
 const DW_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 const METHOD_META = {
   lunas: { cls: 'lunas', label: 'dist.lunas' },
@@ -1395,6 +1399,8 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const rows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim())).map((cols) => {
     const d = deriveLegacyImportRow(cols, colMap, cellAt);
     let status = d.status;
+    // Over-ceiling rows are skipped with a clear reason (not sent, not silently dropped server-side).
+    if (status === 'ok' && d.amount > MAX_ROW_AMOUNT) status = 'toobig';
     if (status === 'ok') {
       const k = `${d.date}|${d.type}|${d.amount}`;
       if (existing.has(k) || seen.has(k)) status = 'dup'; else seen.add(k);
@@ -1406,7 +1412,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const shown = filter === 'ok' ? valid : filter === 'skip' ? skipped : rows;
   const reset = () => { setText(''); setFileRows(null); setFileName(''); setErr(''); setFilter('all'); if (fileRef.current) fileRef.current.value = ''; };
   const typeLbl = (t) => t === 'bon' ? trD('dist.bon') : t === 'pelunasan' ? trD('dist.pelunasan') : trD('dist.lunas');
-  const reasonOf = (s) => s === 'baddate' ? trD('dist.liBadDate') : s === 'noaction' ? trD('dist.liNoAction') : s === 'multi' ? trD('dist.liMulti') : s === 'noprice' ? trD('dist.liNoPrice') : s === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
+  const reasonOf = (s) => s === 'baddate' ? trD('dist.liBadDate') : s === 'noaction' ? trD('dist.liNoAction') : s === 'multi' ? trD('dist.liMulti') : s === 'noprice' ? trD('dist.liNoPrice') : s === 'toobig' ? trD('dist.liTooBig') : s === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
   // Download ONLY the skipped rows + their reason, so the user fixes them and re-imports.
   const downloadSkipped = () => {
     const head = ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan', 'Alasan'];
@@ -1545,6 +1551,7 @@ function OpeningBonModal({ customer, onClose, onSaved }) {
           <div className="gud-hint">{trD('dist.obDateHint')}</div>
           <label className="fld-label">{trD('dist.obNote')} <span style={{ color: 'var(--neg)' }}>*</span></label>
           <input className="fld" value={note} placeholder={trD('dist.obNotePh')} onChange={(e) => setNote(e.target.value)} />
+          {amt > WARN_AMOUNT && <div className="dist-amt-warn" style={{ marginTop: 10 }}><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(amt) })}</div>}
           {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
           {confirming && <div className="dist-warnbox" style={{ marginTop: 10 }}><IconWarn s={16} /><span>{trD('dist.obConfirm', { amt: rpFull(amt), date })}</span></div>}
         </div>
@@ -3080,6 +3087,7 @@ function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDist
   const [fNote, setFNote] = uSx('');
   const [fPhoto, setFPhoto] = uSx(null);
   const [fFleet, setFFleet] = uSx('');
+  const [bigOk, setBigOk] = uSx(false);   // explicit confirm for an implausibly large expense
   const scoped = isScoped(fleetScope);
   const ef = effFleet(fleetScope, distFleet);
   const fleetOpts = (fleet || []).filter(Boolean);
@@ -3092,13 +3100,15 @@ function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDist
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
   const catLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
   const viewPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
-  const openAdd = () => { setErr(''); setFCat('bensin'); setFAmount(''); setAmtFocus(false); setFNote(''); setFPhoto(null); setFFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || ''))); setView('form'); };
+  const openAdd = () => { setErr(''); setFCat('bensin'); setFAmount(''); setAmtFocus(false); setFNote(''); setFPhoto(null); setBigOk(false); setFFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || ''))); setView('form'); };
   const openVoid = (row) => { setErr(''); setVoidReason(''); setVoidRow(row); };
   const fAmt = parseInt(String(fAmount).replace(/[^0-9]/g, ''), 10) || 0;
   const commitAdd = () => {
     if (saving) return;
     if (!(fAmt > 0)) { setErr(trD('exp.amtReq')); return; }
     if (!scoped && !fFleet) { setErr(trD('run.errFleet')); return; }
+    // A typo-sized expense must be confirmed once before it saves (the server still hard-rejects > 1B).
+    if (fAmt > WARN_AMOUNT && !bigOk) { setBigOk(true); return; }
     setSaving(true); setErr('');
     const cat = (fCat || '').trim() || 'lainnya';
     const photoId = fPhoto && fPhoto.ref ? fPhoto.ref : undefined;
@@ -3143,7 +3153,7 @@ function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDist
               <div style={{ flex: 1, minWidth: 150 }}>
                 <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
                 {/* Free typing; rupiah thousands-format applied on blur (same behaviour as the txn amount). */}
-                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={amtFocus ? fAmount : (fAmt ? fAmt.toLocaleString('id-ID') : '')} placeholder="0" onFocus={() => setAmtFocus(true)} onBlur={() => setAmtFocus(false)} onChange={(e) => setFAmount(e.target.value.replace(/[^0-9]/g, ''))} /></div>
+                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={amtFocus ? fAmount : (fAmt ? fAmt.toLocaleString('id-ID') : '')} placeholder="0" onFocus={() => setAmtFocus(true)} onBlur={() => setAmtFocus(false)} onChange={(e) => { setFAmount(e.target.value.replace(/[^0-9]/g, '')); setBigOk(false); }} /></div>
               </div>
               <div style={{ flex: 1, minWidth: 150 }}>
                 <label className="fld-label">{trD('dist.fDate')}</label>
@@ -3157,9 +3167,9 @@ function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDist
             <label className="fld-label">{trD('exp.photo')}</label>
             <UI.FileAttach value={fPhoto} onChange={setFPhoto} camera accept="image/*" label={trD('exp.photoAdd')} />
 
-            {fAmt > WARN_AMOUNT && <div className="dist-amt-warn"><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(fAmt) })}</div>}
+            {fAmt > WARN_AMOUNT && <div className={`dist-amt-warn${bigOk ? ' on' : ''}`}><IconInvoice s={14} />{bigOk ? trD('dist.amtConfirm', { amt: rpFull(fAmt) }) : trD('dist.amtWarn', { amt: rpFull(fAmt) })}</div>}
             {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
-            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={saving || !(fAmt > 0)} onClick={commitAdd}>{saving ? '…' : trD('exp.save')}</button>
+            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={saving || !(fAmt > 0)} onClick={commitAdd}>{saving ? '…' : (fAmt > WARN_AMOUNT && bigOk) ? trD('dist.amtConfirmYes') : trD('exp.save')}</button>
             <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('exp.formNote')}</div>
           </div>
 
