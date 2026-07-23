@@ -595,7 +595,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canExpense, onGoExpense, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -779,9 +779,20 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
       <div className="dist-tx-toolbar">
         <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {canInput && <button type="button" className="btn btn-ghost dist-paybtn" onClick={() => setPayOpen(true)}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
-          {canInput && <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
+        {/* Two DISTINCT groups: non-sale outflow actions (Bayar Bon + Pengeluaran) are kept apart
+            from the PRIMARY sale action (Transaksi Baru) by a gap + divider, so an outflow is never
+            mistaken for a sale. */}
+        <div className="dist-tx-actions">
+          <div className="dist-tx-grp dist-tx-grp-out">
+            {canInput && <button type="button" className="btn btn-ghost dist-paybtn" onClick={() => setPayOpen(true)}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
+            {canExpense && <button type="button" className="btn dist-expbtn" title={trD('exp.outflowHint')} onClick={onGoExpense}><IconCoinOut s={15} />{trD('exp.btn')}</button>}
+          </div>
+          {canInput && (
+            <div className="dist-tx-grp dist-tx-grp-primary">
+              <span className="dist-tx-div" aria-hidden="true" />
+              <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>
+            </div>
+          )}
         </div>
       </div>
       <div className="dist-permbanner"><IconLock s={15} />{trD('dist.permBanner')}</div>
