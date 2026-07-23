@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
@@ -27,7 +27,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -197,9 +197,12 @@ function deriveDistribusiCaps(perms) {
   // not silently gain them). Only the explicit owner/gm seed or an admin toggle grants them.
   if (p.distribusiDashHistory === undefined) p.distribusiDashHistory = false;
   if (p.distribusiPengirimanReport === undefined) p.distribusiPengirimanReport = false;
+  // "Pelunasan Tidak Diterima" (bon adjustment + the loss report) writes off a receivable and names
+  // a responsible staff member — deliberately owner/GM-tier and granted by hand. NEVER derived.
+  if (p.distribusiBonAdjust === undefined) p.distribusiBonAdjust = false;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport || p.distribusiBonAdjust);
   return p;
 }
 

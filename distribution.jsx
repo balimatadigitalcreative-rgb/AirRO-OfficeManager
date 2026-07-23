@@ -1028,7 +1028,80 @@ function PaymentModal({ customers, staffMode, today, onClose, onSaved, presetCus
   );
 }
 
-window.DISTPAY = { PaymentModal };
+// ── PELUNASAN TIDAK DITERIMA ─────────────────────────────────────────────────────
+// The customer really paid their bon, but the money never reached the company (a staff member took
+// it). Deliberately TWO-SIDED, and the modal says so out loud so nobody books it by accident:
+//   • the customer's bon goes DOWN and their printed statement shows a received payment — they must
+//     never be asked to pay twice, and none of the internal wording below reaches them;
+//   • the company books it as a LOSS against the responsible staff and it counts as ZERO cash.
+// Cap: distribusiBonAdjust (owner/GM tier, server-enforced). Reason + a responsible person are
+// mandatory; an evidence photo is optional. `note` is the ONLY field the statement prints, so the
+// reason is kept in its own internal field.
+function PaymentNotReceivedModal({ customer, today, onClose, onSaved }) {
+  const [amount, setAmount] = uSx(0);
+  const [date, setDate] = uSx(today);
+  const [staffId, setStaffId] = uSx('');
+  const [staffName, setStaffName] = uSx('');
+  const [reason, setReason] = uSx('');
+  const [photo, setPhoto] = uSx(null);
+  const [users, setUsers] = uSx(null);   // null = still loading / unavailable → free-text only
+  const [ack, setAck] = uSx(false);
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  // The staff picker is a convenience, not a requirement: a user without manageUsers cannot list
+  // accounts, and field helpers are often not accounts at all — so a typed name always works.
+  uEx(() => { let live = true; if (!(window.API && window.API.users)) return; window.API.users.list().then((r) => { if (live) setUsers((r.data || []).filter((u) => u.active !== false)); }).catch(() => { if (live) setUsers([]); }); return () => { live = false; }; }, []);
+  const sisa = customer ? (customer.sisaBon || 0) : 0;
+  const who = staffId ? ((users || []).find((u) => u.id === staffId) || {}).name || '' : staffName.trim();
+  const valid = amount > 0 && amount <= sisa && !!who && !!reason.trim() && ack && !saving;
+  const save = () => {
+    if (!valid) return;
+    setSaving(true); setErr('');
+    const body = { customerId: customer.id, amount, txnDate: date || today, lossReason: reason.trim() };
+    if (staffId) body.responsibleUserId = staffId; else body.responsibleName = staffName.trim();
+    if (photo && photo.ref) body.lossPhotoId = photo.ref;
+    window.API.distribusi.transactions.paymentNotReceived(body)
+      .then((r) => { setSaving(false); onSaved(r.data); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('pnr.title')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.name} · {trD('dist.sisaBon')} {rpFull(sisa)}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {/* Spell out both consequences before anything is typed. */}
+          <div className="pnr-explain">
+            <div className="pnr-side ok"><IconCoinIn s={14} /><div><b>{trD('pnr.sideCustT')}</b><span>{trD('pnr.sideCustD')}</span></div></div>
+            <div className="pnr-side bad"><IconWarn s={14} /><div><b>{trD('pnr.sideCoT')}</b><span>{trD('pnr.sideCoD')}</span></div></div>
+          </div>
+          <label className="fld-label">{trD('pnr.amount')}</label>
+          <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={amount ? amount.toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setAmount(Math.min(sisa, +e.target.value.replace(/\D/g, '') || 0))} /></div>
+          <div className="dist-hint" style={{ marginTop: 6 }}>{trD('pnr.amountHint', { sisa: rpFull(Math.max(0, sisa - amount)) })}</div>
+          <label className="fld-label">{trD('dist.fDate')}</label>
+          <DP.DateField value={date} onChange={setDate} max={today} />
+          <label className="fld-label">{trD('pnr.staff')}</label>
+          {users && users.length > 0 && (
+            <UI.Dropdown value={staffId} options={[{ value: '', label: trD('pnr.staffOther') }].concat(users.map((u) => ({ value: u.id, label: u.name + (u.username ? ' · ' + u.username : ''), search: (u.name || '') + ' ' + (u.username || '') })))} placeholder={trD('pnr.staffPh')} onChange={(v) => { setStaffId(v); if (v) setStaffName(''); }} fluid />
+          )}
+          {(!users || users.length === 0 || !staffId) && (
+            <input className="fld" style={{ marginTop: users && users.length ? 8 : 0 }} value={staffName} onChange={(e) => setStaffName(e.target.value)} placeholder={trD('pnr.staffNamePh')} />
+          )}
+          <label className="fld-label">{trD('pnr.reason')}</label>
+          <textarea className="fld" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={trD('pnr.reasonPh')} />
+          <div className="dist-hint" style={{ marginTop: 6 }}>{trD('pnr.reasonHint')}</div>
+          <label className="fld-label">{trD('pnr.proof')}</label>
+          <UI.FileAttach value={photo} onChange={setPhoto} camera accept="image/*" label={trD('pnr.proofAdd')} />
+          <label className="dist-arch-bon pnr-ack"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /><span>{trD('pnr.ack')}</span></label>
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!valid} onClick={save}>{saving ? '…' : trD('pnr.save')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+window.DISTPAY = { PaymentModal, PaymentNotReceivedModal };
 
 // Build an invoice from a customer's transactions: pick a scope (unpaid bon / period /
 // all sales), a due date + note, preview the billed items + total, then create.
@@ -1486,7 +1559,7 @@ function OpeningBonModal({ customer, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [statusFilter, setStatusFilter] = uSx('active');   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
@@ -1501,6 +1574,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [histOpen, setHistOpen] = uSx(false);     // printable full transaction-history doc
   const [legacyOpen, setLegacyOpen] = uSx(false); // legacy (archive) transaction import modal
   const [payFor, setPayFor] = uSx(null);          // standalone Pelunasan Bon for this customer
+  const [pnrFor, setPnrFor] = uSx(null);          // "Pelunasan tidak diterima" adjustment (cap-gated)
   const [q, setQ] = uSx('');
   const [filter, setFilter] = uSx('all');
   const [toast, setToast] = uSx('');
@@ -1886,6 +1960,9 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
               {canLegacyImport && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLegacyOpen(true)}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('dist.liBtn')}</button>}
               {(canInput || canCustomers) && <GpsButton custId={d.id} hasLoc={d.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }} onFlash={flash} />}
               {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
+              {/* The customer paid but the money never reached us. Writes off a receivable AND names
+                  a responsible staff member → its own owner/GM-tier cap, never a plain input helper. */}
+              {canBonAdjust && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm dist-pnr-btn" onClick={() => setPnrFor(d)}><IconWarn s={14} />{trD('pnr.btn')}</button>}
               {/* Carry-over receivable from the old books. Correction-tier cap: this creates a
                   real bon out of nothing, so a plain input helper must not be able to. */}
               {canKoreksi && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setObFor(d)}><IconInvoice s={14} />{trD('dist.obBtn')}</button>}
@@ -1960,6 +2037,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
         {histOpen && d && <TxnHistoryDoc customer={d} userName={userName} onClose={() => setHistOpen(false)} />}
         {legacyOpen && d && <LegacyImportModal customer={d} onClose={() => setLegacyOpen(false)} onDone={(res) => { setLegacyOpen(false); flash(trD('dist.liDone', { n: res.imported, m: res.skipped })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
+        {pnrFor && <PaymentNotReceivedModal customer={pnrFor} today={new Date().toISOString().slice(0, 10)} onClose={() => setPnrFor(null)} onSaved={(res) => { setPnrFor(null); flash(trD('pnr.saved', { amt: rpFull(res.amount), who: res.responsibleName || '' })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {obFor && <OpeningBonModal customer={obFor} onClose={() => setObFor(null)} onSaved={(res) => { setObFor(null); flash(trD('dist.obSaved', { amt: rpFull(res.amount) })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {renderForm()}
         {typesModal()}
@@ -3451,4 +3529,99 @@ function DistDeliveryReport({ refreshKey, today, fleetScope, fleet, distFleet, s
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, Expenses: DistExpenses, DeliveryReport: DistDeliveryReport };
+// ── KERUGIAN / UANG TIDAK DITERIMA ───────────────────────────────────────────────
+// The INTERNAL side of "Pelunasan Tidak Diterima": every adjustment with its customer, amount,
+// responsible staff, reason, evidence and who recorded it, plus totals per staff and for the period.
+// Cap: distribusiBonAdjust (same as the action; server-enforced). This screen is company-internal —
+// it is never part of a customer statement or any other customer-facing print.
+function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDistFleet }) {
+  const [period, setPeriod] = uSx('month');
+  const [from, setFrom] = uSx(today);
+  const [to, setTo] = uSx(today);
+  const [rep, setRep] = uSx(null);
+  const [loading, setLoading] = uSx(true);
+  const [err, setErr] = uSx(false);
+  const [toast, setToast] = uSx('');
+  const ef = effFleet(fleetScope, distFleet);
+  uEx(() => {
+    let live = true; setLoading(true); setErr(false);
+    if (!(window.API && window.API.distribusi && window.API.distribusi.lossReport)) { setLoading(false); setErr(true); return; }
+    const opts = period === 'range' ? { period: 'range', dateFrom: from, dateTo: to, fleet: ef } : { period, fleet: ef };
+    window.API.distribusi.lossReport(opts).then((r) => { if (live) { setRep(r.data); setLoading(false); } }).catch(() => { if (live) { setErr(true); setLoading(false); } });
+    return () => { live = false; };
+  }, [refreshKey, ef, period, from, to]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+  const periods = [['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['range', trD('dist.perRange')]];
+  const viewProof = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
+  const exportCsv = () => {
+    if (!rep) return;
+    const rows = [[trD('loss.title'), rep.from + ' → ' + rep.to], [],
+      [trD('dist.fDate'), trD('dist.fCust'), trD('pnr.amount'), trD('pnr.staff'), trD('pnr.reason'), trD('loss.recordedBy'), trD('loss.statusCol')]];
+    (rep.items || []).forEach((x) => rows.push([x.txnDate, x.customerName, x.amount, x.responsibleName, x.lossReason, x.recordedByName, x.voided ? trD('loss.voided') : '']));
+    rows.push([]); rows.push([trD('loss.perStaff')]);
+    (rep.byStaff || []).forEach((s) => rows.push([s.responsibleName, s.count, s.total]));
+    rows.push([]); rows.push([trD('loss.total'), rep.total]);
+    const csv = rows.map((r) => r.map((c) => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'kerugian-uang-tidak-diterima-' + rep.from + (rep.from !== rep.to ? '_' + rep.to : '') + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    flash(trD('rep.exported'));
+  };
+  return (
+    <div className="dist-dash screen-enter dist-report">
+      <div className="no-print"><FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} /></div>
+      <div className="dist-tx-toolbar no-print">
+        <div className="dist-chips">{periods.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+        {period === 'range' && <div className="dist-period-range"><DP.DateField value={from} onChange={setFrom} max={to || today} /><span>–</span><DP.DateField value={to} onChange={setTo} min={from || undefined} max={today} /></div>}
+        <div style={{ flex: 1 }} />
+        <button type="button" className="btn btn-ghost" disabled={!rep} onClick={() => window.print()}><IconDownload s={14} />{trD('dist.print')}</button>
+        <button type="button" className="btn btn-ghost" disabled={!rep} onClick={exportCsv}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('rep.csv')}</button>
+      </div>
+
+      <div className="dist-report-head">
+        <div><b>{trD('loss.title')}</b><span>{rep ? (rep.from === rep.to ? rep.from : rep.from + ' → ' + rep.to) : '…'}</span></div>
+      </div>
+      <div className="dist-warnbox loss-internal"><IconLock s={16} /><span>{trD('loss.internalOnly')}</span></div>
+
+      {loading ? <div className="card"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div>
+        : err ? <div className="card"><div className="dist-empty">{trD('dist.loadErr')}</div></div>
+        : !rep || rep.items.length === 0 ? <div className="card"><div className="dist-empty">{trD('loss.none')}</div></div>
+        : (<>
+          <div className="card dist-card loss-totals">
+            <div className="dist-card-head"><div className="sec-title">{trD('loss.total')}</div><span className="dist-badge">{numX(rep.count)} {trD('dist.notaWord')}</span></div>
+            <div className="loss-big amt-neg">{rpFull(rep.total)}</div>
+            <div className="loss-staff">
+              {rep.byStaff.map((s) => (
+                <div key={s.key} className="loss-staff-row"><span className="loss-staff-name">{s.responsibleName || '—'}</span><span className="loss-staff-cnt">{numX(s.count)}×</span><b className="tnum amt-neg">{rpFull(s.total)}</b></div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card dist-card">
+            <div className="dist-card-head"><div className="sec-title">{trD('loss.detail')}</div></div>
+            <div className="run-table-wrap">
+              <table className="run-table loss-table">
+                <thead><tr><th>{trD('dist.fDate')}</th><th>{trD('dist.fCust')}</th><th className="num">{trD('pnr.amount')}</th><th>{trD('pnr.staff')}</th><th>{trD('pnr.reason')}</th><th>{trD('loss.recordedBy')}</th><th /></tr></thead>
+                <tbody>
+                  {rep.items.map((x) => (
+                    <tr key={x.id} className={x.voided ? 'loss-void' : ''}>
+                      <td className="tnum">{x.txnDate}</td>
+                      <td>{x.customerName}{x.customerCode ? <small> · {x.customerCode}</small> : null}</td>
+                      <td className="num">{rpFull(x.amount)}{x.voided ? <span className="dist-badge void">{trD('loss.voided')}</span> : null}</td>
+                      <td><b>{x.responsibleName || '—'}</b></td>
+                      <td className="loss-reason">{x.lossReason}{x.voided && x.voidReason ? <small> · {trD('loss.voidReason')}: {x.voidReason}</small> : null}</td>
+                      <td><small>{x.recordedByName || '—'}{x.createdAt ? ' · ' + fmtDT(x.createdAt) : ''}</small></td>
+                      <td>{x.lossPhotoId ? <button type="button" className="dist-link" onClick={() => viewProof(x.lossPhotoId)}>{trD('pnr.proofView')}</button> : null}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>)}
+      {toast && <div className="dist-toast no-print"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, Expenses: DistExpenses, DeliveryReport: DistDeliveryReport, LossReport: DistLossReport };

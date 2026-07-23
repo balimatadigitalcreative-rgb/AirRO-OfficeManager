@@ -38,6 +38,9 @@ function navForRole(p, role) {
     { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
     { id: 'dist-expenses', label: tr('nav.distExpenses'), icon: 'IconCoinOut', caps: ['distribusiExpense'] },
     { id: 'dist-delivery-report', label: tr('nav.distDeliveryReport'), icon: 'IconShield', caps: ['distribusiPengirimanReport'] },
+    // INTERNAL loss report (Kerugian / Uang Tidak Diterima). Same owner/GM-tier cap as the action
+    // that creates the rows; never customer-facing.
+    { id: 'dist-loss-report', label: tr('nav.distLossReport'), icon: 'IconWarn', caps: ['distribusiBonAdjust'] },
     // Setoran lives under DISTRIBUSI (it is field-delivery paperwork) but is otherwise UNCHANGED:
     // same screen id 'setoran' (so navigate('setoran'), the isDerivedEntry jump-back, #setoran
     // deeplink and the setoranDay/setoranMfg cash-book auto-sync all keep working), same icon, and
@@ -1337,7 +1340,7 @@ function FApp() {
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canDelete={!!p.distribusiCustomerDelete}
-              canLegacyImport={!!p.distribusiLegacyImport} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
+              canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
@@ -1354,6 +1357,10 @@ function FApp() {
           )}
           {screen === 'dist-delivery-report' && p.distribusiPengirimanReport && (
             <DIST.DeliveryReport refreshKey={distTick} today={FIN.TODAY}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
+          )}
+          {screen === 'dist-loss-report' && p.distribusiBonAdjust && (
+            <DIST.LossReport refreshKey={distTick} today={FIN.TODAY}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
           {screen === 'dist-gallon' && p.distribusiGallon && (

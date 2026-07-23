@@ -165,6 +165,10 @@
         void: (id, data) => req('POST', '/distribusi/transactions/' + id + '/void', data),   // { reason }
         // ARCHIVE TOGGLE (cap distribusiLegacyImport) — flip active↔archive(legacy); reason required.
         setArchive: (id, data) => req('POST', '/distribusi/transactions/' + id + '/archive', data),   // { legacy, reason }
+        // PELUNASAN TIDAK DITERIMA (cap distribusiBonAdjust) — the customer paid but the money never
+        // reached the company. Reduces their bon like a normal pelunasan; recorded as an internal loss
+        // against the responsible staff and excluded from every cash figure.
+        paymentNotReceived: (data) => req('POST', '/distribusi/transactions/payment-not-received', data),
         // HARD DELETE (cap distribusiHardDelete, owner) — permanent; audit written first.
         hardDelete: (id, data) => req('DELETE', '/distribusi/transactions/' + id, data),     // { reason, confirm, password }
       },
@@ -211,6 +215,9 @@
       billingReminders: (fleet) => req('GET', '/distribusi/billing-reminders' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
       // Laporan Pengiriman (delivery report) — read-only, cap distribusiPengirimanReport.
       deliveryReport: (opts) => { const o = opts || {}; const p = []; ['period', 'date', 'dateFrom', 'dateTo'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/reports/delivery' + (p.length ? '?' + p.join('&') : '')); },
+      // Kerugian / Uang Tidak Diterima — INTERNAL loss report, cap distribusiBonAdjust. Never printed
+      // on anything the customer sees.
+      lossReport: (opts) => { const o = opts || {}; const p = []; ['period', 'date', 'dateFrom', 'dateTo'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/reports/loss' + (p.length ? '?' + p.join('&') : '')); },
     },
     // Gudang (warehouse) — ledger-based inventory.
     gudang: {

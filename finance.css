@@ -2623,3 +2623,32 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .ub-row.ub-elim .ub-name { display: inline-flex; align-items: center; gap: 5px; color: var(--text-faint); font-weight: 600; }
 /* Inter-unit transfer modal — from/to unit+account pairs side by side. */
 .iu-legrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* ── PELUNASAN TIDAK DITERIMA + the internal loss report ──────────────────────────
+   The modal has to make the DOUBLE consequence obvious before anything is typed: green =
+   what happens for the customer (their bon drops, statement shows a payment), red = what
+   happens for the company (zero cash, a loss booked against a named person). */
+.pnr-explain { display: grid; gap: 8px; margin-bottom: 4px; }
+.pnr-side { display: flex; gap: 9px; align-items: flex-start; padding: 9px 11px; border-radius: 11px; border: 1px solid var(--border-soft); }
+.pnr-side svg { flex: none; margin-top: 2px; }
+.pnr-side div { display: flex; flex-direction: column; gap: 2px; }
+.pnr-side b { font-size: 12.5px; font-weight: 800; }
+.pnr-side span { font-size: 11.5px; line-height: 1.45; color: var(--text-mut); }
+.pnr-side.ok { background: var(--pos-bg, #ecfdf5); color: var(--green-800, #065f46); border-color: rgba(6, 95, 70, .16); }
+.pnr-side.bad { background: var(--danger-bg, #fef2f2); color: #9f1239; border-color: rgba(159, 18, 57, .16); }
+.pnr-ack { margin-top: 14px; }
+.dist-pnr-btn { color: #9f1239; }
+.dist-pnr-btn:hover { background: var(--danger-bg, #fef2f2); }
+
+.dist-warnbox.loss-internal { margin: 10px 0 14px; }
+.loss-totals .loss-big { font-size: 27px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 6px 0 12px; }
+.loss-staff { display: grid; gap: 6px; }
+.loss-staff-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 8px 11px; border-radius: 10px; background: var(--surface-2, #f6f8f9); }
+.loss-staff-name { font-weight: 700; font-size: 13px; }
+.loss-staff-cnt { font-size: 11.5px; color: var(--text-mut); }
+.loss-table td { white-space: normal; }
+.loss-table td.loss-reason { max-width: 280px; font-size: 12px; }
+.loss-table td small { color: var(--text-mut); font-size: 11px; }
+.loss-table tr.loss-void td { opacity: .55; text-decoration: line-through; }
+.loss-table tr.loss-void td .dist-badge { text-decoration: none; margin-left: 6px; }
+@media (max-width: 640px) { .loss-table { min-width: 560px; } }

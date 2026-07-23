@@ -68,6 +68,12 @@ router.post('/transactions/:id/void', requireCap('distribusiVoid'), validate({ p
 // ARCHIVE TOGGLE — flip a row between active and archive (legacy). Cap: distribusiLegacyImport (the
 // archive-management capability). Reason required; audited; gallon movements reconciled. Fleet-scoped.
 router.post('/transactions/:id/archive', requireCap('distribusiLegacyImport'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.archiveSchema }), ctrl.setTransactionArchive);
+// PELUNASAN TIDAK DITERIMA — the customer paid their bon but the money never reached the company.
+// Writes off a receivable AND names a responsible staff member, so it is its own owner/GM-tier cap
+// (distribusiBonAdjust), granted deliberately — never derived from the generic `distribusi` flag.
+// The same cap gates the internal loss report below; nothing here is ever customer-facing.
+router.post('/transactions/payment-not-received', requireCap('distribusiBonAdjust'), validate({ body: ctrl.schemas.pnrSchema }), ctrl.createPaymentNotReceived);
+router.get('/reports/loss', requireCap('distribusiBonAdjust'), validate({ query: ctrl.schemas.lossQuery }), ctrl.lossReport);
 // HARD DELETE (permanent) — OWNER-ONLY last resort. Cap: distribusiHardDelete (granted to no one
 // but owner by default). Typed ref/HAPUS + password + reason enforced in the service; an audit
 // entry is written BEFORE the row is removed, so a trace always survives. Fleet-scoped.

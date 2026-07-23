@@ -36,6 +36,17 @@ const BON_METHODS = ['bon', 'pelunasan'];
 // true). `bonCounted` is INDEPENDENT of `legacy`, so an archive can keep or drop its receivable
 // effect — while `legacy` still governs KPIs/gallons/cash exclusion.
 const BON_TXN = { ...NOT_VOID, method: { in: BON_METHODS }, bonCounted: true };
+// PELUNASAN TIDAK DITERIMA — the customer really paid their bon, but the money never reached the
+// company (a staff member took it). Deliberately TWO-SIDED, and the two sides use different filters:
+//   • CUSTOMER side — it IS a pelunasan. BON_TXN above still matches it, so their sisa bon drops and
+//     their printed statement shows a received payment. They are never asked to pay twice, and the
+//     internal reason never appears on anything customer-facing (it lives in `lossReason`, not `note`).
+//   • COMPANY side — no cash arrived, so it must not appear in ANY money-in figure. `noMoneyIn(r)`
+//     below is applied at every cash aggregate (dashboard money-in/tunai + per-fleet net cash, cash
+//     integration, delivery report cash); the amount is reported as a LOSS against the responsible
+//     staff instead (see lossReport).
+const noMoneyIn = (r) => !!(r && r.paymentNotReceived);
+const NOT_PNR = { paymentNotReceived: { not: true } };   // query-side twin of noMoneyIn (NULL-safe)
 // Retroactive-price-change scopes (option b). Payments (pelunasan) are never re-priced.
 const PRICE_SCOPES = ['all', 'cycle', 'bon'];
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -890,6 +901,90 @@ async function voidTransaction(txnId, body, actor) {
   return { ...updated, voided: true, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
 }
 
+// ── PELUNASAN TIDAK DITERIMA (payment not received) ──────────────────────────────
+// The customer really DID pay their bon, but the money never reached the company — a staff member
+// took it. This is an accounting fact with two different, deliberately asymmetric consequences:
+//   • CUSTOMER SIDE — they paid, so their debt MUST go down. The row is created as an ordinary
+//     `pelunasan` with bonCounted:true, so sisa bon drops and "Cetak Riwayat Transaksi" prints it as
+//     a received payment. Nothing about the internal problem appears anywhere they can see: the
+//     reason lives in `lossReason` (internal-only), NEVER in `note` (which prints). They must never
+//     be asked to pay twice.
+//   • COMPANY SIDE — no cash arrived, so `paymentNotReceived:true` keeps it out of every money-in /
+//     cash figure (dashboard uang masuk + tunai + per-fleet net cash, cash integration, delivery
+//     report). The amount is instead a recorded LOSS against the named responsible staff, visible
+//     only to distribusiBonAdjust holders via lossReport().
+// Immutable like every other transaction: a mistake is corrected by voiding (recorded), never by a
+// silent delete or edit.
+async function createPaymentNotReceived(body, actor) {
+  const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
+  if (!customer) throw ApiError.badRequest('customerId does not reference an existing customer');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');
+  const amount = int(body.amount);
+  if (amount <= 0) throw ApiError.badRequest('Jumlah harus lebih dari 0.');
+  if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
+  const sisaBon = await customerBonBalance(customer.id);
+  if (sisaBon <= 0) throw ApiError.badRequest('Pelanggan ini tidak punya sisa bon.');
+  if (amount > sisaBon) throw ApiError.badRequest(`Jumlah (${amount}) melebihi sisa bon (${sisaBon}).`, { sisaBon });
+  const lossReason = String(body.lossReason || body.reason || '').trim();
+  if (!lossReason) throw ApiError.badRequest('Alasan / keterangan wajib diisi.');
+  // Responsible staff: a system user id when one is picked, otherwise a typed name (field helpers
+  // are not always users). One of the two is required — a loss with nobody attached is not reportable.
+  let responsibleUserId = body.responsibleUserId ? String(body.responsibleUserId) : null;
+  let responsibleName = String(body.responsibleName || '').trim();
+  if (responsibleUserId) {
+    const u = await prisma.user.findUnique({ where: { id: responsibleUserId }, select: { id: true, name: true, username: true } });
+    if (!u) throw ApiError.badRequest('Staf yang bertanggung jawab tidak ditemukan.');
+    responsibleName = responsibleName || u.name || u.username;
+  }
+  if (!responsibleName) throw ApiError.badRequest('Staf yang bertanggung jawab wajib dipilih.');
+  const snap = await actorSnap(actor);
+  const txn = await prisma.distTransaction.create({ data: {
+    customerId: customer.id, fleetId: customer.armada || '', qty: 0, unitPriceLocked: 0, amount,
+    method: 'pelunasan', bonCounted: true, paymentNotReceived: true,
+    // `note` PRINTS on the customer statement → keep it clean. The reason goes to lossReason.
+    note: (body.note || '').trim(),
+    responsibleUserId, responsibleName: responsibleName.slice(0, 120), lossReason: lossReason.slice(0, 500),
+    lossPhotoId: body.lossPhotoId ? String(body.lossPhotoId).slice(0, 60) : null,
+    txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+  } });
+  await logAudit('koreksi', `Pelunasan tidak diterima: ${customer.name}`,
+    `${shortRefServer(txn.id)} · ${amount} · penanggung jawab ${responsibleName} · ${lossReason}`, snap, customer.armada || '');
+  return { ...txn, sisaBon: Math.max(0, sisaBon - amount), gallonsHeld: await gallonBalanceOf(customer.id), isPayment: true };
+}
+
+// Internal loss report — "Kerugian / Uang Tidak Diterima". Cap-gated (distribusiBonAdjust) and
+// NEVER rendered on anything customer-facing. Lists every adjustment with its evidence + who
+// recorded it, plus totals per responsible staff and for the period.
+async function lossReport(user, query) {
+  const q = query || {};
+  const { from, to, period } = dayRange(q, todayISO());
+  const rows = await resilientFindMany(prisma.distTransaction, {
+    where: { paymentNotReceived: true, txnDate: { gte: from, lte: to }, ...fleetWhere(user, 'fleetId', q.fleet) },
+    include: { customer: { select: { name: true, code: true } } }, orderBy: [{ txnDate: 'desc' }, { createdAt: 'desc' }],
+  }, 'loss-report');
+  const items = rows.map((r) => ({
+    id: r.id, txnDate: r.txnDate, amount: r.amount, status: r.status, voided: r.status === 'void',
+    customerId: r.customerId, customerName: r.customer ? r.customer.name : '', customerCode: r.customer ? r.customer.code : '',
+    responsibleUserId: r.responsibleUserId || null, responsibleName: r.responsibleName || '',
+    lossReason: r.lossReason || '', lossPhotoId: r.lossPhotoId || null, fleetId: r.fleetId || '',
+    recordedByName: r.actorName || '', recordedByRole: r.actorRole || '', createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
+    voidReason: r.voidReason || '', voidedByName: r.voidedByName || '',
+  }));
+  // Voided adjustments stay listed (append-only, nothing is hidden) but never count toward totals.
+  const live = items.filter((x) => !x.voided);
+  const byStaff = {};
+  live.forEach((x) => {
+    const k = x.responsibleUserId || ('name:' + x.responsibleName);
+    const s = byStaff[k] || (byStaff[k] = { key: k, responsibleUserId: x.responsibleUserId, responsibleName: x.responsibleName, count: 0, total: 0 });
+    s.count += 1; s.total += x.amount;
+  });
+  return {
+    from, to, period,
+    items, count: live.length, total: live.reduce((a, x) => a + x.amount, 0),
+    byStaff: Object.values(byStaff).sort((a, b) => b.total - a.total),
+  };
+}
+
 // ── ARCHIVE TOGGLE — flip a row between ACTIVE and ARCHIVE (legacy). Cap: distribusiLegacyImport
 // (the archive-management capability). Because every money aggregate (KPIs, gallons sold, sisa bon,
 // receivables, cash integration) is derived DIRECTLY from the transaction rows and filters on the
@@ -1112,7 +1207,11 @@ async function dashboardSummary(user, query) {
   // tag on the note at pay time (see createTransaction). Transfers land straight in the company
   // account and must NOT count toward the cash owed. Older/untagged pelunasan default to cash (safe).
   const isTransferPay = isTransferPayment;   // shared module helper (see top): pelunasan · Transfer
-  const moneyInOf = (r) => (r.method === 'lunas' ? effOf(r) : r.method === 'pelunasan' ? r.amount : 0);
+  // A "Pelunasan Tidak Diterima" row is a real payment for the CUSTOMER (it clears their bon) but no
+  // money ever reached the company, so on the COMPANY side it contributes ZERO to every cash figure
+  // below — money-in, the cash/transfer split, per-fleet reconciliation and the daily chart. It is
+  // reported instead as a loss against the responsible staff (see lossReport).
+  const moneyInOf = (r) => (noMoneyIn(r) ? 0 : r.method === 'lunas' ? effOf(r) : r.method === 'pelunasan' ? r.amount : 0);
 
   // ── PERIOD KPIs — all computed over the SELECTED window [from,to] (default = today), from the
   // SAME `rows` that power the chart, the recent list and the top-customers list, so the headline
@@ -1123,7 +1222,7 @@ async function dashboardSummary(user, query) {
   rows.forEach((r) => {
     periodQty += r.qty;
     const e = effOf(r); amount += e;
-    if (byMethod[r.method] != null) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e);
+    if (byMethod[r.method] != null && !noMoneyIn(r)) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e);
     const inc = moneyInOf(r);
     if (!inc) return;
     periodIn += inc;
@@ -1156,7 +1255,7 @@ async function dashboardSummary(user, query) {
   // Daily stacked series over the window (cash bucket = lunas + pelunasan, vs bon). For "today" it
   // is a single bar; a longer period fills in each day. Capped so a huge custom range stays sane.
   const byDay = {};
-  rows.forEach((r) => { const s = byDay[r.txnDate] || (byDay[r.txnDate] = { lunas: 0, bon: 0 }); const e = effOf(r); if (r.method === 'bon') s.bon += e; else s.lunas += e; });
+  rows.forEach((r) => { if (noMoneyIn(r)) return; const s = byDay[r.txnDate] || (byDay[r.txnDate] = { lunas: 0, bon: 0 }); const e = effOf(r); if (r.method === 'bon') s.bon += e; else s.lunas += e; });
   const series = [];
   let cur = from, guard = 0;
   while (cur <= to && guard++ < 92) { const s = byDay[cur] || { lunas: 0, bon: 0 }; series.push({ date: cur, lunas: s.lunas, bon: s.bon }); cur = addDays(cur, 1); }
@@ -1775,7 +1874,10 @@ async function cashIntegration(user, query) {
   ]);
   // Field expenses ride along as an INFORMATIONAL line only — the bridge never posts to the cash
   // book, so surfacing them here can't double-count the separate Setoran.expense number.
-  return { transactions: t.data.filter((x) => !x.legacy), customers: c.data, audit: a.data, expenses: e.data };
+  // …and a "pelunasan tidak diterima" is dropped here too: the bridge exists to reconcile MONEY that
+  // moved, and for that row none did. It stays on the customer's ledger; the shortfall is reported by
+  // lossReport instead. Dropping it server-side means no client can sum it into a cash figure.
+  return { transactions: t.data.filter((x) => !x.legacy && !x.paymentNotReceived), customers: c.data, audit: a.data, expenses: e.data };
 }
 
 // ── LAPORAN PENGIRIMAN (delivery report) ─────────────────────────────────────────
@@ -1828,7 +1930,8 @@ async function deliveryReport(user, query) {
   });
   coRows.forEach((c) => { F(c.fleetId || '').closeouts.push(closeoutClient(c)); });
   txns.forEach((t) => {
-    const inc = t.method === 'lunas' ? (t.amount + priceDelta(t.corrections)) : t.method === 'pelunasan' ? t.amount : 0;
+    // "Pelunasan tidak diterima" cleared the customer's bon but no cash arrived → never a cash line.
+    const inc = noMoneyIn(t) ? 0 : t.method === 'lunas' ? (t.amount + priceDelta(t.corrections)) : t.method === 'pelunasan' ? t.amount : 0;
     if (!inc) return;
     const f = F(t.fleetId || '');
     if (isTransferPayment(t)) f.cash.transfer += inc; else f.cash.tunai += inc;
@@ -1853,6 +1956,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
+  createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns, correctRun,

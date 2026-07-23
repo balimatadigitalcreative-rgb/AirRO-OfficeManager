@@ -107,6 +107,21 @@ const correctionSchema = z.object({
 const voidSchema = z.object({ reason: z.string().trim().min(1, 'reason is required').max(1000) });
 // Toggle a transaction between ARCHIVE (legacy=true) and ACTIVE (legacy=false); reason required.
 const archiveSchema = z.object({ legacy: z.boolean(), bonCounted: z.boolean().optional(), reason: z.string().trim().min(1, 'reason is required').max(1000) });
+// PELUNASAN TIDAK DITERIMA — the customer paid but the money never reached the company. Reason and a
+// responsible staff member are mandatory (a loss with nobody attached is not reportable); the staff
+// may be a system user id or a typed name. `note` is the only field that ever prints for the
+// customer, so the internal reason is a SEPARATE field the statement never reads.
+const pnrSchema = z.object({
+  customerId: z.string().min(1),
+  amount: z.number().int().positive(),
+  txnDate: DATE,
+  responsibleUserId: z.string().min(1).max(60).optional(),
+  responsibleName: z.string().trim().max(120).optional(),
+  lossReason: z.string().trim().min(1, 'lossReason is required').max(500),
+  lossPhotoId: z.string().max(60).optional(),
+  note: z.string().max(300).optional(),
+});
+const lossQuery = z.object({ period: z.enum(['today', 'week', 'month', 'range']).optional(), date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
 const hardDeleteSchema = z.object({
   reason: z.string().trim().min(1, 'reason is required').max(1000),
   confirm: z.string().min(1).max(40),
@@ -222,6 +237,8 @@ const getInvoice = asyncHandler(async (req, res) => res.json({ data: await servi
 const listAudit = asyncHandler(async (req, res) => res.json(await service.listAudit(req.query, req.user)));
 const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.user, req.query) }));
 const deliveryReport = asyncHandler(async (req, res) => res.json({ data: await service.deliveryReport(req.user, req.query) }));
+const createPaymentNotReceived = asyncHandler(async (req, res) => { const t = await service.createPaymentNotReceived(req.body, req.user); bcast('txn', t.id); res.status(201).json({ data: t }); });
+const lossReport = asyncHandler(async (req, res) => res.json({ data: await service.lossReport(req.user, req.query) }));
 const billingReminders = asyncHandler(async (req, res) => res.json(await service.billingReminders(req.user, req.query.fleet, req.query.date)));
 const cashIntegration = asyncHandler(async (req, res) => res.json({ data: await service.cashIntegration(req.user, req.query) }));
 
@@ -272,5 +289,6 @@ module.exports = {
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, archiveSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  createPaymentNotReceived, lossReport,
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, archiveSchema, pnrSchema, lossQuery, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

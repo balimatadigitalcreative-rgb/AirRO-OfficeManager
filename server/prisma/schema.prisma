@@ -563,6 +563,18 @@ model DistTransaction {
   // debt import) or not (bonCounted=false, e.g. a mistaken row). Default true → every existing row
   // (incl. active sales and prior imports) keeps counting exactly as before.
   bonCounted      Boolean  @default(true)
+  // PELUNASAN TIDAK DITERIMA — the customer really paid their bon but the money never reached the
+  // company (a staff member took it). Deliberately two-sided: the row is a REAL pelunasan on the
+  // CUSTOMER side (reduces sisa bon, prints on their statement as a received payment, no mention of
+  // the internal issue — they must never be asked to pay twice), but on the COMPANY side it is NOT
+  // money-in: every cash/money-in aggregate skips it and it is reported as a LOSS against the
+  // responsible staff. `lossReason`/`lossPhotoId` are INTERNAL ONLY and never rendered on a
+  // customer-facing print (that is why the reason is NOT stored in `note`, which does print).
+  paymentNotReceived Boolean @default(false)
+  responsibleUserId  String?
+  responsibleName    String?
+  lossReason         String?
+  lossPhotoId        String?
   // VOID (recorded cancellation) — the default cancel path. The row STAYS (shown "Dibatalkan",
   // filterable) but is EXCLUDED from every aggregate (sisa bon, gallons, KPIs); its gallon
   // movements are reversed. Permanent hard-delete removes the row entirely (owner-only) but always
