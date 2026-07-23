@@ -51,7 +51,20 @@ const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z
 const locationPhotoSchema = z.object({ photoId: z.string().max(60).nullable().optional() });
 const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000), skipped: z.number().int().nonnegative().optional() });
 // Per-customer legacy (archive) transaction import — customerId comes from the route, NOT the body.
-const legacyRow = z.object({ txnDate: z.string().max(20), qty: z.number().int(), price: z.number().int().nonnegative(), method: z.enum(['lunas', 'bon']).optional(), note: z.string().max(300).optional() });
+// Richer template: Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon. Exactly ONE
+// of the three action columns should be filled per row; the server derives the transaction type and
+// re-validates (a row with none/many, or missing date/price/qty, is skipped with a reason).
+const legacyRow = z.object({
+  txnDate: z.string().max(20),
+  price: z.number().int().nonnegative().optional(),      // Harga (required for purchases)
+  lunasQty: z.number().int().optional(),                 // Pembelian Lunas (gallons)
+  bonQty: z.number().int().optional(),                   // Pembelian Bon (gallons)
+  paymentAmount: z.number().int().optional(),            // Pembayaran Bon (rupiah)
+  note: z.string().max(300).optional(),
+  // legacy shape kept accepted so an old client/paste still works (qty+method → lunas/bon).
+  qty: z.number().int().optional(),
+  method: z.enum(['lunas', 'bon']).optional(),
+});
 const legacyImportSchema = z.object({ rows: z.array(legacyRow).max(5000), skipped: z.number().int().nonnegative().optional() });
 const legacyBatchParams = z.object({ id: z.string().min(1), batchId: z.string().min(1) });
 // scope null/omitted = option (a) new-only; 'all'|'cycle'|'bon' = option (b) retroactive.

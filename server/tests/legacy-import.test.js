@@ -54,14 +54,16 @@ describe('Distribusi — legacy transaction import (archive only)', () => {
     expect(await prisma.gallonMovement.count({ where: { customerId: cid } })).toBe(1);   // just the real sale's delivery_out
   });
 
-  it('legacy rows do NOT change KPIs / receivables / gallon stock / cash integration', async () => {
+  it('legacy PURCHASES stay archive-only for gallons/KPIs/cash, but a legacy BON adds to sisa bon', async () => {
     const after = await aggregates();
-    expect(after.listSisaBon).toBe(before.listSisaBon);       // receivable unchanged
-    expect(after.listTotalGalon).toBe(before.listTotalGalon); // gallons-sold unchanged
-    expect(after.listTxnCount).toBe(before.listTxnCount);     // txn count excludes legacy
-    expect(after.receivable).toBe(before.receivable);
+    // gallons-sold, txn count, gallon stock, and cash integration all still EXCLUDE legacy rows
+    expect(after.listTotalGalon).toBe(before.listTotalGalon);
+    expect(after.listTxnCount).toBe(before.listTxnCount);
     expect(after.gallonOwned).toBe(before.gallonOwned);
-    expect(after.cashTxns).toBe(before.cashTxns);             // cash integration excludes legacy
+    expect(after.cashTxns).toBe(before.cashTxns);
+    // …but the imported bon (qty 5 × 12,000 = 60,000) IS a real receivable → sisa bon / receivable rise
+    expect(after.listSisaBon).toBe(before.listSisaBon + 60000);
+    expect(after.receivable).toBe(before.receivable + 60000);
   });
 
   it('legacy rows DO appear in the customer detail history (flagged) + import list; record unchanged', async () => {

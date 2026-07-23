@@ -1100,6 +1100,11 @@ select.fld::-ms-expand { display: none; }
 .dist-imp-hist-row:first-of-type { border-top: none; }
 .dist-imp-hist-main { flex: 1; min-width: 0; font-size: 12.5px; }
 .dist-imp-hrow.li, .dist-imp-row.li { grid-template-columns: 1.3fr .7fr 1fr .8fr .9fr; }
+/* Richer legacy import preview: Tanggal · Tipe · Nominal · Status. */
+.dist-imp-hrow.li3, .dist-imp-row.li3 { grid-template-columns: 1.1fr .9fr 1.1fr 1fr; }
+.dist-imp-row.li3.is-skip { background: var(--warn-bg, #fff7ed); }
+.dist-imp-dl { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.dist-imp-status.noaction, .dist-imp-status.multi, .dist-imp-status.noprice { background: var(--warn-bg); color: var(--warn); }
 .dist-sumrow { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; color: var(--text-mut); }
 .dist-sumrow:last-child { border-bottom: 0; }
 .dist-quick { padding: 18px; }

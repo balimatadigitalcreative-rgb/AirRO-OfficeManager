@@ -499,13 +499,50 @@ function parseLegacyDate(s) {
   const t = Date.parse(s); if (!isNaN(t)) return new Date(t).toISOString().slice(0, 10);
   return null;
 }
-// Ready-to-fill CSV template for the per-customer legacy transaction import (header + 1 example).
+// Ready-to-fill CSV template for the per-customer legacy transaction import — the richer 5-column
+// shape (fill exactly ONE of the three action columns per row). Header + one example of each type.
 function downloadLegacyTemplate() {
-  const rows = [['Tanggal', 'Jumlah Galon', 'Harga', 'Metode', 'Catatan'], ['2026-01-15', '10', '12000', 'lunas', 'saldo awal']];
+  const rows = [
+    ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan'],
+    ['2026-01-15', '12000', '10', '', '', 'penjualan lunas'],
+    ['2026-01-16', '12000', '', '5', '', 'penjualan bon'],
+    ['2026-01-20', '', '', '', '30000', 'pembayaran bon'],
+  ];
   const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-riwayat-transaksi.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+// Derive the transaction from one parsed legacy row — the SAME rule the server uses. Exactly one of
+// lunasQty / bonQty / paymentAmount must be > 0. Returns { type, qty, price, amount, status, reason }.
+function deriveLegacyImportRow(cells, colMap, cellAt) {
+  const dateRaw = cellAt(cells, colMap.date);
+  const date = parseLegacyDate(dateRaw);
+  const digits = (i) => { const c = cellAt(cells, i); return c === '' ? null : (parseInt(c.replace(/[^0-9]/g, ''), 10)); };
+  const price = colMap.price >= 0 ? digits(colMap.price) : null;
+  const lunasQty = colMap.lunas >= 0 ? (digits(colMap.lunas) || 0) : 0;
+  const bonQty = colMap.bon >= 0 ? (digits(colMap.bon) || 0) : 0;
+  const pay = colMap.pay >= 0 ? (digits(colMap.pay) || 0) : 0;
+  // legacy fallback: a plain qty + optional metode column, no action columns filled
+  const legQty = colMap.qty >= 0 ? (digits(colMap.qty) || 0) : 0;
+  const legMethod = colMap.method >= 0 && /bon/i.test(cellAt(cells, colMap.method)) ? 'bon' : 'lunas';
+  const note = colMap.note >= 0 ? cellAt(cells, colMap.note) : '';
+  const base = { dateRaw, date, note };
+  if (!date) return { ...base, type: null, qty: 0, price, amount: 0, status: 'baddate' };
+  const filled = [lunasQty > 0, bonQty > 0, pay > 0].filter(Boolean).length;
+  if (filled === 0 && legQty > 0) {
+    if (!(price > 0)) return { ...base, type: legMethod, qty: legQty, price, amount: 0, status: 'noprice' };
+    return { ...base, type: legMethod, qty: legQty, price, amount: legQty * price, status: 'ok' };
+  }
+  if (filled === 0) return { ...base, type: null, qty: 0, price, amount: 0, status: 'noaction' };
+  if (filled > 1) return { ...base, type: null, qty: 0, price, amount: 0, status: 'multi' };
+  if (lunasQty > 0 || bonQty > 0) {
+    const type = lunasQty > 0 ? 'lunas' : 'bon';
+    const qty = lunasQty > 0 ? lunasQty : bonQty;
+    if (!(price > 0)) return { ...base, type, qty, price, amount: 0, status: 'noprice' };
+    return { ...base, type, qty, price, amount: qty * price, status: 'ok' };
+  }
+  return { ...base, type: 'pelunasan', qty: 0, price: 0, amount: pay, status: 'ok' };
 }
 // Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
 const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng;
@@ -1223,38 +1260,57 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const [fileBusy, setFileBusy] = uSx(false);
   const [err, setErr] = uSx('');
   const [saving, setSaving] = uSx(false);
+  const [filter, setFilter] = uSx('all');   // all | ok | skip
   const fileRef = React.useRef(null);
-  const existing = new Set((customer.transactions || []).map((t) => `${t.txnDate}|${t.qty}|${t.amount}`));
+  // dedupe against existing rows keyed on (date + TYPE + amount) — matches the server
+  const existing = new Set((customer.transactions || []).map((t) => `${t.txnDate}|${t.method}|${t.amount}`));
   const rawCells = fileRows || text.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
-  const HRE = { date: /tanggal|tgl|date/i, qty: /galon|jumlah|qty/i, price: /harga|price|tarif/i, method: /metode|method|bayar|cara/i, note: /catatan|note|keterangan|ket/i };
-  let colMap = { date: 0, qty: 1, price: 2, method: 3, note: 4 };
+  // Header synonyms (case-insensitive, ID/EN). "Pembelian Bon" (purchase) vs "Pembayaran Bon"
+  // (payment) both contain "bon" → the payment regex is checked FIRST so it wins.
+  const HRE = { date: /tanggal|tgl|date/i, price: /harga|price|tarif|unit/i, pay: /bayar|pembayaran|payment|pelunasan|setor/i, lunas: /lunas|tunai|cash/i, bon: /bon|hutang|kredit|piutang/i, qty: /galon|jumlah|qty/i, method: /metode|method|cara/i, note: /catatan|note|keterangan|ket/i };
+  // fixed-order fallback (no header): Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan
+  let colMap = { date: 0, price: 1, lunas: 2, bon: 3, pay: 4, note: 5, qty: -1, method: -1 };
   let dataRows = rawCells;
   if (rawCells.length) {
-    const h = rawCells[0].join(' ');
-    if (HRE.date.test(h) && (HRE.qty.test(h) || HRE.price.test(h))) {   // header row
-      const hdr = rawCells[0]; const idx = (re) => hdr.findIndex((c) => re.test(c));
-      colMap = { date: Math.max(0, idx(HRE.date)), qty: idx(HRE.qty), price: idx(HRE.price), method: idx(HRE.method), note: idx(HRE.note) };
+    const hdr = rawCells[0]; const h = hdr.join(' ');
+    if (HRE.date.test(h) && (HRE.price.test(h) || HRE.lunas.test(h) || HRE.bon.test(h) || HRE.pay.test(h) || HRE.qty.test(h))) {   // header row
+      // payment matched first, then the remaining columns (a "bon" column that is NOT the payment)
+      const idxBut = (re, ...avoid) => hdr.findIndex((c, i) => re.test(c) && !avoid.some((a) => a === i));
+      const iDate = hdr.findIndex((c) => HRE.date.test(c));
+      const iPrice = hdr.findIndex((c) => HRE.price.test(c));
+      const iPay = hdr.findIndex((c) => HRE.pay.test(c));
+      const iLunas = idxBut(HRE.lunas, iPay);
+      const iBon = idxBut(HRE.bon, iPay, iLunas);
+      colMap = { date: iDate, price: iPrice, lunas: iLunas, bon: iBon, pay: iPay, note: hdr.findIndex((c) => HRE.note.test(c)), qty: hdr.findIndex((c) => HRE.qty.test(c)), method: hdr.findIndex((c) => HRE.method.test(c)) };
       dataRows = rawCells.slice(1);
     }
   }
-  const cellAt = (row, i) => (i >= 0 && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
+  const cellAt = (row, i) => (i >= 0 && row && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
   const seen = new Set();
   const rows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim())).map((cols) => {
-    const dateRaw = cellAt(cols, colMap.date); const date = parseLegacyDate(dateRaw);
-    const qty = parseInt(cellAt(cols, colMap.qty).replace(/[^0-9]/g, ''), 10);
-    const priceCell = cellAt(cols, colMap.price); const price = priceCell === '' ? null : parseInt(priceCell.replace(/[^0-9]/g, ''), 10);
-    const method = /bon/i.test(cellAt(cols, colMap.method)) ? 'bon' : 'lunas';
-    const note = cellAt(cols, colMap.note);
-    const okBase = !!date && qty > 0 && price != null && !isNaN(price);
-    const amount = okBase ? qty * price : 0;
-    const key = okBase ? `${date}|${qty}|${amount}` : '';
-    const dup = okBase && (existing.has(key) || seen.has(key));
-    if (key && !dup) seen.add(key);
-    const status = !date ? 'baddate' : (!(qty > 0) || price == null || isNaN(price)) ? 'kurang' : dup ? 'dup' : 'ok';
-    return { dateRaw, date, qty: qty || 0, price: (price == null || isNaN(price)) ? null : price, method, note, amount, status, valid: status === 'ok' };
+    const d = deriveLegacyImportRow(cols, colMap, cellAt);
+    let status = d.status;
+    if (status === 'ok') {
+      const k = `${d.date}|${d.type}|${d.amount}`;
+      if (existing.has(k) || seen.has(k)) status = 'dup'; else seen.add(k);
+    }
+    return { ...d, status, valid: status === 'ok' };
   });
   const valid = rows.filter((r) => r.valid);
-  const reset = () => { setText(''); setFileRows(null); setFileName(''); setErr(''); if (fileRef.current) fileRef.current.value = ''; };
+  const skipped = rows.filter((r) => !r.valid);
+  const shown = filter === 'ok' ? valid : filter === 'skip' ? skipped : rows;
+  const reset = () => { setText(''); setFileRows(null); setFileName(''); setErr(''); setFilter('all'); if (fileRef.current) fileRef.current.value = ''; };
+  const typeLbl = (t) => t === 'bon' ? trD('dist.bon') : t === 'pelunasan' ? trD('dist.pelunasan') : trD('dist.lunas');
+  const reasonOf = (s) => s === 'baddate' ? trD('dist.liBadDate') : s === 'noaction' ? trD('dist.liNoAction') : s === 'multi' ? trD('dist.liMulti') : s === 'noprice' ? trD('dist.liNoPrice') : s === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
+  // Download ONLY the skipped rows + their reason, so the user fixes them and re-imports.
+  const downloadSkipped = () => {
+    const head = ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan', 'Alasan'];
+    const out = [head, ...skipped.map((r) => [r.dateRaw || '', r.price || '', r.type === 'lunas' ? r.qty : '', r.type === 'bon' ? r.qty : '', r.type === 'pelunasan' ? r.amount : '', r.note || '', reasonOf(r.status)])];
+    const csv = out.map((row) => row.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'riwayat-dilewati.csv';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
   const onFile = (e) => {
     const file = e.target.files && e.target.files[0]; e.target.value = '';
     if (!file) return;
@@ -1284,18 +1340,25 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const commit = () => {
     if (!valid.length || saving) return;
     setSaving(true); setErr('');
-    window.API.distribusi.customers.importLegacyTxns(customer.id, valid.map((r) => ({ txnDate: r.date, qty: r.qty, price: r.price, method: r.method, ...(r.note ? { note: r.note } : {}) })), rows.length - valid.length)
+    // Send the RAW action columns; the server re-derives + re-validates (authoritative).
+    const payload = valid.map((r) => {
+      const o = { txnDate: r.date };
+      if (r.type === 'pelunasan') o.paymentAmount = r.amount;
+      else { o.price = r.price; if (r.type === 'bon') o.bonQty = r.qty; else o.lunasQty = r.qty; }
+      if (r.note) o.note = r.note;
+      return o;
+    });
+    window.API.distribusi.customers.importLegacyTxns(customer.id, payload, skipped.length)
       .then((res) => { setSaving(false); onDone(res); })
       .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
-  const statusLabel = (s) => s === 'ok' ? trD('dist.impReady') : s === 'kurang' ? trD('dist.impMissing') : s === 'baddate' ? trD('dist.liBadDate') : trD('dist.impDup');
   return (
     <div className="modal-scrim" onClick={onClose} style={{ zIndex: 210 }}>
-      <div className="modal-card" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card" style={{ maxWidth: 660 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.liTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.code ? customer.code + ' · ' : ''}{customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
         <div className="modal-body">
           <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.liInfo')}</span></div>
-          <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Jumlah Galon · Harga · Metode · Catatan</b></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+          <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan</b></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
           <div className="dist-imp-upload">
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onFile} />
             <button type="button" className="btn btn-ghost" onClick={() => fileRef.current && fileRef.current.click()}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.importUpload')}</button>
@@ -1304,18 +1367,26 @@ function LegacyImportModal({ customer, onClose, onDone }) {
               : <span className="dist-imp-or">{trD('dist.importOr')}</span>}
           </div>
           {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={13} />{err}</div>}
-          {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'2026-01-15\t10\t12000\tlunas\tsaldo awal'} onChange={(e) => setText(e.target.value)} />}
+          {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'2026-01-15\t12000\t10\t\t\tlunas\n2026-01-16\t12000\t\t5\t\tbon\n2026-01-20\t\t\t\t30000\tbayar bon'} onChange={(e) => setText(e.target.value)} />}
           {rows.length > 0 && (<>
-            <div className="dist-imp-counts"><span className="dist-imp-ok">{valid.length} {trD('dist.importReady')}</span><span className="dist-imp-skip">{rows.length - valid.length} {trD('dist.importSkip')}</span></div>
+            {/* Status filter chips + "Unduh yang dilewati" so the user fixes skips and re-imports. */}
+            <div className="dist-imp-chips">
+              {[['all', trD('dist.impAll'), rows.length], ['ok', trD('dist.importReady'), valid.length], ['skip', trD('dist.importSkip'), skipped.length]]
+                .map(([k, label, n]) => <button key={k} type="button" className={`dist-imp-chip ${filter === k ? 'on' : ''} ${k === 'skip' ? 'skip' : ''}`} onClick={() => setFilter(k)}>{label} <span className="dist-imp-chipn">{n}</span></button>)}
+              {skipped.length > 0 && <button type="button" className="dist-link dist-imp-dl" onClick={downloadSkipped}><IconDownload s={13} />{trD('dist.impDownloadSkip')}</button>}
+            </div>
             <div className="dist-imp-preview">
-              <div className="dist-imp-hrow li"><span>Tanggal</span><span>Galon</span><span>Harga</span><span>Metode</span><span>Status</span></div>
-              {rows.slice(0, 400).map((r, i) => (
-                <div key={i} className="dist-imp-row li">
-                  <span className="dist-imp-name">{r.date || r.dateRaw || '—'}</span><span>{r.qty || '—'}</span><span>{r.price != null ? rpFull(r.price) : '—'}</span><span>{r.method}</span>
-                  <span><span className={`dist-imp-status ${r.status}`}>{statusLabel(r.status)}</span></span>
+              <div className="dist-imp-hrow li3"><span>Tanggal</span><span>{trD('dist.liType')}</span><span>{trD('dist.liAmount')}</span><span>Status</span></div>
+              {shown.slice(0, 400).map((r, i) => (
+                <div key={i} className={`dist-imp-row li3 ${r.valid ? '' : 'is-skip'}`}>
+                  <span className="dist-imp-name">{r.date || r.dateRaw || '—'}</span>
+                  <span>{r.type ? <span className={`dist-badge ${r.type === 'bon' ? 'bon' : r.type === 'pelunasan' ? 'obon' : 'lunas'}`}>{typeLbl(r.type)}</span> : '—'}</span>
+                  <span className="tnum">{r.amount ? rpFull(r.amount) : '—'}</span>
+                  <span><span className={`dist-imp-status ${r.status}`}>{reasonOf(r.status)}</span></span>
                 </div>
               ))}
-              {rows.length > 400 && <div className="dist-hint" style={{ padding: '6px 10px' }}>… +{rows.length - 400}</div>}
+              {shown.length > 400 && <div className="dist-hint" style={{ padding: '6px 10px' }}>… +{shown.length - 400}</div>}
+              {shown.length === 0 && <div className="dist-hint" style={{ padding: '10px' }}>{trD('dist.impNoneInFilter')}</div>}
             </div>
           </>)}
         </div>
