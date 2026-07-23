@@ -639,7 +639,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, onGoExpense, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -679,6 +679,23 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [archReason, setArchReason] = uSx('');
   const [archBon, setArchBon] = uSx(false);         // when archiving a bon/pelunasan: keep counting toward sisa bon?
   const [archSaving, setArchSaving] = uSx(false);
+  // ── PENGELUARAN (field expenses) — now a filter chip + inline form INSIDE this screen, not a
+  // separate route. Expenses are DistExpense rows (never DistTransaction): they never appear under
+  // "Semua" and never touch txn totals / gallons / bon / KPIs — only the dashboard's net-cash line.
+  const [expenses, setExpenses] = uSx(null);        // DistExpense rows for the chosen day/fleet
+  const [eDate, setEDate] = uSx(today);             // the day the expense list + form act on
+  const [eCats, setECats] = uSx(['bensin', 'makan', 'parkir', 'lainnya']);
+  const [eCat, setECat] = uSx('bensin');
+  const [eAmount, setEAmount] = uSx('');            // raw digits; rupiah-formatted on blur (like the txn amount)
+  const [eAmtFocus, setEAmtFocus] = uSx(false);
+  const [eNote, setENote] = uSx('');
+  const [ePhoto, setEPhoto] = uSx(null);
+  const [eFleet, setEFleet] = uSx('');
+  const [eBigOk, setEBigOk] = uSx(false);           // explicit confirm for an implausibly large expense
+  const [eSaving, setESaving] = uSx(false);
+  const [eErr, setEErr] = uSx('');
+  const [eVoidRow, setEVoidRow] = uSx(null);        // the expense being voided (recorded, reason required)
+  const [eVoidReason, setEVoidReason] = uSx('');
 
   const doArchive = () => {
     if (!archTxn || !archReason.trim() || archSaving) return;
@@ -711,6 +728,18 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   uEx(() => { let live = true; if (window.API && window.API.distribusi) reload(); return () => { live = false; }; }, [refreshKey, ef]);
   uEx(() => { if (openFormTick) { setView('form'); setFErr(''); } }, [openFormTick]);
 
+  // Expenses load independently (they are date-scoped, the txn list is not). The chip reads this.
+  const scoped = isScoped(fleetScope);
+  const fleetOpts = (fleet || []).filter(Boolean);
+  const reloadExpenses = () => {
+    if (!(window.API && window.API.distribusi && window.API.distribusi.expenses)) { setExpenses([]); return; }
+    window.API.distribusi.expenses.list({ date: eDate, fleet: ef }).then((r) => setExpenses(r.data || [])).catch(() => setExpenses([]));
+  };
+  uEx(() => { if (canExpense) reloadExpenses(); }, [refreshKey, ef, eDate, canExpense]);
+  uEx(() => { if (canExpense && window.API && window.API.distribusi && window.API.distribusi.expenses) window.API.distribusi.expenses.categories().then((r) => { if (r.data && r.data.length) setECats(r.data); }).catch(() => {}); }, [canExpense]);
+  // An expense-only user (no input/koreksi) lands straight on the Pengeluaran view.
+  uEx(() => { if (!canInput && !canKoreksi && canExpense) setFilter('pengeluaran'); }, []);
+
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   const selCust = customers.find((c) => c.id === fCust) || null;
   const price = selCust ? selCust.masterPrice : 0;
@@ -730,6 +759,35 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     window.API.distribusi.transactions.correct(corrTxn.id, { reason: corrReason.trim(), oldValue: { amount: corrTxn.amount }, newValue: corrValue.trim() || null })
       .then(() => { setCorrSaving(false); setCorrTxn(null); setCorrReason(''); setCorrValue(''); flash(trD('dist.corrSaved')); reload(); if (onChanged) onChanged(); })
       .catch(() => { setCorrSaving(false); });
+  };
+
+  // ── Expense form/list helpers (same patterns as the transaction form: rupiah amount, chips, void). ──
+  const expCatLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
+  const viewExpPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
+  const eAmt = parseInt(String(eAmount).replace(/[^0-9]/g, ''), 10) || 0;
+  const eCatCustom = !eCats.includes(eCat);
+  const expActive = (expenses || []).filter((r) => r.status === 'active');
+  const expTotal = expActive.reduce((s, r) => s + r.amount, 0);
+  const openExpenseForm = () => { setEErr(''); setECat('bensin'); setEAmount(''); setEAmtFocus(false); setENote(''); setEPhoto(null); setEBigOk(false); setEFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || ''))); setView('expense'); };
+  const commitExpense = () => {
+    if (eSaving) return;
+    if (!(eAmt > 0)) { setEErr(trD('exp.amtReq')); return; }
+    if (!scoped && !eFleet) { setEErr(trD('run.errFleet')); return; }
+    // A typo-sized expense is confirmed once before saving (the server still hard-rejects > 1B).
+    if (eAmt > WARN_AMOUNT && !eBigOk) { setEBigOk(true); return; }
+    setESaving(true); setEErr('');
+    const photoId = ePhoto && ePhoto.ref ? ePhoto.ref : undefined;
+    window.API.distribusi.expenses.create({ date: eDate, fleet: eFleet || undefined, amount: eAmt, category: (eCat || '').trim() || 'lainnya', note: (eNote || '').trim() || undefined, photoId })
+      .then(() => { setESaving(false); setView('list'); setFilter('pengeluaran'); flash(trD('exp.saved')); reloadExpenses(); if (onChanged) onChanged(); })
+      .catch((e) => { setESaving(false); setEErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
+  const commitExpenseVoid = () => {
+    if (!eVoidRow || eSaving) return;
+    if (!(eVoidReason || '').trim()) { setEErr(trD('exp.reasonReq')); return; }
+    setESaving(true); setEErr('');
+    window.API.distribusi.expenses.void(eVoidRow.id, { reason: eVoidReason.trim() })
+      .then(() => { setESaving(false); setEVoidRow(null); setEVoidReason(''); flash(trD('exp.voided')); reloadExpenses(); if (onChanged) onChanged(); })
+      .catch((e) => { setESaving(false); setEErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
 
   const rows = (txns || []).filter((t) => {
@@ -830,8 +888,66 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     );
   }
 
+  // ── EXPENSE FORM — identical shell/flow to the new-transaction form (card + summary, chips,
+  // rupiah amount, DateField, note, attachment, full-width submit + footer hint). Back → the list
+  // with the Pengeluaran chip active, exactly like the transaction form returns to the list. ──
+  if (view === 'expense') {
+    return (
+      <div className="dist-dash screen-enter">
+        <button type="button" className="dist-back" onClick={() => { setView('list'); setFilter('pengeluaran'); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backList')}</button>
+        <div className="dist-form-wrap">
+          <div className="card dist-form">
+            {!scoped && (<>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <select className="fld" value={eFleet} onChange={(e) => setEFleet(e.target.value)}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
+            </>)}
+
+            {/* Category — chips like the payment-method chips, not a dropdown */}
+            <label className="fld-label" style={scoped ? { marginTop: 0 } : undefined}>{trD('exp.category')}</label>
+            <div className="exp-cat-chips">
+              {eCats.map((c) => <button key={c} type="button" className={`cat-chip ${eCat === c ? 'on' : ''}`} onClick={() => setECat(c)}>{expCatLabel(c)}</button>)}
+              <button type="button" className={`cat-chip ${eCatCustom ? 'on' : ''}`} onClick={() => setECat(eCatCustom ? 'bensin' : '')}>{trD('exp.catCustom')}</button>
+            </div>
+            {eCatCustom && <input className="fld" style={{ marginTop: 8 }} value={eCat} placeholder={trD('exp.catOther')} onChange={(e) => setECat(e.target.value)} />}
+
+            <div className="dist-form-row">
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={eAmtFocus ? eAmount : (eAmt ? eAmt.toLocaleString('id-ID') : '')} placeholder="0" onFocus={() => setEAmtFocus(true)} onBlur={() => setEAmtFocus(false)} onChange={(e) => { setEAmount(e.target.value.replace(/[^0-9]/g, '')); setEBigOk(false); }} /></div>
+              </div>
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <label className="fld-label">{trD('dist.fDate')}</label>
+                <DP.DateField value={eDate} onChange={setEDate} max={today} />
+              </div>
+            </div>
+
+            <label className="fld-label">{trD('exp.note')}</label>
+            <input className="fld" value={eNote} maxLength={300} placeholder={trD('exp.notePh')} onChange={(e) => setENote(e.target.value)} />
+
+            <label className="fld-label">{trD('exp.photo')}</label>
+            <UI.FileAttach value={ePhoto} onChange={setEPhoto} camera accept="image/*" label={trD('exp.photoAdd')} />
+
+            {eAmt > WARN_AMOUNT && <div className={`dist-amt-warn${eBigOk ? ' on' : ''}`}><IconInvoice s={14} />{eBigOk ? trD('dist.amtConfirm', { amt: rpFull(eAmt) }) : trD('dist.amtWarn', { amt: rpFull(eAmt) })}</div>}
+            {eErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{eErr}</div>}
+            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={eSaving || !(eAmt > 0)} onClick={commitExpense}>{eSaving ? '…' : (eAmt > WARN_AMOUNT && eBigOk) ? trD('dist.amtConfirmYes') : trD('exp.save')}</button>
+            <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('exp.formNote')}</div>
+          </div>
+
+          <div className="card dist-form-sum">
+            <div className="dist-fs-t">{trD('dist.summary')}</div>
+            <div className="dist-fs-line"><span>{expCatLabel(eCat || 'lainnya')}</span><b>{rpFull(eAmt)}</b></div>
+            <div className="dist-fs-total"><span>{trD('dist.total')}</span><b className="tnum">{rpFull(eAmt)}</b></div>
+            <div className="dist-fs-note"><IconCoinOut s={13} />{trD('exp.sumNote')}</div>
+          </div>
+        </div>
+        {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+      </div>
+    );
+  }
+
   // ── LIST ──
-  const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')], ...(voidN ? [['void', trD('dist.voidFilter') + ' (' + voidN + ')']] : []), ['arsip', trD('dist.arsip')]];
+  const isExp = filter === 'pengeluaran';
+  const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')], ...(voidN ? [['void', trD('dist.voidFilter') + ' (' + voidN + ')']] : []), ['arsip', trD('dist.arsip')], ...(canExpense ? [['pengeluaran', trD('exp.chip')]] : [])];
   return (
     <div className="dist-dash screen-enter">
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
@@ -843,7 +959,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
         <div className="dist-tx-actions">
           <div className="dist-tx-grp dist-tx-grp-out">
             {canInput && <button type="button" className="btn btn-ghost dist-paybtn" onClick={() => setPayOpen(true)}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
-            {canExpense && <button type="button" className="btn dist-expbtn" title={trD('exp.outflowHint')} onClick={onGoExpense}><IconCoinOut s={15} />{trD('exp.btn')}</button>}
+            {canExpense && <button type="button" className="btn dist-expbtn" title={trD('exp.outflowHint')} onClick={openExpenseForm}><IconCoinOut s={15} />{trD('exp.btn')}</button>}
           </div>
           {canInput && (
             <div className="dist-tx-grp dist-tx-grp-primary">
@@ -853,8 +969,49 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           )}
         </div>
       </div>
-      <div className="dist-permbanner"><IconLock s={15} />{trD('dist.permBanner')}</div>
+      {!isExp && <div className="dist-permbanner"><IconLock s={15} />{trD('dist.permBanner')}</div>}
 
+      {/* PENGELUARAN LIST — DistExpense rows for the chosen day/fleet: outflow-styled amount, category,
+          note, who logged it, lazy photo thumbnail, plus the day's total on top. These are NEVER
+          transactions and never appear under "Semua". Date picker + a void (recorded) action. */}
+      {isExp && (
+        <div className="dist-exp-inline">
+          <div className="dist-exp-datebar"><span className="dist-exp-datelbl"><IconCalendar s={14} />{trD('dist.fDate')}</span><div style={{ minWidth: 170 }}><DP.DateField value={eDate} onChange={setEDate} max={today} /></div></div>
+          <div className="card exp-total-card">
+            <div className="exp-total-lbl"><IconCoinOut s={15} />{trD('exp.totalToday')}</div>
+            <div className="tnum exp-total-big">{rpFull(expTotal)}</div>
+            <div className="exp-total-meta">{numX(expActive.length)} {trD('exp.itemWord')} · {eDate}</div>
+          </div>
+          <div className="card dist-card">
+            <div className="dist-card-head"><div className="sec-title"><IconCoinOut s={15} /> {trD('exp.title')}</div></div>
+            {expenses === null ? <div className="dist-empty">{trD('common.loading') || '…'}</div>
+              : expenses.length === 0 ? <div className="dist-empty">{trD('exp.none')}</div>
+              : (
+                <div className="exp-list">
+                  {expenses.map((r) => {
+                    const voided = r.status === 'void';
+                    return (
+                      <div key={r.id} className={`exp-row ${voided ? 'is-void' : ''}`}>
+                        {r.photoId ? <LocThumb photoId={r.photoId} onView={() => viewExpPhoto(r.photoId)} /> : <div className="exp-nophoto"><IconCoinOut s={16} /></div>}
+                        <div className="exp-mid">
+                          <div className="exp-line1"><span className={`exp-cat ${'c-' + r.category}`}>{expCatLabel(r.category)}</span>{r.fleetId ? <span className="exp-fleet">{r.fleetId}</span> : null}{voided && <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>}</div>
+                          <div className="exp-sub">{r.createdByName ? r.createdByName + ' · ' : ''}{fmtDT(r.createdAt)}{r.note ? ' · ' + r.note : ''}{voided && r.voidReason ? ' · ' + trD('exp.voidReason') + ': ' + r.voidReason : ''}</div>
+                        </div>
+                        <div className="exp-right">
+                          <div className={`tnum exp-amt ${voided ? 'struck' : ''}`}>−{rpFull(r.amount)}</div>
+                          {!voided && canExpense && <button type="button" className="dist-link danger exp-void" onClick={() => { setEErr(''); setEVoidReason(''); setEVoidRow(r); }}><IconClose s={12} />{trD('exp.void')}</button>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            <div className="dist-fieldhint" style={{ marginTop: 8 }}><IconClock s={12} />{trD('exp.hint')}</div>
+          </div>
+        </div>
+      )}
+
+      {!isExp && (
       <div className="card dist-card" style={{ padding: '6px 18px' }}>
         {txns === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
         {txns !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.noTxn')}</div>}
@@ -908,6 +1065,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           );
         })}
       </div>
+      )}
 
       {corrTxn && (
         <div className="modal-scrim" onClick={() => setCorrTxn(null)} style={{ zIndex: 200 }}>
@@ -979,6 +1137,22 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       )}
       {payOpen && <PaymentModal customers={customers} staffMode={staffMode} today={today} onClose={() => setPayOpen(false)}
         onSaved={(d) => { setPayOpen(false); setNewIds((p) => [d.id, ...p]); flash(trD('dist.paySaved', { amt: rpFull(d.amount), sisa: rpFull(d.sisaBon || 0) })); reload(); if (onChanged) onChanged(); }} />}
+      {/* EXPENSE VOID — recorded cancellation (reason required); expenses are never silently deleted. */}
+      {eVoidRow && (
+        <div className="modal-scrim" onClick={() => setEVoidRow(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('exp.voidT')}</div><button className="jp-icon" onClick={() => setEVoidRow(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-infobox"><IconClose s={16} /><span>{trD('exp.voidInfo')}</span></div>
+              <div className="exp-void-sum"><span className={`exp-cat ${'c-' + eVoidRow.category}`}>{expCatLabel(eVoidRow.category)}</span> · <b>{rpFull(eVoidRow.amount)}</b>{eVoidRow.note ? ' · ' + eVoidRow.note : ''}</div>
+              <label className="fld-label">{trD('exp.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={eVoidReason} placeholder={trD('exp.voidReasonPh')} onChange={(e) => setEVoidReason(e.target.value)} />
+              {eErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{eErr}</div>}
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEVoidRow(null)}>{trD('dist.cancel')}</button><button className="btn btn-danger" disabled={eSaving} onClick={commitExpenseVoid}>{eSaving ? '…' : trD('exp.void')}</button></div>
+          </div>
+        </div>
+      )}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
   );
@@ -3064,190 +3238,6 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
   );
 }
 
-// Field expenses (pengeluaran lapangan) — a dedicated, mobile-first screen where delivery staff log
-// cash they paid out in the field (fuel/bensin, meals, parking…) with an optional receipt photo
-// (stored via the Attachment system, never base64 inline). Append-only: a mistake is VOIDED
-// (recorded, reason) not deleted. The day's total reduces the "net cash to deposit" on the
-// dashboard — it never posts to the cash book, so no double-count. Fleet-scoped (server-enforced):
-// a scoped driver sees/logs only their fleet; owner/admin see all and can filter by fleet.
-function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
-  const [view, setView] = uSx('list');   // list | form (same view-swap pattern as the new-transaction form)
-  const [date, setDate] = uSx(today);
-  const [rows, setRows] = uSx(null);
-  const [cats, setCats] = uSx(['bensin', 'makan', 'parkir', 'lainnya']);
-  const [voidRow, setVoidRow] = uSx(null);   // the row being voided (an action modal, like Batalkan)
-  const [voidReason, setVoidReason] = uSx('');
-  const [saving, setSaving] = uSx(false);
-  const [err, setErr] = uSx('');
-  const [toast, setToast] = uSx('');
-  // Expense-form fields — mirror the new-transaction form's field states 1:1.
-  const [fCat, setFCat] = uSx('bensin');
-  const [fAmount, setFAmount] = uSx('');   // raw digits; formatted on blur
-  const [amtFocus, setAmtFocus] = uSx(false);
-  const [fNote, setFNote] = uSx('');
-  const [fPhoto, setFPhoto] = uSx(null);
-  const [fFleet, setFFleet] = uSx('');
-  const [bigOk, setBigOk] = uSx(false);   // explicit confirm for an implausibly large expense
-  const scoped = isScoped(fleetScope);
-  const ef = effFleet(fleetScope, distFleet);
-  const fleetOpts = (fleet || []).filter(Boolean);
-  const reload = () => {
-    if (!(window.API && window.API.distribusi && window.API.distribusi.expenses)) return;
-    window.API.distribusi.expenses.list({ date, fleet: ef }).then((r) => setRows(r.data || [])).catch(() => setRows([]));
-  };
-  uEx(() => { reload(); }, [refreshKey, ef, date]);
-  uEx(() => { if (window.API && window.API.distribusi && window.API.distribusi.expenses) window.API.distribusi.expenses.categories().then((r) => { if (r.data && r.data.length) setCats(r.data); }).catch(() => {}); }, []);
-  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
-  const catLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
-  const viewPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
-  const openAdd = () => { setErr(''); setFCat('bensin'); setFAmount(''); setAmtFocus(false); setFNote(''); setFPhoto(null); setBigOk(false); setFFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || ''))); setView('form'); };
-  const openVoid = (row) => { setErr(''); setVoidReason(''); setVoidRow(row); };
-  const fAmt = parseInt(String(fAmount).replace(/[^0-9]/g, ''), 10) || 0;
-  const commitAdd = () => {
-    if (saving) return;
-    if (!(fAmt > 0)) { setErr(trD('exp.amtReq')); return; }
-    if (!scoped && !fFleet) { setErr(trD('run.errFleet')); return; }
-    // A typo-sized expense must be confirmed once before it saves (the server still hard-rejects > 1B).
-    if (fAmt > WARN_AMOUNT && !bigOk) { setBigOk(true); return; }
-    setSaving(true); setErr('');
-    const cat = (fCat || '').trim() || 'lainnya';
-    const photoId = fPhoto && fPhoto.ref ? fPhoto.ref : undefined;
-    window.API.distribusi.expenses.create({ date, fleet: fFleet || undefined, amount: fAmt, category: cat, note: (fNote || '').trim() || undefined, photoId })
-      .then(() => { setSaving(false); setView('list'); flash(trD('exp.saved')); reload(); if (onChanged) onChanged(); })
-      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
-  };
-  const commitVoid = () => {
-    if (!voidRow || saving) return;
-    if (!(voidReason || '').trim()) { setErr(trD('exp.reasonReq')); return; }
-    setSaving(true); setErr('');
-    window.API.distribusi.expenses.void(voidRow.id, { reason: voidReason.trim() })
-      .then(() => { setSaving(false); setVoidRow(null); flash(trD('exp.voided')); reload(); if (onChanged) onChanged(); })
-      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
-  };
-  const active = (rows || []).filter((r) => r.status === 'active');
-  const total = active.reduce((s, r) => s + r.amount, 0);
-  const catCustom = !cats.includes(fCat);
-
-  // ── FORM — identical shell/flow to the new-transaction form (card + summary, DateField, chips,
-  // rupiah amount, note, attachment, full-width submit + footer hint). ──
-  if (view === 'form') {
-    return (
-      <div className="dist-dash screen-enter">
-        <button type="button" className="dist-back" onClick={() => setView('list')}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backList')}</button>
-        <div className="dist-form-wrap">
-          <div className="card dist-form">
-            {!scoped && (<>
-              <label className="fld-label" style={{ marginTop: 0 }}>{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <select className="fld" value={fFleet} onChange={(e) => setFFleet(e.target.value)}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
-            </>)}
-
-            {/* Category — chips like the payment-method chips, not a dropdown */}
-            <label className="fld-label" style={scoped ? { marginTop: 0 } : undefined}>{trD('exp.category')}</label>
-            <div className="exp-cat-chips">
-              {cats.map((c) => <button key={c} type="button" className={`cat-chip ${fCat === c ? 'on' : ''}`} onClick={() => setFCat(c)}>{catLabel(c)}</button>)}
-              <button type="button" className={`cat-chip ${catCustom ? 'on' : ''}`} onClick={() => setFCat(catCustom ? 'bensin' : '')}>{trD('exp.catCustom')}</button>
-            </div>
-            {catCustom && <input className="fld" style={{ marginTop: 8 }} value={fCat} placeholder={trD('exp.catOther')} onChange={(e) => setFCat(e.target.value)} />}
-
-            <div className="dist-form-row">
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-                {/* Free typing; rupiah thousands-format applied on blur (same behaviour as the txn amount). */}
-                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={amtFocus ? fAmount : (fAmt ? fAmt.toLocaleString('id-ID') : '')} placeholder="0" onFocus={() => setAmtFocus(true)} onBlur={() => setAmtFocus(false)} onChange={(e) => { setFAmount(e.target.value.replace(/[^0-9]/g, '')); setBigOk(false); }} /></div>
-              </div>
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('dist.fDate')}</label>
-                <DP.DateField value={date} onChange={setDate} max={today} />
-              </div>
-            </div>
-
-            <label className="fld-label">{trD('exp.note')}</label>
-            <input className="fld" value={fNote} maxLength={300} placeholder={trD('exp.notePh')} onChange={(e) => setFNote(e.target.value)} />
-
-            <label className="fld-label">{trD('exp.photo')}</label>
-            <UI.FileAttach value={fPhoto} onChange={setFPhoto} camera accept="image/*" label={trD('exp.photoAdd')} />
-
-            {fAmt > WARN_AMOUNT && <div className={`dist-amt-warn${bigOk ? ' on' : ''}`}><IconInvoice s={14} />{bigOk ? trD('dist.amtConfirm', { amt: rpFull(fAmt) }) : trD('dist.amtWarn', { amt: rpFull(fAmt) })}</div>}
-            {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
-            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={saving || !(fAmt > 0)} onClick={commitAdd}>{saving ? '…' : (fAmt > WARN_AMOUNT && bigOk) ? trD('dist.amtConfirmYes') : trD('exp.save')}</button>
-            <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('exp.formNote')}</div>
-          </div>
-
-          <div className="card dist-form-sum">
-            <div className="dist-fs-t">{trD('dist.summary')}</div>
-            <div className="dist-fs-line"><span>{catLabel(fCat || 'lainnya')}</span><b>{rpFull(fAmt)}</b></div>
-            <div className="dist-fs-total"><span>{trD('dist.total')}</span><b className="tnum">{rpFull(fAmt)}</b></div>
-            <div className="dist-fs-note"><IconCoinOut s={13} />{trD('exp.sumNote')}</div>
-          </div>
-        </div>
-        {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
-      </div>
-    );
-  }
-
-  // ── LIST ──
-  return (
-    <div className="dist-dash screen-enter">
-      <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
-      <div className="dist-tx-toolbar">
-        <div style={{ minWidth: 180 }}><DP.DateField value={date} onChange={setDate} max={today} /></div>
-        <div style={{ flex: 1 }} />
-        <button type="button" className="btn btn-primary exp-add-btn" onClick={openAdd}><IconPlus s={16} />{trD('exp.addT')}</button>
-      </div>
-
-      {/* Prominent running total so staff know how much they've spent today. */}
-      <div className="card exp-total-card">
-        <div className="exp-total-lbl"><IconCoinOut s={15} />{trD('exp.totalToday')}</div>
-        <div className="tnum exp-total-big">{rpFull(total)}</div>
-        <div className="exp-total-meta">{numX(active.length)} {trD('exp.itemWord')} · {date}</div>
-      </div>
-
-      <div className="card dist-card">
-        <div className="dist-card-head"><div className="sec-title"><IconCoinOut s={15} /> {trD('exp.title')}</div></div>
-        {rows === null ? <div className="dist-empty">{trD('common.loading') || '…'}</div>
-          : rows.length === 0 ? <div className="dist-empty">{trD('exp.none')}</div>
-          : (
-            <div className="exp-list">
-              {rows.map((r) => {
-                const voided = r.status === 'void';
-                return (
-                  <div key={r.id} className={`exp-row ${voided ? 'is-void' : ''}`}>
-                    {r.photoId ? <LocThumb photoId={r.photoId} onView={() => viewPhoto(r.photoId)} /> : <div className="exp-nophoto"><IconCoinOut s={16} /></div>}
-                    <div className="exp-mid">
-                      <div className="exp-line1"><span className={`exp-cat ${'c-' + r.category}`}>{catLabel(r.category)}</span>{r.fleetId ? <span className="exp-fleet">{r.fleetId}</span> : null}{voided && <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>}</div>
-                      <div className="exp-sub">{r.createdByName ? r.createdByName + ' · ' : ''}{fmtDT(r.createdAt)}{r.note ? ' · ' + r.note : ''}{voided && r.voidReason ? ' · ' + trD('exp.voidReason') + ': ' + r.voidReason : ''}</div>
-                    </div>
-                    <div className="exp-right">
-                      <div className={`tnum exp-amt ${voided ? 'struck' : ''}`}>{rpFull(r.amount)}</div>
-                      {!voided && <button type="button" className="dist-link danger exp-void" onClick={() => openVoid(r)}><IconClose s={12} />{trD('exp.void')}</button>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        <div className="dist-fieldhint" style={{ marginTop: 8 }}><IconClock s={12} />{trD('exp.hint')}</div>
-      </div>
-
-      {voidRow && (
-        <div className="modal-scrim" onClick={() => setVoidRow(null)} style={{ zIndex: 200 }}>
-          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('exp.voidT')}</div><button className="jp-icon" onClick={() => setVoidRow(null)}><IconClose s={18} /></button></div>
-            <div className="modal-body">
-              <div className="dist-infobox"><IconClose s={16} /><span>{trD('exp.voidInfo')}</span></div>
-              <div className="exp-void-sum"><span className={`exp-cat ${'c-' + voidRow.category}`}>{catLabel(voidRow.category)}</span> · <b>{rpFull(voidRow.amount)}</b>{voidRow.note ? ' · ' + voidRow.note : ''}</div>
-              <label className="fld-label">{trD('exp.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={voidReason} placeholder={trD('exp.voidReasonPh')} onChange={(e) => setVoidReason(e.target.value)} />
-              {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
-            </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoidRow(null)}>{trD('dist.cancel')}</button><button className="btn btn-danger" disabled={saving} onClick={commitVoid}>{saving ? '…' : trD('exp.void')}</button></div>
-          </div>
-        </div>
-      )}
-      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
-    </div>
-  );
-}
 
 function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
@@ -3634,4 +3624,4 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, Expenses: DistExpenses, DeliveryReport: DistDeliveryReport, LossReport: DistLossReport };
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, DeliveryReport: DistDeliveryReport, LossReport: DistLossReport };

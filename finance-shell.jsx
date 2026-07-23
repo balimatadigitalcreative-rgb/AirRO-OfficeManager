@@ -3,6 +3,11 @@ const { useState: uSh, useEffect: uEh, useMemo: uMh, useRef: uRf } = React;
 const tr = (k, v) => window.t(k, v);
 function Ish(name, props) { const C = window[name]; return C ? <C {...props} /> : null; }
 
+// Retired screen ids → their new home, so old bookmarks/history entries still resolve. `dist-expenses`
+// became a filter chip inside the Transaksi screen (nav item removed), so its deeplink lands there.
+const SCREEN_ALIAS = { 'dist-expenses': 'dist-transactions' };
+const normId = (id) => SCREEN_ALIAS[id] || id;
+
 function navForRole(p, role) {
   // User & role administration follows the `manageUsers` CAPABILITY only — never role===.
   // Owner is configurable like anyone else; the server's lockout guard guarantees at least
@@ -34,9 +39,11 @@ function navForRole(p, role) {
   [
     { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', caps: ['distribusiDashboard'] },
     { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', caps: ['distribusiCustomers'] },
-    { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi'] },
+    // Pengeluaran (field expenses) now lives INSIDE the Transaksi screen (its own filter chip + inline
+    // form), so it no longer has a sidebar item. distribusiExpense is added here so an expense-only
+    // user still reaches the host screen; #dist-expenses deeplinks are redirected here (see normId).
+    { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi', 'distribusiExpense'] },
     { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
-    { id: 'dist-expenses', label: tr('nav.distExpenses'), icon: 'IconCoinOut', caps: ['distribusiExpense'] },
     { id: 'dist-delivery-report', label: tr('nav.distDeliveryReport'), icon: 'IconShield', caps: ['distribusiPengirimanReport'] },
     // INTERNAL loss report (Kerugian / Uang Tidak Diterima). Same owner/GM-tier cap as the action
     // that creates the rows; never customer-facing.
@@ -221,7 +228,8 @@ function FApp() {
   // Change screen + record it in history. Only ids in NAV (mirrors go()); pushing the same
   // screen is skipped so Back never lands on a duplicate. `replace` (login / perm-correction)
   // rewrites the entry instead of adding one, so Back can't return to a transient state.
-  const navigate = (id, opts) => {
+  const navigate = (rawId, opts) => {
+    const id = normId(rawId);   // retired ids (e.g. dist-expenses) resolve to their new home
     const replace = !!(opts && opts.replace);
     if (!navIdsRef.current.includes(id)) return;
     setDrawer(false);
@@ -269,7 +277,7 @@ function FApp() {
         return;
       }
       const st = e.state || {};
-      const want = st.screen || location.hash.slice(1);
+      const want = normId(st.screen || location.hash.slice(1));
       const ids = navIdsRef.current;
       const id = ids.includes(want) ? want : ids[0];
       if (!id) return;
@@ -290,7 +298,7 @@ function FApp() {
     const ids = navIdsRef.current;
     if (!ids.length) return;
     bootedRef.current = true;
-    const fromHash = location.hash.slice(1);
+    const fromHash = normId(location.hash.slice(1));
     const target = ids.includes(fromHash) ? fromHash : (ids.includes(screenRef.current) ? screenRef.current : ids[0]);
     if (target !== screenRef.current) setScreen(target);
     history.replaceState({ screen: target }, '', '#' + target);
@@ -1331,12 +1339,12 @@ function FApp() {
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onQuickInput={() => { go('dist-transactions', !p.distribusiInput); if (p.distribusiInput) setDistFormTick((t) => t + 1); }} onOpenCustomers={() => go('dist-customers', !p.distribusi)} />
           )}
-          {screen === 'dist-transactions' && (p.distribusiInput || p.distribusiKoreksi) && (
+          {screen === 'dist-transactions' && (p.distribusiInput || p.distribusiKoreksi || p.distribusiExpense) && (
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canHardDelete={!!p.distribusiHardDelete} canArchive={!!p.distribusiLegacyImport} canExpense={!!p.distribusiExpense} userName={user && user.name}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
-              onGoExpense={() => go('dist-expenses')} onChanged={() => setDistTick((t) => t + 1)} />
+              onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canDelete={!!p.distribusiCustomerDelete}
@@ -1350,11 +1358,7 @@ function FApp() {
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen === 'dist-expenses' && p.distribusiExpense && (
-            <DIST.Expenses refreshKey={distTick} today={FIN.TODAY}
-              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
-              onChanged={() => setDistTick((t) => t + 1)} />
-          )}
+          {/* Pengeluaran (field expenses) moved into the Transaksi screen — no standalone route. */}
           {screen === 'dist-delivery-report' && p.distribusiPengirimanReport && (
             <DIST.DeliveryReport refreshKey={distTick} today={FIN.TODAY}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
@@ -1376,7 +1380,7 @@ function FApp() {
           {screen === 'dist-audit' && p.distribusiAudit && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-expenses', 'dist-delivery-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'gudang' && p.gudangView && (
             <GUDANG.Dept refreshKey={distTick} canAddStock={!!p.gudangAddStock} canKoreksi={!!p.gudangKoreksi} canBuffer={!!p.gudangBuffer}
