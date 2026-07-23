@@ -203,8 +203,12 @@
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),
       setOpeningStock: (data) => req('POST', '/distribusi/gallon/opening', data),   // { qty, fleet?, reason }
       resetGallon: (data) => req('POST', '/distribusi/gallon/reset', data),          // { mode:balanced|purge, fleet?, target?, confirm?, reason }
-      summary: (date, fleet) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/dashboard/summary' + (p.length ? '?' + p.join('&') : '')); },
+      // opts: { period?, dateFrom?, dateTo?, fleet? }. Default (no opts) = today only. History
+      // periods require the distribusiDashHistory cap (server-enforced — a non-today window 403s).
+      summary: (opts) => { const o = opts || {}; const p = []; ['period', 'dateFrom', 'dateTo'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/dashboard/summary' + (p.length ? '?' + p.join('&') : '')); },
       billingReminders: (fleet) => req('GET', '/distribusi/billing-reminders' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
+      // Laporan Pengiriman (delivery report) — read-only, cap distribusiPengirimanReport.
+      deliveryReport: (opts) => { const o = opts || {}; const p = []; ['period', 'date', 'dateFrom', 'dateTo'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/reports/delivery' + (p.length ? '?' + p.join('&') : '')); },
     },
     // Gudang (warehouse) — ledger-based inventory.
     gudang: {

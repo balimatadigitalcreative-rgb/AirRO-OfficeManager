@@ -103,7 +103,9 @@ const listTxnQuery = z.object({
   fleet: z.string().max(60).optional(),
 });
 const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan']).optional(), limit: z.coerce.number().int().positive().max(2000).optional(), fleet: z.string().max(60).optional() });
-const summaryQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
+const summaryQuery = z.object({ date: DATE.optional(), period: z.enum(['today', 'week', 'month', 'range']).optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
+// Delivery report (Laporan Pengiriman) — a date or range + fleet. Read-only, server-cap-gated.
+const deliveryReportQuery = z.object({ period: z.enum(['today', 'week', 'month', 'range']).optional(), date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
 const cashIntegQuery = z.object({ dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
 const boardQuery = z.object({ date: DATE, fleet: z.string().max(60).optional() });
 const orderSchema = z.object({ customerId: z.string().min(1), date: DATE, qty: z.number().int().nonnegative().optional(), note: z.string().max(300).optional() });
@@ -202,7 +204,8 @@ const getInvoice = asyncHandler(async (req, res) => res.json({ data: await servi
 
 // ── audit + dashboard ──
 const listAudit = asyncHandler(async (req, res) => res.json(await service.listAudit(req.query, req.user)));
-const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.query.date, req.user, req.query.fleet) }));
+const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await service.dashboardSummary(req.user, req.query) }));
+const deliveryReport = asyncHandler(async (req, res) => res.json({ data: await service.deliveryReport(req.user, req.query) }));
 const billingReminders = asyncHandler(async (req, res) => res.json(await service.billingReminders(req.user, req.query.fleet, req.query.date)));
 const cashIntegration = asyncHandler(async (req, res) => res.json({ data: await service.cashIntegration(req.user, req.query) }));
 
@@ -252,6 +255,6 @@ module.exports = {
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
-  listExpenses, createExpense, voidExpense, expenseCats,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

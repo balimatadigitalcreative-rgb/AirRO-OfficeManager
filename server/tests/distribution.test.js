@@ -328,8 +328,12 @@ describe('Distribusi — per-fleet data separation (server-enforced)', () => {
     // dashboard customer count honours the fleet filter
     const sB = await request(app).get('/api/v1/distribusi/dashboard/summary?date=2026-08-01&fleet=Biru').set(auth(owner));
     expect(sB.body.data.customers).toBe(1);   // only Cust Biru carries the Biru fleet
-    const sScopedB = await request(app).get('/api/v1/distribusi/dashboard/summary?date=2026-08-01').set(auth(staffBiru));
+    // scoped Biru staff (no distribusiDashHistory) → TODAY is allowed and shows only its fleet…
+    const sScopedB = await request(app).get('/api/v1/distribusi/dashboard/summary').set(auth(staffBiru));
+    expect(sScopedB.status).toBe(200);
     expect(sScopedB.body.data.customers).toBe(1);   // scoped Biru staff sees only its fleet
+    // …but a non-today date is REJECTED server-side (history requires the cap the staff lacks).
+    expect((await request(app).get('/api/v1/distribusi/dashboard/summary?date=2026-08-01').set(auth(staffBiru))).status).toBe(403);
   });
 });
 

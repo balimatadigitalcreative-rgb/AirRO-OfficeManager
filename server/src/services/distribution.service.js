@@ -52,6 +52,10 @@ const SEED_TYPES = [
   { id: 'bulk', label: 'Bulk', sortOrder: 3 },
 ];
 const int = (v) => Math.max(0, Math.round(+v || 0));
+// A pelunasan (bon settlement) is a bank TRANSFER — not field cash — when its note ends with the
+// " · Transfer" tag written at pay time (see createTransaction); otherwise it counts as cash. Used
+// by the dashboard cash split and the delivery report so both agree on what a driver owes in cash.
+const isTransferPayment = (r) => { if (r.method !== 'pelunasan') return false; const parts = String(r.note || '').split(' · '); return parts[parts.length - 1].trim().toLowerCase() === 'transfer'; };
 const cleanDays = (v) => { const a = Array.isArray(v) ? v : []; return DAY_CODES.filter((d) => a.includes(d)); };   // dedup + canonical order
 
 // ── Fleet scope (per-user data separation) ──────────────────────────────────
@@ -969,62 +973,74 @@ async function billingReminders(user, qFleet, dateStr) {
 // Everything the Distribusi dashboard needs in ONE call (NOT posted to AirRO cash —
 // informational): today's KPIs, a 7-day stacked series (lunas vs bon), the most
 // recent transactions (with a corrected flag), and the top customers in the window.
-async function dashboardSummary(date, user, qFleet) {
-  const day = date || new Date().toISOString().slice(0, 10);
-  const from = addDays(day, -6);
+// Resolve the dashboard/report window [from,to] from a period request, and ENFORCE the history cap
+// server-side: without `distribusiDashHistory` a user may ONLY see today — any other window is 403,
+// so a normal user can't craft a request for last month. Returns { from, to, period, canHistory }.
+function resolveDashWindow(user, query) {
+  const q = query || {};
+  const today = todayISO();
+  const perms = resolvePerms(user.role, user.permissions);
+  const canHistory = !!perms.distribusiDashHistory;
+  let from = today, to = today, period = 'today';
+  const p = q.period || (q.date ? 'range' : (q.dateFrom || q.dateTo ? 'range' : 'today'));
+  if (q.date && !q.period && !q.dateFrom && !q.dateTo) { from = to = q.date; period = (q.date === today ? 'today' : 'range'); }
+  else if (p === 'today') { from = to = today; period = 'today'; }
+  else if (p === 'week') { from = addDays(today, -6); to = today; period = 'week'; }
+  else if (p === 'month') { from = today.slice(0, 8) + '01'; to = today; period = 'month'; }
+  else if (p === 'range') {
+    from = q.dateFrom || q.date || today; to = q.dateTo || q.date || today; period = 'range';
+    if (from > to) { const t = from; from = to; to = t; }
+  }
+  if (!(from === today && to === today) && !canHistory) {
+    throw ApiError.forbidden('Perlu izin "Lihat Periode Sebelumnya" untuk melihat periode selain hari ini.');
+  }
+  return { from, to, period, canHistory };
+}
+
+async function dashboardSummary(user, query) {
+  const q = query || {};
+  const { from, to, period, canHistory } = resolveDashWindow(user, q);
+  const qFleet = q.fleet;
   const fleetFilter = fleetWhere(user, 'fleetId', qFleet);
   const rows = await prisma.distTransaction.findMany({
-    where: { txnDate: { gte: from, lte: day }, ...fleetFilter, ...LIVE_TXN },
+    where: { txnDate: { gte: from, lte: to }, ...fleetFilter, ...LIVE_TXN },
     include: { customer: { select: { name: true, type: true } }, corrections: { select: { kind: true, deltaAmount: true, active: true } } },
     orderBy: { createdAt: 'desc' },
   });
   // Amounts follow the EFFECTIVE (adjusted) value so retroactive price changes are reflected.
   const effOf = (r) => r.amount + priceDelta(r.corrections);
-
-  // ── PERIOD (last 7 days) headline KPIs — computed from the SAME `rows` that power the
-  // chart, the recent list and the top-customers list, so the headline numbers can never
-  // disagree with what is shown right below them. Gallons sold = Σ qty; Money in = cash
-  // actually received in the window (lunas sales + pelunasan payments). ──
   // Money-in splits into CASH vs TRANSFER. Delivery staff hand over CASH in the field, so this is
   // what a driver must physically deposit: a `lunas` sale is always cash, and a `pelunasan` (bon
   // settlement) is cash UNLESS it was paid by bank transfer — recorded as the trailing " · Transfer"
   // tag on the note at pay time (see createTransaction). Transfers land straight in the company
   // account and must NOT count toward the cash owed. Older/untagged pelunasan default to cash (safe).
-  const payTag = (r) => { const parts = String(r.note || '').split(' · '); return parts[parts.length - 1].trim().toLowerCase(); };
-  const isTransferPay = (r) => r.method === 'pelunasan' && payTag(r) === 'transfer';
-  // moneyIn amount of a row (0 for bon/other), and whether it is a transfer.
+  const isTransferPay = isTransferPayment;   // shared module helper (see top): pelunasan · Transfer
   const moneyInOf = (r) => (r.method === 'lunas' ? effOf(r) : r.method === 'pelunasan' ? r.amount : 0);
 
-  let periodQty = 0, periodIn = 0, periodInCash = 0, periodInTransfer = 0;
+  // ── PERIOD KPIs — all computed over the SELECTED window [from,to] (default = today), from the
+  // SAME `rows` that power the chart, the recent list and the top-customers list, so the headline
+  // numbers can never disagree with what is shown right below them. ──
+  const byMethod = { lunas: 0, bon: 0, pelunasan: 0 };
+  let periodQty = 0, periodIn = 0, periodInCash = 0, periodInTransfer = 0, amount = 0, todayCash = 0, todayTransfer = 0;
+  const cashFleet = {};   // per-fleet CASH the driver should deposit (reconcile)
   rows.forEach((r) => {
     periodQty += r.qty;
-    const inc = moneyInOf(r);
-    if (!inc) return;
-    periodIn += inc;
-    if (isTransferPay(r)) periodInTransfer += inc; else periodInCash += inc;
-  });
-
-  // ── TODAY — powers the "today" rail + the "Transactions today" KPI. ──
-  const todayRows = rows.filter((r) => r.txnDate === day);
-  const byMethod = { lunas: 0, bon: 0, pelunasan: 0 };
-  let amount = 0, todayCash = 0, todayTransfer = 0;
-  const cashFleet = {};   // per-fleet CASH owed today (reconcile what each driver deposits)
-  todayRows.forEach((r) => {
     const e = effOf(r); amount += e;
     if (byMethod[r.method] != null) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e);
     const inc = moneyInOf(r);
     if (!inc) return;
+    periodIn += inc;
     const transfer = isTransferPay(r);
-    if (transfer) todayTransfer += inc; else todayCash += inc;
+    if (transfer) { periodInTransfer += inc; todayTransfer += inc; } else { periodInCash += inc; todayCash += inc; }
     const f = r.fleetId || '';
     const slot = cashFleet[f] || (cashFleet[f] = { fleetId: f, cash: 0, transfer: 0 });
     if (transfer) slot.transfer += inc; else slot.cash += inc;
   });
   const uangMasuk = byMethod.lunas + byMethod.pelunasan;   // == todayCash + todayTransfer
   const piutang = byMethod.bon;
-  // Field expenses paid in cash today reduce what the driver must physically deposit:
+  // Field expenses paid in cash over the window reduce what the driver must physically deposit:
   //   net cash to deposit = cash money-in − field expenses. Per-fleet too, for reconciliation.
-  const exp = await expensesForDate(user, day, qFleet);
+  const exp = await expensesForRange(user, from, to, qFleet);
   const todayExpense = exp.total;
   const todayNetCash = todayCash - todayExpense;
   const todayCashByFleet = Object.values(cashFleet).map((f) => {
@@ -1032,24 +1048,21 @@ async function dashboardSummary(date, user, qFleet) {
     return { ...f, expense: e, netCash: f.cash - e };
   }).sort((a, b) => b.netCash - a.netCash);
 
-  // ── RUNNING RECEIVABLES — outstanding bon across ALL time (fleet-scoped), computed
-  // per-customer and floored at 0, identical to the Customers screen's sisaBon so the
-  // dashboard total and the customer list can never disagree. This is a live balance,
-  // NOT a 7-day figure, so a bon booked last month still shows as a receivable today. ──
+  // ── RUNNING RECEIVABLES — outstanding bon across ALL time (fleet-scoped), floored at 0 per
+  // customer, identical to the Customers screen's sisaBon. A live balance, not a window figure. ──
   const allTxns = await prisma.distTransaction.findMany({ where: { ...fleetFilter, ...LIVE_TXN }, select: { id: true, customerId: true, amount: true, method: true } });
   const rcvDelta = await activePriceDeltas({});
   const bonByCust = {};
   allTxns.forEach((t) => { const c = bonByCust[t.customerId] || (bonByCust[t.customerId] = { bon: 0, pel: 0 }); if (t.method === 'bon') c.bon += t.amount + (rcvDelta[t.id] || 0); else if (t.method === 'pelunasan') c.pel += t.amount; });
   const receivable = Object.values(bonByCust).reduce((s, c) => s + Math.max(0, c.bon - c.pel), 0);
 
-  // 7-day stacked series: cash bucket (lunas + pelunasan) vs bon.
-  const last7 = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = addDays(day, -i);
-    let lunas = 0, bon = 0;
-    rows.filter((r) => r.txnDate === d).forEach((r) => { const e = effOf(r); if (r.method === 'bon') bon += e; else lunas += e; });
-    last7.push({ date: d, lunas, bon });
-  }
+  // Daily stacked series over the window (cash bucket = lunas + pelunasan, vs bon). For "today" it
+  // is a single bar; a longer period fills in each day. Capped so a huge custom range stays sane.
+  const byDay = {};
+  rows.forEach((r) => { const s = byDay[r.txnDate] || (byDay[r.txnDate] = { lunas: 0, bon: 0 }); const e = effOf(r); if (r.method === 'bon') s.bon += e; else s.lunas += e; });
+  const series = [];
+  let cur = from, guard = 0;
+  while (cur <= to && guard++ < 92) { const s = byDay[cur] || { lunas: 0, bon: 0 }; series.push({ date: cur, lunas: s.lunas, bon: s.bon }); cur = addDays(cur, 1); }
 
   // Most recent transactions across the window.
   const recent = rows.slice(0, 8).map((r) => { const adj = priceDelta(r.corrections); return {
@@ -1064,16 +1077,16 @@ async function dashboardSummary(date, user, qFleet) {
   const topCustomers = Object.values(byCust).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
   const customers = await prisma.customer.count({ where: fleetWhere(user, 'armada', qFleet) });
-  const reminders = (await billingReminders(user, qFleet, day)).data;   // "Perlu ditagih" list
+  const reminders = (await billingReminders(user, qFleet, to)).data;   // "Perlu ditagih" list
   return {
-    date: day, periodDays: 7,
-    periodQty, periodIn,            // last-7-days headline KPIs (same source as chart/recent/top)
+    date: to, from, to, period, canHistory, periodDays: series.length,
+    periodQty, periodIn,            // headline KPIs over the window (same source as chart/recent/top)
     periodInCash, periodInTransfer, // …split: cash driver deposits vs bank transfers (sum = periodIn)
     receivable,                     // all-time outstanding bon (running balance)
-    count: todayRows.length, amount, byMethod, uangMasuk, piutang,   // TODAY (rail + "Transactions today")
-    todayCash, todayTransfer, todayCashByFleet,   // TODAY money-in split + per-fleet cash to reconcile
-    todayExpense, todayNetCash,   // field expenses paid today + net cash to deposit (cash − expenses)
-    customers, last7, recent, topCustomers, reminders,
+    count: rows.length, amount, byMethod, uangMasuk, piutang,   // window txns + money-in
+    todayCash, todayTransfer, todayCashByFleet,   // money-in split + per-fleet cash to reconcile
+    todayExpense, todayNetCash,   // field expenses in the window + net cash to deposit (cash − expenses)
+    customers, last7: series, series, recent, topCustomers, reminders,
   };
 }
 
@@ -1641,7 +1654,11 @@ async function voidExpense(id, body, actor) {
 }
 // Σ active field expenses per fleet for a date, in the user's scope (drives dashboard net cash).
 async function expensesForDate(user, day, qFleet) {
-  const rows = await prisma.distExpense.findMany({ where: { date: day, status: 'active', ...fleetWhere(user, 'fleetId', qFleet) }, select: { fleetId: true, amount: true } });
+  return expensesForRange(user, day, day, qFleet);
+}
+// Σ active field expenses per fleet over a date range [from,to], in the user's scope.
+async function expensesForRange(user, from, to, qFleet) {
+  const rows = await prisma.distExpense.findMany({ where: { date: { gte: from, lte: to }, status: 'active', ...fleetWhere(user, 'fleetId', qFleet) }, select: { fleetId: true, amount: true } });
   let total = 0; const byFleet = {};
   rows.forEach((r) => { total += r.amount; byFleet[r.fleetId || ''] = (byFleet[r.fleetId || ''] || 0) + r.amount; });
   return { total, byFleet };
@@ -1663,6 +1680,74 @@ async function cashIntegration(user, query) {
   return { transactions: t.data.filter((x) => !x.legacy), customers: c.data, audit: a.data, expenses: e.data };
 }
 
+// ── LAPORAN PENGIRIMAN (delivery report) ─────────────────────────────────────────
+// A READ-ONLY per-fleet report over a day/range combining what already exists: rits (runs) with
+// their reconciliation, delivery stops (planned vs terkirim vs batal/ditunda + reasons), the daily
+// closeouts (notes/kendala), and the day's cash summary (tunai/transfer/field expenses/net cash).
+// Fleet scope + business-unit filtering apply (same fleetWhere as everything else). It NEVER writes.
+const dayRange = (query, today) => {
+  const q = query || {};
+  if (q.date) return { from: q.date, to: q.date, period: 'range' };
+  const p = q.period || (q.dateFrom || q.dateTo ? 'range' : 'today');
+  if (p === 'week') return { from: addDays(today, -6), to: today, period: 'week' };
+  if (p === 'month') return { from: today.slice(0, 8) + '01', to: today, period: 'month' };
+  if (p === 'range') { let f = q.dateFrom || today, t = q.dateTo || today; if (f > t) { const x = f; f = t; t = x; } return { from: f, to: t, period: 'range' }; }
+  return { from: today, to: today, period: 'today' };
+};
+async function deliveryReport(user, query) {
+  const { from, to, period } = dayRange(query, todayISO());
+  const qFleet = query.fleet;
+  const inRange = { gte: from, lte: to };
+  // 1) RUNS (rits) with effective figures + reconciliation
+  const runRows = await prisma.deliveryRun.findMany({ where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: [{ date: 'asc' }, { fleetId: 'asc' }, { runNo: 'asc' }] });
+  const runIds = runRows.map((r) => r.id);
+  const sold = await soldForRuns(runIds);
+  const runCorrs = await correctionsForRuns(runIds);
+  const runs = runRows.map((r) => runClient(r, sold[r.id] || 0, runCorrs[r.id] || []));
+  // 2) DELIVERY STOPS — planned vs terkirim vs batal/ditunda (+ reasons for the non-delivered)
+  const stopRows = await prisma.delivery.findMany({ where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, include: { customer: { select: { name: true } } }, orderBy: [{ date: 'asc' }, { seq: 'asc' }] });
+  // 3) CLOSEOUTS (notes / kendala)
+  const coRows = await prisma.deliveryCloseout.findMany({ where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { date: 'asc' } });
+  // 4) CASH — money-in split (tunai/transfer) + field expenses → net cash, per fleet
+  const txns = await prisma.distTransaction.findMany({ where: { txnDate: inRange, ...fleetWhere(user, 'fleetId', qFleet), ...LIVE_TXN }, include: { corrections: { select: { kind: true, deltaAmount: true, active: true } } } });
+  const exp = await prisma.distExpense.findMany({ where: { date: inRange, status: 'active', ...fleetWhere(user, 'fleetId', qFleet) }, select: { fleetId: true, amount: true } });
+
+  // Bucket everything by fleet.
+  const fleetMap = {};
+  const F = (id) => (fleetMap[id] || (fleetMap[id] = {
+    fleetId: id, runs: [], stops: { planned: 0, terkirim: 0, batal: 0, ditunda: 0, pending: 0 }, stopReasons: [],
+    closeouts: [], cash: { tunai: 0, transfer: 0, expense: 0, net: 0 },
+    runTotals: { out: 0, sold: 0, full: 0, empty: 0, diff: 0 },
+  }));
+  runs.forEach((r) => { const f = F(r.fleetId); f.runs.push(r); f.runTotals.out += r.gallonsOut; f.runTotals.sold += r.sold; f.runTotals.full += (r.status === 'closed' ? r.gallonsFullReturned : 0); f.runTotals.empty += (r.status === 'closed' ? r.gallonsEmptyReturned : 0); f.runTotals.diff += (r.diff || 0); });
+  stopRows.forEach((s) => {
+    const f = F(s.fleetId || '');
+    f.stops.planned += 1;
+    if (f.stops[s.status] != null) f.stops[s.status] += 1;
+    if (s.status === 'batal' || s.status === 'ditunda' || s.status === 'pending') {
+      f.stopReasons.push({ date: s.date, customerName: s.customer ? s.customer.name : '', status: s.status, reason: s.pendingReason || s.note || '' });
+    }
+  });
+  coRows.forEach((c) => { F(c.fleetId || '').closeouts.push(closeoutClient(c)); });
+  txns.forEach((t) => {
+    const inc = t.method === 'lunas' ? (t.amount + priceDelta(t.corrections)) : t.method === 'pelunasan' ? t.amount : 0;
+    if (!inc) return;
+    const f = F(t.fleetId || '');
+    if (isTransferPayment(t)) f.cash.transfer += inc; else f.cash.tunai += inc;
+  });
+  exp.forEach((e) => { F(e.fleetId || '').cash.expense += e.amount; });
+  Object.values(fleetMap).forEach((f) => { f.cash.net = f.cash.tunai - f.cash.expense; });
+
+  const fleets = Object.values(fleetMap).sort((a, b) => (a.fleetId || '~').localeCompare(b.fleetId || '~'));
+  // Combined totals across fleets.
+  const totals = {
+    runs: fleets.reduce((a, f) => ({ out: a.out + f.runTotals.out, sold: a.sold + f.runTotals.sold, full: a.full + f.runTotals.full, empty: a.empty + f.runTotals.empty, diff: a.diff + f.runTotals.diff }), { out: 0, sold: 0, full: 0, empty: 0, diff: 0 }),
+    stops: fleets.reduce((a, f) => ({ planned: a.planned + f.stops.planned, terkirim: a.terkirim + f.stops.terkirim, batal: a.batal + f.stops.batal, ditunda: a.ditunda + f.stops.ditunda, pending: a.pending + f.stops.pending }), { planned: 0, terkirim: 0, batal: 0, ditunda: 0, pending: 0 }),
+    cash: fleets.reduce((a, f) => ({ tunai: a.tunai + f.cash.tunai, transfer: a.transfer + f.cash.transfer, expense: a.expense + f.cash.expense, net: a.net + f.cash.net }), { tunai: 0, transfer: 0, expense: 0, net: 0 }),
+  };
+  return { from, to, period, fleets, totals };
+}
+
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
@@ -1670,7 +1755,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, hardDeleteTransaction, listAudit, dashboardSummary,
-  createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
+  createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,

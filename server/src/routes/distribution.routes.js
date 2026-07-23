@@ -81,6 +81,9 @@ router.post('/customers/:id/invoices', requireAnyCap(['distribusiInput', 'distri
 router.get('/audit', requireCap('distribusiAudit'), validate({ query: ctrl.schemas.auditQuery }), ctrl.listAudit);
 router.get('/dashboard/summary', requireCap('distribusiDashboard'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.dashboardSummary);
 router.get('/billing-reminders', requireCap('distribusiDashboard'), validate({ query: ctrl.schemas.summaryQuery }), ctrl.billingReminders);
+// Laporan Pengiriman (delivery report) — read-only per-day/range report per fleet (rits + stops +
+// closeout + cash reconciliation). Its own cap; fleet scope + business-unit filtering apply.
+router.get('/reports/delivery', requireCap('distribusiPengirimanReport'), validate({ query: ctrl.schemas.deliveryReportQuery }), ctrl.deliveryReport);
 
 // ── Cash Integration — its own capability. Composes the datasets the view needs
 // (transactions in range + customers + adjustment audit) behind a single gate. ──

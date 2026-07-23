@@ -261,25 +261,51 @@ function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero, sub
   );
 }
 
-function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCustomers, today, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInput, onOpenCustomers, today, fleetScope, fleet, distFleet, setDistFleet }) {
   const [sum, setSum] = uSx(null);
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
   const [bump, setBump] = uSx(0);
+  const [period, setPeriod] = uSx('today');   // today | week | month | range (history-cap only)
+  const [rFrom, setRFrom] = uSx(today);       // custom-range endpoints
+  const [rTo, setRTo] = uSx(today);
   const [payCust, setPayCust] = uSx(null);   // Perlu-ditagih → catat Pelunasan
   const [invCust, setInvCust] = uSx(null);    // Perlu-ditagih → buat Invoice (fetched detail)
   const [invView, setInvView] = uSx(null);
   const ef = effFleet(fleetScope, distFleet);
+  // Without the history cap the dashboard is LOCKED to today (the server rejects anything else too).
+  const per = canHistory ? period : 'today';
   const refetch = () => setBump((b) => b + 1);
   const openInvoice = (id) => { window.API.distribusi.customers.get(id).then((r) => setInvCust(r.data)).catch(() => {}); };
   const reasonLabel = (x) => x.type === 'bon' ? trD('dist.rlBon') : x.type === 'gallon' ? trD('dist.rlGallon', { n: x.value }) : x.type === 'overdue' ? trD('dist.rlOverdue', { n: x.days }) : x.type === 'dueDay' ? trD('dist.rlDueDay', { n: x.day }) : x.type === 'weekly' ? trD('dist.rlWeekly', { d: x.weekday }) : x.type;
   uEx(() => {
     let live = true; setErr(false);
     if (!(window.API && window.API.distribusi)) { setLoading(false); setErr(true); return; }
-    window.API.distribusi.summary(today, ef).then((r) => { if (live) { setSum(r.data); setLoading(false); } })
+    const opts = per === 'range' ? { period: 'range', dateFrom: rFrom, dateTo: rTo, fleet: ef } : { period: per, fleet: ef };
+    window.API.distribusi.summary(opts).then((r) => { if (live) { setSum(r.data); setLoading(false); } })
       .catch(() => { if (live) { setErr(true); setLoading(false); } });
     return () => { live = false; };
-  }, [refreshKey, today, ef, bump]);
+  }, [refreshKey, today, ef, bump, per, rFrom, rTo]);
+
+  const periodLabel = { today: trD('dist.perToday'), week: trD('dist.per7d'), month: trD('dist.perMonth'), range: trD('dist.perRange') }[per] || trD('dist.perToday');
+  const periodSelector = canHistory ? (
+    <div className="dist-period-bar">
+      <div className="dist-chips">
+        {[['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['range', trD('dist.perRange')]].map(([k, l]) => (
+          <button key={k} type="button" className={`dist-chip ${per === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>
+        ))}
+      </div>
+      {per === 'range' && (
+        <div className="dist-period-range">
+          <DP.DateField value={rFrom} onChange={setRFrom} max={rTo || today} />
+          <span>–</span>
+          <DP.DateField value={rTo} onChange={setRTo} min={rFrom || undefined} max={today} />
+        </div>
+      )}
+    </div>
+  ) : (
+    <div className="dist-period-bar"><span className="dist-period-locked"><IconCalendar s={13} />{trD('dist.perTodayOnly')}</span></div>
+  );
 
   const fleetBar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   if (loading) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div></div>;
@@ -291,6 +317,7 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
   return (
     <div className="dist-dash screen-enter">
       {fleetBar}
+      {periodSelector}
       {staffMode && (
         <div className="dist-staff-banner"><span className="dist-staff-ic"><IconShield s={16} /></span><div><b>{trD('dist.staffMode')}</b><span>{trD('dist.staffModeSub')}</span></div></div>
       )}
@@ -298,11 +325,11 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
       <div className="dist-grid">
         <div className="dist-main">
           <div className="dist-kpis">
-            <Kpi hero icon="IconDrop" value={numX(sum.periodQty)} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={trD('dist.pill7d')} pillCls="hero" />
-            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpFull(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={trD('dist.pill7d')} pillCls="pos"
+            <Kpi hero icon="IconDrop" value={numX(sum.periodQty)} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={periodLabel} pillCls="hero" />
+            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpFull(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={periodLabel} pillCls="pos"
               sub={<><span className="dist-kpi-cash"><span className="dist-cash-dot cash" />{trD('dist.cashLbl')} {rpFull(sum.periodInCash || 0)}</span><span className="dist-kpi-cash"><span className="dist-cash-dot xfer" />{trD('dist.xferLbl')} {rpFull(sum.periodInTransfer || 0)}</span></>} />
             <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpFull(sum.receivable)} label={trD('dist.kpiBon')} pill={trD('dist.pillRunning')} pillCls="warn" />
-            <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={trD('dist.pillToday')} pillCls="blue" />
+            <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={periodLabel} pillCls="blue" />
           </div>
 
           {(sum.reminders || []).length > 0 && (
@@ -327,7 +354,7 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
 
           <div className="card dist-card">
             <div className="dist-card-head">
-              <div className="sec-title">{trD('dist.chart7')}</div>
+              <div className="sec-title">{trD('dist.chartTrend')} · {periodLabel}</div>
               <div className="dist-legend">
                 <span><span className="dot navy" />{trD('dist.lunas')}</span>
                 <span><span className="dot amber" />{trD('dist.bon')}</span>
@@ -362,7 +389,7 @@ function DistDashboard({ refreshKey, staffMode, canInput, onQuickInput, onOpenCu
 
         <div className="dist-rail">
           <div className="card dist-today-hero">
-            <div className="dist-th-top"><span>{trD('dist.today')}</span><span className="dist-th-count">{numX(sum.count)} {trD('dist.notaWord')}</span></div>
+            <div className="dist-th-top"><span>{per === 'today' ? trD('dist.today') : periodLabel}</span><span className="dist-th-count">{numX(sum.count)} {trD('dist.notaWord')}</span></div>
             <div className="dist-th-metrics">
               {/* Money-in, split so it's obvious which part is CASH the driver must deposit. */}
               <div>
@@ -3110,4 +3137,146 @@ function CloseoutModal({ date, fleet, pendingStops, onClose, onClosed }) {
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, Expenses: DistExpenses };
+// LAPORAN PENGIRIMAN (delivery report) — a READ-ONLY per-fleet report over a day/range combining
+// rits (runs) + reconciliation, delivery stops (planned vs terkirim vs batal/ditunda + reasons), the
+// daily closeout notes, and the cash summary (tunai/transfer/field expenses/net). Printable + CSV.
+// It never changes data; every endpoint it reads is server-cap-gated (distribusiPengirimanReport).
+function DistDeliveryReport({ refreshKey, today, fleetScope, fleet, distFleet, setDistFleet }) {
+  const [period, setPeriod] = uSx('today');
+  const [from, setFrom] = uSx(today);
+  const [to, setTo] = uSx(today);
+  const [rep, setRep] = uSx(null);
+  const [loading, setLoading] = uSx(true);
+  const [err, setErr] = uSx(false);
+  const [toast, setToast] = uSx('');
+  const ef = effFleet(fleetScope, distFleet);
+  uEx(() => {
+    let live = true; setLoading(true); setErr(false);
+    if (!(window.API && window.API.distribusi && window.API.distribusi.deliveryReport)) { setLoading(false); setErr(true); return; }
+    const opts = period === 'range' ? { period: 'range', dateFrom: from, dateTo: to, fleet: ef } : { period, fleet: ef };
+    window.API.distribusi.deliveryReport(opts).then((r) => { if (live) { setRep(r.data); setLoading(false); } }).catch(() => { if (live) { setErr(true); setLoading(false); } });
+    return () => { live = false; };
+  }, [refreshKey, ef, period, from, to]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+  const periods = [['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['range', trD('dist.perRange')]];
+  const stName = (s) => trD('dist.dstat_' + s) !== 'dist.dstat_' + s ? trD('dist.dstat_' + s) : s;
+
+  const exportCsv = () => {
+    if (!rep) return;
+    const rows = [[trD('rep.csvTitle'), rep.from + ' → ' + rep.to]];
+    (rep.fleets || []).forEach((f) => {
+      rows.push([]); rows.push(['ARMADA', f.fleetId || trD('dist.noFleet')]);
+      rows.push([trD('rep.rits'), trD('run.keluar'), trD('run.terjual'), trD('run.dikembalikan'), trD('run.kosong'), trD('run.selisih'), trD('run.status')]);
+      f.runs.forEach((r) => rows.push([trD('run.ritN', { n: r.runNo }), r.gallonsOut, r.sold, r.status === 'closed' ? r.gallonsFullReturned : '', r.status === 'closed' ? r.gallonsEmptyReturned : '', r.status === 'closed' ? r.diff : '', r.status]));
+      rows.push([trD('rep.stops'), trD('rep.planned'), trD('dist.dstat_terkirim'), trD('dist.dstat_batal'), trD('dist.dstat_ditunda')]);
+      rows.push(['', f.stops.planned, f.stops.terkirim, f.stops.batal, f.stops.ditunda + f.stops.pending]);
+      rows.push([trD('rep.cash'), trD('dist.cashLbl'), trD('dist.xferLbl'), trD('dist.fieldExpense'), trD('dist.netCash')]);
+      rows.push(['', f.cash.tunai, f.cash.transfer, f.cash.expense, f.cash.net]);
+    });
+    const csv = rows.map((r) => r.map((c) => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'laporan-pengiriman-' + rep.from + (rep.from !== rep.to ? '_' + rep.to : '') + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    flash(trD('rep.exported'));
+  };
+
+  const fleetBar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
+  const T = rep && rep.totals;
+  return (
+    <div className="dist-dash screen-enter dist-report">
+      <div className="no-print">{fleetBar}</div>
+      <div className="dist-tx-toolbar no-print">
+        <div className="dist-chips">{periods.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+        {period === 'range' && <div className="dist-period-range"><DP.DateField value={from} onChange={setFrom} max={to || today} /><span>–</span><DP.DateField value={to} onChange={setTo} min={from || undefined} max={today} /></div>}
+        <div style={{ flex: 1 }} />
+        <button type="button" className="btn btn-ghost" disabled={!rep} onClick={() => window.print()}><IconDownload s={14} />{trD('dist.print')}</button>
+        <button type="button" className="btn btn-ghost" disabled={!rep} onClick={exportCsv}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('rep.csv')}</button>
+      </div>
+
+      <div className="dist-report-head">
+        <div><b>{trD('rep.title')}</b><span>{rep ? (rep.from === rep.to ? rep.from : rep.from + ' → ' + rep.to) : '…'}</span></div>
+      </div>
+
+      {loading ? <div className="card"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div>
+        : err ? <div className="card"><div className="dist-empty">{trD('dist.loadErr')}</div></div>
+        : !rep || rep.fleets.length === 0 ? <div className="card"><div className="dist-empty">{trD('rep.none')}</div></div>
+        : (<>
+          {/* Combined totals across fleets */}
+          {rep.fleets.length > 1 && T && (
+            <div className="card dist-card rep-totals">
+              <div className="dist-card-head"><div className="sec-title">{trD('rep.combined')}</div></div>
+              <div className="rep-cashrow">
+                <div><span>{trD('dist.cashLbl')}</span><b className="amt-pos">{rpFull(T.cash.tunai)}</b></div>
+                <div><span>{trD('dist.xferLbl')}</span><b>{rpFull(T.cash.transfer)}</b></div>
+                <div><span>{trD('dist.fieldExpense')}</span><b className="amt-neg">−{rpFull(T.cash.expense)}</b></div>
+                <div className="rep-net"><span>{trD('dist.netCash')}</span><b>{rpFull(T.cash.net)}</b></div>
+              </div>
+              <div className="rep-runrow"><span>{trD('rep.rits')}: {trD('run.keluar')} {numX(T.runs.out)} · {trD('run.terjual')} {numX(T.runs.sold)} · {trD('run.kosong')} {numX(T.runs.empty)}</span><span>{trD('rep.stops')}: {numX(T.stops.terkirim)}/{numX(T.stops.planned)} {trD('dist.dstat_terkirim')}</span></div>
+            </div>
+          )}
+
+          {rep.fleets.map((f) => (
+            <div key={f.fleetId || '—'} className="card dist-card rep-fleet">
+              <div className="dist-card-head"><div className="sec-title"><IconTruck s={15} /> {f.fleetId || trD('dist.noFleet')}</div></div>
+
+              {/* Cash reconciliation */}
+              <div className="rep-cashrow">
+                <div><span>{trD('dist.cashLbl')}</span><b className="amt-pos">{rpFull(f.cash.tunai)}</b></div>
+                <div><span>{trD('dist.xferLbl')}</span><b>{rpFull(f.cash.transfer)}</b></div>
+                <div><span>{trD('dist.fieldExpense')}</span><b className="amt-neg">−{rpFull(f.cash.expense)}</b></div>
+                <div className="rep-net"><span>{trD('dist.netCash')}</span><b>{rpFull(f.cash.net)}</b></div>
+              </div>
+
+              {/* Rits */}
+              <div className="rep-sub">{trD('rep.rits')}</div>
+              {f.runs.length === 0 ? <div className="dist-empty sm">{trD('run.none')}</div> : (
+                <div className="run-table-wrap"><table className="run-table">
+                  <thead><tr><th>{trD('run.rit')}</th><th>{trD('dist.fDate')}</th><th className="num">{trD('run.keluar')}</th><th className="num">{trD('run.terjual')}</th><th className="num">{trD('run.dikembalikan')}</th><th className="num">{trD('run.kosong')}</th><th className="num">{trD('run.selisih')}</th><th>{trD('run.status')}</th><th>{trD('rep.who')}</th></tr></thead>
+                  <tbody>
+                    {f.runs.map((r) => (
+                      <tr key={r.id} className={r.status === 'closed' && r.diff !== 0 ? 'run-diff' : ''}>
+                        <td>{trD('run.ritN', { n: r.runNo })}{r.corrected ? <span className="run-corr-badge" title={trD('run.correctedTip')}>{trD('run.correctedTag')}</span> : null}</td>
+                        <td>{r.date}</td>
+                        <td className="num">{numX(r.gallonsOut)}</td>
+                        <td className="num">{numX(r.sold)}</td>
+                        <td className="num">{r.status === 'closed' ? numX(r.gallonsFullReturned) : '—'}</td>
+                        <td className="num">{r.status === 'closed' ? numX(r.gallonsEmptyReturned) : '—'}</td>
+                        <td className="num">{r.status === 'closed' ? (r.diff === 0 ? <span className="run-ok">0</span> : <span className="run-bad">{(r.diff > 0 ? '+' : '') + numX(r.diff)}</span>) : '—'}</td>
+                        <td>{r.status === 'closed' ? <span className="run-st closed">{trD('run.closed_')}</span> : <span className="run-st open">{trD('run.open')}</span>}</td>
+                        <td className="rep-who">{r.openedByName || '—'}{r.closedByName ? ' → ' + r.closedByName : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table></div>
+              )}
+
+              {/* Stops summary */}
+              <div className="rep-sub">{trD('rep.stops')}</div>
+              <div className="rep-stops">
+                <span className="rep-pill planned">{trD('rep.planned')} {numX(f.stops.planned)}</span>
+                <span className="rep-pill ok">{trD('dist.dstat_terkirim')} {numX(f.stops.terkirim)}</span>
+                <span className="rep-pill bad">{trD('dist.dstat_batal')} {numX(f.stops.batal)}</span>
+                <span className="rep-pill warn">{trD('dist.dstat_ditunda')} {numX(f.stops.ditunda + f.stops.pending)}</span>
+              </div>
+              {f.stopReasons.length > 0 && (
+                <div className="rep-reasons">
+                  {f.stopReasons.map((s, i) => <div key={i} className="rep-reason-row"><span className="rep-reason-cust">{s.customerName || '—'}</span><span className={`rep-pill sm ${s.status === 'batal' ? 'bad' : 'warn'}`}>{stName(s.status)}</span><span className="rep-reason-txt">{s.reason || '—'}{rep.from !== rep.to ? ' · ' + s.date : ''}</span></div>)}
+                </div>
+              )}
+
+              {/* Closeout notes / kendala */}
+              {f.closeouts.length > 0 && (<>
+                <div className="rep-sub">{trD('rep.closeout')}</div>
+                {f.closeouts.map((c) => (
+                  <div key={c.id} className="rep-closeout"><span className="rep-co-meta">{c.date} · {c.closedByName || '—'}{c.closedAt ? ' · ' + fmtDT(c.closedAt) : ''}</span><span className="rep-co-counts">{trD('dist.dstat_terkirim')} {numX(c.delivered)} · {trD('dist.dstat_ditunda')} {numX(c.pending)} · {trD('dist.dstat_batal')} {numX(c.cancelled)}</span>{c.generalNote ? <span className="rep-co-note">{c.generalNote}</span> : null}</div>
+                ))}
+              </>)}
+            </div>
+          ))}
+        </>)}
+      {toast && <div className="dist-toast no-print"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, Expenses: DistExpenses, DeliveryReport: DistDeliveryReport };

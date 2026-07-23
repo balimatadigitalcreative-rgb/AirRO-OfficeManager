@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
@@ -27,7 +27,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -192,9 +192,14 @@ function deriveDistribusiCaps(perms) {
   // Field-expense logging is a field-staff action, so it back-fills from the legacy combined
   // `distribusi` cap (a full-distribusi user keeps it) — same as input/koreksi/pengiriman.
   if (p.distribusiExpense === undefined) p.distribusiExpense = legacy;
+  // History access (view earlier dashboard periods) and the delivery report are OWNER/GM-tier
+  // reporting caps — NEVER derived from the legacy combined `distribusi` (a plain field user must
+  // not silently gain them). Only the explicit owner/gm seed or an admin toggle grants them.
+  if (p.distribusiDashHistory === undefined) p.distribusiDashHistory = false;
+  if (p.distribusiPengirimanReport === undefined) p.distribusiPengirimanReport = false;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport);
   return p;
 }
 
