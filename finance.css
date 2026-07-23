@@ -1176,6 +1176,9 @@ select.fld::-ms-expand { display: none; }
 .dist-datelocked { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--border); border-radius: 11px; padding: 0 14px; height: 46px; background: var(--card-soft); color: var(--text-mut); font-size: 13.5px; font-weight: 600; }
 .dist-datelocked span { display: inline-flex; align-items: center; gap: 8px; }
 .dist-hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+/* Absurd-amount warning shown before saving a transaction/expense (likely a qty/price typo). */
+.dist-amt-warn { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding: 9px 12px; border-radius: 10px; font-size: 12px; font-weight: 600; line-height: 1.4; color: var(--warn, #c2660c); background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn, #e59a4a); }
+.dist-amt-warn svg { flex-shrink: 0; margin-top: 1px; }
 /* Per-field help under an input + one-line legend above the gallon-flow row, so staff can't
    confuse "isi keluar" (filled out) with "kosong masuk" (empties in). Compact on mobile. */
 .dist-fieldhint { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; line-height: 1.35; color: var(--text-faint); margin-top: 5px; }

@@ -8,6 +8,9 @@ function IcX(name, props) { const C = window[name]; return C ? <C {...props} /> 
 // ambiguous compact form ("500rb"). Non-money counts (galon, txn count) use numX.
 const rpFull = (n) => (window.FIN && FIN.fmt ? FIN.fmt(n) : String(n));
 const numX = (n) => (n || 0).toLocaleString('id-ID');
+// Warn (client-side) before saving when a computed amount looks absurd — likely a typo in qty/price.
+// The server enforces a hard ceiling of Rp 1,000,000,000 per row; this softer warning fires earlier.
+const WARN_AMOUNT = 100000000;
 const DW_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 const METHOD_META = {
   lunas: { cls: 'lunas', label: 'dist.lunas' },
@@ -741,6 +744,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 
             <label className="fld-label">{trD('dist.fNote')}</label>
             <input className="fld" value={fNote} maxLength={300} placeholder={trD('dist.fNotePh')} onChange={(e) => setFNote(e.target.value)} />
+            {selCust && total > WARN_AMOUNT && <div className="dist-amt-warn"><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(total) })}</div>}
             {fErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{fErr}</div>}
             <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={!selCust} onClick={() => setConfirmOpen(true)}>{trD('dist.fSave')}</button>
             <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('dist.permanentNote')}</div>
@@ -760,6 +764,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               <span className="dist-confirm-ic"><IconLock s={24} /></span>
               <div className="dist-confirm-t">{trD('dist.confirmT')}</div>
               <div className="dist-confirm-s"><b>{selCust ? selCust.name : ''}</b> · {fQty} {trD('dist.galonUnit')} · {methodLabel(fMethod)} — <b>{rpFull(total)}</b>. {trD('dist.confirmS')}</div>
+              {total > WARN_AMOUNT && <div className="dist-amt-warn" style={{ margin: '0 auto 4px', maxWidth: 340 }}><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(total) })}</div>}
               <div className="dist-confirm-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setConfirmOpen(false)}>{trD('dist.cancel')}</button>
                 <button type="button" className="btn btn-primary" disabled={saving} onClick={commitTxn}>{saving ? '…' : trD('dist.confirmYes')}</button>
@@ -2970,6 +2975,7 @@ function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDist
             <label className="fld-label">{trD('exp.photo')}</label>
             <UI.FileAttach value={fPhoto} onChange={setFPhoto} camera accept="image/*" label={trD('exp.photoAdd')} />
 
+            {fAmt > WARN_AMOUNT && <div className="dist-amt-warn"><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(fAmt) })}</div>}
             {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
             <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={saving || !(fAmt > 0)} onClick={commitAdd}>{saving ? '…' : trD('exp.save')}</button>
             <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('exp.formNote')}</div>

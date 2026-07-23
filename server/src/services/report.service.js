@@ -16,8 +16,8 @@ async function summary({ dateFrom, dateTo } = {}) {
     prisma.entry.aggregate({ _sum: { amount: true }, _count: true, where: { ...where, type: 'income' } }),
     prisma.entry.aggregate({ _sum: { amount: true }, _count: true, where: { ...where, type: 'expense' } }),
   ]);
-  const revenue = income._sum.amount || 0;
-  const exp = expense._sum.amount || 0;
+  const revenue = Number(income._sum.amount || 0);   // _sum on a BigInt money column is BigInt → coerce
+  const exp = Number(expense._sum.amount || 0);
   const profit = revenue - exp;
   return {
     range: { dateFrom: dateFrom || null, dateTo: dateTo || null },
@@ -52,15 +52,16 @@ async function breakdown({ type = 'expense', dateFrom, dateTo } = {}) {
     where: { type, status: { not: 'Failed' }, ...dateWhere(dateFrom, dateTo) },
     _sum: { amount: true },
   });
-  const total = grouped.reduce((a, g) => a + (g._sum.amount || 0), 0);
+  const sumOf = (g) => Number(g._sum.amount || 0);   // groupBy _sum on a BigInt column is BigInt → coerce
+  const total = grouped.reduce((a, g) => a + sumOf(g), 0);
   return {
     type,
     total,
     categories: grouped
       .map((g) => ({
         category: g.categoryKey || 'Uncategorized',
-        value: g._sum.amount || 0,
-        pct: total ? +(((g._sum.amount || 0) / total) * 100).toFixed(1) : 0,
+        value: sumOf(g),
+        pct: total ? +((sumOf(g) / total) * 100).toFixed(1) : 0,
       }))
       .sort((a, b) => b.value - a.value),
   };

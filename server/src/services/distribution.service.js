@@ -13,6 +13,7 @@ const { normalizePhone } = require('../utils/phone');
 const { resolvePerms } = require('../config/permissions');
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
 const { resolveUnitId } = require('./businessUnit.service');   // business-unit label (defaults to 'air')
+const { resilientFindMany } = require('../lib/resilientFind');   // one bad row must not blank a whole list
 
 const METHODS = ['lunas', 'bon', 'pelunasan'];
 // Legacy (imported archive) transactions must NEVER touch any aggregate — KPIs, cash integration,
@@ -52,6 +53,13 @@ const SEED_TYPES = [
   { id: 'bulk', label: 'Bulk', sortOrder: 3 },
 ];
 const int = (v) => Math.max(0, Math.round(+v || 0));
+// Per-row money ceiling — a single transaction/price/expense above this is almost certainly a typo
+// (a mis-entered qty or price). Reject it server-side with a clear message so a bad row can never be
+// created again (this is what produced the 4.2-billion amount that broke the transaction list). One
+// billion rupiah per row is far above any real single delivery/expense.
+const MAX_ROW_AMOUNT = 1000000000;
+const overCeiling = (n) => Number(n) > MAX_ROW_AMOUNT;
+const ceilingMsg = 'Nominal terlalu besar (maks Rp 1.000.000.000 per baris) — periksa jumlah/harga, kemungkinan salah ketik.';
 // A pelunasan (bon settlement) is a bank TRANSFER — not field cash — when its note ends with the
 // " · Transfer" tag written at pay time (see createTransaction); otherwise it counts as cash. Used
 // by the dashboard cash split and the delivery report so both agree on what a driver owes in cash.
@@ -277,7 +285,7 @@ async function listCustomers(user, qFleet, status, filters) {
   // Denominator for "Menampilkan X dari Y": everything this user may see in the chosen
   // fleet, before any of the detailed criteria are applied.
   const total = await prisma.customer.count({ where: scopeWhere });
-  const rows = await prisma.customer.findMany({ where: { ...scopeWhere, ...activeWhere, ...customerFilterWhere(f) }, orderBy: { name: 'asc' } });
+  const rows = await resilientFindMany(prisma.customer, { where: { ...scopeWhere, ...activeWhere, ...customerFilterWhere(f) }, orderBy: { name: 'asc' } }, 'customers');
   const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...LIVE_TXN }, select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true } });
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const agg = {};
@@ -600,6 +608,7 @@ async function updatePrice(id, newPriceRaw, actor, scopeRaw) {
   if (!c) throw ApiError.notFound('Customer not found');
   if (!fleetAllows(actor, c.armada)) throw ApiError.notFound('Customer not found');   // out of scope
   const newPrice = int(newPriceRaw);
+  if (overCeiling(newPrice)) throw ApiError.badRequest(ceilingMsg, { newPrice });
   const oldPrice = c.masterPrice;
   const scope = PRICE_SCOPES.includes(scopeRaw) ? scopeRaw : null;   // null = option (a) new-only
   const snap = await actorSnap(actor);
@@ -681,10 +690,10 @@ async function listTransactions(q, user) {
   if (q.dateFrom || q.dateTo) { where.txnDate = {}; if (q.dateFrom) where.txnDate.gte = q.dateFrom; if (q.dateTo) where.txnDate.lte = q.dateTo; }
   if (q.customerId) where.customerId = q.customerId;
   if (q.method && METHODS.includes(q.method)) where.method = q.method;
-  const rows = await prisma.distTransaction.findMany({
+  const rows = await resilientFindMany(prisma.distTransaction, {
     where, orderBy: { createdAt: 'desc' },
     include: { customer: { select: { name: true, code: true, type: true } }, corrections: { orderBy: { createdAt: 'desc' } } },
-  });
+  }, 'transactions');
   // Expose the effective (adjusted) amount + flags so reports/Cash Integration follow the
   // new price while the original `amount` stays intact. Legacy (archive) rows are INCLUDED here so
   // the Transactions screen can show them with an "Arsip" badge/filter — the `legacy` flag on each
@@ -736,6 +745,7 @@ async function createTransaction(body, actor) {
   // PRICE LOCK: always the customer's current master_price — the client cannot set it.
   const unitPriceLocked = customer.masterPrice;
   const amount = qty * unitPriceLocked;
+  if (overCeiling(amount) || overCeiling(unitPriceLocked)) throw ApiError.badRequest(ceilingMsg, { amount, qty, unitPriceLocked });
   const snap = await actorSnap(actor);
   const deliveryRunId = await openRunIdFor(fleetId);   // tag the sale to the fleet's open rit (if any)
   const txn = await prisma.distTransaction.create({ data: {
@@ -770,6 +780,7 @@ async function createOpeningBon(customerId, body, actor) {
   if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');
   const amount = int(body.amount);
   if (amount <= 0) throw ApiError.badRequest('Nominal bon awal harus lebih dari 0.');
+  if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
   const note = String(body.note || '').trim();
   if (!note) throw ApiError.badRequest('Keterangan wajib diisi.');
   const txnDate = String(body.txnDate || '').trim();
@@ -909,7 +920,7 @@ async function listInvoices(customerId, user) {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!customer) throw ApiError.notFound('Customer not found');
   if (!fleetAllows(user, customer.armada)) throw ApiError.notFound('Customer not found');
-  const rows = await prisma.distInvoice.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' } });
+  const rows = await resilientFindMany(prisma.distInvoice, { where: { customerId }, orderBy: { createdAt: 'desc' } }, 'invoices');
   return { data: rows.map((r) => invoiceClient(r, customer)) };
 }
 async function getInvoice(id, user) {
@@ -1354,10 +1365,10 @@ async function deliveryBoard(user, date, qFleet) {
       create: { date, customerId: c.id, source: 'jadwal', fleetId: c.armada || '', status: 'pending', seq: 0 },
     });
   }
-  const rows = await prisma.delivery.findMany({
+  const rows = await resilientFindMany(prisma.delivery, {
     where: { date, ...fleetWhere(user, 'fleetId', qFleet) },
     include: { customer: true }, orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
-  });
+  }, 'deliveries');
   const bon = await bonMapFor([...new Set(rows.map((r) => r.customerId))]);
   const cos = await prisma.deliveryCloseout.findMany({ where: { date, ...fleetWhere(user, 'fleetId', qFleet) } });
   return { data: rows.map((r) => deliveryClient(r, bon[r.customerId])), closeouts: cos.map(closeoutClient) };
@@ -1615,7 +1626,7 @@ async function listExpenses(user, query) {
   if (q.date) where.date = q.date;
   if (q.dateFrom || q.dateTo) where.date = { ...(q.dateFrom ? { gte: q.dateFrom } : {}), ...(q.dateTo ? { lte: q.dateTo } : {}) };
   if (q.status === 'active' || q.status === 'void') where.status = q.status;
-  const rows = await prisma.distExpense.findMany({ where, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500 });
+  const rows = await resilientFindMany(prisma.distExpense, { where, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500 }, 'expenses');
   return { data: rows.map(expenseClient) };
 }
 async function createExpense(body, actor) {
@@ -1623,6 +1634,7 @@ async function createExpense(body, actor) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw ApiError.badRequest('Tanggal wajib diisi.');
   const amount = int(body.amount);
   if (amount <= 0) throw ApiError.badRequest('Nominal pengeluaran harus lebih dari 0.');
+  if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
   const fleetId = resolveWriteFleet(actor, body.fleet);
   if (!fleetId) throw ApiError.badRequest('Pilih armada.');
   const category = String(body.category || 'lainnya').trim().slice(0, 40) || 'lainnya';
@@ -1705,12 +1717,12 @@ async function deliveryReport(user, query) {
   const runCorrs = await correctionsForRuns(runIds);
   const runs = runRows.map((r) => runClient(r, sold[r.id] || 0, runCorrs[r.id] || []));
   // 2) DELIVERY STOPS — planned vs terkirim vs batal/ditunda (+ reasons for the non-delivered)
-  const stopRows = await prisma.delivery.findMany({ where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, include: { customer: { select: { name: true } } }, orderBy: [{ date: 'asc' }, { seq: 'asc' }] });
+  const stopRows = await resilientFindMany(prisma.delivery, { where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, include: { customer: { select: { name: true } } }, orderBy: [{ date: 'asc' }, { seq: 'asc' }] }, 'report-stops');
   // 3) CLOSEOUTS (notes / kendala)
   const coRows = await prisma.deliveryCloseout.findMany({ where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { date: 'asc' } });
   // 4) CASH — money-in split (tunai/transfer) + field expenses → net cash, per fleet
-  const txns = await prisma.distTransaction.findMany({ where: { txnDate: inRange, ...fleetWhere(user, 'fleetId', qFleet), ...LIVE_TXN }, include: { corrections: { select: { kind: true, deltaAmount: true, active: true } } } });
-  const exp = await prisma.distExpense.findMany({ where: { date: inRange, status: 'active', ...fleetWhere(user, 'fleetId', qFleet) }, select: { fleetId: true, amount: true } });
+  const txns = await resilientFindMany(prisma.distTransaction, { where: { txnDate: inRange, ...fleetWhere(user, 'fleetId', qFleet), ...LIVE_TXN }, include: { corrections: { select: { kind: true, deltaAmount: true, active: true } } } }, 'report-cash');
+  const exp = await resilientFindMany(prisma.distExpense, { where: { date: inRange, status: 'active', ...fleetWhere(user, 'fleetId', qFleet) }, select: { fleetId: true, amount: true } }, 'report-expenses');
 
   // Bucket everything by fleet.
   const fleetMap = {};

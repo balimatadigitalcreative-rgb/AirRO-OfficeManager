@@ -61,7 +61,7 @@ model Account {
   type      String   @default("bank") // "cash" | "bank"
   bank      String   @default("")
   number    String   @default("")
-  opening   Int      @default(0) // opening balance in IDR (whole rupiah)
+  opening   BigInt      @default(0) // opening balance in IDR (whole rupiah)
   color     String   @default("#065489")
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
@@ -88,7 +88,7 @@ model Category {
 model Entry {
   id          String    @id @default(cuid())
   type        String // "income" | "expense"
-  amount      Int // always positive; sign derived from `type`
+  amount      BigInt // always positive; sign derived from `type`
   note        String    @default("")
   method      String    @default("Cash")
   date        String // YYYY-MM-DD (business date, tz-agnostic)
@@ -146,7 +146,7 @@ model Entry {
 
 model Transfer {
   id        String   @id @default(cuid())
-  amount    Int
+  amount    BigInt
   date      String
   note      String   @default("")
   createdAt DateTime @default(now())
@@ -172,10 +172,10 @@ model Setoran {
   date      String // YYYY-MM-DD
   armada    String   @default("") // fleet plate string (the frontend's per-armada key)
   galon     Int      @default(0) // gallons sold that day (drives manufacturing cost)
-  cash      Int      @default(0)
-  bon       Int      @default(0) // credit/receivable sales booked (not yet collected)
-  bonPay    Int      @default(0) // receivable payments collected in the field
-  expense   Int      @default(0) // field expenses paid from cash
+  cash      BigInt      @default(0)
+  bon       BigInt      @default(0) // credit/receivable sales booked (not yet collected)
+  bonPay    BigInt      @default(0) // receivable payments collected in the field
+  expense   BigInt      @default(0) // field expenses paid from cash
   note      String   @default("")
   proof     String? // attached proof image (data URL / path)
   createdAt DateTime @default(now())
@@ -198,16 +198,16 @@ model Employee {
   id         String   @id @default(cuid())
   name       String
   department String   @default("Staff")
-  base       Int      @default(0) // base salary (IDR)
+  base       BigInt      @default(0) // base salary (IDR)
   allowance  Int      @default(0) // "Tunjangan lain" — legacy catch-all, still counted
   // Structured monthly allowances (all add to gross earnings). tjBpjs* are cash
   // allowances GIVEN to the employee — NOT the statutory BPJS iuran, which the
   // payroll engine computes separately. See finance-hrd.js compute().
-  tjKinerja    Int    @default(0) // Tj. Kinerja
-  tjProfesi    Int    @default(0) // Tj. Profesi
-  tjRumahDinas Int    @default(0) // Tj. Rumah Dinas
-  tjBpjsKes    Int    @default(0) // Tj. BPJS Kesehatan (allowance to employee)
-  tjBpjsTk     Int    @default(0) // Tj. BPJS Ketenagakerjaan (allowance to employee)
+  tjKinerja    BigInt    @default(0) // Tj. Kinerja
+  tjProfesi    BigInt    @default(0) // Tj. Profesi
+  tjRumahDinas BigInt    @default(0) // Tj. Rumah Dinas
+  tjBpjsKes    BigInt    @default(0) // Tj. BPJS Kesehatan (allowance to employee)
+  tjBpjsTk     BigInt    @default(0) // Tj. BPJS Ketenagakerjaan (allowance to employee)
   risk       String   @default("Low") // JKK occupational-risk class
   jp         Boolean  @default(true) // enrolled in JP (pension)
   religion   String   @default("Islam")
@@ -282,7 +282,7 @@ model Orientation {
   employeeId   String   @unique
   startDate    String // YYYY-MM-DD
   durationDays Int      @default(7)
-  dailyWage    Int      @default(0)
+  dailyWage    BigInt      @default(0)
   endDate      String? // derived = startDate + durationDays
   outcome      String   @default("pending") // pending | passed | failed
   paid         Boolean  @default(false)
@@ -338,7 +338,7 @@ model Training {
   provider   String   @default("")
   startDate  String // YYYY-MM-DD
   endDate    String?
-  cost       Int      @default(0)
+  cost       BigInt      @default(0)
   status     String   @default("planned") // planned | ongoing | done
   note       String   @default("")
   createdAt  DateTime @default(now())
@@ -352,7 +352,7 @@ model Training {
 model Cashbon {
   id           String   @id @default(cuid())
   employeeId   String
-  amount       Int // nominal kasbon (IDR)
+  amount       BigInt // nominal kasbon (IDR)
   date         String // YYYY-MM-DD tanggal pengajuan (requestDate)
   disbursedDate String? // YYYY-MM-DD tanggal DIBERIKAN/dicairkan — set on ACC; drives the deduction cycle
   note         String   @default("")
@@ -468,7 +468,7 @@ model Customer {
   name          String
   phone         String   @default("")
   type          String   @default("reguler") // CustomerType id (seed ids: reguler|kos|cafe|bulk)
-  masterPrice   Int      @default(0)          // master_price (IDR per unit)
+  masterPrice   BigInt      @default(0)          // master_price (IDR per unit)
   deliveryDays  String   @default("[]")       // JSON array of day codes, e.g. ["Sen","Rab","Jum"]
   armada        String   @default("")         // delivery fleet plate (reuses the Setoran fleet list)
   reminder      String   @default("")         // JSON billing-reminder settings ({enabled,dueDay,weekday,overdueDays,gallonThreshold,bonThreshold})
@@ -520,8 +520,8 @@ model CustomerType {
 model PriceHistory {
   id            String   @id @default(cuid())
   customerId    String
-  oldPrice      Int
-  newPrice      Int
+  oldPrice      BigInt
+  newPrice      BigInt
   changedById   String?                        // changed_by
   changedByName String?
   changedByRole String?
@@ -540,8 +540,8 @@ model DistTransaction {
   customerId      String
   fleetId         String   @default("")         // fleet scope — copied from the customer's armada at input time (immutable)
   qty             Int
-  unitPriceLocked Int                          // unit_price_locked
-  amount          Int                          // qty * unitPriceLocked (server-computed)
+  unitPriceLocked BigInt                          // unit_price_locked
+  amount          BigInt                          // qty * unitPriceLocked (server-computed)
   method          String   @default("lunas")   // lunas | bon | pelunasan
   note            String   @default("")
   txnDate         String                        // txn_date (YYYY-MM-DD)
@@ -643,7 +643,7 @@ model DistExpense {
   id             String   @id @default(cuid())
   date           String                          // YYYY-MM-DD (the field date)
   fleetId        String   @default("")           // fleet scope (the driver's armada)
-  amount         Int                             // IDR, > 0
+  amount         BigInt                             // IDR, > 0
   category       String   @default("lainnya")    // bensin | makan | parkir | lainnya | <custom>
   note           String   @default("")
   photoId        String?                         // Attachment.id of the receipt photo (optional)
@@ -718,7 +718,7 @@ model Correction {
   transactionId String
   reason        String                          // required
   kind          String   @default("manual")     // manual | price
-  deltaAmount   Int      @default(0)             // numeric effect for price adjustments
+  deltaAmount   BigInt      @default(0)             // numeric effect for price adjustments
   batchId       String?                          // groups one price-change event's adjustments
   active        Boolean  @default(true)          // false once the batch is cancelled/reversed
   oldValue      String?                          // old_value (JSON string)
@@ -789,8 +789,8 @@ model DistInvoice {
   issueDate     String                            // YYYY-MM-DD
   dueDate       String   @default("")             // YYYY-MM-DD (from reminder setting or explicit)
   items         String   @default("[]")           // JSON snapshot: [{txnId,date,qty,unitPrice,amount,method}]
-  total         Int      @default(0)              // Σ billed items
-  sisaBon       Int      @default(0)              // outstanding bon snapshot at issue
+  total         BigInt      @default(0)              // Σ billed items
+  sisaBon       BigInt      @default(0)              // outstanding bon snapshot at issue
   note          String   @default("")
   createdById   String?
   createdByName String?
@@ -854,7 +854,7 @@ model StockMovement {
   itemId    String
   type      String                                // opening | purchase | in | out | damage | loss | sale | correction
   qty       Int                                   // positive for directional types; signed delta for correction
-  amount    Int?                                  // money for a 'sale' (total Rp); null otherwise
+  amount    BigInt?                                  // money for a 'sale' (total Rp); null otherwise
   method    String?                               // payment method for a 'sale' (Cash/Transfer/…)
   fleetId   String   @default("")                 // optional fleet scope ('' = global)
   refId     String?                               // optional link to another record (the source GallonMovement, …)

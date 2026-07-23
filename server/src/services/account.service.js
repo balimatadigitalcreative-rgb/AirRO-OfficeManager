@@ -54,7 +54,7 @@ async function balance(id) {
     prisma.transfer.aggregate({ _sum: { amount: true }, where: { toId: id } }),
     prisma.transfer.aggregate({ _sum: { amount: true }, where: { fromId: id } }),
   ]);
-  const s = (a) => a._sum.amount || 0;
+  const s = (a) => Number(a._sum.amount || 0);   // _sum on a BigInt money column is BigInt → coerce to Number
   const value = account.opening + s(income) - s(expense) + s(xferIn) - s(xferOut);
   return {
     accountId: id,

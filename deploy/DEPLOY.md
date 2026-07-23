@@ -780,3 +780,41 @@ done
 **min 8 chars** (server + client). Existing users are **not** force-reset; instead any
 short/temporary password (e.g. a 4-digit admin PIN like `1234`) is **flagged "password
 lemah"** next to that user in the user list, so you can decide who to upgrade.
+
+## Oversized-amount fix (money columns → BigInt) & the repair script
+
+**Background.** A mis-entered qty/price once produced a transaction `amount` of ~4.28 billion,
+which overflowed the old 32-bit `Int` column mapping. Prisma then threw
+`Value … does not fit in an INT column` on the **whole** `findMany`, so the Transaksi list showed
+"belum ada transaksi" for that fleet even though the data was intact. The fix widens all money
+columns to **BigInt** (migration `…_widen_money_to_bigint`), reads them back as plain `Number`
+(exact for IDR, well under 2^53), makes list endpoints skip an unreadable row instead of failing
+the whole screen, and rejects any new row above **Rp 1,000,000,000** (client warns above
+Rp 100,000,000).
+
+**Deploying the fix (has a migration — back up first):**
+```bash
+cd /var/www/airrooffice
+bash deploy/backup-db.sh                 # ALWAYS back up before a migration
+cd server && npx prisma migrate deploy   # applies …_widen_money_to_bigint (rebuilds tables, copies data)
+cd .. && bash deploy/update.sh           # rebuild + restart (or your usual flow)
+```
+The migration is **data-preserving**: SQLite stores `Int` and `BigInt` identically (64-bit
+`INTEGER`), so each table is recreated with the column re-declared `BIGINT` and every row copied
+via `INSERT … SELECT`. No values change.
+
+**Find the bad row(s) — read-only, changes nothing:**
+```bash
+cd /var/www/airrooffice/server
+node scripts/find-oversized-amounts.js
+```
+It connects with `DATABASE_URL` from `server/.env` and prints every money row above the old Int
+limit (2,147,483,647). For `DistTransaction` it prints
+`id · fleet · date · qty · unitPrice · amount · by · customer`.
+
+**Correct a bad row — through the app, never SQL.** Open the Distribusi → **Transaksi** screen,
+find the offending transaction (by the `id`/customer the script printed), and use the normal
+**Koreksi** action to record the correct value. This keeps the change **recorded + audited** (who,
+when, why) like every other correction. If a row is a pure duplicate/garbage entry, use **Batalkan**
+(void) — also recorded. **Do NOT edit the DB with raw SQL** — that leaves no audit trail and can
+desync the running app.
