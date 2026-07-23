@@ -2832,11 +2832,14 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
   );
 }
 
-// Field expenses (pengeluaran lapangan) — cash a delivery person paid out (fuel/bensin, meals,
-// parking…) with an optional receipt photo (stored via the Attachment system, never base64 inline).
-// Append-only: a mistake is VOIDED (recorded, reason) not deleted. The day's total reduces the
-// "net cash to deposit" shown on the dashboard — it never posts to the cash book, so no double-count.
-function ExpensePanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onChanged }) {
+// Field expenses (pengeluaran lapangan) — a dedicated, mobile-first screen where delivery staff log
+// cash they paid out in the field (fuel/bensin, meals, parking…) with an optional receipt photo
+// (stored via the Attachment system, never base64 inline). Append-only: a mistake is VOIDED
+// (recorded, reason) not deleted. The day's total reduces the "net cash to deposit" on the
+// dashboard — it never posts to the cash book, so no double-count. Fleet-scoped (server-enforced):
+// a scoped driver sees/logs only their fleet; owner/admin see all and can filter by fleet.
+function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+  const [date, setDate] = uSx(today);
   const [rows, setRows] = uSx(null);
   const [cats, setCats] = uSx(['bensin', 'makan', 'parkir', 'lainnya']);
   const [modal, setModal] = uSx(null);   // { kind:'add', ...fields } | { kind:'void', row, reason }
@@ -2844,6 +2847,7 @@ function ExpensePanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onCh
   const [err, setErr] = uSx('');
   const [toast, setToast] = uSx('');
   const scoped = isScoped(fleetScope);
+  const ef = effFleet(fleetScope, distFleet);
   const fleetOpts = (fleet || []).filter(Boolean);
   const reload = () => {
     if (!(window.API && window.API.distribusi && window.API.distribusi.expenses)) return;
@@ -2877,34 +2881,47 @@ function ExpensePanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onCh
   const catLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
   const viewPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
   return (
-    <div className="card dist-card">
-      <div className="dist-card-head">
-        <div className="sec-title"><IconCoinOut s={15} /> {trD('exp.title')}{total > 0 ? <span className="exp-total-pill">{rpFull(total)}</span> : null}</div>
-        <button type="button" className="btn btn-primary btn-sm" onClick={openAdd}><IconPlus s={14} />{trD('exp.add')}</button>
+    <div className="dist-dash screen-enter">
+      <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
+      <div className="dist-tx-toolbar">
+        <div style={{ minWidth: 180 }}><DP.DateField value={date} onChange={setDate} max={today} /></div>
+        <div style={{ flex: 1 }} />
+        <button type="button" className="btn btn-primary exp-add-btn" onClick={openAdd}><IconPlus s={16} />{trD('exp.addT')}</button>
       </div>
-      {rows === null ? <div className="dist-empty">{trD('common.loading') || '…'}</div>
-        : rows.length === 0 ? <div className="dist-empty">{trD('exp.none')}</div>
-        : (
-          <div className="exp-list">
-            {rows.map((r) => {
-              const voided = r.status === 'void';
-              return (
-                <div key={r.id} className={`exp-row ${voided ? 'is-void' : ''}`}>
-                  {r.photoId ? <LocThumb photoId={r.photoId} onView={() => viewPhoto(r.photoId)} /> : <div className="exp-nophoto"><IconCoinOut s={16} /></div>}
-                  <div className="exp-mid">
-                    <div className="exp-line1"><span className={`exp-cat ${'c-' + r.category}`}>{catLabel(r.category)}</span>{r.fleetId ? <span className="exp-fleet">{r.fleetId}</span> : null}{voided && <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>}</div>
-                    <div className="exp-sub">{r.createdByName ? r.createdByName + ' · ' : ''}{fmtDT(r.createdAt)}{r.note ? ' · ' + r.note : ''}{voided && r.voidReason ? ' · ' + trD('exp.voidReason') + ': ' + r.voidReason : ''}</div>
+
+      {/* Prominent running total so staff know how much they've spent today. */}
+      <div className="card exp-total-card">
+        <div className="exp-total-lbl"><IconCoinOut s={15} />{trD('exp.totalToday')}</div>
+        <div className="tnum exp-total-big">{rpFull(total)}</div>
+        <div className="exp-total-meta">{numX(active.length)} {trD('exp.itemWord')} · {date}</div>
+      </div>
+
+      <div className="card dist-card">
+        <div className="dist-card-head"><div className="sec-title"><IconCoinOut s={15} /> {trD('exp.title')}</div></div>
+        {rows === null ? <div className="dist-empty">{trD('common.loading') || '…'}</div>
+          : rows.length === 0 ? <div className="dist-empty">{trD('exp.none')}</div>
+          : (
+            <div className="exp-list">
+              {rows.map((r) => {
+                const voided = r.status === 'void';
+                return (
+                  <div key={r.id} className={`exp-row ${voided ? 'is-void' : ''}`}>
+                    {r.photoId ? <LocThumb photoId={r.photoId} onView={() => viewPhoto(r.photoId)} /> : <div className="exp-nophoto"><IconCoinOut s={16} /></div>}
+                    <div className="exp-mid">
+                      <div className="exp-line1"><span className={`exp-cat ${'c-' + r.category}`}>{catLabel(r.category)}</span>{r.fleetId ? <span className="exp-fleet">{r.fleetId}</span> : null}{voided && <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>}</div>
+                      <div className="exp-sub">{r.createdByName ? r.createdByName + ' · ' : ''}{fmtDT(r.createdAt)}{r.note ? ' · ' + r.note : ''}{voided && r.voidReason ? ' · ' + trD('exp.voidReason') + ': ' + r.voidReason : ''}</div>
+                    </div>
+                    <div className="exp-right">
+                      <div className={`tnum exp-amt ${voided ? 'struck' : ''}`}>{rpFull(r.amount)}</div>
+                      {!voided && <button type="button" className="dist-link danger exp-void" onClick={() => openVoid(r)}><IconClose s={12} />{trD('exp.void')}</button>}
+                    </div>
                   </div>
-                  <div className="exp-right">
-                    <div className={`tnum exp-amt ${voided ? 'struck' : ''}`}>{rpFull(r.amount)}</div>
-                    {!voided && <button type="button" className="dist-link danger exp-void" onClick={() => openVoid(r)}><IconClose s={12} />{trD('exp.void')}</button>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      <div className="dist-fieldhint" style={{ marginTop: 8 }}><IconClock s={12} />{trD('exp.hint')}</div>
+                );
+              })}
+            </div>
+          )}
+        <div className="dist-fieldhint" style={{ marginTop: 8 }}><IconClock s={12} />{trD('exp.hint')}</div>
+      </div>
 
       {modal && (
         <div className="modal-scrim" onClick={() => setModal(null)} style={{ zIndex: 200 }}>
@@ -2945,7 +2962,7 @@ function ExpensePanel({ date, ef, fleetScope, fleet, distFleet, refreshKey, onCh
   );
 }
 
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canExpense, canRun, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [closeouts, setCloseouts] = uSx([]);
@@ -2997,8 +3014,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
-      {canRun && <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />}
-      {canExpense && <ExpensePanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} refreshKey={refreshKey} onChanged={reload} />}
+      <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />
       {closeouts.map((c) => (
         <div key={c.id} className="card dist-closed-banner">
           <span className="dist-closed-ic"><IconCheck s={17} /></span>
@@ -3094,4 +3110,4 @@ function CloseoutModal({ date, fleet, pendingStops, onClose, onClosed }) {
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries };
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, Expenses: DistExpenses };

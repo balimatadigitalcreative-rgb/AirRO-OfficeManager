@@ -35,7 +35,8 @@ function navForRole(p, role) {
     { id: 'dist-dashboard', label: tr('nav.distDashboard'), icon: 'IconDashboard', caps: ['distribusiDashboard'] },
     { id: 'dist-customers', label: tr('nav.distCustomers'), icon: 'IconCustomers', caps: ['distribusiCustomers'] },
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi'] },
-    { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman', 'distribusiExpense'] },
+    { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
+    { id: 'dist-expenses', label: tr('nav.distExpenses'), icon: 'IconCoinOut', caps: ['distribusiExpense'] },
     // Setoran lives under DISTRIBUSI (it is field-delivery paperwork) but is otherwise UNCHANGED:
     // same screen id 'setoran' (so navigate('setoran'), the isDerivedEntry jump-back, #setoran
     // deeplink and the setoranDay/setoranMfg cash-book auto-sync all keep working), same icon, and
@@ -1340,8 +1341,13 @@ function FApp() {
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen === 'dist-deliveries' && (p.distribusiPengiriman || p.distribusiExpense) && (
-            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi} canExpense={!!p.distribusiExpense} canRun={!!p.distribusiPengiriman}
+          {screen === 'dist-deliveries' && p.distribusiPengiriman && (
+            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
+              onChanged={() => setDistTick((t) => t + 1)} />
+          )}
+          {screen === 'dist-expenses' && p.distribusiExpense && (
+            <DIST.Expenses refreshKey={distTick} today={FIN.TODAY}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
@@ -1358,7 +1364,7 @@ function FApp() {
           {screen === 'dist-audit' && p.distribusiAudit && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-expenses', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
 
           {screen === 'gudang' && p.gudangView && (
             <GUDANG.Dept refreshKey={distTick} canAddStock={!!p.gudangAddStock} canKoreksi={!!p.gudangKoreksi} canBuffer={!!p.gudangBuffer}

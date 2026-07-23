@@ -995,8 +995,13 @@ select.fld::-ms-expand { display: none; }
 .dist-th-net-row b { font-size: 13px; color: #fff; } .dist-th-net-row b.neg { color: #f4b0b0; }
 .dist-th-net-row.total { font-weight: 700; color: #fff; } .dist-th-net-row.total b { font-size: 16px; color: #8fe0c0; }
 .dist-th-net-formula { font-size: 10px; color: rgba(255,255,255,.5); margin-top: 4px; }
-/* Field-expense list (pengeluaran lapangan). */
-.exp-total-pill { margin-left: 8px; font-size: 12px; font-weight: 800; color: var(--danger, #dc2626); }
+/* Field-expense screen (pengeluaran lapangan) — mobile-first. */
+.exp-add-btn { min-height: 44px; }   /* big tap target for the field */
+.exp-total-card { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; margin-bottom: 14px; background: linear-gradient(135deg, var(--card), var(--card-soft)); }
+.exp-total-lbl { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--text-mut); }
+.exp-total-lbl svg { color: var(--danger, #dc2626); }
+.exp-total-big { font-size: 30px; font-weight: 800; letter-spacing: -.5px; color: var(--danger, #dc2626); line-height: 1.1; }
+.exp-total-meta { font-size: 11.5px; color: var(--text-faint); }
 .exp-list { display: flex; flex-direction: column; }
 .exp-row { display: flex; align-items: center; gap: 11px; padding: 10px 2px; border-bottom: 1px solid var(--border-soft); }
 .exp-row:last-child { border-bottom: 0; }
