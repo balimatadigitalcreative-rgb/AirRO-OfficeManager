@@ -635,7 +635,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canExpense, onGoExpense, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, onGoExpense, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -670,7 +670,19 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [delSaving, setDelSaving] = uSx(false);
   const [delErr, setDelErr] = uSx('');
   const [menuFor, setMenuFor] = uSx(null);          // which txn row's action menu is open
+  // archive toggle (active ↔ arsip/legacy)
+  const [archTxn, setArchTxn] = uSx(null);          // { ...txn, toLegacy } being toggled
+  const [archReason, setArchReason] = uSx('');
+  const [archBon, setArchBon] = uSx(false);         // when archiving a bon/pelunasan: keep counting toward sisa bon?
+  const [archSaving, setArchSaving] = uSx(false);
 
+  const doArchive = () => {
+    if (!archTxn || !archReason.trim() || archSaving) return;
+    setArchSaving(true);
+    window.API.distribusi.transactions.setArchive(archTxn.id, { legacy: !!archTxn.toLegacy, bonCounted: archBon, reason: archReason.trim() })
+      .then(() => { setArchSaving(false); setArchTxn(null); setArchReason(''); flash(trD(archTxn.toLegacy ? 'dist.archDone' : 'dist.unarchDone')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setArchSaving(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
   const doVoid = () => {
     if (!voidTxn || !voidReason.trim() || voidSaving) return;
     setVoidSaving(true);
@@ -850,7 +862,8 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           const showKoreksi = canKoreksi && !voided && !t.legacy;
           const showVoid = canVoid && !voided && !t.legacy;
           const showDelete = canHardDelete;
-          const hasMenu = showVoid || showDelete;
+          const showArchive = canArchive && !voided;   // active → arsip, arsip → active (both directions)
+          const hasMenu = showVoid || showDelete || showArchive;
           return (
             <div key={t.id} className={`dist-txn dist-txn-full ${voided ? 'is-void' : ''}`}>
               <span className="dist-txn-av">{(t.customer && t.customer.name || '?').slice(0, 1).toUpperCase()}</span>
@@ -879,6 +892,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
                     <>
                       <div className="dist-menu-scrim" onClick={() => setMenuFor(null)} />
                       <div className="dist-menu-pop">
+                        {showArchive && <button type="button" className="dist-menu-item" onClick={() => { setMenuFor(null); setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }}><IconInvoice s={14} />{trD(t.legacy ? 'dist.makeActive' : 'dist.makeArchive')}</button>}
                         {showVoid && <button type="button" className="dist-menu-item" onClick={() => { setMenuFor(null); setVoidTxn(t); setVoidReason(''); }}><IconClose s={14} />{trD('dist.voidBtn')}</button>}
                         {showDelete && <button type="button" className="dist-menu-item danger" onClick={() => { setMenuFor(null); setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }}><IconTrash s={14} />{trD('dist.hardDelBtn')}</button>}
                       </div>
@@ -906,6 +920,23 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               {staffMode && <div className="dist-staffnote"><IconShield s={14} />{trD('dist.korekStaff')}</div>}
             </div>
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCorrTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrReason.trim() || corrSaving} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSave')}</button></div>
+          </div>
+        </div>
+      )}
+      {/* ARCHIVE TOGGLE — active ↔ arsip (legacy). Reason required; recomputes bon/KPIs/gallon. */}
+      {archTxn && (
+        <div className="modal-scrim" onClick={() => setArchTxn(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD(archTxn.toLegacy ? 'dist.makeArchive' : 'dist.makeActive')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(archTxn.id)} · {archTxn.customer ? archTxn.customer.name : ''} · {methodLabel(archTxn.method)} · {rpFull(archTxn.amount)}</div></div><button className="jp-icon" onClick={() => setArchTxn(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-infobox"><IconInvoice s={16} /><span>{trD(archTxn.toLegacy ? 'dist.archInfo' : 'dist.unarchInfo')}</span></div>
+              {archTxn.toLegacy && (archTxn.method === 'bon' || archTxn.method === 'pelunasan') && (
+                <label className="dist-arch-bon"><input type="checkbox" checked={archBon} onChange={(e) => setArchBon(e.target.checked)} /><span><b>{trD('dist.archKeepBon')}</b><small>{trD('dist.archKeepBonHint')}</small></span></label>
+              )}
+              <label className="fld-label">{trD('dist.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={archReason} placeholder={trD('dist.archReasonPh')} onChange={(e) => setArchReason(e.target.value)} />
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setArchTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!archReason.trim() || archSaving} onClick={doArchive}>{archSaving ? '…' : trD(archTxn.toLegacy ? 'dist.makeArchive' : 'dist.makeActive')}</button></div>
           </div>
         </div>
       )}
@@ -1261,6 +1292,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const [err, setErr] = uSx('');
   const [saving, setSaving] = uSx(false);
   const [filter, setFilter] = uSx('all');   // all | ok | skip
+  const [includeBon, setIncludeBon] = uSx(true);   // count imported bon/pelunasan toward sisa bon?
   const fileRef = React.useRef(null);
   // dedupe against existing rows keyed on (date + TYPE + amount) — matches the server
   const existing = new Set((customer.transactions || []).map((t) => `${t.txnDate}|${t.method}|${t.amount}`));
@@ -1348,7 +1380,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
       if (r.note) o.note = r.note;
       return o;
     });
-    window.API.distribusi.customers.importLegacyTxns(customer.id, payload, skipped.length)
+    window.API.distribusi.customers.importLegacyTxns(customer.id, payload, skipped.length, includeBon)
       .then((res) => { setSaving(false); onDone(res); })
       .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
@@ -1359,6 +1391,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
         <div className="modal-body">
           <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.liInfo')}</span></div>
           <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan</b></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+          <label className="dist-arch-bon"><input type="checkbox" checked={includeBon} onChange={(e) => setIncludeBon(e.target.checked)} /><span><b>{trD('dist.liIncludeBon')}</b><small>{trD('dist.liIncludeBonHint')}</small></span></label>
           <div className="dist-imp-upload">
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onFile} />
             <button type="button" className="btn btn-ghost" onClick={() => fileRef.current && fileRef.current.click()}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.importUpload')}</button>

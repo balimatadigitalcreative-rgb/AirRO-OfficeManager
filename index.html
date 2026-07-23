@@ -29,24 +29,24 @@
   <meta name="apple-mobile-web-app-title" content="AirRO" />
   <meta name="mobile-web-app-capable" content="yes" />
 
-  <link rel="stylesheet" href="styles.css?v=l173" />
-  <link rel="stylesheet" href="app.css?v=l173" />
-  <link rel="stylesheet" href="finance.css?v=l173" />
-  <link rel="stylesheet" href="desktop-scale.css?v=l173" />
+  <link rel="stylesheet" href="styles.css?v=l175" />
+  <link rel="stylesheet" href="app.css?v=l175" />
+  <link rel="stylesheet" href="finance.css?v=l175" />
+  <link rel="stylesheet" href="desktop-scale.css?v=l175" />
 
   <!-- Production React (minified), served from OUR origin — never a CDN. If unpkg is
        unreachable the app must still boot. JSX is pre-compiled at build time into
        dist/app.js, so @babel/standalone is not loaded or run in the browser.
        No integrity/crossorigin: those exist for cross-origin CDN fetches and are
        meaningless (and brittle) for same-origin files we ship ourselves. -->
-  <script src="/vendor/react.production.min.js?v=l173"></script>
-  <script src="/vendor/react-dom.production.min.js?v=l173"></script>
+  <script src="/vendor/react.production.min.js?v=l175"></script>
+  <script src="/vendor/react-dom.production.min.js?v=l175"></script>
 </head>
 <body>
   <div id="root"></div>
   <!-- Single pre-built bundle: all former per-file scripts (finance-i18n.js … finance-shell.jsx)
        transformed by esbuild and concatenated in the SAME load order by build.mjs.
        Rebuild with `npm run build` after editing any .js/.jsx source. See deploy/DEPLOY.md. -->
-  <script src="/dist/app.js?v=l173"></script>
+  <script src="/dist/app.js?v=l175"></script>
 </body>
 </html>

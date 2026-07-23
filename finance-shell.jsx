@@ -1331,7 +1331,7 @@ function FApp() {
           {screen === 'dist-transactions' && (p.distribusiInput || p.distribusiKoreksi) && (
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
-              canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canHardDelete={!!p.distribusiHardDelete} canExpense={!!p.distribusiExpense} userName={user && user.name}
+              canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canHardDelete={!!p.distribusiHardDelete} canArchive={!!p.distribusiLegacyImport} canExpense={!!p.distribusiExpense} userName={user && user.name}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onGoExpense={() => go('dist-expenses')} onChanged={() => setDistTick((t) => t + 1)} />
           )}

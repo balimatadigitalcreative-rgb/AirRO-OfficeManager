@@ -65,6 +65,9 @@ router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), va
 // VOID (recorded cancellation) — the default everyday cancel path. Row stays, excluded from all
 // aggregates, gallons reversed, audited. Cap: distribusiVoid (owner/GM default). Fleet-scoped.
 router.post('/transactions/:id/void', requireCap('distribusiVoid'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.voidSchema }), ctrl.voidTransaction);
+// ARCHIVE TOGGLE — flip a row between active and archive (legacy). Cap: distribusiLegacyImport (the
+// archive-management capability). Reason required; audited; gallon movements reconciled. Fleet-scoped.
+router.post('/transactions/:id/archive', requireCap('distribusiLegacyImport'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.archiveSchema }), ctrl.setTransactionArchive);
 // HARD DELETE (permanent) — OWNER-ONLY last resort. Cap: distribusiHardDelete (granted to no one
 // but owner by default). Typed ref/HAPUS + password + reason enforced in the service; an audit
 // entry is written BEFORE the row is removed, so a trace always survives. Fleet-scoped.

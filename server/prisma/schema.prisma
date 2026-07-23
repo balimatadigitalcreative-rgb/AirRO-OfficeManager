@@ -557,6 +557,12 @@ model DistTransaction {
   // existing aggregation already counts it and a 'pelunasan' reduces it. The flag exists
   // only to LABEL the row ("Bon Awal") and to make it auditable/queryable.
   openingBon      Boolean  @default(false)
+  // Whether this row counts toward the customer's outstanding bon (sisa bon). Independent of
+  // `legacy`: `legacy` excludes a row from KPIs/gallons/cash, while `bonCounted` decides the
+  // RECEIVABLE. So an archive can either keep affecting sisa bon (bonCounted=true, e.g. a historical
+  // debt import) or not (bonCounted=false, e.g. a mistaken row). Default true → every existing row
+  // (incl. active sales and prior imports) keeps counting exactly as before.
+  bonCounted      Boolean  @default(true)
   // VOID (recorded cancellation) — the default cancel path. The row STAYS (shown "Dibatalkan",
   // filterable) but is EXCLUDED from every aggregate (sisa bon, gallons, KPIs); its gallon
   // movements are reversed. Permanent hard-delete removes the row entirely (owner-only) but always

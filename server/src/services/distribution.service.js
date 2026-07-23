@@ -32,7 +32,10 @@ const LIVE_TXN = { ...NOT_LEGACY, ...NOT_VOID };   // real, countable transactio
 // LIVE_TXN, so archive purchases never distort reports. This keeps sisa bon = Σ bon − Σ pelunasan
 // (all non-void rows) correct after a historical import, while purchases stay archive-only.
 const BON_METHODS = ['bon', 'pelunasan'];
-const BON_TXN = { ...NOT_VOID, method: { in: BON_METHODS } };
+// A row counts toward sisa bon iff it is bon/pelunasan, not void, AND flagged bonCounted (default
+// true). `bonCounted` is INDEPENDENT of `legacy`, so an archive can keep or drop its receivable
+// effect — while `legacy` still governs KPIs/gallons/cash exclusion.
+const BON_TXN = { ...NOT_VOID, method: { in: BON_METHODS }, bonCounted: true };
 // Retroactive-price-change scopes (option b). Payments (pelunasan) are never re-priced.
 const PRICE_SCOPES = ['all', 'cycle', 'bon'];
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -296,13 +299,13 @@ async function listCustomers(user, qFleet, status, filters) {
   const rows = await resilientFindMany(prisma.customer, { where: { ...scopeWhere, ...activeWhere, ...customerFilterWhere(f) }, orderBy: { name: 'asc' } }, 'customers');
   // Non-void rows (legacy INCLUDED) so sisa bon counts historical bon/pelunasan; gallons/count/last
   // activity below still exclude legacy so archive rows never distort those stats.
-  const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...NOT_VOID }, select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true, legacy: true } });
+  const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...NOT_VOID }, select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true, legacy: true, bonCounted: true } });
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const agg = {};
   txns.forEach((t) => {
     const a = agg[t.customerId] || (agg[t.customerId] = { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 });
     const eff = t.amount + (deltaMap[t.id] || 0);
-    if (t.method === 'bon') a.bon += eff; else if (t.method === 'pelunasan') a.pelunasan += t.amount;   // receivable (incl. legacy)
+    if (t.bonCounted) { if (t.method === 'bon') a.bon += eff; else if (t.method === 'pelunasan') a.pelunasan += t.amount; }   // receivable (bonCounted, incl. legacy)
     if (!t.legacy) { a.totalGalon += t.qty; a.txnCount++; if (t.txnDate > a.lastDate) a.lastDate = t.txnDate; }   // stats exclude archive
   });
   const heldMap = await gallonBalances(user, qFleet);   // gallons each customer currently holds
@@ -331,13 +334,13 @@ async function getCustomer(id, user) {
     const eff = t.amount + adj;
     const voided = t.status === 'void';
     if (!voided) {
-      // Receivable (sisa bon) counts bon/pelunasan even for legacy archive rows — a historical bon is
-      // still owed. bon uses the EFFECTIVE (adjusted) amount; a paid txn's adjustment is reported but
-      // does not become a new receivable (money already settled at the old price).
-      if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount;
+      // Receivable (sisa bon) counts a bon/pelunasan row iff bonCounted (default true) — independent
+      // of legacy, so an archive can keep or drop its receivable. bon uses the EFFECTIVE (adjusted)
+      // amount; a paid txn's adjustment is reported but does not become a new receivable.
+      if (t.bonCounted) { if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; }
       if (!t.legacy) totalGalon += t.qty;   // gallons-sold stat still excludes archive rows
     }
-    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
       status: t.status || 'active', voided, voidReason: t.voidReason || null, voidedByName: t.voidedByName || null, voidedAt: t.voidedAt ? new Date(t.voidedAt).getTime() : null };
   });
   // Legacy import batches (for the "Batalkan" undo list): one entry per importBatchId.
@@ -539,7 +542,7 @@ function deriveLegacyRow(row) {
   return { ok: true, date, method: 'pelunasan', qty: 0, price: 0, amount: pay };
 }
 
-async function importLegacyTransactions(customerId, rows, actor, clientSkipped) {
+async function importLegacyTransactions(customerId, rows, actor, clientSkipped, includeBon) {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!customer) throw ApiError.notFound('Customer not found');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');   // out of scope
@@ -551,6 +554,9 @@ async function importLegacyTransactions(customerId, rows, actor, clientSkipped) 
   const key = (d, m, a) => `${d}|${m}|${a}`;
   const existing = await prisma.distTransaction.findMany({ where: { customerId }, select: { txnDate: true, method: true, amount: true } });
   const seen = new Set(existing.map((t) => key(t.txnDate, t.method, t.amount)));
+  // Whether the imported bon/pelunasan reconcile the customer's sisa bon. Default true (the historical
+  // balance is counted); pass includeBon=false to import as pure archive that leaves sisa bon alone.
+  const bonCounted = includeBon !== false;
   let created = 0, serverSkipped = 0;
   for (const row of list) {
     const d = deriveLegacyRow(row);
@@ -560,7 +566,7 @@ async function importLegacyTransactions(customerId, rows, actor, clientSkipped) 
     if (seen.has(k)) { serverSkipped++; continue; }   // duplicate
     seen.add(k);
     await prisma.distTransaction.create({ data: {
-      customerId, fleetId: customer.armada || '', qty: d.qty, unitPriceLocked: d.price, amount: d.amount, method: d.method,
+      customerId, fleetId: customer.armada || '', qty: d.qty, unitPriceLocked: d.price, amount: d.amount, method: d.method, bonCounted,
       note: String(row.note || '').slice(0, 300), txnDate: d.date, legacy: true, importBatchId: batchId,
       actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
     } });   // legacy=true + NO GallonMovement — purchases stay archive-only; a pelunasan reduces sisa
@@ -591,8 +597,8 @@ async function undoLegacyBatch(customerId, batchId, actor) {
 async function customerImpact(id) {
   const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, include: { corrections: true } });
   let bon = 0, pelunasan = 0;
-  // sisa bon counts bon/pelunasan incl. legacy archive rows (a historical bon is still owed); only VOID is dropped.
-  txns.forEach((t) => { if (t.status === 'void') return; const eff = t.amount + priceDelta(t.corrections); if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; });
+  // sisa bon counts a bon/pelunasan row iff bonCounted (default true) and not void — incl. legacy.
+  txns.forEach((t) => { if (t.status === 'void' || !t.bonCounted) return; const eff = t.amount + priceDelta(t.corrections); if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; });
   return { txnCount: txns.length, sisaBon: Math.max(0, bon - pelunasan) };   // count includes legacy (they'll be deleted too)
 }
 
@@ -882,6 +888,43 @@ async function voidTransaction(txnId, body, actor) {
   });
   await logAudit('batal', `Batalkan transaksi: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${txn.method} ${txn.amount} · ${reason}`, snap, txn.fleetId);
   return { ...updated, voided: true, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
+}
+
+// ── ARCHIVE TOGGLE — flip a row between ACTIVE and ARCHIVE (legacy). Cap: distribusiLegacyImport
+// (the archive-management capability). Because every money aggregate (KPIs, gallons sold, sisa bon,
+// receivables, cash integration) is derived DIRECTLY from the transaction rows and filters on the
+// `legacy` flag, flipping it recomputes all of those automatically — no double-count, no orphan.
+// The only side channel is the gallon STOCK ledger (GallonMovement, the single source of truth for
+// stock):
+//   • active → archive: reverse this row's gallon movements (append-only → deactivate), so an
+//     archived row no longer moves stock — exactly like a void.
+//   • archive → active: RESTORE this row's own movements if it ever had any. A legacy-IMPORTED row
+//     never recorded gallon out/in (the importer writes none), so there is nothing to restore and no
+//     phantom stock is fabricated — the row starts counting for money only. A row that was a REAL
+//     sale, archived, then reactivated gets its original movements back.
+// A reason is required and one immutable audit entry (who/when/from→to/reason) is written.
+async function setTransactionArchive(txnId, targetLegacy, body, actor) {
+  const txn = await prisma.distTransaction.findUnique({ where: { id: txnId }, include: { customer: { select: { name: true } } } });
+  if (!txn) throw ApiError.notFound('Transaction not found');
+  if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');   // out of fleet scope
+  if (txn.status === 'void') throw ApiError.badRequest('Transaksi yang dibatalkan tidak bisa diubah arsip/aktif.');
+  const target = !!targetLegacy;
+  if (!!txn.legacy === target) throw ApiError.badRequest(target ? 'Transaksi ini sudah arsip.' : 'Transaksi ini sudah aktif.');
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan wajib diisi.');
+  // Receivable choice: archiving may KEEP counting toward sisa bon (bonCounted=true, e.g. a real
+  // historical debt) or DROP it (bonCounted=false, e.g. a mistaken row). Reactivating always counts.
+  const bonCounted = target ? !!body.bonCounted : true;
+  const snap = await actorSnap(actor);
+  const updated = await prisma.$transaction(async (tx) => {
+    if (target) await tx.gallonMovement.updateMany({ where: { transactionId: txnId, active: true }, data: { active: false } });   // archive → reverse stock
+    else await tx.gallonMovement.updateMany({ where: { transactionId: txnId, active: false }, data: { active: true } });          // reactivate own movements (none for imports)
+    return tx.distTransaction.update({ where: { id: txnId }, data: { legacy: target, bonCounted } });
+  });
+  const bonNote = (txn.method === 'bon' || txn.method === 'pelunasan') ? ` · sisa bon ${bonCounted ? 'dihitung' : 'tidak dihitung'}` : '';
+  await logAudit('impor', `${target ? 'Jadikan arsip' : 'Jadikan aktif'}: ${txn.customer ? txn.customer.name : ''}`,
+    `${shortRefServer(txn.id)} · ${txn.method} ${txn.amount} · ${txn.legacy ? 'arsip' : 'aktif'} → ${target ? 'arsip' : 'aktif'}${bonNote} · ${reason}`, snap, txn.fleetId);
+  return { ...updated, legacy: target, bonCounted, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
 }
 
 // ── HARD DELETE (permanent) — OWNER-ONLY last resort (cap: distribusiHardDelete) ───────────────
@@ -1809,7 +1852,7 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
-  listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, hardDeleteTransaction, listAudit, dashboardSummary,
+  listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns, correctRun,

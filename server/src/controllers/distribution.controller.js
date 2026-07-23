@@ -65,7 +65,7 @@ const legacyRow = z.object({
   qty: z.number().int().optional(),
   method: z.enum(['lunas', 'bon']).optional(),
 });
-const legacyImportSchema = z.object({ rows: z.array(legacyRow).max(5000), skipped: z.number().int().nonnegative().optional() });
+const legacyImportSchema = z.object({ rows: z.array(legacyRow).max(5000), skipped: z.number().int().nonnegative().optional(), includeBon: z.boolean().optional() });
 const legacyBatchParams = z.object({ id: z.string().min(1), batchId: z.string().min(1) });
 // scope null/omitted = option (a) new-only; 'all'|'cycle'|'bon' = option (b) retroactive.
 const priceSchema = z.object({ newPrice: z.number().int().nonnegative(), scope: z.enum(['all', 'cycle', 'bon']).nullable().optional() });
@@ -105,6 +105,8 @@ const correctionSchema = z.object({
 });
 // VOID — a mandatory reason. HARD DELETE — reason + typed confirmation (ref or "HAPUS") + password.
 const voidSchema = z.object({ reason: z.string().trim().min(1, 'reason is required').max(1000) });
+// Toggle a transaction between ARCHIVE (legacy=true) and ACTIVE (legacy=false); reason required.
+const archiveSchema = z.object({ legacy: z.boolean(), bonCounted: z.boolean().optional(), reason: z.string().trim().min(1, 'reason is required').max(1000) });
 const hardDeleteSchema = z.object({
   reason: z.string().trim().min(1, 'reason is required').max(1000),
   confirm: z.string().min(1).max(40),
@@ -180,7 +182,7 @@ const updateCustomer = asyncHandler(async (req, res) => { const c = await servic
 const setLocation = asyncHandler(async (req, res) => { const c = await service.setCustomerLocation(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const setLocationPhoto = asyncHandler(async (req, res) => { const c = await service.setLocationPhoto(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user, req.body.skipped); bcast('import', 'customers'); res.status(201).json(r); });
-const importLegacyTxns = asyncHandler(async (req, res) => { const r = await service.importLegacyTransactions(req.params.id, req.body.rows, req.user, req.body.skipped); bcast('update', req.params.id); res.status(201).json(r); });
+const importLegacyTxns = asyncHandler(async (req, res) => { const r = await service.importLegacyTransactions(req.params.id, req.body.rows, req.user, req.body.skipped, req.body.includeBon); bcast('update', req.params.id); res.status(201).json(r); });
 const undoLegacyBatch = asyncHandler(async (req, res) => { const r = await service.undoLegacyBatch(req.params.id, req.params.batchId, req.user); bcast('update', req.params.id); res.json({ data: r }); });
 const updatePrice = asyncHandler(async (req, res) => { const c = await service.updatePrice(req.params.id, req.body.newPrice, req.user, req.body.scope); bcast('price', c.id); res.json({ data: c }); });
 const pricePreview = asyncHandler(async (req, res) => res.json({ data: await service.pricePreview(req.params.id, req.body.newPrice, req.user) }));
@@ -208,6 +210,7 @@ const addCorrection = asyncHandler(async (req, res) => {
   res.status(201).json({ data: c });
 });
 const voidTransaction = asyncHandler(async (req, res) => { const t = await service.voidTransaction(req.params.id, req.body, req.user); bcast('void', req.params.id); res.json({ data: t }); });
+const setTransactionArchive = asyncHandler(async (req, res) => { const t = await service.setTransactionArchive(req.params.id, req.body.legacy, req.body, req.user); bcast('archive', req.params.id); res.json({ data: t }); });
 const hardDeleteTransaction = asyncHandler(async (req, res) => { const r = await service.hardDeleteTransaction(req.params.id, req.body, req.user); bcast('delete', req.params.id); res.json({ data: r }); });
 
 // ── invoices / notas ──
@@ -264,10 +267,10 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
-  listTransactions, createTransaction, addCorrection, voidTransaction, hardDeleteTransaction, listAudit, dashboardSummary,
+  listTransactions, createTransaction, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, archiveSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

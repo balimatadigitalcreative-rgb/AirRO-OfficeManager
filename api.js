@@ -139,7 +139,7 @@
         openingBon: (id, data) => req('POST', '/distribusi/customers/' + id + '/opening-bon', data),   // { amount, txnDate, note }
         import: (customers, skipped) => req('POST', '/distribusi/customers/import', { customers, skipped: skipped || 0 }),
         // Per-customer legacy (archive) transaction import + undo a batch.
-        importLegacyTxns: (id, rows, skipped) => req('POST', '/distribusi/customers/' + id + '/transactions/import', { rows, skipped: skipped || 0 }),
+        importLegacyTxns: (id, rows, skipped, includeBon) => req('POST', '/distribusi/customers/' + id + '/transactions/import', { rows, skipped: skipped || 0, includeBon: includeBon !== false }),
         undoLegacyBatch: (id, batchId) => req('DELETE', '/distribusi/customers/' + id + '/transactions/legacy-batch/' + batchId),
         // scope: null = new transactions only; 'all'|'cycle'|'bon' = also adjust old ones.
         setPrice: (id, newPrice, scope) => req('PATCH', '/distribusi/customers/' + id + '/price', { newPrice, scope: scope || null }),
@@ -163,6 +163,8 @@
         correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),
         // VOID (cap distribusiVoid) — recorded cancellation; row stays, excluded from aggregates.
         void: (id, data) => req('POST', '/distribusi/transactions/' + id + '/void', data),   // { reason }
+        // ARCHIVE TOGGLE (cap distribusiLegacyImport) — flip active↔archive(legacy); reason required.
+        setArchive: (id, data) => req('POST', '/distribusi/transactions/' + id + '/archive', data),   // { legacy, reason }
         // HARD DELETE (cap distribusiHardDelete, owner) — permanent; audit written first.
         hardDelete: (id, data) => req('DELETE', '/distribusi/transactions/' + id, data),     // { reason, confirm, password }
       },
