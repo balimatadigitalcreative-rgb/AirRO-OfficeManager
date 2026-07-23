@@ -2877,13 +2877,22 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
 // dashboard — it never posts to the cash book, so no double-count. Fleet-scoped (server-enforced):
 // a scoped driver sees/logs only their fleet; owner/admin see all and can filter by fleet.
 function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+  const [view, setView] = uSx('list');   // list | form (same view-swap pattern as the new-transaction form)
   const [date, setDate] = uSx(today);
   const [rows, setRows] = uSx(null);
   const [cats, setCats] = uSx(['bensin', 'makan', 'parkir', 'lainnya']);
-  const [modal, setModal] = uSx(null);   // { kind:'add', ...fields } | { kind:'void', row, reason }
+  const [voidRow, setVoidRow] = uSx(null);   // the row being voided (an action modal, like Batalkan)
+  const [voidReason, setVoidReason] = uSx('');
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
   const [toast, setToast] = uSx('');
+  // Expense-form fields — mirror the new-transaction form's field states 1:1.
+  const [fCat, setFCat] = uSx('bensin');
+  const [fAmount, setFAmount] = uSx('');   // raw digits; formatted on blur
+  const [amtFocus, setAmtFocus] = uSx(false);
+  const [fNote, setFNote] = uSx('');
+  const [fPhoto, setFPhoto] = uSx(null);
+  const [fFleet, setFFleet] = uSx('');
   const scoped = isScoped(fleetScope);
   const ef = effFleet(fleetScope, distFleet);
   const fleetOpts = (fleet || []).filter(Boolean);
@@ -2894,30 +2903,91 @@ function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDist
   uEx(() => { reload(); }, [refreshKey, ef, date]);
   uEx(() => { if (window.API && window.API.distribusi && window.API.distribusi.expenses) window.API.distribusi.expenses.categories().then((r) => { if (r.data && r.data.length) setCats(r.data); }).catch(() => {}); }, []);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
-  const openAdd = () => { setErr(''); setModal({ kind: 'add', category: 'bensin', amount: '', note: '', photo: null, fleet: (distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || '')) }); };
-  const openVoid = (row) => { setErr(''); setModal({ kind: 'void', row, reason: '' }); };
-  const commit = () => {
-    if (!modal || saving) return;
+  const catLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
+  const viewPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
+  const openAdd = () => { setErr(''); setFCat('bensin'); setFAmount(''); setAmtFocus(false); setFNote(''); setFPhoto(null); setFFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || ''))); setView('form'); };
+  const openVoid = (row) => { setErr(''); setVoidReason(''); setVoidRow(row); };
+  const fAmt = parseInt(String(fAmount).replace(/[^0-9]/g, ''), 10) || 0;
+  const commitAdd = () => {
+    if (saving) return;
+    if (!(fAmt > 0)) { setErr(trD('exp.amtReq')); return; }
+    if (!scoped && !fFleet) { setErr(trD('run.errFleet')); return; }
     setSaving(true); setErr('');
-    const done = (m) => { setSaving(false); setModal(null); flash(m); reload(); if (onChanged) onChanged(); };
-    const fail = (e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); };
-    if (modal.kind === 'void') {
-      if (!(modal.reason || '').trim()) { setSaving(false); setErr(trD('exp.reasonReq')); return; }
-      window.API.distribusi.expenses.void(modal.row.id, { reason: modal.reason.trim() }).then(() => done(trD('exp.voided'))).catch(fail);
-      return;
-    }
-    const amount = parseInt(String(modal.amount).replace(/[^0-9]/g, ''), 10) || 0;
-    if (!(amount > 0)) { setSaving(false); setErr(trD('exp.amtReq')); return; }
-    if (!scoped && !modal.fleet) { setSaving(false); setErr(trD('run.errFleet')); return; }
-    const cat = (modal.category || '').trim() || 'lainnya';
-    const photoId = modal.photo && modal.photo.ref ? modal.photo.ref : undefined;
-    window.API.distribusi.expenses.create({ date, fleet: modal.fleet || undefined, amount, category: cat, note: (modal.note || '').trim() || undefined, photoId })
-      .then(() => done(trD('exp.saved'))).catch(fail);
+    const cat = (fCat || '').trim() || 'lainnya';
+    const photoId = fPhoto && fPhoto.ref ? fPhoto.ref : undefined;
+    window.API.distribusi.expenses.create({ date, fleet: fFleet || undefined, amount: fAmt, category: cat, note: (fNote || '').trim() || undefined, photoId })
+      .then(() => { setSaving(false); setView('list'); flash(trD('exp.saved')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
+  const commitVoid = () => {
+    if (!voidRow || saving) return;
+    if (!(voidReason || '').trim()) { setErr(trD('exp.reasonReq')); return; }
+    setSaving(true); setErr('');
+    window.API.distribusi.expenses.void(voidRow.id, { reason: voidReason.trim() })
+      .then(() => { setSaving(false); setVoidRow(null); flash(trD('exp.voided')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
   const active = (rows || []).filter((r) => r.status === 'active');
   const total = active.reduce((s, r) => s + r.amount, 0);
-  const catLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
-  const viewPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
+  const catCustom = !cats.includes(fCat);
+
+  // ── FORM — identical shell/flow to the new-transaction form (card + summary, DateField, chips,
+  // rupiah amount, note, attachment, full-width submit + footer hint). ──
+  if (view === 'form') {
+    return (
+      <div className="dist-dash screen-enter">
+        <button type="button" className="dist-back" onClick={() => setView('list')}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backList')}</button>
+        <div className="dist-form-wrap">
+          <div className="card dist-form">
+            {!scoped && (<>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <select className="fld" value={fFleet} onChange={(e) => setFFleet(e.target.value)}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
+            </>)}
+
+            {/* Category — chips like the payment-method chips, not a dropdown */}
+            <label className="fld-label" style={scoped ? { marginTop: 0 } : undefined}>{trD('exp.category')}</label>
+            <div className="exp-cat-chips">
+              {cats.map((c) => <button key={c} type="button" className={`cat-chip ${fCat === c ? 'on' : ''}`} onClick={() => setFCat(c)}>{catLabel(c)}</button>)}
+              <button type="button" className={`cat-chip ${catCustom ? 'on' : ''}`} onClick={() => setFCat(catCustom ? 'bensin' : '')}>{trD('exp.catCustom')}</button>
+            </div>
+            {catCustom && <input className="fld" style={{ marginTop: 8 }} value={fCat} placeholder={trD('exp.catOther')} onChange={(e) => setFCat(e.target.value)} />}
+
+            <div className="dist-form-row">
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                {/* Free typing; rupiah thousands-format applied on blur (same behaviour as the txn amount). */}
+                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={amtFocus ? fAmount : (fAmt ? fAmt.toLocaleString('id-ID') : '')} placeholder="0" onFocus={() => setAmtFocus(true)} onBlur={() => setAmtFocus(false)} onChange={(e) => setFAmount(e.target.value.replace(/[^0-9]/g, ''))} /></div>
+              </div>
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <label className="fld-label">{trD('dist.fDate')}</label>
+                <DP.DateField value={date} onChange={setDate} max={today} />
+              </div>
+            </div>
+
+            <label className="fld-label">{trD('exp.note')}</label>
+            <input className="fld" value={fNote} maxLength={300} placeholder={trD('exp.notePh')} onChange={(e) => setFNote(e.target.value)} />
+
+            <label className="fld-label">{trD('exp.photo')}</label>
+            <UI.FileAttach value={fPhoto} onChange={setFPhoto} camera accept="image/*" label={trD('exp.photoAdd')} />
+
+            {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={saving || !(fAmt > 0)} onClick={commitAdd}>{saving ? '…' : trD('exp.save')}</button>
+            <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('exp.formNote')}</div>
+          </div>
+
+          <div className="card dist-form-sum">
+            <div className="dist-fs-t">{trD('dist.summary')}</div>
+            <div className="dist-fs-line"><span>{catLabel(fCat || 'lainnya')}</span><b>{rpFull(fAmt)}</b></div>
+            <div className="dist-fs-total"><span>{trD('dist.total')}</span><b className="tnum">{rpFull(fAmt)}</b></div>
+            <div className="dist-fs-note"><IconCoinOut s={13} />{trD('exp.sumNote')}</div>
+          </div>
+        </div>
+        {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+      </div>
+    );
+  }
+
+  // ── LIST ──
   return (
     <div className="dist-dash screen-enter">
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
@@ -2961,37 +3031,18 @@ function DistExpenses({ refreshKey, today, fleetScope, fleet, distFleet, setDist
         <div className="dist-fieldhint" style={{ marginTop: 8 }}><IconClock s={12} />{trD('exp.hint')}</div>
       </div>
 
-      {modal && (
-        <div className="modal-scrim" onClick={() => setModal(null)} style={{ zIndex: 200 }}>
+      {voidRow && (
+        <div className="modal-scrim" onClick={() => setVoidRow(null)} style={{ zIndex: 200 }}>
           <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{modal.kind === 'void' ? trD('exp.voidT') : trD('exp.addT')}</div><button className="jp-icon" onClick={() => setModal(null)}><IconClose s={18} /></button></div>
+            <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('exp.voidT')}</div><button className="jp-icon" onClick={() => setVoidRow(null)}><IconClose s={18} /></button></div>
             <div className="modal-body">
-              {modal.kind === 'void' ? (<>
-                <div className="dist-infobox"><IconClose s={16} /><span>{trD('exp.voidInfo')}</span></div>
-                <div className="exp-void-sum"><span className={`exp-cat ${'c-' + modal.row.category}`}>{catLabel(modal.row.category)}</span> · <b>{rpFull(modal.row.amount)}</b>{modal.row.note ? ' · ' + modal.row.note : ''}</div>
-                <label className="fld-label">{trD('exp.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-                <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={modal.reason} placeholder={trD('exp.voidReasonPh')} onChange={(e) => setModal({ ...modal, reason: e.target.value })} />
-              </>) : (<>
-                {!scoped && (<>
-                  <label className="fld-label">{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-                  <select className="fld" value={modal.fleet} onChange={(e) => setModal({ ...modal, fleet: e.target.value })}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
-                </>)}
-                <label className="fld-label">{trD('exp.category')}</label>
-                <div className="exp-cat-chips">
-                  {cats.map((c) => <button key={c} type="button" className={`cat-chip ${modal.category === c ? 'on' : ''}`} onClick={() => setModal({ ...modal, category: c })}>{catLabel(c)}</button>)}
-                </div>
-                {!cats.includes(modal.category) && <input className="fld" style={{ marginTop: 8 }} value={modal.category} placeholder={trD('exp.catOther')} onChange={(e) => setModal({ ...modal, category: e.target.value })} />}
-                <button type="button" className="dist-link" style={{ marginTop: 8 }} onClick={() => setModal({ ...modal, category: cats.includes(modal.category) ? '' : 'bensin' })}>{cats.includes(modal.category) ? trD('exp.catCustom') : trD('exp.catPreset')}</button>
-                <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={modal.amount ? (parseInt(String(modal.amount).replace(/[^0-9]/g, ''), 10) || 0).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setModal({ ...modal, amount: e.target.value.replace(/[^0-9]/g, '') })} /></div>
-                <label className="fld-label">{trD('exp.note')}</label>
-                <input className="fld" value={modal.note} maxLength={300} placeholder={trD('exp.notePh')} onChange={(e) => setModal({ ...modal, note: e.target.value })} />
-                <label className="fld-label">{trD('exp.photo')}</label>
-                <UI.FileAttach value={modal.photo} onChange={(v) => setModal({ ...modal, photo: v })} camera accept="image/*" label={trD('exp.photoAdd')} />
-              </>)}
+              <div className="dist-infobox"><IconClose s={16} /><span>{trD('exp.voidInfo')}</span></div>
+              <div className="exp-void-sum"><span className={`exp-cat ${'c-' + voidRow.category}`}>{catLabel(voidRow.category)}</span> · <b>{rpFull(voidRow.amount)}</b>{voidRow.note ? ' · ' + voidRow.note : ''}</div>
+              <label className="fld-label">{trD('exp.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={voidReason} placeholder={trD('exp.voidReasonPh')} onChange={(e) => setVoidReason(e.target.value)} />
               {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
             </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setModal(null)}>{trD('dist.cancel')}</button><button className={`btn ${modal.kind === 'void' ? 'btn-danger' : 'btn-primary'}`} disabled={saving} onClick={commit}>{saving ? '…' : (modal.kind === 'void' ? trD('exp.void') : trD('exp.save'))}</button></div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoidRow(null)}>{trD('dist.cancel')}</button><button className="btn btn-danger" disabled={saving} onClick={commitVoid}>{saving ? '…' : trD('exp.void')}</button></div>
           </div>
         </div>
       )}
