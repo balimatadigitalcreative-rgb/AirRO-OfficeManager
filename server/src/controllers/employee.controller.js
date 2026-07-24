@@ -3,7 +3,6 @@ const { z } = require('zod');
 const service = require('../services/employee.service');
 const asyncHandler = require('../utils/asyncHandler');
 const bus = require('../lib/eventbus');
-const { OFFICES } = service;
 
 const DATE_OPT = z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/, 'Date must be YYYY-MM-DD').optional();
 
@@ -24,8 +23,10 @@ const updateSchema = z.object({
 const listQuery = z.object({ includeInactive: z.coerce.boolean().optional().default(false) });
 const idParams = z.object({ id: z.string().min(1) });
 // Standalone NIP allocation (used by the shared-store UI path).
+// The NIP office prefix is DERIVED from the employee's business unit (BusinessUnit.officeCode) —
+// the client picks a unit, never an office. `office` is deliberately NOT accepted here.
 const nipSchema = z.object({
-  office: z.enum(OFFICES).optional().default('AIRRO'),
+  businessUnitId: z.string().max(60).optional(),
   contractStart: DATE_OPT,
 });
 
@@ -35,7 +36,7 @@ const create = asyncHandler(async (req, res) => { const e = await service.create
 const update = asyncHandler(async (req, res) => { const e = await service.update(req.params.id, req.body, req.user?.id); bus.broadcast({ entity: 'employee', action: 'update', id: e.id }); res.json({ data: e }); });
 const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bus.broadcast({ entity: 'employee', action: 'delete', id: req.params.id }); res.status(204).send(); });
 // POST /employees/nip → allocate a unique NIP without creating an Employee row.
-const generateNip = asyncHandler(async (req, res) => res.json({ data: { nip: await service.allocateNip(req.body) } }));
+const generateNip = asyncHandler(async (req, res) => res.json({ data: { nip: await service.allocateNip({ businessUnitId: req.body.businessUnitId || null, contractStart: req.body.contractStart || null }) } }));
 // POST /employees/:id/regenerate-nip → fresh NIP for an existing DB employee.
 const regenerateNip = asyncHandler(async (req, res) => { const e = await service.regenerateNip(req.params.id); bus.broadcast({ entity: 'employee', action: 'update', id: e.id }); res.json({ data: e }); });
 

@@ -224,6 +224,11 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
   // Business-unit options (active only, but keep the staff's current unit even if it was
   // deactivated so the dropdown never loses their placement).
   const buUnits = useBusinessUnits();
+  // READ-ONLY office prefix for the chosen unit — mirrors the server derivation (officeCodeFor).
+  const unitOfficeCode = (() => {
+    const u = buUnits.find((x) => x.id === (f.businessUnitId || 'air'));
+    return (u && u.officeCode) || f.office || 'AIRRO';
+  })();
   const buOptions = (() => {
     const act = buUnits.filter((u) => u.active !== false);
     const cur = f.businessUnitId || 'air';
@@ -262,7 +267,8 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
     if (!(window.API && window.API.employees)) { alert(trH('co.nipOffline')); return; }
     setNipBusy(true);
     try {
-      const r = await window.API.employees.nip({ office: f.office || 'AIRRO', contractStart: f.contractStart || undefined });
+      // The office prefix is DERIVED server-side from the business unit — the client never picks one.
+      const r = await window.API.employees.nip({ businessUnitId: f.businessUnitId || 'air', contractStart: f.contractStart || undefined });
       if (r && r.data && r.data.nip) set({ nip: r.data.nip }); else alert(trH('co.nipOffline'));
     } catch (e) { alert(trH('co.nipOffline')); }
     finally { setNipBusy(false); }
@@ -284,10 +290,14 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
       <label className="ed-af ed-af-wide"><span>{trH('co.nip')}</span>
         <div className="ed-nip-row">
           <input value={f.nip || ''} readOnly placeholder="—" />
+          {/* "Posisi kantor" is no longer a separate choice: the NIP office prefix is DERIVED from the
+              Business Unit below (BusinessUnit.officeCode) and shown READ-ONLY here so the information
+              is still visible. Changing the unit never rewrites an existing NIP. */}
+          <span className="ed-nip-office" title={trH('co.office')}>{unitOfficeCode}</span>
           <button type="button" className="ed-nip-btn" disabled={nipBusy} onClick={genNip}>{nipBusy ? trH('co.nipBusy') : (f.nip ? trH('co.regenNip') : trH('co.genNip'))}</button>
         </div>
+        <small className="ed-nip-hint">{trH('co.nipUnitHint')}</small>
       </label>
-      <label className="ed-af"><span>{trH('co.office')}</span><UI.Dropdown value={f.office || 'AIRRO'} options={['AIRRO', 'NSN', 'MFG']} onChange={(v) => set({ office: v })} /></label>
       <label className="ed-af"><span>{trH('co.maritalStatus')}</span><UI.Dropdown value={f.maritalStatus || 'TK'} options={[{ value: 'TK', label: trH('co.mTK') }, { value: 'K', label: trH('co.mK') }, { value: 'Cerai', label: trH('co.mCerai') }]} onChange={(v) => set({ maritalStatus: v })} /></label>
       <label className="ed-af"><span>NIK</span><input value={f.nik || ''} inputMode="numeric" onChange={(e) => set({ nik: e.target.value.replace(/\D/g, '') })} /></label>
       <label className="ed-af"><span>{trH('co.noKk')}</span><input value={f.noKk || ''} inputMode="numeric" onChange={(e) => set({ noKk: e.target.value.replace(/\D/g, '') })} /></label>

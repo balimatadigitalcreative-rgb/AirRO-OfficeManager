@@ -4,13 +4,17 @@ const service = require('../services/businessUnit.service');
 const asyncHandler = require('../utils/asyncHandler');
 
 const idParams = z.object({ id: z.string().min(1) });
+// `officeCode` = the NIP <OFFICE> prefix for staff placed in this unit (owner-editable, so a new
+// unit can get its own). Validated against the allowed set in the service.
 const createSchema = z.object({
   name: z.string().trim().min(1).max(60),
   code: z.string().trim().max(12).optional(),
+  officeCode: z.string().trim().max(12).optional(),
 });
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   code: z.string().trim().max(12).optional(),
+  officeCode: z.string().trim().max(12).optional(),
   active: z.boolean().optional(),
 });
 

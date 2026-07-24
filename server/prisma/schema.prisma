@@ -994,6 +994,13 @@ model BusinessUnit {
   id        String   @id @default(cuid())
   name      String
   code      String   @default("")                     // short label (AIR / MFG / …), for chips + future filters
+  // NIP OFFICE PREFIX for staff placed in this unit. DISTINCT from `code` (a display chip): this is
+  // the <OFFICE> segment of an employee NIP (<OFFICE>-YY-NNN) and the key of the per-office running
+  // counter (EmployeeNip @@unique([office, year, seq])). "Posisi kantor" was removed from the
+  // employee form — office is DERIVED from the employee's business unit through this column, so the
+  // user makes one choice instead of two and the client can never send an arbitrary office.
+  // Owner-editable (PATCH /business-units/:id) so a new unit can get its own prefix later.
+  officeCode String  @default("AIRRO")                // AIRRO | NSN | MFG
   active    Boolean  @default(true)                   // deactivate (never delete) once data references it
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())

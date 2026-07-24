@@ -28,8 +28,13 @@ function yy2(contractStart) {
 // Format: <OFFICE>-YY-NNN. NNN resets per office+year, starts at 001.
 // The EmployeeNip unique constraint on (office, year, seq) means two concurrent
 // callers can't both claim the same seq — the loser gets P2002 and retries.
-async function allocateNip({ office = 'AIRRO', contractStart = null } = {}) {
-  const code = OFFICES.includes(office) ? office : 'AIRRO';
+// `businessUnitId`, when given, is AUTHORITATIVE: the office prefix is DERIVED from the unit
+// (BusinessUnit.officeCode). "Posisi kantor" is no longer a per-employee choice, so the client never
+// supplies an office. The plain `office` argument survives only for internal callers that already
+// hold an employee's stored office (regenerateNip).
+async function allocateNip({ office = 'AIRRO', businessUnitId = null, contractStart = null } = {}) {
+  const derived = businessUnitId ? await businessUnit.officeCodeFor(businessUnitId) : office;
+  const code = OFFICES.includes(derived) ? derived : 'AIRRO';
   const year = yy2(contractStart);
   for (let attempt = 0; attempt < 25; attempt++) {
     const count = await prisma.employeeNip.count({ where: { office: code, year } });
@@ -77,7 +82,8 @@ function toColumns(o) {
     stage: o.stage || 'permanent',
     bpjsKesEnrolled: !!o.bpjsKesEnrolled, bpjsKesStart: str(o.bpjsKesStart) || null,
     bpjsTkEnrolled: !!o.bpjsTkEnrolled, bpjsTkStart: str(o.bpjsTkStart) || null,
-    office: OFFICES.includes(o.office) ? o.office : 'AIRRO',
+    // NOTE: `office` is deliberately NOT projected here — it is DERIVED from the employee's business
+    // unit in create()/update() below, so a client-sent office is always ignored.
     contractStart: str(o.contractStart) || null, contractEnd: str(o.contractEnd) || null,
     noSurat: str(o.noSurat) || null, noKk: str(o.noKk) || null,
     noBpjsKes: str(o.noBpjsKes) || null, noBpjsTk: str(o.noBpjsTk) || null,
@@ -134,7 +140,10 @@ async function create(body, userId) {
   // (defaults to "Air"). Purely a label — it changes no pay amount, only grouping.
   const businessUnitId = await businessUnit.resolveUnitId(body.businessUnitId);
   full.businessUnitId = businessUnitId;
-  const data = { ...cols, ...snap, nip, businessUnitId, data: JSON.stringify(full) };
+  // Office (the NIP prefix) is DERIVED from the placement — never taken from the request body.
+  const office = await businessUnit.officeCodeFor(businessUnitId);
+  full.office = office;                                // keep the client blob consistent with the column
+  const data = { ...cols, ...snap, nip, businessUnitId, office, data: JSON.stringify(full) };
   if (body.id) data.id = String(body.id);           // keep the client id (optimistic insert)
   const row = await prisma.employee.create({ data });
   return toClient(row);
@@ -164,7 +173,12 @@ async function update(id, body, userId) {
     }
   }
   merged.businessUnitId = businessUnitId;
-  const row = await prisma.employee.update({ where: { id }, data: { ...cols, businessUnitId, data: JSON.stringify(merged) } });
+  // Derive the office from the (possibly new) placement. The employee's EXISTING NIP is a historical
+  // identifier and is NEVER rewritten when the unit changes — only a future "Regenerasi NIP" picks up
+  // the new prefix (regenerateNip reads this column).
+  const office = await businessUnit.officeCodeFor(businessUnitId);
+  merged.office = office;
+  const row = await prisma.employee.update({ where: { id }, data: { ...cols, businessUnitId, office, data: JSON.stringify(merged) } });
   return toClient(row);
 }
 // Explicit "Regenerasi NIP" — allocates a fresh NIP using current office/contract.
