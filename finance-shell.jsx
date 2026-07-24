@@ -115,6 +115,23 @@ function UnitSelector({ units, value, onChange }) {
 // null/blank/unknown → "Air" (Stage 1 backfilled everyone); keeps grouping from ever dropping a row.
 const unitOfRec = (r) => (r && r.businessUnitId) || 'air';
 
+// Screens whose data carries NO businessUnitId, so the unit selector cannot filter them:
+// DISTRIBUSI (transactions are scoped by fleetId, not by unit), plus Setoran/Gudang/Pemasok which
+// are the same water-side operation. POLICY: they are left UNAFFECTED by the selector — and the
+// indicator says so out loud, so a filtered header can never be misread as a filtered screen.
+const UNIT_EXEMPT = (screen) => !!screen && (screen.indexOf('dist-') === 0 || ['setoran', 'gudang', 'suppliers'].includes(screen));
+// "Unit: X" indicator — shown on every screen whenever a single unit is selected, so filtered
+// numbers are never mistaken for company totals.
+function UnitViewBar({ unitName, exempt }) {
+  if (!unitName) return null;   // combined view → no indicator (numbers ARE company totals)
+  return (
+    <div className={`unit-viewbar ${exempt ? 'exempt' : ''}`}>
+      <span className="unit-viewbar-tag">{tr('unit.label')}: <b>{unitName}</b></span>
+      <span className="unit-viewbar-msg">{exempt ? tr('unit.exemptNote') : tr('unit.filteredNote')}</span>
+    </div>
+  );
+}
+
 function FApp() {
   // Auth is backend-only: never auto-login from a stale LOCAL session (left over
   // from the old localStorage build). The session is restored solely from a
@@ -210,10 +227,28 @@ function FApp() {
   // Load the unit dictionary once the user is authenticated (keyed on a cap that flips true
   // after login, so the request carries a token — an at-mount fetch would 401). Placed after
   // `p` is defined so the dependency array can safely read it.
+  // The unit dictionary is what makes the header selector EXIST at all (UnitSelector renders null
+  // with <2 units), so a transient failure here silently removes the whole feature. The cap flips
+  // true on the same render as `user`, which can still be BEFORE the cloud adapter has installed the
+  // JWT — the request then 401s and the old `.catch(() => {})` swallowed it, leaving the 1-item
+  // fallback forever. So: wait for a token, and retry a bounded number of times on failure.
   uEh(() => {
-    if (!(p.cashflow || p.employees) || !(window.API && window.API.businessUnits)) return;
-    window.API.businessUnits.list().then((r) => { const list = (r && r.data && r.data.length) ? r.data : null; if (list) { setBusinessUnits(list); try { localStorage.setItem('airro_bunits_cache_v1', JSON.stringify(list)); } catch (e) {} } }).catch(() => {});
-  }, [p.cashflow, p.employees]);
+    if (!user || !(p.cashflow || p.employees) || !(window.API && window.API.businessUnits)) return;
+    let live = true, tries = 0;
+    const load = () => {
+      if (!live) return;
+      if (!(window.API.getToken && window.API.getToken())) { if (++tries <= 10) setTimeout(load, 400); return; }
+      window.API.businessUnits.list()
+        .then((r) => {
+          if (!live) return;
+          const list = (r && r.data && r.data.length) ? r.data : null;
+          if (list) { setBusinessUnits(list); try { localStorage.setItem('airro_bunits_cache_v1', JSON.stringify(list)); } catch (e) {} }
+        })
+        .catch(() => { if (live && ++tries <= 10) setTimeout(load, 600); });
+    };
+    load();
+    return () => { live = false; };
+  }, [user, p.cashflow, p.employees]);
 
   // ── Browser history: hash routing (#screen) + Back-to-close overlays ─────────
   // Screen changes push a `#id` entry so the browser Back/Forward buttons walk the app
@@ -978,6 +1013,14 @@ function FApp() {
   // (Bersama) show only in the combined view, so their balance is never double-counted.
   const scopedEntries = uMh(() => (activeUnit === 'all' ? entries : entries.filter((e) => unitOfRec(e) === activeUnit)), [entries, activeUnit]);
   const scopedAccounts = uMh(() => (activeUnit === 'all' ? accounts : accounts.filter((a) => unitOfRec(a) === activeUnit)), [accounts, activeUnit]);
+  // HR follows the SAME view context: employees carry businessUnitId (Stage 2), so a unit view shows
+  // only that unit's people and every payroll total recomputes from that set. With 'all' the scoped
+  // array IS the full array, so combined totals are byte-for-byte unchanged and Σ(units) == combined.
+  // The payroll screen's own per-unit chips/subtotals (Stage 2) keep working inside whatever set they
+  // are handed — no duplicated filtering logic.
+  const scopedStaff = uMh(() => (activeUnit === 'all' ? hrdStaff : hrdStaff.filter((s) => unitOfRec(s) === activeUnit)), [hrdStaff, activeUnit]);
+  // Label for the "Unit: X" indicator (null in the combined view → no indicator shown).
+  const activeUnitName = uMh(() => (activeUnit === 'all' ? null : ((businessUnits.find((u) => u.id === activeUnit) || {}).name || activeUnit)), [activeUnit, businessUnits]);
 
   // `combined` = the "Semua" view. In it, inter-unit transfer legs are ELIMINATED from company
   // income/expense/profit (internal trade nets to zero — not new company revenue/cost); they are
@@ -1151,7 +1194,7 @@ function FApp() {
   }, [cats]);
   // Payroll totals for the current month: exclude separated staff, prorate the
   // separation month, and fold in the running cycle's kasbon — matches PayrollScreen.
-  const hrdTotals = uMh(() => HRD.totals(HRD.payrollStaff(hrdStaff, curMonthKey, hrdRates).map((s) => HRD.withCashbon(s, cashbons, HRD.payCycle().anchor)), hrdRates), [hrdStaff, hrdRates, cashbons, curMonthKey]);
+  const hrdTotals = uMh(() => HRD.totals(HRD.payrollStaff(scopedStaff, curMonthKey, hrdRates).map((s) => HRD.withCashbon(s, cashbons, HRD.payCycle().anchor)), hrdRates), [scopedStaff, hrdRates, cashbons, curMonthKey]);
   const payrollPosted = uMh(() => entries.find((e) => e.payroll === curMonthKey) || null, [entries, curMonthKey]);
   const postPayroll = (amount, label, unitBreakdown) => {
     if (!p.payroll || !amount) return;
@@ -1345,6 +1388,8 @@ function FApp() {
                 onChangePassword={openPw} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
           </header>
+          {/* Which unit am I looking at? Shown on EVERY screen while a single unit is selected. */}
+          <UnitViewBar unitName={activeUnitName} exempt={UNIT_EXEMPT(screen)} />
 
           {screen === 'dist-dashboard' && p.distribusiDashboard && (
             <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
@@ -1473,22 +1518,22 @@ function FApp() {
             <COMPANY.ProjectsScreen projects={projects} setProjects={applyProjects} canEdit={true} />
           )}
 
-          {screen === 'company' && p.company && (            <COMPANY.CompanyDashboard fin={stats} staff={hrdStaff} rates={hrdRates} budget={hrBudget} approvals={approvals} setApprovals={applyApprovals} role={user.role} projects={projects} setoran={setoran} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} onCancelRequest={cancelRequest} onDeleteRequest={deleteRequest} userName={user.name} />
+          {screen === 'company' && p.company && (            <COMPANY.CompanyDashboard fin={stats} staff={scopedStaff} rates={hrdRates} budget={hrBudget} approvals={approvals} setApprovals={applyApprovals} role={user.role} projects={projects} setoran={setoran} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} onCancelRequest={cancelRequest} onDeleteRequest={deleteRequest} userName={user.name} />
           )}
 
           {screen === 'headcount' && p.payroll && p.attendance && (
-            <COMPANY.HeadcountAffordability staff={hrdStaff} rates={hrdRates} budget={hrBudget} setBudget={applyBudget} canEdit={p.payroll} />
+            <COMPANY.HeadcountAffordability staff={scopedStaff} rates={hrdRates} budget={hrBudget} setBudget={applyBudget} canEdit={p.payroll} />
           )}
 
           {screen === 'hrreport' && p.employees && (
-            <COMPANY.HRReport staff={hrdStaff} rates={hrdRates} departments={departments} budget={hrBudget} monthKey={monthKey} today={FIN.TODAY} approvals={approvals} gran={gran} anchor={anchor} setAnchor={setAnchor} range={range} periodLbl={periodLbl} setGran={setGran} />
+            <COMPANY.HRReport staff={scopedStaff} rates={hrdRates} departments={departments} budget={hrBudget} monthKey={monthKey} today={FIN.TODAY} approvals={approvals} gran={gran} anchor={anchor} setAnchor={setAnchor} range={range} periodLbl={periodLbl} setGran={setGran} />
           )}
 
           {screen === 'hrsettings' && p.payroll && p.attendance && (            <PAYROLL.HrSettings rates={hrdRates} setRates={applyRates} departments={departments} setDepartments={applyDepartments} positions={positions} setPositions={applyPositions} staff={hrdStaff} setStaff={applyStaff} canEditDept={p.payroll} />
           )}
 
           {screen === 'employees' && p.employees && (
-            <COMPANY.EmployeeDirectory staff={hrdStaff} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} onOpen={openEmp} onEdit={() => navigate('payroll')} canEdit={p.employees} seeMoney={p.seeMoney} setStaff={applyStaff} />
+            <COMPANY.EmployeeDirectory staff={scopedStaff} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} onOpen={openEmp} onEdit={() => navigate('payroll')} canEdit={p.employees} seeMoney={p.seeMoney} setStaff={applyStaff} />
           )}
 
           {screen === 'hrcalendar' && p.employees && (
@@ -1512,15 +1557,15 @@ function FApp() {
           )}
 
           {screen === 'reports' && p.reports && (
-            <REPORTS.ReportsScreen entries={reportEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={hrdStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} />
+            <REPORTS.ReportsScreen entries={reportEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={scopedStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} />
           )}
 
           {screen === 'thr' && p.payroll && (
-            <COMPANY.ThrScreen staff={hrdStaff} rates={hrdRates} setRates={applyRates} today={FIN.TODAY} posted={thrPosted} onPost={postThr} canPost={p.addEntry || p.payroll} canEdit={p.payroll} />
+            <COMPANY.ThrScreen staff={scopedStaff} rates={hrdRates} setRates={applyRates} today={FIN.TODAY} posted={thrPosted} onPost={postThr} canPost={p.addEntry || p.payroll} canEdit={p.payroll} />
           )}
 
           {screen === 'payroll' && p.payroll && (
-            <PAYROLL.PayrollScreen rates={hrdRates} setRates={applyRates} staff={hrdStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} departments={departments} positions={positions} setPositions={applyPositions} />
+            <PAYROLL.PayrollScreen defaultUnit={unitDefaultForNew()} rates={hrdRates} setRates={applyRates} staff={scopedStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} departments={departments} positions={positions} setPositions={applyPositions} />
           )}
 
           {screen === 'settings' && p.settings && (

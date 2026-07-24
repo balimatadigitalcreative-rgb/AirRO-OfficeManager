@@ -588,7 +588,7 @@ function PayslipModal({ staff, calc, rates, monLabel, onClose }) {
 }
 
 /* ---------------- Main HRD screen ---------------- */
-function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit, cashbons, monthKey, departments, positions, setPositions }) {
+function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, canEdit, cashbons, monthKey, departments, positions, setPositions, defaultUnit }) {
   const [showRates, setShowRates] = uShr(false);
   const [editStaff, setEditStaff] = uShr(null);
   const [payslip, setPayslip] = uShr(null);
@@ -644,7 +644,7 @@ function PayrollScreen({ rates, setRates, staff, setStaff, monLabel, onPost, can
     setEditStaff(null);
   };
   const delStaff = (id) => { if (confirm(trH('hrd.removeConfirm'))) setStaff((prev) => prev.filter((x) => x.id !== id)); };
-  const addStaff = () => setEditStaff(HRD.newStaff());
+  const addStaff = () => setEditStaff(HRD.newStaff(defaultUnit));   // new hire defaults to the active unit
 
   return (
     <div className="screen-enter">

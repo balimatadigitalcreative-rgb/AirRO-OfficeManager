@@ -111,9 +111,11 @@
   // Canonical blank staff object — the SINGLE shape used by both the Payroll form
   // and the Employee Directory form, so fields never drift apart. Salary fields
   // default to 0 ("gaji belum diatur"); identity fields default blank.
-  function newStaff() {
+  // `unit` = the active business unit (Stage 3). A new hire defaults to the unit you are VIEWING,
+  // mirroring how a new entry/account defaults (unitDefaultForNew); 'air' when viewing Semua.
+  function newStaff(unit) {
     return {
-      id: newStaffId(), name: '', pos: '', dept: (loadDepartments()[0] || 'Staff'),
+      id: newStaffId(), businessUnitId: unit || 'air', name: '', pos: '', dept: (loadDepartments()[0] || 'Staff'),
       base: 0, allowance: 0, tjKinerja: 0, tjProfesi: 0, tjRumahDinas: 0, tjBpjsKes: 0, tjBpjsTk: 0,
       risk: 'Low', jp: true, religion: 'Islam', pph: 0, offDays: 0, deductions: [],
       nip: '', office: 'AIRRO', status: 'Tetap', noSurat: '', joinedDate: '', contractStart: '', contractEnd: '',
