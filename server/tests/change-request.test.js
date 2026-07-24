@@ -111,18 +111,20 @@ describe('Distribusi — approval-gated structured corrections', () => {
   });
 
   it('REJECT changes nothing on the transaction and closes the request with the note', async () => {
-    const r2 = await correct(staff, bonId, { reason: 'mau ubah harga', qty: 3, unitPrice: 7000, gallonOut: 3, gallonIn: 0 });
+    // qty-only (the price is capability-gated — this staff has no distribusiHargaMaster; see
+    // correction-price-gate.test.js). 2 × 6000 = 12.000 requested, then rejected.
+    const r2 = await correct(staff, bonId, { reason: 'mau ubah jumlah', qty: 2, unitPrice: 6000, gallonOut: 2, gallonIn: 0 });
     const rid = r2.body.data.id;
-    expect(r2.body.data.newAmount).toBe(21000);
-    const rej = await reject(gm, rid, 'harga master tidak berubah');
+    expect(r2.body.data.newAmount).toBe(12000);
+    const rej = await reject(gm, rid, 'jumlah asli sudah benar');
     expect(rej.status).toBe(200);
     expect(rej.body.data.status).toBe('rejected');
-    expect(rej.body.data.decisionNote).toBe('harga master tidak berubah');
+    expect(rej.body.data.decisionNote).toBe('jumlah asli sudah benar');
     const txn = await getTxn(gm, bonId);
     expect(txn.amount).toBe(18000);   // still the approved value, unchanged by the rejected request
     expect(txn.qty).toBe(3);
     expect(txn.pendingRequest).toBe(null);
-    expect((await audit(gm)).some((x) => /Tolak koreksi/i.test(x.title) && /tidak berubah/.test(x.detail))).toBe(true);
+    expect((await audit(gm)).some((x) => /Tolak koreksi/i.test(x.title) && /sudah benar/.test(x.detail))).toBe(true);
   });
 
   it('reject requires a note', async () => {

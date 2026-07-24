@@ -639,7 +639,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -767,8 +767,11 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const corrValid = corrTxn && corrReason.trim() && (corrSale ? ((+corrForm.qty || 0) > 0 && (+corrForm.unitPrice || 0) > 0) : (+corrForm.amount || 0) > 0);
   const commitCorrect = () => {
     if (!corrValid || corrSaving) return;
+    // The price is capability-gated: without distribusiHargaMaster we always send the transaction's
+    // LOCKED price, so a staff correction can only move the total via qty. The server re-checks this
+    // against the stored unitPriceLocked regardless of what is sent here.
     const payload = corrSale
-      ? { qty: +corrForm.qty || 0, unitPrice: +corrForm.unitPrice || 0, gallonOut: +corrForm.gallonOut || 0, gallonIn: +corrForm.gallonIn || 0 }
+      ? { qty: +corrForm.qty || 0, unitPrice: canPrice ? (+corrForm.unitPrice || 0) : corrTxn.unitPriceLocked, gallonOut: +corrForm.gallonOut || 0, gallonIn: +corrForm.gallonIn || 0 }
       : { amount: +corrForm.amount || 0 };
     setCorrSaving(true);
     // Submits a REQUEST (approval-gated) — the transaction is not changed until an approver approves.
@@ -1098,7 +1101,15 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               {corrSale ? (<>
                 <div className="dist-form-row">
                   <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fQty')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.qty} onChange={(e) => setCorrForm({ ...corrForm, qty: e.target.value.replace(/[^0-9]/g, '') })} /></div>
-                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.hargaPerGalon')}</label><div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, unitPrice: e.target.value.replace(/[^0-9]/g, '') })} /></div></div>
+                  {/* PRICE is capability-gated: editable only with distribusiHargaMaster; everyone
+                      else sees it locked (the server enforces this too, against unitPriceLocked). */}
+                  <div style={{ flex: 1, minWidth: 130 }}>
+                    <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.hargaPerGalon')}{!canPrice && <IconLock s={11} style={{ marginLeft: 5, verticalAlign: '-1px' }} />}</label>
+                    {canPrice
+                      ? <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, unitPrice: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                      : <><div className="amt-input is-locked"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} readOnly disabled aria-readonly="true" /></div>
+                        <div className="dist-fieldhint dist-price-locked"><IconLock s={11} />{trD('dist.korekPriceLocked')}</div></>}
+                  </div>
                 </div>
                 <div className="dist-form-row">
                   <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalOut')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonOut} onChange={(e) => setCorrForm({ ...corrForm, gallonOut: e.target.value.replace(/[^0-9]/g, '') })} /></div>

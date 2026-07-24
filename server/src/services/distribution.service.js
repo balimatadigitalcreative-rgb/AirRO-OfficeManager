@@ -182,7 +182,7 @@ async function deleteType(id, reassignTo, actor) {
 // actor = req.user ({ id, role, username }). We snapshot id+role (+name from DB) so
 // the trail is historical and can never be forged from the request body.
 async function actorSnap(actor) {
-  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null, actorStaff: false };
+  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null, actorStaff: false, canPrice: false };
   if (actor && actor.id) {
     const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true, role: true, permissions: true } });
     if (u) {
@@ -190,6 +190,9 @@ async function actorSnap(actor) {
       const perms = resolvePerms(u.role, u.permissions);
       // A "staff" actor has base distribusi but none of the owner distribusi caps.
       out.actorStaff = !!(perms.distribusi && !perms.distribusiAudit && !perms.distribusiHargaMaster && !perms.distribusiCustomers);
+      // May this actor change a PRICE? Resolved from the DB (never from the token/client body) —
+      // gates the unitPrice field of a correction, both at request and at approve time.
+      out.canPrice = !!perms.distribusiHargaMaster;
     }
   }
   return out;
@@ -929,11 +932,25 @@ async function currentGallonsOf(txnId) {
 }
 // Validate + normalize a structured correction payload against the txn's method.
 // Returns { fields, newAmount }. Throws ApiError on any invalid input.
-async function normalizeCorrection(txn, payload) {
+async function normalizeCorrection(txn, payload, opts) {
   const p = payload || {};
+  // FIELD-LEVEL GATE: qty / gallonOut / gallonIn are editable by anyone who may request a correction
+  // (distribusiKoreksi). The PRICE is not — only distribusiHargaMaster may change it. Enforced here,
+  // server-side, against the transaction's STORED unitPriceLocked (the client's value is never
+  // trusted): a non-holder sending a different price is rejected, and an absent/equal price is
+  // pinned to the stored one. Applied at BOTH request time (requester's caps) and approve time
+  // (approver's caps), so a price change can never slip through either door.
+  const canPrice = !!(opts && opts.canPrice);
   if (isGallonSale(txn)) {
-    const qty = int(p.qty), unitPrice = int(p.unitPrice);
+    const qty = int(p.qty);
     const gallonOut = int(p.gallonOut), gallonIn = int(p.gallonIn);   // int() floors negatives to 0
+    let unitPrice = int(p.unitPrice);
+    if (!canPrice) {
+      if (p.unitPrice != null && unitPrice !== txn.unitPriceLocked) {
+        throw ApiError.forbidden('Harga terkunci — hanya pemegang akses Harga Master yang boleh mengubah harga.', { unitPriceLocked: txn.unitPriceLocked });
+      }
+      unitPrice = txn.unitPriceLocked;   // pin to the stored price, whatever the client sent
+    }
     if (qty <= 0) throw ApiError.badRequest('Jumlah galon harus lebih dari 0.');
     if (unitPrice <= 0) throw ApiError.badRequest('Harga harus lebih dari 0.');
     const newAmount = qty * unitPrice;
@@ -992,9 +1009,11 @@ async function requestChange(txnId, kind, body, actor) {
   if (!reason) throw ApiError.badRequest('Alasan wajib diisi.');
   const already = await prisma.distChangeRequest.findFirst({ where: { transactionId: txnId, status: 'pending' } });
   if (already) throw ApiError.badRequest('Sudah ada pengajuan menunggu persetujuan untuk transaksi ini.');
+  const snap = await actorSnap(actor);   // resolved from the DB → carries the REQUESTER's price cap
   let payloadObj = {};
-  if (kind === 'correction') payloadObj = (await normalizeCorrection(txn, body.payload || body)).fields;   // validate now (fail fast)
-  const snap = await actorSnap(actor);
+  // Validate now (fail fast) with the requester's caps: a staff member without distribusiHargaMaster
+  // cannot submit a price change at all — the request never even reaches an approver.
+  if (kind === 'correction') payloadObj = (await normalizeCorrection(txn, body.payload || body, { canPrice: snap.canPrice })).fields;
   const req = await prisma.distChangeRequest.create({ data: {
     transactionId: txnId, fleetId: txn.fleetId || '', kind, status: 'pending',
     payload: JSON.stringify(payloadObj), reason,
@@ -1044,10 +1063,18 @@ async function decideChangeRequest(id, decision, body, actor) {
   if (txn.status === 'void') throw ApiError.badRequest('Transaksi sudah dibatalkan.');
   if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak bisa diubah.');
   let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
+  // A request that CHANGES THE PRICE can only be applied by an approver who also holds
+  // distribusiHargaMaster. Approving is what actually rewrites the price, so the same field-level
+  // gate applies at this door too. The request is NOT dropped — it stays pending for an approver who
+  // does hold the cap; any approver may still REJECT it (rejecting changes nothing).
+  const priceChanged = req.kind === 'correction' && isGallonSale(txn) && payload.unitPrice != null && int(payload.unitPrice) !== txn.unitPriceLocked;
+  if (priceChanged && !snap.canPrice) {
+    throw ApiError.forbidden('Pengajuan ini mengubah harga — hanya penyetuju dengan akses Harga Master yang boleh menyetujuinya. Anda tetap bisa menolaknya.', { unitPriceLocked: txn.unitPriceLocked, requestedUnitPrice: int(payload.unitPrice) });
+  }
   // Re-validate + gather old values BEFORE the write transaction (avoids nested-client reads).
   let norm = null, oldVals = null, newVals = null;
   if (req.kind === 'correction') {
-    norm = await normalizeCorrection(txn, payload);   // re-validate against the CURRENT txn state
+    norm = await normalizeCorrection(txn, payload, { canPrice: snap.canPrice });   // re-validate against the CURRENT txn state
     const oldG = isGallonSale(txn) ? await currentGallonsOf(txn.id) : {};
     oldVals = { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, ...oldG };
     newVals = { ...norm.fields, amount: norm.newAmount };
@@ -1078,7 +1105,10 @@ async function decideChangeRequest(id, decision, body, actor) {
       status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(),
     } });
   });
-  const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}`;
+  // A price change is called out explicitly (old → new) so the audit reads without decoding the JSON.
+  const priceLine = (req.kind === 'correction' && oldVals && newVals && newVals.unitPrice != null && oldVals.unitPrice !== newVals.unitPrice)
+    ? ` · HARGA ${oldVals.unitPrice} → ${newVals.unitPrice} (oleh pemegang Harga Master)` : '';
+  const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}${priceLine}`;
   await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${detail} · ${req.reason} · oleh ${snap.actorName}`, snap, req.fleetId);
   const fresh = await prisma.distChangeRequest.findUnique({ where: { id } });
   const out = await changeRequestClient(fresh);

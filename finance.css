@@ -2701,3 +2701,8 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .cr-meta.cr-ok { color: #159a6b; }
 .cr-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
 .cr-actions .cr-reject { color: var(--neg); }
+
+/* Correction form: the price field when the user lacks distribusiHargaMaster. */
+.amt-input.is-locked { background: var(--surface-2, #f2f5f6); opacity: .75; cursor: not-allowed; }
+.amt-input.is-locked input { cursor: not-allowed; color: var(--text-mut); }
+.dist-fieldhint.dist-price-locked { display: flex; align-items: center; gap: 4px; color: var(--text-mut); margin-top: 4px; }

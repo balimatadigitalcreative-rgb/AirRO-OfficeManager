@@ -154,6 +154,7 @@
       // Approval-gated corrections/voids — the request submits, an approver applies it.
       'dist.korekApprovalInfo': 'Edit the input fields; the total recomputes. This SUBMITS a request — the transaction changes only after an approver approves it.',
       'dist.korekDelta': 'Difference', 'dist.korekSubmit': 'Submit for approval', 'dist.corrReqSent': 'Correction submitted — awaiting approval.',
+      'dist.korekPriceLocked': 'Price locked — only Master Price holders may change it',
       'dist.voidApprovalInfo': 'This SUBMITS a cancellation request — the transaction stays active until an approver approves it. Bon & gallons reverse only on approval.',
       'dist.voidSubmit': 'Submit for approval', 'dist.voidReqSent': 'Cancellation submitted — awaiting approval.',
       'dist.pendingBadge': 'Awaiting approval', 'dist.pendCorrLine': 'Correction requested by {who} — awaiting approval', 'dist.pendVoidLine': 'Cancellation requested by {who} — awaiting approval',
@@ -714,6 +715,7 @@
       // Koreksi/pembatalan lewat persetujuan — pengajuan dikirim, penyetuju yang menerapkan.
       'dist.korekApprovalInfo': 'Ubah kolom input; total dihitung ulang. Ini MENGAJUKAN permintaan — transaksi baru berubah setelah disetujui penyetuju.',
       'dist.korekDelta': 'Selisih', 'dist.korekSubmit': 'Ajukan persetujuan', 'dist.corrReqSent': 'Koreksi diajukan — menunggu persetujuan.',
+      'dist.korekPriceLocked': 'Harga terkunci — hanya pemegang akses Harga Master',
       'dist.voidApprovalInfo': 'Ini MENGAJUKAN permintaan pembatalan — transaksi tetap aktif sampai disetujui. Bon & galon dibalik hanya setelah disetujui.',
       'dist.voidSubmit': 'Ajukan persetujuan', 'dist.voidReqSent': 'Pembatalan diajukan — menunggu persetujuan.',
       'dist.pendingBadge': 'Menunggu persetujuan', 'dist.pendCorrLine': 'Koreksi diajukan oleh {who} — menunggu persetujuan', 'dist.pendVoidLine': 'Pembatalan diajukan oleh {who} — menunggu persetujuan',
