@@ -23,11 +23,12 @@ const pnr = (t, body) => request(app).post('/api/v1/distribusi/transactions/paym
 const loss = async (t, qs) => (await request(app).get('/api/v1/distribusi/reports/loss' + (qs || '')).set(auth(t))).body.data;
 
 const TODAY = new Date().toISOString().slice(0, 10);
-let gm, cid, staffId, pnrId;
+let gm, owner, cid, staffId, pnrId;
 
 beforeAll(async () => {
   await resetDb();
   gm = (await reg({ name: 'Boss', username: 'gm_pnr', password: 'secret123', role: 'gm' })).token;
+  owner = (await reg({ name: 'Owner', username: 'owner_pnr', password: 'secret123', role: 'owner' })).token;   // approver (≠ requester)
   // the staff member who took the money — a real system user, so the loss is attributable
   staffId = (await reg({ name: 'Sopir Budi', username: 'sopir_pnr', password: 'secret123', role: 'finance' })).user.id;
   cid = (await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'Warung Melati', type: 'reguler', masterPrice: 10000, armada: 'Merah' })).body.data.id;
@@ -139,9 +140,13 @@ describe('Distribusi — pelunasan tidak diterima (payment not received)', () =>
     expect((await loss(gm)).byStaff.some((s) => s.responsibleName === 'Helper Andi')).toBe(true);
   });
 
-  it('a mistake is undone by the recorded VOID flow: the bon comes back and the loss stops counting', async () => {
+  it('a mistake is undone by the recorded (approval-gated) VOID flow: the bon comes back and the loss stops counting', async () => {
     const before = await loss(gm);
-    const v = await request(app).post(`/api/v1/distribusi/transactions/${pnrId}/void`).set(auth(gm)).send({ reason: 'salah pelanggan' });
+    // void is approval-gated now: gm REQUESTS, owner APPROVES (a requester can't approve their own).
+    const vr = await request(app).post(`/api/v1/distribusi/transactions/${pnrId}/void`).set(auth(gm)).send({ reason: 'salah pelanggan' });
+    expect(vr.status).toBe(201);
+    expect(vr.body.data).toMatchObject({ kind: 'void', status: 'pending' });
+    const v = await request(app).post(`/api/v1/distribusi/change-requests/${vr.body.data.id}/approve`).set(auth(owner)).send({});
     expect(v.status).toBe(200);
     expect(await sisaBon(gm, cid)).toBe(500000);   // the debt is a receivable again
     const after = await loss(gm);

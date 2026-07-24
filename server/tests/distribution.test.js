@@ -64,16 +64,21 @@ describe('Distribusi — permissions, price lock, immutability, audit', () => {
     expect(after.body.data.find((t) => t.id === oldTxnId).unitPriceLocked).toBe(6000);   // locked, unchanged
   });
 
-  it('corrections require a reason, flag staff actors, and never mutate the transaction', async () => {
+  it('a correction REQUEST needs a reason + valid inputs, is attributed to the requester, and never mutates the transaction while pending', async () => {
     const list = await request(app).get('/api/v1/distribusi/transactions?date=2026-07-06').set(auth(owner));
-    const txnId = list.body.data[0].id;
-    const bad = await request(app).post(`/api/v1/distribusi/transactions/${txnId}/corrections`).set(auth(staff)).send({});
-    expect(bad.status).toBe(400);   // reason required
-    const ok = await request(app).post(`/api/v1/distribusi/transactions/${txnId}/corrections`).set(auth(staff)).send({ reason: 'salah qty', oldValue: { qty: 3 }, newValue: { qty: 2 } });
+    const txn = list.body.data.find((t) => t.method === 'lunas') || list.body.data[0];
+    const txnId = txn.id;
+    // reason required
+    expect((await request(app).post(`/api/v1/distribusi/transactions/${txnId}/corrections`).set(auth(staff)).send({})).status).toBe(400);
+    // a structured correction (qty 3→2 at the locked price) → a PENDING request, attributed to staff
+    const ok = await request(app).post(`/api/v1/distribusi/transactions/${txnId}/corrections`).set(auth(staff)).send({ reason: 'salah qty', qty: 2, unitPrice: txn.unitPriceLocked, gallonOut: 2, gallonIn: 0 });
     expect(ok.status).toBe(201);
-    expect(ok.body.data.byStaff).toBe(true);
+    expect(ok.body.data).toMatchObject({ kind: 'correction', status: 'pending', newAmount: 2 * txn.unitPriceLocked });
+    expect(ok.body.data.requestedBy).toBeTruthy();          // server-stamped requester snapshot
     const after = await request(app).get('/api/v1/distribusi/transactions?date=2026-07-06').set(auth(owner));
-    expect(after.body.data.find((t) => t.id === txnId).qty).toBe(3);   // original untouched
+    const stillThere = after.body.data.find((t) => t.id === txnId);
+    expect(stillThere.qty).toBe(txn.qty);                    // untouched while pending
+    expect(stillThere.pendingRequest).toMatchObject({ kind: 'correction' });
   });
 
   it('transactions are not casually deletable — hard delete needs the safeguards (see inter-unit/void test)', async () => {

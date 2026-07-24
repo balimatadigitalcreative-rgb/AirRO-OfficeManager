@@ -29,7 +29,9 @@ function navForRole(p, role) {
   if (p.payroll) items.push({ id: 'thr', label: tr('nav.thr'), icon: 'IconCoinIn', grp: 'hr' });
   if (p.employees && p.attendance) items.push({ id: 'hrreport', label: tr('nav.hrreport'), icon: 'IconReport', grp: 'hr' });
   if (p.payroll && p.attendance) items.push({ id: 'hrsettings', label: tr('nav.hrsettings'), icon: 'IconSettings', grp: 'hr' });
-  if (p.approvals) items.push({ id: 'approvals', label: tr('nav.approvals'), icon: 'IconInvoice', grp: 'admin' });
+  // Requests/Pengajuan — HR approvals (p.approvals) AND the distribusi correction/void inbox
+  // (p.distribusiApprove) both live here, so the item shows for either capability.
+  if (p.approvals || p.distribusiApprove) items.push({ id: 'approvals', label: tr('nav.approvals'), icon: 'IconInvoice', grp: 'admin' });
   if (p.settings) items.push({ id: 'settings', label: tr('nav.settings'), icon: 'IconSettings', grp: 'admin' });
   if (canAdmin) items.push({ id: 'users', label: tr('nav.users'), icon: 'IconUserCircle', grp: 'admin' });
   // DISTRIBUSI — a separate module. Each item shows ONLY if the user holds a capability
@@ -141,6 +143,7 @@ function FApp() {
   const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard/transaksi re-fetch
   const [deliveryAlerts, setDeliveryAlerts] = uSh([]);   // AlertBell: extra orders on today's board for the user's fleet
   const [resetAlerts, setResetAlerts] = uSh([]);         // AlertBell: pending forgot-password requests (owner/GM)
+  const [changeReqAlerts, setChangeReqAlerts] = uSh([]); // AlertBell: pending distribusi correction/void requests (approvers)
   const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
   const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
@@ -379,6 +382,17 @@ function FApp() {
     const iv = setInterval(load, 60000);
     return () => { live = false; clearInterval(iv); };
   }, [user, screen, distTick]);
+  // Distribusi correction/void requests awaiting approval (AlertBell) — approvers only. Refreshed on
+  // any distribusi SSE event (distTick) so a new request surfaces promptly.
+  uEh(() => {
+    if (!user || !p.distribusiApprove || !(window.API && window.API.distribusi && window.API.distribusi.changeRequests)) { setChangeReqAlerts([]); return; }
+    let live = true;
+    window.API.distribusi.changeRequests.list({ status: 'pending', fleet: 'all' }).then((r) => {
+      if (!live) return; const n = (r.data || []).length;
+      setChangeReqAlerts(n ? [{ id: 'distchangereq', level: 'high', icon: 'IconClock', title: tr('cr.alertTitle'), msg: tr('cr.alertMsg', { n }), screen: 'approvals' }] : []);
+    }).catch(() => { if (live) setChangeReqAlerts([]); });
+    return () => { live = false; };
+  }, [user, p.distribusiApprove, screen, distTick]);
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // ── Setoran: REST per-record (create/update/delete one record at a time) ──
@@ -1326,7 +1340,7 @@ function FApp() {
                 </span>
               )}
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
-              {(p.seeMoney || p.distribusiPengiriman || resetAlerts.length > 0) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts, ...resetAlerts]} />}
+              {(p.seeMoney || p.distribusiPengiriman || resetAlerts.length > 0 || changeReqAlerts.length > 0) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts, ...resetAlerts, ...changeReqAlerts]} />}
               <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []} activity={myActivity}
                 onChangePassword={openPw} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
@@ -1489,8 +1503,12 @@ function FApp() {
             <COMPANY.KasbonScreen staff={hrdStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canRequest={p.kasbonRequest} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} today={FIN.TODAY} userName={user.name} />
           )}
 
-          {screen === 'approvals' && p.approvals && (
-            <div className="screen-enter"><COMPANY.ApprovalsCard approvals={approvals} setApprovals={applyApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} onCancelRequest={cancelRequest} onDeleteRequest={deleteRequest} userName={user.name} /></div>
+          {screen === 'approvals' && (p.approvals || p.distribusiApprove) && (
+            <div className="screen-enter">
+              {p.approvals && <COMPANY.ApprovalsCard approvals={approvals} setApprovals={applyApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} onCancelRequest={cancelRequest} onDeleteRequest={deleteRequest} userName={user.name} />}
+              {/* Distribusi correction/void approval inbox — same screen, its own capability. */}
+              {p.distribusiApprove && <DIST.ChangeRequests refreshKey={distTick} fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} onChanged={() => setDistTick((t) => t + 1)} />}
+            </div>
           )}
 
           {screen === 'reports' && p.reports && (

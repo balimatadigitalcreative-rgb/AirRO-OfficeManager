@@ -754,11 +754,19 @@ async function listTransactions(q, user) {
     where, orderBy: { createdAt: 'desc' },
     include: { customer: { select: { name: true, code: true, type: true } }, corrections: { orderBy: { createdAt: 'desc' } } },
   }, 'transactions');
+  // Pending change-requests (correction/void awaiting approval) for these rows → drives the
+  // "Menunggu persetujuan" badge and blocks a second request. Plus each sale's current galon out/in,
+  // so the structured correction form can pre-fill the actual input values (not just qty).
+  const ids = rows.map((r) => r.id);
+  const pendings = ids.length ? await prisma.distChangeRequest.findMany({ where: { transactionId: { in: ids }, status: 'pending' }, select: { transactionId: true, kind: true, requestedByName: true, createdAt: true } }) : [];
+  const pendBy = {}; pendings.forEach((p) => { pendBy[p.transactionId] = { kind: p.kind, requestedByName: p.requestedByName || null, createdAt: p.createdAt ? new Date(p.createdAt).getTime() : null }; });
+  const movs = ids.length ? await prisma.gallonMovement.findMany({ where: { transactionId: { in: ids }, active: true, type: { in: ['delivery_out', 'return_in'] } }, select: { transactionId: true, type: true, qty: true } }) : [];
+  const galBy = {}; movs.forEach((m) => { const g = galBy[m.transactionId] || (galBy[m.transactionId] = { gallonOut: 0, gallonIn: 0 }); if (m.type === 'delivery_out') g.gallonOut += m.qty; else g.gallonIn += m.qty; });
   // Expose the effective (adjusted) amount + flags so reports/Cash Integration follow the
   // new price while the original `amount` stays intact. Legacy (archive) rows are INCLUDED here so
   // the Transactions screen can show them with an "Arsip" badge/filter — the `legacy` flag on each
   // row lets Cash Integration (and any aggregate) drop them.
-  const data = rows.map((r) => { const adj = priceDelta(r.corrections); return { ...r, legacy: !!r.legacy, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections) }; });
+  const data = rows.map((r) => { const adj = priceDelta(r.corrections); const g = galBy[r.id] || { gallonOut: 0, gallonIn: 0 }; return { ...r, legacy: !!r.legacy, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections), pendingRequest: pendBy[r.id] || null, gallonOut: g.gallonOut, gallonIn: g.gallonIn }; });
   return { data, now: new Date().toISOString() };
 }
 // Current outstanding bon (piutang) for a customer: Σ effective bon − Σ pelunasan,
@@ -899,6 +907,182 @@ async function voidTransaction(txnId, body, actor) {
   });
   await logAudit('batal', `Batalkan transaksi: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${txn.method} ${txn.amount} · ${reason}`, snap, txn.fleetId);
   return { ...updated, voided: true, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
+}
+
+// ── APPROVAL-GATED CORRECTIONS / VOIDS ───────────────────────────────────────────
+// A correction or void is submitted as a PENDING DistChangeRequest and applied only on approval.
+// Requesting needs distribusiKoreksi (correction) / distribusiVoid (void); approving needs the
+// separate distribusiApprove, and a requester can never approve their own request. Corrections are
+// STRUCTURED and input-level: the requester edits qty/unitPrice/gallonOut/gallonIn (purchase) or the
+// payment amount (pelunasan); the server RECOMPUTES the total and, on apply, rewrites the amount,
+// the gallon movements and (through the normal aggregates) sisa bon / KPIs / cash.
+const isPurchaseMethod = (m) => m === 'lunas' || m === 'bon';
+// A real gallon SALE (qty × price + gallon movements). An opening/carry-over bon is method 'bon' but
+// stores its amount directly (qty 0), so it is corrected like a pelunasan: the amount field only.
+const isGallonSale = (txn) => isPurchaseMethod(txn.method) && !txn.openingBon;
+// Current active galon out/in a sale produced (for pre-fill + old→new trail).
+async function currentGallonsOf(txnId) {
+  const rows = await prisma.gallonMovement.findMany({ where: { transactionId: txnId, active: true, type: { in: ['delivery_out', 'return_in'] } }, select: { type: true, qty: true } });
+  let gallonOut = 0, gallonIn = 0;
+  rows.forEach((m) => { if (m.type === 'delivery_out') gallonOut += m.qty; else gallonIn += m.qty; });
+  return { gallonOut, gallonIn };
+}
+// Validate + normalize a structured correction payload against the txn's method.
+// Returns { fields, newAmount }. Throws ApiError on any invalid input.
+async function normalizeCorrection(txn, payload) {
+  const p = payload || {};
+  if (isGallonSale(txn)) {
+    const qty = int(p.qty), unitPrice = int(p.unitPrice);
+    const gallonOut = int(p.gallonOut), gallonIn = int(p.gallonIn);   // int() floors negatives to 0
+    if (qty <= 0) throw ApiError.badRequest('Jumlah galon harus lebih dari 0.');
+    if (unitPrice <= 0) throw ApiError.badRequest('Harga harus lebih dari 0.');
+    const newAmount = qty * unitPrice;
+    if (overCeiling(newAmount) || overCeiling(unitPrice)) throw ApiError.badRequest(ceilingMsg, { newAmount });
+    return { fields: { qty, unitPrice, gallonOut, gallonIn }, newAmount };
+  }
+  // Amount-only: a pelunasan (payment) or an opening/carry-over bon (lump receivable typed directly).
+  const amount = int(p.amount);
+  if (amount <= 0) throw ApiError.badRequest('Jumlah harus lebih dari 0.');
+  if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
+  if (txn.method === 'pelunasan') {
+    // Can't pay more than owed: customerBonBalance already reflects THIS pelunasan's reduction, so the
+    // max new payment = current outstanding bon + this row's current amount (its effect added back).
+    const maxPay = (await customerBonBalance(txn.customerId)) + txn.amount;
+    if (amount > maxPay) throw ApiError.badRequest(`Pembayaran (${amount}) melebihi sisa bon (${maxPay}).`, { maxPay });
+  }
+  return { fields: { amount }, newAmount: amount };
+}
+
+// Enrich a request row into the client shape: current vs requested inputs + the recomputed delta.
+async function changeRequestClient(req, txnMaybe) {
+  const txn = txnMaybe || await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true, code: true } } } });
+  let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
+  const sale = txn && isGallonSale(txn);
+  const curG = (txn && sale) ? await currentGallonsOf(txn.id) : { gallonOut: 0, gallonIn: 0 };
+  const current = txn ? { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, ...curG } : null;
+  let requested = null, newAmount = null;
+  if (req.kind === 'correction' && txn) {
+    if (sale) { requested = { qty: payload.qty, unitPrice: payload.unitPrice, gallonOut: payload.gallonOut, gallonIn: payload.gallonIn }; newAmount = (payload.qty || 0) * (payload.unitPrice || 0); }
+    else { requested = { amount: payload.amount }; newAmount = payload.amount; }
+  }
+  const delta = req.kind === 'void' ? (txn ? -txn.amount : 0) : (newAmount != null && txn ? newAmount - txn.amount : 0);
+  return {
+    id: req.id, transactionId: req.transactionId, fleetId: req.fleetId, kind: req.kind, status: req.status,
+    method: txn ? txn.method : null, reason: req.reason,
+    customerName: txn && txn.customer ? txn.customer.name : '', customerCode: txn && txn.customer ? txn.customer.code : '',
+    txnRef: shortRefServer(req.transactionId), txnDate: txn ? txn.txnDate : null,
+    current, requested, newAmount, delta,
+    requestedBy: req.requestedByName ? { name: req.requestedByName, role: req.requestedByRole || null } : null,
+    requestedById: req.requestedById || null,
+    decidedBy: req.decidedByName ? { name: req.decidedByName, role: req.decidedByRole || null } : null,
+    decisionNote: req.decisionNote || '', decidedAt: req.decidedAt ? new Date(req.decidedAt).getTime() : null,
+    createdAt: req.createdAt ? new Date(req.createdAt).getTime() : null,
+  };
+}
+
+// Submit a correction/void request (does NOT change the transaction). One pending request per txn.
+async function requestChange(txnId, kind, body, actor) {
+  if (kind !== 'correction' && kind !== 'void') throw ApiError.badRequest('Jenis pengajuan tidak dikenal.');
+  const txn = await prisma.distTransaction.findUnique({ where: { id: txnId }, include: { customer: { select: { name: true, code: true } } } });
+  if (!txn) throw ApiError.notFound('Transaction not found');
+  if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');   // out of scope
+  if (txn.status === 'void') throw ApiError.badRequest('Transaksi ini sudah dibatalkan.');
+  if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak masuk hitungan — tak perlu dikoreksi/dibatalkan.');
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan wajib diisi.');
+  const already = await prisma.distChangeRequest.findFirst({ where: { transactionId: txnId, status: 'pending' } });
+  if (already) throw ApiError.badRequest('Sudah ada pengajuan menunggu persetujuan untuk transaksi ini.');
+  let payloadObj = {};
+  if (kind === 'correction') payloadObj = (await normalizeCorrection(txn, body.payload || body)).fields;   // validate now (fail fast)
+  const snap = await actorSnap(actor);
+  const req = await prisma.distChangeRequest.create({ data: {
+    transactionId: txnId, fleetId: txn.fleetId || '', kind, status: 'pending',
+    payload: JSON.stringify(payloadObj), reason,
+    requestedById: snap.actorId, requestedByName: snap.actorName, requestedByRole: snap.actorRole,
+  } });
+  const what = kind === 'void' ? 'pembatalan' : 'koreksi ' + JSON.stringify(payloadObj);
+  await logAudit('koreksi', `Pengajuan ${kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${what} · ${reason}`, snap, txn.fleetId);
+  return changeRequestClient(req, txn);
+}
+
+// List requests in the actor's fleet scope (approver inbox + audit of decided ones).
+async function listChangeRequests(user, query) {
+  const q = query || {};
+  const where = { ...fleetWhere(user, 'fleetId', q.fleet) };
+  if (q.status === 'pending' || q.status === 'approved' || q.status === 'rejected') where.status = q.status;
+  const rows = await prisma.distChangeRequest.findMany({ where, orderBy: [{ createdAt: 'desc' }], take: 200 });
+  const data = [];
+  for (const r of rows) data.push(await changeRequestClient(r));
+  return { data };
+}
+
+// Approve (apply atomically) or reject (close, note required) a pending request.
+async function decideChangeRequest(id, decision, body, actor) {
+  const req = await prisma.distChangeRequest.findUnique({ where: { id } });
+  if (!req) throw ApiError.notFound('Pengajuan tidak ditemukan.');
+  if (!fleetAllows(actor, req.fleetId)) throw ApiError.notFound('Pengajuan tidak ditemukan.');   // out of scope
+  if (req.status !== 'pending') throw ApiError.badRequest('Pengajuan ini sudah diputuskan.');
+  // A requester can NEVER approve their own request — even holding distribusiApprove.
+  if (decision === 'approve' && req.requestedById && actor && req.requestedById === actor.id) {
+    throw ApiError.forbidden('Anda tidak boleh menyetujui pengajuan Anda sendiri.');
+  }
+  const snap = await actorSnap(actor);
+  const txn = await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true } } } });
+  if (!txn) throw ApiError.notFound('Transaction not found');
+
+  if (decision === 'reject') {
+    const note = String(body.note || '').trim();
+    if (!note) throw ApiError.badRequest('Alasan penolakan wajib diisi.');
+    const updated = await prisma.distChangeRequest.update({ where: { id }, data: {
+      status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date(),
+    } });
+    await logAudit('koreksi', `Tolak ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${note}`, snap, req.fleetId);
+    return changeRequestClient(updated, txn);   // nothing on the txn changed
+  }
+
+  // approve → apply. The txn must still be applyable.
+  if (txn.status === 'void') throw ApiError.badRequest('Transaksi sudah dibatalkan.');
+  if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak bisa diubah.');
+  let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
+  // Re-validate + gather old values BEFORE the write transaction (avoids nested-client reads).
+  let norm = null, oldVals = null, newVals = null;
+  if (req.kind === 'correction') {
+    norm = await normalizeCorrection(txn, payload);   // re-validate against the CURRENT txn state
+    const oldG = isGallonSale(txn) ? await currentGallonsOf(txn.id) : {};
+    oldVals = { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, ...oldG };
+    newVals = { ...norm.fields, amount: norm.newAmount };
+  }
+  await prisma.$transaction(async (db) => {
+    if (req.kind === 'void') {
+      await db.gallonMovement.updateMany({ where: { transactionId: txn.id, active: true }, data: { active: false } });
+      await db.distTransaction.update({ where: { id: txn.id }, data: {
+        status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedByRole: snap.actorRole, voidedAt: new Date(), voidReason: req.reason,
+      } });
+    } else if (isGallonSale(txn)) {
+      // Rewrite this sale's gallon movements to the corrected out/in (append-only: deactivate + add).
+      await db.gallonMovement.updateMany({ where: { transactionId: txn.id, active: true, type: { in: ['delivery_out', 'return_in'] } }, data: { active: false } });
+      const base = { customerId: txn.customerId, transactionId: txn.id, fleetId: txn.fleetId || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, active: true };
+      if (norm.fields.gallonOut > 0) await db.gallonMovement.create({ data: { ...base, type: 'delivery_out', qty: norm.fields.gallonOut, note: 'Galon keluar (koreksi)' } });
+      if (norm.fields.gallonIn > 0) await db.gallonMovement.create({ data: { ...base, type: 'return_in', qty: norm.fields.gallonIn, note: 'Galon masuk (koreksi)' } });
+      await db.distTransaction.update({ where: { id: txn.id }, data: { qty: norm.fields.qty, unitPriceLocked: norm.fields.unitPrice, amount: norm.newAmount } });
+    } else {
+      await db.distTransaction.update({ where: { id: txn.id }, data: { amount: norm.newAmount } });
+    }
+    if (req.kind === 'correction') {
+      // Record the applied correction (kind 'manual' → the "Dikoreksi" badge + the old→new trail).
+      await db.correction.create({ data: { transactionId: txn.id, reason: req.reason, kind: 'manual',
+        oldValue: JSON.stringify(oldVals), newValue: JSON.stringify(newVals),
+        actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, byStaff: false } });
+    }
+    await db.distChangeRequest.update({ where: { id }, data: {
+      status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(),
+    } });
+  });
+  const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}`;
+  await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${detail} · ${req.reason} · oleh ${snap.actorName}`, snap, req.fleetId);
+  const fresh = await prisma.distChangeRequest.findUnique({ where: { id } });
+  const out = await changeRequestClient(fresh);
+  return { ...out, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
 }
 
 // ── PELUNASAN TIDAK DITERIMA (payment not received) ──────────────────────────────
@@ -1956,6 +2140,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
+  requestChange, listChangeRequests, decideChangeRequest,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,

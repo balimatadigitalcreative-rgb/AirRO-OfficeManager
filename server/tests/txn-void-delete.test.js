@@ -47,8 +47,7 @@ describe('VOID (recorded cancellation)', () => {
     expect((await request(app).post(`/api/v1/distribusi/transactions/${t.id}/void`).set(auth(gm)).send({ reason: '' })).status).toBe(400);
   });
 
-  it('voids a bon sale → row stays "Dibatalkan", bon + gallons reversed, excluded from aggregates, audited', async () => {
-    await resetDb.__noop?.();
+  it('an APPROVED void → row stays "Dibatalkan", bon + gallons reversed, excluded from aggregates, audited', async () => {
     // fresh customer for a clean ledger
     const c = await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'Void Clean', masterPrice: 5000 });
     const id = c.body.data.id;
@@ -59,9 +58,15 @@ describe('VOID (recorded cancellation)', () => {
     expect(before.sisaBon).toBe(20000);
     expect(before.gallonsHeld).toBe(4);
 
-    const v = await request(app).post(`/api/v1/distribusi/transactions/${t.id}/void`).set(auth(gm)).send({ reason: 'batal — pelanggan komplain' });
-    expect(v.status).toBe(200);
-    expect(v.body.data).toMatchObject({ status: 'void', voided: true, voidedByName: 'GM', voidReason: 'batal — pelanggan komplain' });
+    // void is now approval-gated: gm REQUESTS, owner APPROVES (a requester can't approve their own).
+    const vr = await request(app).post(`/api/v1/distribusi/transactions/${t.id}/void`).set(auth(gm)).send({ reason: 'batal — pelanggan komplain' });
+    expect(vr.status).toBe(201);
+    expect(vr.body.data).toMatchObject({ kind: 'void', status: 'pending' });
+    // still active while pending
+    expect((await request(app).get('/api/v1/distribusi/customers').set(auth(gm)).then((r) => r.body.data.find((x) => x.id === id))).sisaBon).toBe(20000);
+    const ap = await request(app).post(`/api/v1/distribusi/change-requests/${vr.body.data.id}/approve`).set(auth(owner)).send({});
+    expect(ap.status).toBe(200);
+    expect(ap.body.data.status).toBe('approved');
 
     // aggregates: bon + gallons back to zero (excluded)
     const after = await request(app).get('/api/v1/distribusi/customers').set(auth(gm)).then((r) => r.body.data.find((x) => x.id === id));
@@ -73,9 +78,10 @@ describe('VOID (recorded cancellation)', () => {
     const d = await detail(gm, id);
     const row = d.transactions.find((x) => x.id === t.id);
     expect(row).toMatchObject({ status: 'void', voided: true });
-    // one immutable audit entry
+    // immutable audit entries — the request AND the approval that applied it
     const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(gm));
-    expect(audit.body.data.some((a) => /Batalkan transaksi/i.test(a.title) && /Void Clean/.test(a.title))).toBe(true);
+    expect(audit.body.data.some((a) => /Pengajuan pembatalan/i.test(a.title) && /Void Clean/.test(a.title))).toBe(true);
+    expect(audit.body.data.some((a) => /Setujui pembatalan/i.test(a.title) && /Void Clean/.test(a.title))).toBe(true);
     // gallon movements reversed (inactive)
     expect(await prisma.gallonMovement.count({ where: { transactionId: t.id, active: true } })).toBe(0);
   });

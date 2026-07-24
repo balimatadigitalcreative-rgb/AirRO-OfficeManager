@@ -13,10 +13,11 @@ const detail = (t, id) => request(app).get('/api/v1/distribusi/customers/' + id)
 const listed = (t, id) => request(app).get('/api/v1/distribusi/customers').set(auth(t)).then((r) => r.body.data.find((c) => c.id === id));
 const openingBon = (t, id, body) => request(app).post(`/api/v1/distribusi/customers/${id}/opening-bon`).set(auth(t)).send(body);
 
-let gm, staff, custId;
+let gm, owner, staff, custId;
 beforeAll(async () => {
   await resetDb();
   gm = (await reg({ name: 'GM', username: 'ob_gm', password: 'secret123', role: 'gm' })).token;
+  owner = (await reg({ name: 'Owner', username: 'ob_owner', password: 'secret123', role: 'owner' })).token;   // approver (≠ requester)
   // a helper who may INPUT sales but has no correction cap
   const s = await reg({ name: 'Helper', username: 'ob_staff', password: 'secret123', role: 'finance' });
   await prisma.user.update({ where: { id: s.user.id }, data: { permissions: JSON.stringify({ distribusiInput: true, distribusiKoreksi: false }) } });   // explicit false: the coarse `distribusi` cap back-fills absent ones
@@ -86,14 +87,20 @@ describe('opening bon — creation + guards', () => {
     expect((await listed(gm, custId)).sisaBon).toBe(0);
   });
 
-  it('is correctable/voidable through the existing correction flow (audited, not deleted)', async () => {
+  it('is correctable/voidable through the approval flow (structured amount edit; audited, not deleted)', async () => {
     const row = await prisma.distTransaction.findFirst({ where: { customerId: custId, openingBon: true } });
-    const c = await request(app).post(`/api/v1/distribusi/transactions/${row.id}/corrections`).set(auth(gm)).send({ reason: 'salah nominal' });
+    // an opening bon stores its amount directly (qty 0) → it is corrected like a pelunasan: amount only.
+    const c = await request(app).post(`/api/v1/distribusi/transactions/${row.id}/corrections`).set(auth(gm)).send({ reason: 'salah nominal', amount: 250000 });
     expect(c.status).toBe(201);
+    expect(c.body.data).toMatchObject({ kind: 'correction', status: 'pending', newAmount: 250000 });
+    // gm can't approve their own request → owner approves
+    const ap = await request(app).post(`/api/v1/distribusi/change-requests/${c.body.data.id}/approve`).set(auth(owner)).send({});
+    expect(ap.status).toBe(200);
     const d = await detail(gm, custId);
     expect(d.transactions.find((x) => x.id === row.id).corrected).toBe(true);
     const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(gm));
-    expect(audit.body.data.some((a) => /Bon awal/i.test(a.title || ''))).toBe(true);   // creation audited
+    expect(audit.body.data.some((a) => /Bon awal/i.test(a.title || ''))).toBe(true);          // creation audited
+    expect(audit.body.data.some((a) => /Setujui koreksi/i.test(a.title || ''))).toBe(true);   // approval audited
   });
 
   it('a fleet-scoped user cannot add one outside their scope', async () => {

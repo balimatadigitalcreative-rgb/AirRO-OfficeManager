@@ -661,7 +661,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   // correction
   const [corrTxn, setCorrTxn] = uSx(null);
   const [corrReason, setCorrReason] = uSx('');
-  const [corrValue, setCorrValue] = uSx('');
+  const [corrForm, setCorrForm] = uSx(null);   // STRUCTURED input fields, pre-filled from the txn
   const [corrSaving, setCorrSaving] = uSx(false);
   // void (recorded cancellation) + hard delete (owner-only, permanent)
   const [voidTxn, setVoidTxn] = uSx(null);
@@ -707,8 +707,9 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const doVoid = () => {
     if (!voidTxn || !voidReason.trim() || voidSaving) return;
     setVoidSaving(true);
+    // Submits a VOID REQUEST (approval-gated) — the transaction stays active until an approver approves.
     window.API.distribusi.transactions.void(voidTxn.id, { reason: voidReason.trim() })
-      .then(() => { setVoidSaving(false); setVoidTxn(null); setVoidReason(''); flash(trD('dist.voidDone')); reload(); if (onChanged) onChanged(); })
+      .then(() => { setVoidSaving(false); setVoidTxn(null); setVoidReason(''); flash(trD('dist.voidReqSent')); reload(); if (onChanged) onChanged(); })
       .catch((e) => { setVoidSaving(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
   const doHardDelete = () => {
@@ -753,12 +754,27 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       .then((r) => { setSaving(false); setConfirmOpen(false); setNewIds((p) => [r.data.id, ...p]); setView('list'); setFilter('all'); setFCust(''); setFQty(1); setFGalOut(1); setFGalIn(0); setFMethod('lunas'); setFNote(''); flash(trD('dist.txnGalonSaved', { out: r.data.gallonOut, in: r.data.gallonIn, held: r.data.gallonsHeld })); reload(); if (onChanged) onChanged(); })
       .catch((e) => { setSaving(false); setConfirmOpen(false); setFErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
+  // A real gallon SALE is corrected via qty/unitPrice/gallonOut/gallonIn (the total recomputes);
+  // a pelunasan or an opening/carry-over bon (amount typed directly) is corrected via the amount.
+  const isSaleTxn = (t) => t && (t.method === 'lunas' || t.method === 'bon') && !t.openingBon;
+  const openCorrect = (t) => {
+    setCorrTxn(t); setCorrReason('');
+    if (isSaleTxn(t)) setCorrForm({ qty: t.qty, unitPrice: t.unitPriceLocked, gallonOut: t.gallonOut != null ? t.gallonOut : t.qty, gallonIn: t.gallonIn || 0 });
+    else setCorrForm({ amount: t.amount });
+  };
+  const corrSale = isSaleTxn(corrTxn);
+  const corrNewTotal = corrForm ? (corrSale ? (+corrForm.qty || 0) * (+corrForm.unitPrice || 0) : (+corrForm.amount || 0)) : 0;
+  const corrValid = corrTxn && corrReason.trim() && (corrSale ? ((+corrForm.qty || 0) > 0 && (+corrForm.unitPrice || 0) > 0) : (+corrForm.amount || 0) > 0);
   const commitCorrect = () => {
-    if (!corrReason.trim() || corrSaving) return;
+    if (!corrValid || corrSaving) return;
+    const payload = corrSale
+      ? { qty: +corrForm.qty || 0, unitPrice: +corrForm.unitPrice || 0, gallonOut: +corrForm.gallonOut || 0, gallonIn: +corrForm.gallonIn || 0 }
+      : { amount: +corrForm.amount || 0 };
     setCorrSaving(true);
-    window.API.distribusi.transactions.correct(corrTxn.id, { reason: corrReason.trim(), oldValue: { amount: corrTxn.amount }, newValue: corrValue.trim() || null })
-      .then(() => { setCorrSaving(false); setCorrTxn(null); setCorrReason(''); setCorrValue(''); flash(trD('dist.corrSaved')); reload(); if (onChanged) onChanged(); })
-      .catch(() => { setCorrSaving(false); });
+    // Submits a REQUEST (approval-gated) — the transaction is not changed until an approver approves.
+    window.API.distribusi.transactions.correct(corrTxn.id, { reason: corrReason.trim(), ...payload })
+      .then(() => { setCorrSaving(false); setCorrTxn(null); setCorrForm(null); flash(trD('dist.corrReqSent')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setCorrSaving(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
 
   // ── Expense form/list helpers (same patterns as the transaction form: rupiah amount, chips, void). ──
@@ -1019,11 +1035,13 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           const corrected = t.correctedManual != null ? t.correctedManual : (t.corrections || []).some((x) => x.kind !== 'price');
           const isNew = newIds.includes(t.id);
           const voided = t.status === 'void';
-          // A voided txn can't be corrected/voided again; only a hard-delete holder can still act.
-          const showKoreksi = canKoreksi && !voided && !t.legacy;
-          const showVoid = canVoid && !voided && !t.legacy;
+          const pending = !voided && t.pendingRequest;   // a correction/void awaiting approval
+          // A voided txn can't be corrected/voided again; only a hard-delete holder can still act. A row
+          // with a pending request is locked from a second correction/void until it is decided.
+          const showKoreksi = canKoreksi && !voided && !t.legacy && !pending;
+          const showVoid = canVoid && !voided && !t.legacy && !pending;
           const showDelete = canHardDelete;
-          const showArchive = canArchive && !voided;   // active → arsip, arsip → active (both directions)
+          const showArchive = canArchive && !voided && !pending;   // active → arsip, arsip → active (both directions)
           const hasMenu = showVoid || showDelete || showArchive;
           return (
             <div key={t.id} className={`dist-txn dist-txn-full ${voided ? 'is-void' : ''}`}>
@@ -1035,17 +1053,19 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
                   {voided ? <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>
                     : t.legacy ? <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span> : <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>}
                   {isNew && !voided ? <span className="dist-badge new">{trD('dist.baru')}</span> : null}
+                  {pending ? <span className="dist-badge pending"><IconClock s={10} />{trD('dist.pendingBadge')}</span> : null}
                   {corrected && !voided ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
                   {t.adjusted && !voided ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
                 </div>
                 <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {t.method === 'pelunasan' ? trD('dist.payLine') : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}{t.adjusted && !voided ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
                 {voided && <div className="dist-txn-voidline">{trD('dist.voidBy', { who: t.voidedByName || '—' })}{t.voidReason ? ' · ' + t.voidReason : ''}</div>}
+                {pending && <div className="dist-txn-pendline"><IconClock s={11} />{trD(t.pendingRequest.kind === 'void' ? 'dist.pendVoidLine' : 'dist.pendCorrLine', { who: t.pendingRequest.requestedByName || '—' })}</div>}
               </div>
               <div className="dist-txn-right">
                 <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                 <span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>
               </div>
-              {showKoreksi && <button type="button" className="dist-corr-btn" onClick={() => { setCorrTxn(t); setCorrReason(''); setCorrValue(''); }}><IconPencil s={13} />{trD('dist.korek')}</button>}
+              {showKoreksi && <button type="button" className="dist-corr-btn" onClick={() => openCorrect(t)}><IconPencil s={13} />{trD('dist.korek')}</button>}
               {hasMenu && (
                 <div className="dist-txn-menu">
                   <button type="button" className="icon-btn" title={trD('dist.moreActions')} onClick={() => setMenuFor(menuFor === t.id ? null : t.id)}><IconDots s={16} /></button>
@@ -1067,21 +1087,38 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       </div>
       )}
 
-      {corrTxn && (
+      {corrTxn && corrForm && (
         <div className="modal-scrim" onClick={() => setCorrTxn(null)} style={{ zIndex: 200 }}>
-          <div className="modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.korekT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(corrTxn.id)} · {corrTxn.customer ? corrTxn.customer.name : ''} · {rpFull(corrTxn.amount)}</div></div><button className="jp-icon" onClick={() => setCorrTxn(null)}><IconClose s={18} /></button></div>
+          <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.korekT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(corrTxn.id)} · {corrTxn.customer ? corrTxn.customer.name : ''} · {methodLabel(corrTxn.method)}</div></div><button className="jp-icon" onClick={() => setCorrTxn(null)}><IconClose s={18} /></button></div>
             <div className="modal-body">
-              <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.korekInfo')}</span></div>
-              <label className="fld-label">{trD('dist.korekReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={corrReason} placeholder={trD('dist.korekReasonPh')} onChange={(e) => setCorrReason(e.target.value)} />
-              <div className="dist-form-row">
-                <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.korekOld')}</label><div className="fld dist-readonly">{rpFull(corrTxn.amount)}</div></div>
-                <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.korekNew')}</label><input className="fld" value={corrValue} placeholder="Rp 0" onChange={(e) => setCorrValue(e.target.value)} /></div>
+              {/* This SUBMITS a request — the transaction changes only after an approver approves it. */}
+              <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.korekApprovalInfo')}</span></div>
+              {/* STRUCTURED, input-level fields (the total is recomputed, never typed directly). */}
+              {corrSale ? (<>
+                <div className="dist-form-row">
+                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fQty')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.qty} onChange={(e) => setCorrForm({ ...corrForm, qty: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.hargaPerGalon')}</label><div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, unitPrice: e.target.value.replace(/[^0-9]/g, '') })} /></div></div>
+                </div>
+                <div className="dist-form-row">
+                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalOut')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonOut} onChange={(e) => setCorrForm({ ...corrForm, gallonOut: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalIn')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonIn} onChange={(e) => setCorrForm({ ...corrForm, gallonIn: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                </div>
+              </>) : (
+                <><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.payAmount')}</label>
+                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.amount ? (+corrForm.amount).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, amount: e.target.value.replace(/[^0-9]/g, '') })} /></div></>
+              )}
+              {/* Live preview of the recomputed total + the delta before submitting. */}
+              <div className="dist-korek-preview">
+                <div><span>{trD('dist.korekOld')}</span><b className="tnum">{rpFull(corrTxn.amount)}</b></div>
+                <div className="dist-korek-arrow"><IconCaret s={16} style={{ transform: 'rotate(-90deg)' }} /></div>
+                <div><span>{trD('dist.korekNew')}</span><b className="tnum">{rpFull(corrNewTotal)}</b></div>
+                <div className="dist-korek-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${corrNewTotal - corrTxn.amount < 0 ? 'amt-neg' : corrNewTotal - corrTxn.amount > 0 ? 'amt-pos' : ''}`}>{corrNewTotal - corrTxn.amount >= 0 ? '+' : ''}{rpFull(corrNewTotal - corrTxn.amount)}</b></div>
               </div>
-              {staffMode && <div className="dist-staffnote"><IconShield s={14} />{trD('dist.korekStaff')}</div>}
+              <label className="fld-label">{trD('dist.korekReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 62, padding: 12, resize: 'vertical' }} value={corrReason} placeholder={trD('dist.korekReasonPh')} onChange={(e) => setCorrReason(e.target.value)} />
             </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCorrTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrReason.trim() || corrSaving} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSave')}</button></div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCorrTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrValid || corrSaving} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSubmit')}</button></div>
           </div>
         </div>
       )}
@@ -1108,11 +1145,11 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.voidT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(voidTxn.id)} · {voidTxn.customer ? voidTxn.customer.name : ''} · {rpFull(voidTxn.amount)}</div></div><button className="jp-icon" onClick={() => setVoidTxn(null)}><IconClose s={18} /></button></div>
             <div className="modal-body">
-              <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.voidInfo')}</span></div>
+              <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.voidApprovalInfo')}</span></div>
               <label className="fld-label">{trD('dist.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
               <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={voidReason} placeholder={trD('dist.voidReasonPh')} onChange={(e) => setVoidReason(e.target.value)} />
             </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoidTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!voidReason.trim() || voidSaving} onClick={doVoid}>{voidSaving ? '…' : trD('dist.voidConfirm')}</button></div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoidTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!voidReason.trim() || voidSaving} onClick={doVoid}>{voidSaving ? '…' : trD('dist.voidSubmit')}</button></div>
           </div>
         </div>
       )}
@@ -3624,4 +3661,106 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, DeliveryReport: DistDeliveryReport, LossReport: DistLossReport };
+// ── CHANGE-REQUEST INBOX (correction / void approvals) ───────────────────────────
+// Approvers (distribusiApprove) see pending correction/void requests here — transaction ref,
+// customer, CURRENT vs REQUESTED input values, the recomputed delta, reason and requester — and
+// Setujui (apply atomically) / Tolak (rejection needs a note). Lives inside the Requests screen.
+function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+  const [reqs, setReqs] = uSx(null);
+  const [tab, setTab] = uSx('pending');
+  const [rejFor, setRejFor] = uSx(null);
+  const [rejNote, setRejNote] = uSx('');
+  const [busy, setBusy] = uSx(false);
+  const [toast, setToast] = uSx('');
+  const ef = effFleet(fleetScope, distFleet);
+  const reload = () => {
+    if (!(window.API && window.API.distribusi && window.API.distribusi.changeRequests)) { setReqs([]); return; }
+    window.API.distribusi.changeRequests.list({ status: tab, fleet: ef }).then((r) => setReqs(r.data || [])).catch(() => setReqs([]));
+  };
+  uEx(() => { reload(); }, [refreshKey, ef, tab]);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+  const approve = (r) => {
+    if (busy) return; setBusy(true);
+    window.API.distribusi.changeRequests.approve(r.id)
+      .then(() => { setBusy(false); flash(trD('cr.approved')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setBusy(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const doReject = () => {
+    if (!rejFor || !rejNote.trim() || busy) return; setBusy(true);
+    window.API.distribusi.changeRequests.reject(rejFor.id, rejNote.trim())
+      .then(() => { setBusy(false); setRejFor(null); setRejNote(''); flash(trD('cr.rejected')); reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setBusy(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  // Compact "field: old → new" chips for the changed inputs of a correction.
+  const fieldChips = (r) => {
+    if (r.kind === 'void' || !r.requested) return null;
+    const c = r.current || {}, q = r.requested || {};
+    const chips = [];
+    const add = (label, o, n) => { if (n != null && +o !== +n) chips.push(<span key={label} className="cr-fieldchip">{label}: <b>{numX(o)}</b> → <b>{numX(n)}</b></span>); };
+    if (q.amount != null) add(trD('dist.payAmount'), c.amount, q.amount);
+    else { add(trD('dist.fQty'), c.qty, q.qty); add(trD('dist.hargaPerGalon'), c.unitPrice, q.unitPrice); add(trD('dist.fGalOut'), c.gallonOut, q.gallonOut); add(trD('dist.fGalIn'), c.gallonIn, q.gallonIn); }
+    return chips.length ? <div className="cr-fieldchips">{chips}</div> : null;
+  };
+  const tabs = [['pending', trD('cr.tabPending')], ['approved', trD('cr.tabApproved')], ['rejected', trD('cr.tabRejected')]];
+  const statusBadge = (s) => <span className={`cr-status ${s}`}>{trD('cr.st_' + s)}</span>;
+  return (
+    <div className="dist-dash screen-enter">
+      <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
+      <div className="dist-report-head"><div><b>{trD('cr.title')}</b><span>{trD('cr.subtitle')}</span></div></div>
+      <div className="dist-tx-toolbar"><div className="dist-chips">{tabs.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div></div>
+      {reqs === null ? <div className="card"><div className="dist-empty">{trD('common.loading') || '…'}</div></div>
+        : reqs.length === 0 ? <div className="card"><div className="dist-empty">{trD('cr.none')}</div></div>
+        : (
+          <div className="cr-list">
+            {reqs.map((r) => {
+              const down = r.delta < 0;
+              return (
+                <div key={r.id} className={`card cr-card ${r.status}`}>
+                  <div className="cr-head">
+                    <span className={`cr-kind ${r.kind}`}>{r.kind === 'void' ? <><IconClose s={12} />{trD('cr.kindVoid')}</> : <><IconPencil s={12} />{trD('cr.kindCorrection')}</>}</span>
+                    <span className="cr-ref">{r.txnRef}</span>
+                    <span className="cr-cust">{r.customerCode ? r.customerCode + ' · ' : ''}{r.customerName}</span>
+                    <span style={{ flex: 1 }} />
+                    {r.status !== 'pending' && statusBadge(r.status)}
+                  </div>
+                  <div className="cr-amounts">
+                    <div><span>{trD('dist.total')}</span><b className="tnum">{rpFull(r.current ? r.current.amount : 0)}</b></div>
+                    <div className="cr-arrow"><IconCaret s={16} style={{ transform: 'rotate(-90deg)' }} /></div>
+                    <div><span>{r.kind === 'void' ? trD('cr.afterVoid') : trD('dist.korekNew')}</span><b className="tnum">{r.kind === 'void' ? rpFull(0) : rpFull(r.newAmount || 0)}</b></div>
+                    <div className="cr-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${down ? 'amt-neg' : r.delta > 0 ? 'amt-pos' : ''}`}>{r.delta >= 0 ? '+' : ''}{rpFull(r.delta)}</b></div>
+                  </div>
+                  {fieldChips(r)}
+                  <div className="cr-meta"><IconInvoice s={12} />{r.reason}</div>
+                  <div className="cr-meta cr-by">{trD('cr.requestedBy', { who: r.requestedBy ? r.requestedBy.name : '—' })}{r.createdAt ? ' · ' + fmtDT(r.createdAt) : ''}</div>
+                  {r.status === 'rejected' && r.decisionNote && <div className="cr-meta cr-rej"><IconClose s={12} />{trD('cr.rejectedNote', { note: r.decisionNote })}{r.decidedBy ? ' · ' + r.decidedBy.name : ''}</div>}
+                  {r.status === 'approved' && r.decidedBy && <div className="cr-meta cr-ok"><IconCheck s={12} />{trD('cr.approvedBy', { who: r.decidedBy.name })}</div>}
+                  {r.status === 'pending' && (
+                    <div className="cr-actions">
+                      <button type="button" className="btn btn-ghost btn-sm cr-reject" disabled={busy} onClick={() => { setRejFor(r); setRejNote(''); }}><IconClose s={14} />{trD('cr.reject')}</button>
+                      <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => approve(r)}><IconCheck s={14} />{trD('cr.approve')}</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      {rejFor && (
+        <div className="modal-scrim" onClick={() => setRejFor(null)} style={{ zIndex: 210 }}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('cr.rejectT')}</div><button className="jp-icon" onClick={() => setRejFor(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-infobox"><IconClose s={16} /><span>{trD('cr.rejectInfo')}</span></div>
+              <label className="fld-label">{trD('cr.rejectReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <textarea className="fld" style={{ height: 62, padding: 12, resize: 'vertical' }} value={rejNote} placeholder={trD('cr.rejectReasonPh')} onChange={(e) => setRejNote(e.target.value)} />
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setRejFor(null)}>{trD('dist.cancel')}</button><button className="btn btn-danger" disabled={!rejNote.trim() || busy} onClick={doReject}>{busy ? '…' : trD('cr.reject')}</button></div>
+          </div>
+        </div>
+      )}
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, DeliveryReport: DistDeliveryReport, LossReport: DistLossReport, ChangeRequests: DistChangeRequests };

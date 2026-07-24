@@ -3,7 +3,6 @@ const { z } = require('zod');
 const service = require('../services/distribution.service');
 const asyncHandler = require('../utils/asyncHandler');
 const bus = require('../lib/eventbus');
-const { resolvePerms } = require('../config/permissions');
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
 const bcast = (action, id) => bus.broadcast({ entity: 'distribusi', action, id });
@@ -98,13 +97,23 @@ const gallonResetSchema = z.object({
   reason: z.string().trim().min(1).max(300),
 });
 const gallonQuery = z.object({ fleet: z.string().max(60).optional() });
+// CORRECTION REQUEST — STRUCTURED, input-level fields (the server recomputes the total; the total is
+// never edited directly). Which fields matter depends on the txn method: purchase (lunas|bon) uses
+// qty/unitPrice/gallonOut/gallonIn; pelunasan uses amount. All optional here — the service validates
+// the right set per method and rejects the rest. Submitting only creates a PENDING request.
 const correctionSchema = z.object({
   reason: z.string().trim().min(1, 'reason is required').max(1000),
-  oldValue: z.any().optional(),
-  newValue: z.any().optional(),
+  qty: z.number().int().nonnegative().optional(),
+  unitPrice: z.number().int().nonnegative().optional(),
+  gallonOut: z.number().int().nonnegative().optional(),
+  gallonIn: z.number().int().nonnegative().optional(),
+  amount: z.number().int().nonnegative().optional(),
 });
-// VOID — a mandatory reason. HARD DELETE — reason + typed confirmation (ref or "HAPUS") + password.
+// VOID REQUEST — a mandatory reason. HARD DELETE — reason + typed confirmation (ref or "HAPUS") + password.
 const voidSchema = z.object({ reason: z.string().trim().min(1, 'reason is required').max(1000) });
+// Change-request inbox filter + the reject note (rejection requires a reason).
+const changeReqQuery = z.object({ status: z.enum(['pending', 'approved', 'rejected']).optional(), fleet: z.string().max(60).optional() });
+const rejectSchema = z.object({ note: z.string().trim().min(1, 'note is required').max(1000) });
 // Toggle a transaction between ARCHIVE (legacy=true) and ACTIVE (legacy=false); reason required.
 const archiveSchema = z.object({ legacy: z.boolean(), bonCounted: z.boolean().optional(), reason: z.string().trim().min(1, 'reason is required').max(1000) });
 // PELUNASAN TIDAK DITERIMA — the customer paid but the money never reached the company. Reason and a
@@ -216,15 +225,13 @@ const deleteType = asyncHandler(async (req, res) => { const r = await service.de
 // ── transactions ── (immutable; price locked server-side)
 const listTransactions = asyncHandler(async (req, res) => res.json(await service.listTransactions(req.query, req.user)));
 const createTransaction = asyncHandler(async (req, res) => { const t = await service.createTransaction(req.body, req.user); bcast('create', t.id); res.status(201).json({ data: t }); });
-const addCorrection = asyncHandler(async (req, res) => {
-  // A "staff" actor has 'distribusi' but none of the owner distribusi caps → flag it.
-  const perms = resolvePerms(req.user.role, req.user.permissions);
-  const isStaff = !perms.distribusiAudit && !perms.distribusiHargaMaster && !perms.distribusiCustomers;
-  const c = await service.addCorrection(req.params.id, req.body, req.user, isStaff);
-  bcast('correction', req.params.id);
-  res.status(201).json({ data: c });
-});
-const voidTransaction = asyncHandler(async (req, res) => { const t = await service.voidTransaction(req.params.id, req.body, req.user); bcast('void', req.params.id); res.json({ data: t }); });
+// A correction/void no longer applies immediately — it creates a PENDING request (distribusiKoreksi /
+// distribusiVoid are now REQUEST rights). Approving them needs the separate distribusiApprove.
+const requestCorrection = asyncHandler(async (req, res) => { const r = await service.requestChange(req.params.id, 'correction', req.body, req.user); bcast('changereq', req.params.id); res.status(201).json({ data: r }); });
+const requestVoid = asyncHandler(async (req, res) => { const r = await service.requestChange(req.params.id, 'void', req.body, req.user); bcast('changereq', req.params.id); res.status(201).json({ data: r }); });
+const listChangeRequests = asyncHandler(async (req, res) => res.json(await service.listChangeRequests(req.user, req.query)));
+const approveChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'approve', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
+const rejectChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'reject', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
 const setTransactionArchive = asyncHandler(async (req, res) => { const t = await service.setTransactionArchive(req.params.id, req.body.legacy, req.body, req.user); bcast('archive', req.params.id); res.json({ data: t }); });
 const hardDeleteTransaction = asyncHandler(async (req, res) => { const r = await service.hardDeleteTransaction(req.params.id, req.body, req.user); bcast('delete', req.params.id); res.json({ data: r }); });
 
@@ -284,11 +291,11 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
-  listTransactions, createTransaction, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
+  listTransactions, createTransaction, requestCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
   createPaymentNotReceived, lossReport,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, archiveSchema, pnrSchema, lossQuery, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

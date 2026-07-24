@@ -160,8 +160,9 @@
       transactions: {
         list: (qs) => req('GET', '/distribusi/transactions' + (qs ? '?' + qs : '')),
         create: (data) => req('POST', '/distribusi/transactions', data),
-        correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),
-        // VOID (cap distribusiVoid) — recorded cancellation; row stays, excluded from aggregates.
+        // CORRECTION / VOID are APPROVAL-GATED. These now SUBMIT a pending request (they no longer
+        // change the transaction). correct: structured input fields per method + reason; void: reason.
+        correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),   // { reason, qty?, unitPrice?, gallonOut?, gallonIn?, amount? }
         void: (id, data) => req('POST', '/distribusi/transactions/' + id + '/void', data),   // { reason }
         // ARCHIVE TOGGLE (cap distribusiLegacyImport) — flip active↔archive(legacy); reason required.
         setArchive: (id, data) => req('POST', '/distribusi/transactions/' + id + '/archive', data),   // { legacy, reason }
@@ -171,6 +172,12 @@
         paymentNotReceived: (data) => req('POST', '/distribusi/transactions/payment-not-received', data),
         // HARD DELETE (cap distribusiHardDelete, owner) — permanent; audit written first.
         hardDelete: (id, data) => req('DELETE', '/distribusi/transactions/' + id, data),     // { reason, confirm, password }
+      },
+      // CHANGE REQUESTS — the approval inbox for correction/void requests (cap distribusiApprove).
+      changeRequests: {
+        list: (opts) => { const o = opts || {}; const p = []; if (o.status) p.push('status=' + encodeURIComponent(o.status)); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/change-requests' + (p.length ? '?' + p.join('&') : '')); },
+        approve: (id) => req('POST', '/distribusi/change-requests/' + id + '/approve', {}),
+        reject: (id, note) => req('POST', '/distribusi/change-requests/' + id + '/reject', { note }),
       },
       // Customer invoices / notas (documents). create/list are per-customer; get by id.
       invoices: {

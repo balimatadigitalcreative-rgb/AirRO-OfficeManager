@@ -15,11 +15,12 @@ const sisaBon = async (t, cid) => (await request(app).get(`/api/v1/distribusi/cu
 const gallonOwned = async (t) => (await request(app).get('/api/v1/distribusi/gallon?fleet=Merah').set(auth(t))).body.data.stock.totalOwned;
 const archive = (t, id, legacy, reason) => request(app).post(`/api/v1/distribusi/transactions/${id}/archive`).set(auth(t)).send({ legacy, reason });
 
-let gm, cid, bonId;
+let gm, owner, cid, bonId;
 
 beforeAll(async () => {
   await resetDb();
   gm = (await reg({ name: 'Boss', username: 'gm_arc', password: 'secret123', role: 'gm' })).token;
+  owner = (await reg({ name: 'Owner', username: 'owner_arc', password: 'secret123', role: 'owner' })).token;   // approver (≠ requester)
   cid = (await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'C', type: 'reguler', masterPrice: 6000, armada: 'Merah' })).body.data.id;
   await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(gm)).send({ qty: 500, reason: 'stok awal', fleet: 'Merah' });
   // a REAL bon sale: 5 gallons out → adds 30,000 to sisa bon + writes a gallon movement
@@ -80,9 +81,10 @@ describe('Distribusi — archive/active toggle', () => {
 
   it('reason required; a voided row cannot be toggled; cap enforced (403)', async () => {
     expect((await archive(gm, bonId, true, '')).status).toBe(400);   // no reason
-    // void a fresh sale, then try to archive it → rejected
+    // void a fresh sale (request → owner approves), then try to archive it → rejected
     const v = (await request(app).post('/api/v1/distribusi/transactions').set(auth(gm)).send({ customerId: cid, qty: 1, method: 'lunas', txnDate: '2026-03-02' })).body.data.id;
-    await request(app).post(`/api/v1/distribusi/transactions/${v}/void`).set(auth(gm)).send({ reason: 'x' });
+    const vr = await request(app).post(`/api/v1/distribusi/transactions/${v}/void`).set(auth(gm)).send({ reason: 'x' });
+    await request(app).post(`/api/v1/distribusi/change-requests/${vr.body.data.id}/approve`).set(auth(owner)).send({});
     expect((await archive(gm, v, true, 'coba')).status).toBe(400);
     // a user WITHOUT distribusiLegacyImport → 403
     const u = await reg({ name: 'NoCap', username: 'nocap_arc', password: 'secret123', role: 'finance' });

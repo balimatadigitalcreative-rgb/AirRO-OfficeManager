@@ -61,10 +61,15 @@ router.delete('/customer-types/:id', requireCap('distribusiCustomers'), validate
 // separate 'distribusiKoreksi' — a helper with only input can never correct.
 router.get('/transactions', requireCap('distribusi'), validate({ query: ctrl.schemas.listTxnQuery }), ctrl.listTransactions);
 router.post('/transactions', requireCap('distribusiInput'), validate({ body: ctrl.schemas.txnSchema }), ctrl.createTransaction);
-router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.addCorrection);
-// VOID (recorded cancellation) — the default everyday cancel path. Row stays, excluded from all
-// aggregates, gallons reversed, audited. Cap: distribusiVoid (owner/GM default). Fleet-scoped.
-router.post('/transactions/:id/void', requireCap('distribusiVoid'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.voidSchema }), ctrl.voidTransaction);
+// CORRECTION / VOID are now APPROVAL-GATED. distribusiKoreksi / distribusiVoid are REQUEST rights:
+// posting here creates a PENDING DistChangeRequest and does NOT change the transaction. It is applied
+// only when an approver (distribusiApprove) approves it — and a requester can never approve their own.
+router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.requestCorrection);
+router.post('/transactions/:id/void', requireCap('distribusiVoid'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.voidSchema }), ctrl.requestVoid);
+// Change-request inbox + decisions — approver-only (distribusiApprove), fleet-scoped, server-enforced.
+router.get('/change-requests', requireCap('distribusiApprove'), validate({ query: ctrl.schemas.changeReqQuery }), ctrl.listChangeRequests);
+router.post('/change-requests/:id/approve', requireCap('distribusiApprove'), validate({ params: ctrl.schemas.idParams }), ctrl.approveChangeRequest);
+router.post('/change-requests/:id/reject', requireCap('distribusiApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.rejectSchema }), ctrl.rejectChangeRequest);
 // ARCHIVE TOGGLE — flip a row between active and archive (legacy). Cap: distribusiLegacyImport (the
 // archive-management capability). Reason required; audited; gallon movements reconciled. Fleet-scoped.
 router.post('/transactions/:id/archive', requireCap('distribusiLegacyImport'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.archiveSchema }), ctrl.setTransactionArchive);

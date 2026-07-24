@@ -753,6 +753,39 @@ model Correction {
   @@index([batchId])
 }
 
+// ── DIST CHANGE REQUEST (correction / void, approval-gated) ─────────────────────────
+// A correction or a void of a DistTransaction no longer applies immediately — it is submitted as a
+// PENDING request and only takes effect once an approver (distribusiApprove) approves it. Mirrors the
+// Approval pattern: type/status + a server-stamped requester snapshot. The original transaction stays
+// fully ACTIVE and unchanged while pending. `payload` holds the STRUCTURED, input-level correction
+// (JSON: {qty,unitPrice,gallonOut,gallonIn} for a purchase, {amount} for a pelunasan) or {} for a
+// void — the total is recomputed server-side on apply, never edited directly.
+model DistChangeRequest {
+  id            String   @id @default(cuid())
+  transactionId String
+  fleetId       String   @default("")            // fleet scope (copied from the txn) — approval respects it
+  kind          String                           // 'correction' | 'void'
+  status        String   @default("pending")     // pending | approved | rejected
+  payload       String   @default("{}")          // requested input fields (correction) or {} (void)
+  reason        String                           // required — why the change is requested
+  // Requester snapshot at submit time — server-stamped from the token, never the client body.
+  requestedById   String?
+  requestedByName String?
+  requestedByRole String?
+  // Decision (approver) snapshot + the rejection/approval note.
+  decidedById   String?
+  decidedByName String?
+  decidedByRole String?
+  decisionNote  String?
+  decidedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt @default(now())
+
+  @@index([status])
+  @@index([transactionId])
+  @@index([fleetId])
+}
+
 // Append-only gallon-stock ledger (loan/exchange model) — the SINGLE source of truth
 // for all stock numbers (customer balances + depot). Never mutated; a mistake is fixed
 // by appending a `correction`. A purchase movement mirrors a cash-flow expense entry and
