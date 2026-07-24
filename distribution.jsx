@@ -3288,8 +3288,15 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   const ef = effFleet(fleetScope, distFleet);
   const reload = () => {
     if (!(window.API && window.API.distribusi)) return;
-    window.API.distribusi.deliveries.board(date, ef).then((r) => { setBoard(r.data || []); setCloseouts(r.closeouts || []); }).catch(() => { setBoard([]); setCloseouts([]); });
-    window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => {});
+    // The board carries the day's closeout state for the fleets in scope (no separate admin
+    // /closeouts call — that one is distribusiDashboard-gated and would 403 for a helper).
+    window.API.distribusi.deliveries.board(date, ef)
+      .then((r) => { setBoard(r.data || []); setCloseouts(r.closeouts || []); })
+      // On failure fall back to an EMPTY board, never null: `board === null` means "still loading" and
+      // would hide "Selesai Kerja Hari Ini". A secondary failure must never hide the primary action.
+      .catch(() => { setBoard([]); setCloseouts([]); });
+    // Customers only feed the "add order" picker — a 403 here must not affect the board or closeout.
+    window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
   };
   uEx(() => { setBoard(null); reload(); }, [refreshKey, ef, date]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
@@ -3309,10 +3316,19 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   };
   const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   const rows = board || [];
-  // The day is closed per (date, armada). Determine the fleet the board is showing: a
-  // single-fleet board (scoped helper) → its fleetId; a full-access user must pick a fleet.
+  // The day is closed per (date, armada). Determine the fleet the board is showing, in order:
+  //   1. the board itself, when every stop is one fleet;
+  //   2. the user's OWN fleet scope when it names exactly one armada — a scoped helper's FleetBar is a
+  //      static label (no picker), so `distFleet` stays 'all' for them forever. Without this fallback a
+  //      helper whose board is EMPTY (a day with no scheduled stops) got closeFleet=null and the
+  //      "Selesai Kerja Hari Ini" button was hidden — they could never close their day. Owner/GM never
+  //      hit it because picking a fleet in the FleetBar sets `distFleet`;
+  //   3. the full-access user's picked fleet.
   const fleetIds = [...new Set(rows.map((r) => r.fleetId))];
-  const closeFleet = fleetIds.length === 1 ? fleetIds[0] : (distFleet && distFleet !== 'all' ? distFleet : null);
+  const scopedFleets = isScoped(fleetScope) ? (fleetScope || []).filter(Boolean) : null;
+  const closeFleet = fleetIds.length === 1 ? fleetIds[0]
+    : (scopedFleets && scopedFleets.length === 1) ? scopedFleets[0]
+    : (distFleet && distFleet !== 'all') ? distFleet : null;
   const closedFor = closeFleet ? closeouts.find((c) => c.fleetId === closeFleet) : null;
   const pendingStops = closeFleet ? rows.filter((s) => s.status === 'pending' && s.fleetId === closeFleet) : [];
   const srcBadge = (s) => <span className={`dist-src ${s}`}>{trD(s === 'tambahan' ? 'dist.srcTambahan' : 'dist.srcJadwal')}</span>;
