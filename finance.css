@@ -2738,3 +2738,8 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .cr-method-flip { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; }
 .cr-method-bon { font-weight: 800; }
 .cr-method-neg { display: inline-flex; align-items: center; gap: 4px; color: var(--warn, #b26a00); font-weight: 700; }
+
+/* Bon Baru KPI sub — period+fleet caption and the all-time Total Piutang (kept, not lost). */
+.dist-kpi-cap { display: block; font-size: 11px; color: var(--text-mut); }
+.dist-kpi-total { display: flex; align-items: baseline; gap: 6px; margin-top: 3px; font-size: 11.5px; color: var(--text-mut); }
+.dist-kpi-total b { font-size: 12.5px; color: var(--text); }

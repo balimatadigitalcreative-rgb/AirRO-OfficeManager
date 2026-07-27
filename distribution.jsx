@@ -317,6 +317,8 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
   );
 
   const fleetBar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
+  // Human caption for the ACTIVE fleet scope — so "Bon Baru / Hari ini" reads unambiguously.
+  const fleetCaption = isScoped(fleetScope) ? (fleetScope || []).join(', ') : (ef && ef !== 'all' ? ef : trD('dist.fleetAll'));
   if (loading) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div></div>;
   if (err || !sum) return (
     <div className="dist-dash screen-enter">{fleetBar}
@@ -345,7 +347,11 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
             <Kpi hero icon="IconDrop" value={numX(sum.periodQty)} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={periodLabel} pillCls="hero" />
             <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpFull(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={periodLabel} pillCls="pos"
               sub={<><span className="dist-kpi-cash"><span className="dist-cash-dot cash" />{trD('dist.cashLbl')} {rpFull(sum.periodInCash || 0)}</span><span className="dist-kpi-cash"><span className="dist-cash-dot xfer" />{trD('dist.xferLbl')} {rpFull(sum.periodInTransfer || 0)}</span></>} />
-            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpFull(sum.receivable)} label={trD('dist.kpiBon')} pill={trD('dist.pillRunning')} pillCls="warn" />
+            {/* BON BARU — bon created within the SELECTED period+fleet (sum.piutang = byMethod.bon),
+                NOT the all-time debt. The period pill + fleet caption make the scope explicit. The
+                all-time outstanding total is kept right below as a secondary line so it's never lost. */}
+            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpFull(sum.piutang)} label={trD('dist.kpiBonBaru')} pill={periodLabel} pillCls="warn"
+              sub={<><span className="dist-kpi-cap">{periodLabel} · {fleetCaption}</span><span className="dist-kpi-total">{trD('dist.totalPiutang')} <b className="tnum">{rpFull(sum.receivable)}</b></span></>} />
             <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={periodLabel} pillCls="blue" />
           </div>
 
