@@ -39,6 +39,7 @@ PORT="${AIRRO_PORT:-4000}"
 PM2_APP="airro-api"
 DOMAIN="${AIRRO_DOMAIN:-airrooffice.com}"
 HEALTH_URL="http://127.0.0.1:$PORT/api/v1/health"
+READY_URL="http://127.0.0.1:$PORT/api/v1/health/ready"   # DB + schema-behind probe (see routes/index.js)
 
 RESTORE_DB=0; SKIP_OFFSITE=0; SKIP_TESTS=0
 for a in "$@"; do
@@ -60,7 +61,7 @@ info() { log "   ·  $*"; }
 # State tracked for the summary + rollback.
 SHA_BEFORE=""; SHA_AFTER=""; BACKUP_FILE=""; COUNTS_BEFORE=""; COUNTS_AFTER=""
 MIGRATIONS_APPLIED="no"; TESTS="skipped"; ROLLED_BACK="no"; DB_RESTORED="no"
-HEALTH_CODE="000"; FAIL_REASON=""
+HEALTH_CODE="000"; READY_CODE="000"; READY_BODY=""; FAIL_REASON=""
 PUBLIC_HTTPS="not checked"; LISTEN_443="?"; CERT_DAYS="?"
 
 log ""
@@ -99,6 +100,20 @@ wait_health() {
     HEALTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" 2>/dev/null || echo 000)"
     [ "$HEALTH_CODE" = "200" ] && return 0
     [ "$i" -lt "$tries" ] && { info "health $HEALTH_CODE — retry $i/$tries in ${delay}s"; sleep "$delay"; delay=$((delay * 2)); }
+  done
+  return 1
+}
+
+# Readiness check with backoff — the API must be able to SERVE DATA, not just be alive. Sets
+# READY_CODE + READY_BODY. Returns 0 only on a 200 (db:ok, schema:ok). A 503 here is the app-wide
+# outage class (DB unreachable, or schema behind the running client) that /health cannot see.
+wait_ready() {
+  local tries=5 delay=1 i
+  for i in $(seq 1 "$tries"); do
+    READY_BODY="$(curl -s --max-time 6 "$READY_URL" 2>/dev/null || echo '')"
+    READY_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "$READY_URL" 2>/dev/null || echo 000)"
+    [ "$READY_CODE" = "200" ] && return 0
+    [ "$i" -lt "$tries" ] && { info "ready $READY_CODE — retry $i/$tries in ${delay}s"; sleep "$delay"; delay=$((delay * 2)); }
   done
   return 1
 }
@@ -157,6 +172,7 @@ finish() {
   log "  tests         : $TESTS"
   log "  migrations    : $MIGRATIONS_APPLIED"
   log "  health (local): $HEALTH_CODE"
+  log "  ready (db+schema): $READY_CODE"
   log "  :443 listening: $LISTEN_443"
   log "  public https  : $PUBLIC_HTTPS      ← the 17 Jul gate (https://$DOMAIN/)"
   log "  cert expires  : ${CERT_DAYS} days"
@@ -310,6 +326,18 @@ if echo "$MIG_OUT" | grep -q 'Applying migration'; then
 else
   ok "no pending migrations"
 fi
+# GUARD: prove the DB now matches the code's migrations. `migrate deploy` can exit 0 yet leave the
+# schema behind the running client (a prior failed/partial migration recorded in _prisma_migrations,
+# drift from a manual SQL edit, or the wrong DATABASE_URL). If so, every query on a new column throws
+# and the whole app fails — the outage this guard exists to prevent. Abort BEFORE the pm2 reload so
+# production keeps serving the old, working code.
+STATUS_OUT="$( cd server && unset DATABASE_URL && npx prisma migrate status 2>&1 )"
+echo "$STATUS_OUT" >> "$LOG"
+if ! echo "$STATUS_OUT" | grep -qiE 'up to date|database schema is up to date'; then
+  echo "$STATUS_OUT" | tail -10 | sed 's/^/        /' | tee -a "$LOG"
+  abort "prisma migrate status is NOT clean — DB schema is behind/ahead of the code. Production untouched. Fix forward: cd server && npx prisma migrate status, then resolve/apply."
+fi
+ok "migrate status clean — DB schema matches the code"
 
 log ""
 log "▸ GATE 5/6  Build frontend bundle"
@@ -345,11 +373,23 @@ if [ "$(echo "$PIDS" | tr '\n' ' ' | xargs)" != "$OURS" ]; then
 fi
 ok "port $PORT held by our pm2 $PM2_APP (pid $OURS)"
 
-# 3b. health
+# 3b. health (liveness — process is up)
 if wait_health; then
   ok "health 200"
 else
   rollback "health check failed (last=$HEALTH_CODE)"; FAIL_REASON="health check failed (last=$HEALTH_CODE)"; finish "FAIL"
+fi
+
+# 3b-ready. READINESS — the API can actually serve DATA. This is the gate that would have caught the
+# app-wide outage: /health returns 200 even when the DB is unreachable or the schema is behind the
+# running client, so without this a broken deploy went green. A 503 here → roll back.
+if wait_ready; then
+  ok "ready 200 — DB reachable + schema matches the running client"
+else
+  READY_REASON="$(echo "$READY_BODY" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log((j.reason||'unknown')+(j.message?': '+j.message:''))}catch(e){console.log('no JSON body')}})" 2>/dev/null)"
+  echo "        $READY_BODY" | tee -a "$LOG"
+  rollback "readiness check failed (last=$READY_CODE, $READY_REASON) — API is up but cannot serve data"
+  FAIL_REASON="readiness failed ($READY_CODE): $READY_REASON"; finish "FAIL"
 fi
 
 # 3c. smoke: real authenticated round-trip ("up but auth broken" is still broken)

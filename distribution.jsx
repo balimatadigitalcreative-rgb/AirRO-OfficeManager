@@ -287,10 +287,12 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
   const reasonLabel = (x) => x.type === 'bon' ? trD('dist.rlBon') : x.type === 'gallon' ? trD('dist.rlGallon', { n: x.value }) : x.type === 'overdue' ? trD('dist.rlOverdue', { n: x.days }) : x.type === 'dueDay' ? trD('dist.rlDueDay', { n: x.day }) : x.type === 'weekly' ? trD('dist.rlWeekly', { d: x.weekday }) : x.type;
   uEx(() => {
     let live = true; setErr(false);
-    if (!(window.API && window.API.distribusi)) { setLoading(false); setErr(true); return; }
+    if (!(window.API && window.API.distribusi)) { setLoading(false); setErr(trD('dist.loadErr')); return; }
     const opts = per === 'range' ? { period: 'range', dateFrom: rFrom, dateTo: rTo, fleet: ef } : { period: per, fleet: ef };
     window.API.distribusi.summary(opts).then((r) => { if (live) { setSum(r.data); setLoading(false); } })
-      .catch(() => { if (live) { setErr(true); setLoading(false); } });
+      // Keep the REAL server message so the screen can show WHY (not a generic dead card), and let the
+      // user retry. A 503 readiness-style failure now reads clearly instead of a blank dashboard.
+      .catch((e) => { if (live) { setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); setLoading(false); } });
     return () => { live = false; };
   }, [refreshKey, today, ef, bump, per, rFrom, rTo]);
 
@@ -316,7 +318,15 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
 
   const fleetBar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   if (loading) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div></div>;
-  if (err || !sum) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}><IconRefresh s={20} /><div style={{ marginTop: 8 }}>{trD('dist.loadErr')}</div></div></div>;
+  if (err || !sum) return (
+    <div className="dist-dash screen-enter">{fleetBar}
+      <div className="card dist-loadfail" style={{ padding: 32, textAlign: 'center' }}>
+        <IconWarn s={22} />
+        <div className="dist-loadfail-msg">{typeof err === 'string' && err ? err : trD('dist.loadErr')}</div>
+        <button type="button" className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => { setLoading(true); refetch(); }}><IconRefresh s={15} />{trD('common.retry')}</button>
+      </div>
+    </div>
+  );
 
   const recent = sum.recent || [];
   const top = sum.topCustomers || [];

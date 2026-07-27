@@ -5,9 +5,39 @@ const { Router } = require('express');
 
 const router = Router();
 
-// Liveness/readiness probe — no auth, no DB dependency required to be "live".
+// LIVENESS — the process is up. No auth, no DB. Deliberately cannot fail on a DB problem, so a
+// monitor can still distinguish "process dead" from "process up but DB broken" (that's /health/ready).
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
+// READINESS — can the API actually SERVE data? This is the probe the plain /health lacked, and whose
+// absence let an app-wide outage stay invisible: /health returned 200 while every DB-backed endpoint
+// 500'd. Two checks, each mapping to a real outage class:
+//   • db:     a trivial query — catches an unreachable / locked / corrupt database file.
+//   • schema: a SELECT touching the NEWEST migrated columns via the RUNNING Prisma client — catches
+//             "code deployed but `migrate deploy` didn't run", where the client references columns the
+//             DB lacks (Prisma P2021/P2022) and every feature query throws at once.
+// 200 {db:'ok',schema:'ok'} when serveable; 503 with a specific reason otherwise. Used by the deploy
+// verification gate so a schema-behind / DB-down state ROLLS BACK instead of going green.
+const prisma = require('../lib/prisma');
+router.get('/health/ready', async (req, res) => {
+  const out = { status: 'ok', db: 'ok', schema: 'ok', timestamp: new Date().toISOString() };
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch (e) {
+    return res.status(503).json({ ...out, status: 'error', db: 'error', reason: 'db_unreachable', message: String(e && e.message || e).slice(0, 200) });
+  }
+  try {
+    // Touch the tables/columns added by the recent migration burst through the client that is
+    // actually running. If the deployed DB is behind, one of these throws (missing table/column).
+    await prisma.businessUnit.findFirst({ select: { officeCode: true } });          // 20260726 office_code
+    await prisma.distChangeRequest.findFirst({ select: { id: true } });             // 20260725 change_request
+    await prisma.distTransaction.findFirst({ select: { paymentNotReceived: true } }); // 20260724 payment_not_received
+  } catch (e) {
+    return res.status(503).json({ ...out, status: 'error', schema: 'behind', reason: 'schema_behind', message: String(e && e.message || e).slice(0, 200) });
+  }
+  res.json(out);
 });
 
 // Build stamp (frontend code freshness). Unauthenticated + rate-limit-exempt (see
