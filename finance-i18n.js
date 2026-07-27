@@ -160,7 +160,7 @@
       'dist.pendingBadge': 'Awaiting approval', 'dist.pendCorrLine': 'Correction requested by {who} — awaiting approval', 'dist.pendVoidLine': 'Cancellation requested by {who} — awaiting approval',
       // Change-request inbox (correction/void approvals)
       'cr.title': 'Correction & Cancellation Requests', 'cr.subtitle': 'Approve or reject transaction changes',
-      'cr.tabPending': 'Pending', 'cr.tabApproved': 'Approved', 'cr.tabRejected': 'Rejected', 'cr.none': 'No requests here.',
+      'cr.tabPending': 'Pending', 'cr.tabApproved': 'Approved', 'cr.tabRejected': 'Rejected', 'cr.none': 'No requests here.', 'cr.none_pending': 'No requests awaiting approval.', 'cr.none_approved': 'No approved requests yet.', 'cr.none_rejected': 'No rejected requests.',
       'cr.kindCorrection': 'Correction', 'cr.kindVoid': 'Cancellation', 'cr.afterVoid': 'After cancel',
       'cr.requestedBy': 'Requested by {who}', 'cr.approvedBy': 'Approved by {who}', 'cr.rejectedNote': 'Rejected: {note}',
       'cr.approve': 'Approve', 'cr.reject': 'Reject', 'cr.approved': 'Applied.', 'cr.rejected': 'Rejected.',
@@ -725,7 +725,7 @@
       'dist.pendingBadge': 'Menunggu persetujuan', 'dist.pendCorrLine': 'Koreksi diajukan oleh {who} — menunggu persetujuan', 'dist.pendVoidLine': 'Pembatalan diajukan oleh {who} — menunggu persetujuan',
       // Kotak masuk pengajuan (persetujuan koreksi/pembatalan)
       'cr.title': 'Pengajuan Koreksi & Pembatalan', 'cr.subtitle': 'Setujui atau tolak perubahan transaksi',
-      'cr.tabPending': 'Menunggu', 'cr.tabApproved': 'Disetujui', 'cr.tabRejected': 'Ditolak', 'cr.none': 'Tidak ada pengajuan di sini.',
+      'cr.tabPending': 'Menunggu', 'cr.tabApproved': 'Disetujui', 'cr.tabRejected': 'Ditolak', 'cr.none': 'Tidak ada pengajuan di sini.', 'cr.none_pending': 'Belum ada pengajuan yang menunggu persetujuan.', 'cr.none_approved': 'Belum ada pengajuan yang disetujui.', 'cr.none_rejected': 'Belum ada pengajuan yang ditolak.',
       'cr.kindCorrection': 'Koreksi', 'cr.kindVoid': 'Pembatalan', 'cr.afterVoid': 'Setelah batal',
       'cr.requestedBy': 'Diajukan oleh {who}', 'cr.approvedBy': 'Disetujui oleh {who}', 'cr.rejectedNote': 'Ditolak: {note}',
       'cr.approve': 'Setujui', 'cr.reject': 'Tolak', 'cr.approved': 'Diterapkan.', 'cr.rejected': 'Ditolak.',

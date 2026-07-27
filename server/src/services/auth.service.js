@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
-const { parsePerms } = require('../config/permissions');
+const { parsePerms, resolvePerms } = require('../config/permissions');
 
 const PASSWORD_MIN = 8;   // minimum length for a user-chosen password (self change)
 const PUBLIC_FIELDS = {
@@ -33,9 +33,18 @@ function parseFleetScope(str) {
   return 'all';
 }
 
-// Shape a user row for API responses: permissions + fleetScope returned parsed.
+// Shape a user row for API responses: permissions + fleetScope returned parsed. RAW permissions
+// (exactly what's stored) — used by the user-MANAGEMENT list/get so an admin edits the true values.
 function publicUser(user) {
   return { ...user, permissions: parsePerms(user.permissions), fleetScope: parseFleetScope(user.fleetScope) };
+}
+// The SELF shape (login / me / profile update): permissions are RESOLVED (role defaults + every
+// derive rule applied), so the frontend's `p` — which renders nav, screens and buttons from
+// user.permissions — matches EXACTLY what the server enforces. Without this, a cap added after an
+// account's stored blob was written (e.g. distribusiApprove) is granted by the API but INVISIBLE in
+// the UI, because the client rendered from the raw blob. This is why the approval screen didn't show.
+function selfUser(user) {
+  return { ...publicUser(user), permissions: resolvePerms(user.role, user.permissions) };
 }
 
 function signToken(user) {
@@ -80,7 +89,7 @@ async function login({ username, password }, ctx) {
   if (!ok) { console.warn(`[auth] login gagal — password salah (username="${uname}", id=${user.id}, ip=${ip})`); throw ApiError.unauthorized('Invalid credentials'); }
 
   const { passwordHash, pin, updatedAt, ...safe } = user;
-  return { user: publicUser(safe), token: signToken(user) };
+  return { user: selfUser(safe), token: signToken(user) };
 }
 
 // Forgot-password (request-to-admin; no email). ALWAYS succeeds silently from the client's
@@ -109,7 +118,7 @@ async function requestPasswordReset({ username, note }) {
 async function me(userId) {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: PUBLIC_FIELDS });
   if (!user) throw ApiError.notFound('User not found');
-  return publicUser(user);
+  return selfUser(user);
 }
 
 // A user changes their OWN password: verify the current one, then store the new
@@ -134,7 +143,7 @@ async function updateProfile(userId, { name, color }) {
   if (color != null) data.color = color;
   if (!Object.keys(data).length) return me(userId);
   const user = await prisma.user.update({ where: { id: userId }, data, select: PUBLIC_FIELDS });
-  return publicUser(user);
+  return selfUser(user);   // self shape → resolved perms, so the client keeps the full cap set
 }
 
 module.exports = { register, login, requestPasswordReset, me, changePassword, updateProfile, signToken, publicUser, normUsername, isWeakPassword, PUBLIC_FIELDS, PASSWORD_MIN };

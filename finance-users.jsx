@@ -62,6 +62,8 @@ const CAP_GROUPS = [
     ['distribusiGallonReset', 'Reset Jumlah Galon'],
     ['distribusiLegacyImport', 'Impor Riwayat Transaksi (arsip)'],
     ['distribusiVoid', 'Batalkan Transaksi'],
+    ['distribusiApprove', 'Setujui Perubahan Distribusi (koreksi/pembatalan)'],
+    ['distribusiBonAdjust', 'Pelunasan Tidak Diterima + Laporan Kerugian'],
     ['distribusiHardDelete', '⚠ Hapus Permanen Transaksi'],
     ['distribusiAudit', 'Lihat Log Audit'],
   ] },

@@ -3729,6 +3729,7 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
 // Setujui (apply atomically) / Tolak (rejection needs a note). Lives inside the Requests screen.
 function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [reqs, setReqs] = uSx(null);
+  const [loadErr, setLoadErr] = uSx('');   // real load failure → message + "Coba lagi" (never a silent [])
   const [tab, setTab] = uSx('pending');
   const [rejFor, setRejFor] = uSx(null);
   const [rejNote, setRejNote] = uSx('');
@@ -3736,8 +3737,13 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
   const [toast, setToast] = uSx('');
   const ef = effFleet(fleetScope, distFleet);
   const reload = () => {
-    if (!(window.API && window.API.distribusi && window.API.distribusi.changeRequests)) { setReqs([]); return; }
-    window.API.distribusi.changeRequests.list({ status: tab, fleet: ef }).then((r) => setReqs(r.data || [])).catch(() => setReqs([]));
+    if (!(window.API && window.API.distribusi && window.API.distribusi.changeRequests)) { setLoadErr(trD('dist.loadErr')); setReqs([]); return; }
+    setLoadErr(''); setReqs(null);
+    window.API.distribusi.changeRequests.list({ status: tab, fleet: ef })
+      .then((r) => { setReqs(r.data || []); })
+      // Surface the REAL error (403 / server down) with a retry, instead of catching to [] which
+      // looks identical to "no requests" and hides a genuine failure.
+      .catch((e) => { setLoadErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); setReqs([]); });
   };
   uEx(() => { reload(); }, [refreshKey, ef, tab]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
@@ -3776,8 +3782,14 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
       <div className="dist-report-head"><div><b>{trD('cr.title')}</b><span>{trD('cr.subtitle')}</span></div></div>
       <div className="dist-tx-toolbar"><div className="dist-chips">{tabs.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div></div>
-      {reqs === null ? <div className="card"><div className="dist-empty">{trD('common.loading') || '…'}</div></div>
-        : reqs.length === 0 ? <div className="card"><div className="dist-empty">{trD('cr.none')}</div></div>
+      {loadErr ? (
+        <div className="card dist-loadfail" style={{ padding: 28, textAlign: 'center' }}>
+          <IconWarn s={22} />
+          <div className="dist-loadfail-msg">{loadErr}</div>
+          <button type="button" className="btn btn-primary" style={{ marginTop: 14 }} onClick={reload}><IconRefresh s={15} />{trD('common.retry')}</button>
+        </div>
+      ) : reqs === null ? <div className="card"><div className="dist-empty dist-loading"><span className="dist-spin" />{trD('common.loading')}</div></div>
+        : reqs.length === 0 ? <div className="card"><div className="dist-empty">{trD('cr.none_' + tab)}</div></div>
         : (
           <div className="cr-list">
             {reqs.map((r) => {

@@ -97,10 +97,10 @@ async function seedBuiltinRoles() {
         // Then materialize the split kasbon caps from the (merged) legacy value so the
         // Role editor shows them as explicit checkboxes, consistent with old behaviour.
         const cur = parsePerms(existing.permissions) || {};
-        const merged = deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps({ ...seed, ...cur })));
+        const merged = deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps({ ...seed, ...cur }), id));
         await prisma.role.update({ where: { id }, data: { builtin: true, permissions: JSON.stringify(merged) } });
       } else {
-        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(seed)))), builtin: true, sortOrder: i } });
+        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(seed), id))), builtin: true, sortOrder: i } });
       }
     }
   } catch (e) { /* table may not exist yet on very first migrate; ignored */ }
@@ -162,10 +162,17 @@ function deriveKasbonCaps(perms) {
 // audit). Every ABSENT cap is derived from the legacy `distribusi` value, so a user/role
 // that had the old combined access keeps ALL views. `distribusi` = "may open the module"
 // = holds ANY distribusi capability (used only to show the sidebar group).
-function deriveDistribusiCaps(perms) {
+function deriveDistribusiCaps(perms, role) {
   if (!perms || typeof perms !== 'object') return perms;
   const p = { ...perms };
   const legacy = !!p.distribusi;
+  // Owner/GM hold every distribusi capability by default. The owner/GM-tier caps below are NEVER
+  // derived from the legacy combined `distribusi` flag, so for a plain user an absent value means
+  // false — but for an OWNER/GM an absent value must mean TRUE, or a cap added AFTER their account's
+  // permissions blob was stored (a per-user override, or a custom role snapshot) silently vanishes.
+  // This is exactly why the approval UI didn't show: existing owner/GM accounts had distribusiApprove
+  // undefined → false, so the Pengajuan block never rendered. Default those caps by role here.
+  const isOwnerGm = role === 'owner' || role === 'gm';
   if (p.distribusiInput === undefined) p.distribusiInput = legacy;
   if (p.distribusiKoreksi === undefined) p.distribusiKoreksi = legacy;
   if (p.distribusiDashboard === undefined) p.distribusiDashboard = legacy;
@@ -195,15 +202,15 @@ function deriveDistribusiCaps(perms) {
   // History access (view earlier dashboard periods) and the delivery report are OWNER/GM-tier
   // reporting caps — NEVER derived from the legacy combined `distribusi` (a plain field user must
   // not silently gain them). Only the explicit owner/gm seed or an admin toggle grants them.
-  if (p.distribusiDashHistory === undefined) p.distribusiDashHistory = false;
-  if (p.distribusiPengirimanReport === undefined) p.distribusiPengirimanReport = false;
-  // "Pelunasan Tidak Diterima" (bon adjustment + the loss report) writes off a receivable and names
-  // a responsible staff member — deliberately owner/GM-tier and granted by hand. NEVER derived.
-  if (p.distribusiBonAdjust === undefined) p.distribusiBonAdjust = false;
-  // Approving correction/void requests writes off / rewrites a transaction — deliberately owner/GM-tier
-  // and granted by hand. NEVER derived from the legacy `distribusi` flag: a plain input/koreksi user
-  // may REQUEST a change but must never gain the right to approve it (least-privilege separation).
-  if (p.distribusiApprove === undefined) p.distribusiApprove = false;
+  // Owner/GM-tier reporting + approval caps: default TRUE for owner/GM, FALSE for everyone else
+  // (never derived from the legacy `distribusi` flag — a plain field user must not silently gain them,
+  // but an owner/GM must never LOSE them just because their stored blob predates the cap).
+  if (p.distribusiDashHistory === undefined) p.distribusiDashHistory = isOwnerGm;
+  if (p.distribusiPengirimanReport === undefined) p.distribusiPengirimanReport = isOwnerGm;
+  if (p.distribusiBonAdjust === undefined) p.distribusiBonAdjust = isOwnerGm;
+  // Approving correction/void requests: a plain input/koreksi user may REQUEST a change but must never
+  // gain approval by derivation (least-privilege) — yet owner/GM get it by default.
+  if (p.distribusiApprove === undefined) p.distribusiApprove = isOwnerGm;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
     || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport || p.distribusiBonAdjust || p.distribusiApprove);
@@ -250,7 +257,7 @@ function deriveManageUsers(perms, role) {
 
 function resolvePerms(role, permsStrOrObj) {
   const override = parsePerms(permsStrOrObj);
-  const resolved = deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance)));
+  const resolved = deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance), role));
   return deriveManageUsers(resolved, role);
 }
 
