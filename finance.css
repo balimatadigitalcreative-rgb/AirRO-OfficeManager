@@ -2728,3 +2728,13 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .dist-loadfail { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-mut); }
 .dist-loadfail svg { color: var(--warn, #e59a4a); }
 .dist-loadfail-msg { margin-top: 8px; font-size: 13px; max-width: 460px; line-height: 1.5; }
+
+/* Correction — method flip + its sisa-bon consequence (form preview + approver card). */
+.dist-korek-methodline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 2px; font-size: 12.5px; }
+.dist-korek-methodflip { font-weight: 700; }
+.dist-korek-bonimpact { font-weight: 800; }
+.cr-method { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 11px; border-radius: 9px; background: var(--surface-2, #f6f8f9); font-size: 12.5px; }
+.cr-method.warn { background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn, #e59a4a); }
+.cr-method-flip { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; }
+.cr-method-bon { font-weight: 800; }
+.cr-method-neg { display: inline-flex; align-items: center; gap: 4px; color: var(--warn, #b26a00); font-weight: 700; }

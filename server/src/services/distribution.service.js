@@ -930,6 +930,22 @@ async function currentGallonsOf(txnId) {
   rows.forEach((m) => { if (m.type === 'delivery_out') gallonOut += m.qty; else gallonIn += m.qty; });
   return { gallonOut, gallonIn };
 }
+// The customer's RAW (unfloored) receivable balance IF `txn` were changed to (newMethod,newAmount).
+// customerBonBalance floors at 0; here we keep the sign so a change that would push the customer into
+// over-paid territory (a bon that was covering existing payments removed) can be DETECTED and
+// confirmed rather than silently clamped. Every OTHER bon/pelunasan row counts as today; this txn's
+// contribution is replaced by its requested one (bon → +amount, lunas → 0).
+async function projectedRawBon(txn, newMethod, newAmount) {
+  const rows = await prisma.distTransaction.findMany({ where: { customerId: txn.customerId, ...BON_TXN }, include: { corrections: true } });
+  let bon = 0, pel = 0;
+  rows.forEach((t) => {
+    if (t.id === txn.id) return;                                   // exclude THIS row — added below
+    if (t.method === 'bon') bon += t.amount + priceDelta(t.corrections);
+    else if (t.method === 'pelunasan') pel += t.amount;
+  });
+  if (newMethod === 'bon') bon += newAmount;                       // this row's requested contribution
+  return bon - pel;                                                // RAW: may be negative
+}
 // Validate + normalize a structured correction payload against the txn's method.
 // Returns { fields, newAmount }. Throws ApiError on any invalid input.
 async function normalizeCorrection(txn, payload, opts) {
@@ -955,9 +971,21 @@ async function normalizeCorrection(txn, payload, opts) {
     if (unitPrice <= 0) throw ApiError.badRequest('Harga harus lebih dari 0.');
     const newAmount = qty * unitPrice;
     if (overCeiling(newAmount) || overCeiling(unitPrice)) throw ApiError.badRequest(ceilingMsg, { newAmount });
-    return { fields: { qty, unitPrice, gallonOut, gallonIn }, newAmount };
+    // METHOD change (bon ↔ lunas). Optional; defaults to the current method. Only 'lunas'/'bon' are
+    // valid (a purchase can't become a 'pelunasan'). No price cap needed for a method-only change.
+    let method = txn.method;
+    if (p.method != null && p.method !== '') {
+      const m = String(p.method);
+      if (m !== 'lunas' && m !== 'bon') throw ApiError.badRequest("Metode hanya bisa 'lunas' atau 'bon'.");
+      method = m;
+    }
+    return { fields: { qty, unitPrice, gallonOut, gallonIn, method }, newAmount };
   }
   // Amount-only: a pelunasan (payment) or an opening/carry-over bon (lump receivable typed directly).
+  // Method is NOT changeable here — reject a request that tries to (per the guard).
+  if (p.method != null && p.method !== '' && String(p.method) !== txn.method) {
+    throw ApiError.badRequest('Metode transaksi ini tidak bisa diubah — hanya pembelian Lunas/Bon yang bisa ditukar metodenya.');
+  }
   const amount = int(p.amount);
   if (amount <= 0) throw ApiError.badRequest('Jumlah harus lebih dari 0.');
   if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
@@ -977,15 +1005,32 @@ async function changeRequestClient(req, txnMaybe) {
   const sale = txn && isGallonSale(txn);
   const curG = (txn && sale) ? await currentGallonsOf(txn.id) : { gallonOut: 0, gallonIn: 0 };
   const current = txn ? { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, ...curG } : null;
-  let requested = null, newAmount = null;
+  let requested = null, newAmount = null, requestedMethod = txn ? txn.method : null;
   if (req.kind === 'correction' && txn) {
-    if (sale) { requested = { qty: payload.qty, unitPrice: payload.unitPrice, gallonOut: payload.gallonOut, gallonIn: payload.gallonIn }; newAmount = (payload.qty || 0) * (payload.unitPrice || 0); }
-    else { requested = { amount: payload.amount }; newAmount = payload.amount; }
+    if (sale) {
+      requestedMethod = (payload.method === 'lunas' || payload.method === 'bon') ? payload.method : txn.method;
+      requested = { qty: payload.qty, unitPrice: payload.unitPrice, gallonOut: payload.gallonOut, gallonIn: payload.gallonIn, method: requestedMethod };
+      newAmount = (payload.qty || 0) * (payload.unitPrice || 0);
+    } else { requested = { amount: payload.amount }; newAmount = payload.amount; }
   }
   const delta = req.kind === 'void' ? (txn ? -txn.amount : 0) : (newAmount != null && txn ? newAmount - txn.amount : 0);
+  // METHOD change + its effect on THIS customer's sisa bon, so the approver sees the consequence.
+  // A row counts toward sisa bon only when method==='bon'; its contribution is its amount. So the
+  // sisa-bon impact = (requested bon-contribution) − (current bon-contribution).
+  const methodChanged = !!(txn && req.kind === 'correction' && sale && requestedMethod !== txn.method);
+  let bonImpact = 0, wouldGoNegative = false;
+  if (txn && req.kind === 'correction' && sale) {
+    const oldContrib = txn.method === 'bon' ? txn.amount : 0;
+    const newContrib = requestedMethod === 'bon' ? (newAmount || 0) : 0;
+    bonImpact = newContrib - oldContrib;
+    // Only worth the extra query while it still matters (pending + the balance actually moves).
+    if (req.status === 'pending' && bonImpact !== 0) {
+      wouldGoNegative = (await projectedRawBon(txn, requestedMethod, newAmount || 0)) < 0;
+    }
+  }
   return {
     id: req.id, transactionId: req.transactionId, fleetId: req.fleetId, kind: req.kind, status: req.status,
-    method: txn ? txn.method : null, reason: req.reason,
+    method: txn ? txn.method : null, requestedMethod, methodChanged, bonImpact, wouldGoNegative, reason: req.reason,
     customerName: txn && txn.customer ? txn.customer.name : '', customerCode: txn && txn.customer ? txn.customer.code : '',
     txnRef: shortRefServer(req.transactionId), txnDate: txn ? txn.txnDate : null,
     current, requested, newAmount, delta,
@@ -1076,8 +1121,18 @@ async function decideChangeRequest(id, decision, body, actor) {
   if (req.kind === 'correction') {
     norm = await normalizeCorrection(txn, payload, { canPrice: snap.canPrice });   // re-validate against the CURRENT txn state
     const oldG = isGallonSale(txn) ? await currentGallonsOf(txn.id) : {};
-    oldVals = { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, ...oldG };
+    oldVals = { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, method: txn.method, ...oldG };
     newVals = { ...norm.fields, amount: norm.newAmount };
+    // NEGATIVE-BALANCE GUARD: a method/amount change that would push the customer's raw sisa bon
+    // below zero (a bon that was covering existing payments removed) must be CONFIRMED by the
+    // approver, never applied silently. The client shows the warning (wouldGoNegative) and re-sends
+    // confirmNegative:true; the server enforces it here regardless of what the UI did.
+    if (isGallonSale(txn) && (norm.fields.method !== txn.method || norm.newAmount !== txn.amount)) {
+      const projected = await projectedRawBon(txn, norm.fields.method, norm.newAmount);
+      if (projected < 0 && !(body && body.confirmNegative)) {
+        throw ApiError.badRequest(`Perubahan ini membuat sisa bon pelanggan menjadi negatif (${projected}). Perlu konfirmasi penyetuju.`, { needsNegativeConfirm: true, projected });
+      }
+    }
   }
   await prisma.$transaction(async (db) => {
     if (req.kind === 'void') {
@@ -1091,7 +1146,13 @@ async function decideChangeRequest(id, decision, body, actor) {
       const base = { customerId: txn.customerId, transactionId: txn.id, fleetId: txn.fleetId || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, active: true };
       if (norm.fields.gallonOut > 0) await db.gallonMovement.create({ data: { ...base, type: 'delivery_out', qty: norm.fields.gallonOut, note: 'Galon keluar (koreksi)' } });
       if (norm.fields.gallonIn > 0) await db.gallonMovement.create({ data: { ...base, type: 'return_in', qty: norm.fields.gallonIn, note: 'Galon masuk (koreksi)' } });
-      await db.distTransaction.update({ where: { id: txn.id }, data: { qty: norm.fields.qty, unitPriceLocked: norm.fields.unitPrice, amount: norm.newAmount } });
+      // METHOD flip: bonCounted mirrors the method so the receivable math is unambiguous — a 'bon'
+      // row counts toward sisa bon, a 'lunas' row does not. Every downstream aggregate reads `method`
+      // (+ bonCounted for BON_TXN) live, so sisa bon / dashboard money-in / cash all recompute here.
+      await db.distTransaction.update({ where: { id: txn.id }, data: {
+        qty: norm.fields.qty, unitPriceLocked: norm.fields.unitPrice, amount: norm.newAmount,
+        method: norm.fields.method, bonCounted: norm.fields.method === 'bon',
+      } });
     } else {
       await db.distTransaction.update({ where: { id: txn.id }, data: { amount: norm.newAmount } });
     }
@@ -1108,7 +1169,10 @@ async function decideChangeRequest(id, decision, body, actor) {
   // A price change is called out explicitly (old → new) so the audit reads without decoding the JSON.
   const priceLine = (req.kind === 'correction' && oldVals && newVals && newVals.unitPrice != null && oldVals.unitPrice !== newVals.unitPrice)
     ? ` · HARGA ${oldVals.unitPrice} → ${newVals.unitPrice} (oleh pemegang Harga Master)` : '';
-  const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}${priceLine}`;
+  // …and a method flip likewise, with its sisa-bon direction, so the trail is reconstructable.
+  const methodLine = (req.kind === 'correction' && oldVals && newVals && newVals.method && oldVals.method !== newVals.method)
+    ? ` · METODE ${oldVals.method} → ${newVals.method} (sisa bon ${newVals.method === 'bon' ? '+' : '−'}${Math.abs(newVals.method === 'bon' ? newVals.amount : oldVals.amount)})` : '';
+  const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}${priceLine}${methodLine}`;
   await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${detail} · ${req.reason} · oleh ${snap.actorName}`, snap, req.fleetId);
   const fresh = await prisma.distChangeRequest.findUnique({ where: { id } });
   const out = await changeRequestClient(fresh);

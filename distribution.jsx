@@ -769,19 +769,26 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const isSaleTxn = (t) => t && (t.method === 'lunas' || t.method === 'bon') && !t.openingBon;
   const openCorrect = (t) => {
     setCorrTxn(t); setCorrReason('');
-    if (isSaleTxn(t)) setCorrForm({ qty: t.qty, unitPrice: t.unitPriceLocked, gallonOut: t.gallonOut != null ? t.gallonOut : t.qty, gallonIn: t.gallonIn || 0 });
+    if (isSaleTxn(t)) setCorrForm({ qty: t.qty, unitPrice: t.unitPriceLocked, gallonOut: t.gallonOut != null ? t.gallonOut : t.qty, gallonIn: t.gallonIn || 0, method: t.method });
     else setCorrForm({ amount: t.amount });
   };
   const corrSale = isSaleTxn(corrTxn);
   const corrNewTotal = corrForm ? (corrSale ? (+corrForm.qty || 0) * (+corrForm.unitPrice || 0) : (+corrForm.amount || 0)) : 0;
+  // sisa-bon impact of a method change: a 'bon' row counts as receivable (its amount), a 'lunas' row
+  // does not. So Δsisa bon = (new bon-contribution) − (current bon-contribution).
+  const corrOldBonContrib = corrTxn && corrTxn.method === 'bon' ? corrTxn.amount : 0;
+  const corrNewBonContrib = corrForm && corrForm.method === 'bon' ? corrNewTotal : 0;
+  const corrBonImpact = corrSale ? (corrNewBonContrib - corrOldBonContrib) : 0;
+  const corrMethodChanged = corrSale && corrForm && corrForm.method !== corrTxn.method;
   const corrValid = corrTxn && corrReason.trim() && (corrSale ? ((+corrForm.qty || 0) > 0 && (+corrForm.unitPrice || 0) > 0) : (+corrForm.amount || 0) > 0);
   const commitCorrect = () => {
     if (!corrValid || corrSaving) return;
     // The price is capability-gated: without distribusiHargaMaster we always send the transaction's
     // LOCKED price, so a staff correction can only move the total via qty. The server re-checks this
-    // against the stored unitPriceLocked regardless of what is sent here.
+    // against the stored unitPriceLocked regardless of what is sent here. Method (bon↔lunas) needs no
+    // price cap and is only sent for a gallon sale.
     const payload = corrSale
-      ? { qty: +corrForm.qty || 0, unitPrice: canPrice ? (+corrForm.unitPrice || 0) : corrTxn.unitPriceLocked, gallonOut: +corrForm.gallonOut || 0, gallonIn: +corrForm.gallonIn || 0 }
+      ? { qty: +corrForm.qty || 0, unitPrice: canPrice ? (+corrForm.unitPrice || 0) : corrTxn.unitPriceLocked, gallonOut: +corrForm.gallonOut || 0, gallonIn: +corrForm.gallonIn || 0, method: corrForm.method }
       : { amount: +corrForm.amount || 0 };
     setCorrSaving(true);
     // Submits a REQUEST (approval-gated) — the transaction is not changed until an approver approves.
@@ -1125,6 +1132,11 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
                   <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalOut')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonOut} onChange={(e) => setCorrForm({ ...corrForm, gallonOut: e.target.value.replace(/[^0-9]/g, '') })} /></div>
                   <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalIn')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonIn} onChange={(e) => setCorrForm({ ...corrForm, gallonIn: e.target.value.replace(/[^0-9]/g, '') })} /></div>
                 </div>
+                {/* METHOD toggle (bon ↔ lunas), pre-set to the current method. No price cap needed. */}
+                <label className="fld-label">{trD('dist.fMethod')}</label>
+                <div className="cat-chips">
+                  {['lunas', 'bon'].map((m) => <button key={m} type="button" className={`cat-chip ${corrForm.method === m ? 'on' : ''}`} onClick={() => setCorrForm({ ...corrForm, method: m })}>{methodLabel(m)}</button>)}
+                </div>
               </>) : (
                 <><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.payAmount')}</label>
                 <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.amount ? (+corrForm.amount).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, amount: e.target.value.replace(/[^0-9]/g, '') })} /></div></>
@@ -1136,6 +1148,13 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
                 <div><span>{trD('dist.korekNew')}</span><b className="tnum">{rpFull(corrNewTotal)}</b></div>
                 <div className="dist-korek-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${corrNewTotal - corrTxn.amount < 0 ? 'amt-neg' : corrNewTotal - corrTxn.amount > 0 ? 'amt-pos' : ''}`}>{corrNewTotal - corrTxn.amount >= 0 ? '+' : ''}{rpFull(corrNewTotal - corrTxn.amount)}</b></div>
               </div>
+              {/* METHOD change → its effect on the customer's sisa bon, so the consequence is explicit. */}
+              {corrMethodChanged && (
+                <div className="dist-korek-methodline">
+                  <span className="dist-korek-methodflip">{methodLabel(corrTxn.method)} → <b>{methodLabel(corrForm.method)}</b></span>
+                  <span className={`dist-korek-bonimpact ${corrBonImpact < 0 ? 'amt-neg' : 'amt-pos'}`}>{trD('dist.korekSisaBon')} {corrBonImpact >= 0 ? '+' : '−'}{rpFull(Math.abs(corrBonImpact))}</span>
+                </div>
+              )}
               <label className="fld-label">{trD('dist.korekReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
               <textarea className="fld" style={{ height: 62, padding: 12, resize: 'vertical' }} value={corrReason} placeholder={trD('dist.korekReasonPh')} onChange={(e) => setCorrReason(e.target.value)} />
             </div>
@@ -3717,8 +3736,14 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
   uEx(() => { reload(); }, [refreshKey, ef, tab]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
   const approve = (r) => {
-    if (busy) return; setBusy(true);
-    window.API.distribusi.changeRequests.approve(r.id)
+    if (busy) return;
+    // A change that would push the customer's sisa bon negative needs the approver's explicit OK
+    // (the server also enforces this — it 400s with needsNegativeConfirm unless confirmNegative is set).
+    let confirmNegative = false;
+    if (r.wouldGoNegative && !window.confirm(trD('cr.negativeConfirm', { amt: rpFull(Math.abs(r.bonImpact || 0)) }))) return;
+    if (r.wouldGoNegative) confirmNegative = true;
+    setBusy(true);
+    window.API.distribusi.changeRequests.approve(r.id, confirmNegative ? { confirmNegative: true } : {})
       .then(() => { setBusy(false); flash(trD('cr.approved')); reload(); if (onChanged) onChanged(); })
       .catch((e) => { setBusy(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
@@ -3767,6 +3792,14 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
                     <div className="cr-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${down ? 'amt-neg' : r.delta > 0 ? 'amt-pos' : ''}`}>{r.delta >= 0 ? '+' : ''}{rpFull(r.delta)}</b></div>
                   </div>
                   {fieldChips(r)}
+                  {/* METHOD flip + its sisa-bon consequence — the decisive line for the approver. */}
+                  {r.methodChanged && (
+                    <div className={`cr-method ${r.wouldGoNegative ? 'warn' : ''}`}>
+                      <span className="cr-method-flip"><IconRefresh s={12} />{methodLabel(r.method)} → <b>{methodLabel(r.requestedMethod)}</b></span>
+                      <span className={`cr-method-bon ${r.bonImpact < 0 ? 'amt-neg' : 'amt-pos'}`}>{trD('dist.korekSisaBon')} {r.bonImpact >= 0 ? '+' : '−'}{rpFull(Math.abs(r.bonImpact || 0))}</span>
+                      {r.wouldGoNegative && <span className="cr-method-neg"><IconWarn s={12} />{trD('cr.wouldGoNegative')}</span>}
+                    </div>
+                  )}
                   <div className="cr-meta"><IconInvoice s={12} />{r.reason}</div>
                   <div className="cr-meta cr-by">{trD('cr.requestedBy', { who: r.requestedBy ? r.requestedBy.name : '—' })}{r.createdAt ? ' · ' + fmtDT(r.createdAt) : ''}</div>
                   {r.status === 'rejected' && r.decisionNote && <div className="cr-meta cr-rej"><IconClose s={12} />{trD('cr.rejectedNote', { note: r.decisionNote })}{r.decidedBy ? ' · ' + r.decidedBy.name : ''}</div>}

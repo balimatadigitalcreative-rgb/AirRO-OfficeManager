@@ -176,7 +176,7 @@
       // CHANGE REQUESTS — the approval inbox for correction/void requests (cap distribusiApprove).
       changeRequests: {
         list: (opts) => { const o = opts || {}; const p = []; if (o.status) p.push('status=' + encodeURIComponent(o.status)); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/change-requests' + (p.length ? '?' + p.join('&') : '')); },
-        approve: (id) => req('POST', '/distribusi/change-requests/' + id + '/approve', {}),
+        approve: (id, body) => req('POST', '/distribusi/change-requests/' + id + '/approve', body || {}),   // body: { confirmNegative? }
         reject: (id, note) => req('POST', '/distribusi/change-requests/' + id + '/reject', { note }),
       },
       // Customer invoices / notas (documents). create/list are per-customer; get by id.

@@ -153,7 +153,7 @@
       'dist.korekStaff': 'Corrections by Staff are specially flagged in the Audit Log.', 'dist.korekSave': 'Save Correction', 'dist.corrSaved': 'Correction recorded — adjustment entry created',
       // Approval-gated corrections/voids — the request submits, an approver applies it.
       'dist.korekApprovalInfo': 'Edit the input fields; the total recomputes. This SUBMITS a request — the transaction changes only after an approver approves it.',
-      'dist.korekDelta': 'Difference', 'dist.korekSubmit': 'Submit for approval', 'dist.corrReqSent': 'Correction submitted — awaiting approval.',
+      'dist.korekDelta': 'Difference', 'dist.korekSubmit': 'Submit for approval', 'dist.corrReqSent': 'Correction submitted — awaiting approval.', 'dist.korekSisaBon': 'Sisa bon',
       'dist.korekPriceLocked': 'Price locked — only Master Price holders may change it',
       'dist.voidApprovalInfo': 'This SUBMITS a cancellation request — the transaction stays active until an approver approves it. Bon & gallons reverse only on approval.',
       'dist.voidSubmit': 'Submit for approval', 'dist.voidReqSent': 'Cancellation submitted — awaiting approval.',
@@ -165,6 +165,7 @@
       'cr.requestedBy': 'Requested by {who}', 'cr.approvedBy': 'Approved by {who}', 'cr.rejectedNote': 'Rejected: {note}',
       'cr.approve': 'Approve', 'cr.reject': 'Reject', 'cr.approved': 'Applied.', 'cr.rejected': 'Rejected.',
       'cr.rejectT': 'Reject request', 'cr.rejectInfo': 'The transaction is left unchanged. A reason is required and recorded.', 'cr.rejectReason': 'Reason for rejection', 'cr.rejectReasonPh': 'e.g. the input looks correct',
+      'cr.wouldGoNegative': 'sisa bon would go negative', 'cr.negativeConfirm': 'This change makes the customer’s sisa bon negative (over-paid by {amt}). Approve anyway?',
       'cr.st_pending': 'Pending', 'cr.st_approved': 'Applied', 'cr.st_rejected': 'Rejected',
       'cr.alertTitle': 'Approval needed', 'cr.alertMsg': '{n} correction/cancellation request(s) awaiting approval',
       'dist.filter': 'Filter', 'dist.filterT': 'Filter pelanggan', 'dist.fApply': 'Apply', 'dist.fReset': 'Reset filter', 'dist.fRemove': 'Remove this filter',
@@ -717,7 +718,7 @@
       'dist.korekStaff': 'Koreksi oleh Staff ditandai khusus di Log Audit.', 'dist.korekSave': 'Simpan Koreksi', 'dist.corrSaved': 'Koreksi tercatat — entri penyesuaian dibuat',
       // Koreksi/pembatalan lewat persetujuan — pengajuan dikirim, penyetuju yang menerapkan.
       'dist.korekApprovalInfo': 'Ubah kolom input; total dihitung ulang. Ini MENGAJUKAN permintaan — transaksi baru berubah setelah disetujui penyetuju.',
-      'dist.korekDelta': 'Selisih', 'dist.korekSubmit': 'Ajukan persetujuan', 'dist.corrReqSent': 'Koreksi diajukan — menunggu persetujuan.',
+      'dist.korekDelta': 'Selisih', 'dist.korekSubmit': 'Ajukan persetujuan', 'dist.corrReqSent': 'Koreksi diajukan — menunggu persetujuan.', 'dist.korekSisaBon': 'Sisa bon',
       'dist.korekPriceLocked': 'Harga terkunci — hanya pemegang akses Harga Master',
       'dist.voidApprovalInfo': 'Ini MENGAJUKAN permintaan pembatalan — transaksi tetap aktif sampai disetujui. Bon & galon dibalik hanya setelah disetujui.',
       'dist.voidSubmit': 'Ajukan persetujuan', 'dist.voidReqSent': 'Pembatalan diajukan — menunggu persetujuan.',
@@ -729,6 +730,7 @@
       'cr.requestedBy': 'Diajukan oleh {who}', 'cr.approvedBy': 'Disetujui oleh {who}', 'cr.rejectedNote': 'Ditolak: {note}',
       'cr.approve': 'Setujui', 'cr.reject': 'Tolak', 'cr.approved': 'Diterapkan.', 'cr.rejected': 'Ditolak.',
       'cr.rejectT': 'Tolak pengajuan', 'cr.rejectInfo': 'Transaksi tidak diubah. Alasan wajib diisi dan dicatat.', 'cr.rejectReason': 'Alasan penolakan', 'cr.rejectReasonPh': 'mis. input sudah benar',
+      'cr.wouldGoNegative': 'sisa bon jadi negatif', 'cr.negativeConfirm': 'Perubahan ini membuat sisa bon pelanggan negatif (lebih bayar {amt}). Tetap setujui?',
       'cr.st_pending': 'Menunggu', 'cr.st_approved': 'Diterapkan', 'cr.st_rejected': 'Ditolak',
       'cr.alertTitle': 'Perlu persetujuan', 'cr.alertMsg': '{n} pengajuan koreksi/pembatalan menunggu persetujuan',
       'dist.filter': 'Filter', 'dist.filterT': 'Filter Pelanggan', 'dist.fApply': 'Terapkan', 'dist.fReset': 'Reset filter', 'dist.fRemove': 'Hapus filter ini',

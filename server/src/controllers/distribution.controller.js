@@ -108,6 +108,10 @@ const correctionSchema = z.object({
   gallonOut: z.number().int().nonnegative().optional(),
   gallonIn: z.number().int().nonnegative().optional(),
   amount: z.number().int().nonnegative().optional(),
+  // METHOD change (bon ↔ lunas) on a PURCHASE. 'pelunasan' is never a valid target — a purchase can't
+  // become a payment; the service also rejects it on a pelunasan/opening-bon row. Method-only changes
+  // need no price cap; a price change in the SAME request still requires distribusiHargaMaster.
+  method: z.enum(['lunas', 'bon']).optional(),
 });
 // VOID REQUEST — a mandatory reason. HARD DELETE — reason + typed confirmation (ref or "HAPUS") + password.
 const voidSchema = z.object({ reason: z.string().trim().min(1, 'reason is required').max(1000) });
