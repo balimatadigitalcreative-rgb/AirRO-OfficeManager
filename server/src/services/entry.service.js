@@ -3,6 +3,7 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const distribution = require('./distribution.service');   // gallon-purchase movement sync (intentional cash-flow ↔ distribusi link)
 const businessUnit = require('./businessUnit.service');   // Stage 3: unit label on each entry (default "Air")
+const { unitWhere, canAccessUnit } = require('../lib/scope');   // per-user business-unit access (Stage A)
 
 // Build a Prisma `where` clause from validated list filters.
 function buildWhere(q) {
@@ -39,8 +40,10 @@ function shapeCreator(entry) {
   return { ...rest, createdBy: createdByName ? { name: createdByName, role: createdByRole || null } : null };
 }
 
-async function list(q) {
-  const where = buildWhere(q);
+async function list(q, user) {
+  // Per-user unit access is enforced SERVER-SIDE: a user scoped to "air" cannot read another
+  // unit's entries even by crafting ?businessUnit=mfg (the AND collapses to no rows).
+  const where = { AND: [buildWhere(q), unitWhere(user)] };
   const page = q.page || 1;
   const limit = q.limit || 20;
   const skip = (page - 1) * limit;
@@ -62,9 +65,11 @@ async function list(q) {
   };
 }
 
-async function getById(id) {
+async function getById(id, user) {
   const entry = await prisma.entry.findUnique({ where: { id } });
   if (!entry) throw ApiError.notFound('Entry not found');
+  // Out-of-scope rows are 404 (not 403) — never reveal the existence of another unit's record.
+  if (user && !canAccessUnit(user, entry.businessUnitId)) throw ApiError.notFound('Entry not found');
   return shapeCreator(entry);
 }
 

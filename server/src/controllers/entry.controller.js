@@ -53,11 +53,11 @@ const listQuerySchema = z.object({
 const idParams = z.object({ id: z.string().min(1) });
 
 const list = asyncHandler(async (req, res) => {
-  res.json(await entryService.list(req.query));
+  res.json(await entryService.list(req.query, req.user));
 });
 
 const getOne = asyncHandler(async (req, res) => {
-  res.json({ data: await entryService.getById(req.params.id) });
+  res.json({ data: await entryService.getById(req.params.id, req.user) });
 });
 
 const create = asyncHandler(async (req, res) => {

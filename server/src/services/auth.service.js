@@ -9,7 +9,7 @@ const { parsePerms, resolvePerms } = require('../config/permissions');
 const PASSWORD_MIN = 8;   // minimum length for a user-chosen password (self change)
 const PUBLIC_FIELDS = {
   id: true, name: true, username: true, role: true, sub: true,
-  color: true, active: true, permissions: true, fleetScope: true, mustChangePassword: true, weakPassword: true, createdAt: true,
+  color: true, active: true, permissions: true, fleetScope: true, unitScope: true, mustChangePassword: true, weakPassword: true, createdAt: true,
 };
 
 // Is this plaintext password weak/temporary? Used to FLAG (not block) accounts for the owner —
@@ -26,17 +26,20 @@ function isWeakPassword(pw) {
 }
 
 // Distribusi fleet access is stored as a string: "all" or a JSON array of fleet names.
-// Parse to 'all' or an array for API responses.
-function parseFleetScope(str) {
+// Parse to 'all' or an array for API responses. `unitScope` (business-unit access) is stored
+// and parsed identically — "all" or a JSON array of businessUnitIds.
+function parseScopeStr(str) {
   if (str == null || str === 'all' || str === '') return 'all';
   try { const a = JSON.parse(str); if (Array.isArray(a)) return a.filter((x) => typeof x === 'string' && x.trim()); if (a === 'all') return 'all'; } catch (e) {}
   return 'all';
 }
+const parseFleetScope = parseScopeStr;
 
-// Shape a user row for API responses: permissions + fleetScope returned parsed. RAW permissions
-// (exactly what's stored) — used by the user-MANAGEMENT list/get so an admin edits the true values.
+// Shape a user row for API responses: permissions + fleetScope + unitScope returned parsed. RAW
+// permissions (exactly what's stored) — used by the user-MANAGEMENT list/get so an admin edits the
+// true values.
 function publicUser(user) {
-  return { ...user, permissions: parsePerms(user.permissions), fleetScope: parseFleetScope(user.fleetScope) };
+  return { ...user, permissions: parsePerms(user.permissions), fleetScope: parseScopeStr(user.fleetScope), unitScope: parseScopeStr(user.unitScope) };
 }
 // The SELF shape (login / me / profile update): permissions are RESOLVED (role defaults + every
 // derive rule applied), so the frontend's `p` — which renders nav, screens and buttons from
@@ -52,7 +55,7 @@ function signToken(user) {
     // The raw permissions JSON string + fleetScope travel in the token; the server
     // resolves them (requireCap / distribusi fleet filter). Changing them takes effect
     // on the user's next login.
-    { sub: user.id, role: user.role, username: user.username, permissions: user.permissions || null, fleetScope: user.fleetScope || 'all' },
+    { sub: user.id, role: user.role, username: user.username, permissions: user.permissions || null, fleetScope: user.fleetScope || 'all', unitScope: user.unitScope || 'all' },
     config.jwt.secret,
     { expiresIn: config.jwt.expiresIn },
   );

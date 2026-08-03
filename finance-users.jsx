@@ -81,7 +81,7 @@ const CAP_GROUPS = [
   ] },
 ];
 
-function UserModal({ row, users, onSave, onClose, busy, fleet }) {
+function UserModal({ row, users, onSave, onClose, busy, fleet, businessUnits }) {
   const [f, setF] = uSu(row);
   React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
   const set = (p) => setF({ ...f, ...p });
@@ -194,6 +194,34 @@ function UserModal({ row, users, onSave, onClose, busy, fleet }) {
               </div>
             );
           })()}
+
+          {/* ---- Business-unit access (data scope, Odoo/Accurate-style) ---- */}
+          {(() => {
+            // SINGLE SOURCE: the live business-unit dictionary (Stage 3), passed in as a prop. Each
+            // chip is a unit the user may access; "Semua unit" = every unit (the default, unchanged).
+            const units = Array.isArray(businessUnits) ? businessUnits.filter((u) => u && u.id) : [];
+            const isAll = f.unitScope === 'all' || f.unitScope == null;
+            const arr = Array.isArray(f.unitScope) ? f.unitScope : [];
+            // A scoped unit that has since been deactivated/removed is kept as an "inactive" chip so
+            // the scope is never silently lost — the GM can still see and untick it.
+            const known = units.map((u) => u.id);
+            const extras = arr.filter((id) => !known.includes(id));
+            const chips = [...units.map((u) => ({ id: u.id, name: u.name || u.id, inactive: u.active === false })), ...extras.map((id) => ({ id, name: id, inactive: true }))];
+            const toggleUnit = (id) => { const cur = Array.isArray(f.unitScope) ? f.unitScope : []; const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]; set({ unitScope: next.length ? next : 'all' }); };
+            return (
+              <div style={{ marginTop: 14 }}>
+                <label className="fld-label" style={{ margin: 0 }}>{trU('um.unitScope')}</label>
+                <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '2px 0 8px' }}>{trU('um.unitScopeHint')}</div>
+                <div className="cat-chips">
+                  <button type="button" className={`cat-chip ${isAll ? 'on' : ''}`} onClick={() => set({ unitScope: 'all' })}>{isAll ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{trU('um.unitAll')}</button>
+                  {chips.map(({ id, name, inactive }) => { const on = !isAll && arr.includes(id); return (
+                    <button key={id} type="button" className={`cat-chip ${on ? 'on' : ''}`} onClick={() => toggleUnit(id)}>{on ? <IconCheck s={14} /> : <span style={{ width: 14 }} />}{name}{inactive ? ' ' + trU('um.fleetInactive') : ''}</button>
+                  ); })}
+                  {chips.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{trU('um.fleetNone')}</span>}
+                </div>
+              </div>
+            );
+          })()}
         </div>
         <div className="modal-foot">
           {!f._new && users.length > 1 && <button className="btn btn-ghost" style={{ color: 'var(--neg)', marginRight: 'auto' }} disabled={busy} onClick={() => onSave(f, true)}><IconClose s={15} />{trU('um.remove')}</button>}
@@ -205,7 +233,7 @@ function UserModal({ row, users, onSave, onClose, busy, fleet }) {
   );
 }
 
-function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, canManageRoles, fleet }) {
+function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, canManageRoles, fleet, businessUnits }) {
   const cloud = !!(window.CLOUD && window.CLOUD.active && window.API);
   const [rows, setRows] = uSu(cloud ? null : (users || []));
   const [edit, setEdit] = uSu(null);
@@ -214,7 +242,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
   const [tab, setTab] = uSu('users');   // 'users' | 'roles'
   const [resetReqs, setResetReqs] = uSu([]);   // pending forgot-password requests
 
-  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', active: u.active !== false, mustChangePassword: !!u.mustChangePassword, weakPassword: !!u.weakPassword });
+  const toRow = (u) => ({ id: u.id, name: u.name, role: u.role, user: u.username, pin: '', sub: u.sub || '', color: u.color || FS.ROLE_COLORS[u.role] || '#22A7A1', permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', unitScope: u.unitScope || 'all', active: u.active !== false, mustChangePassword: !!u.mustChangePassword, weakPassword: !!u.weakPassword });
 
   const refreshReqs = () => { if (cloud) window.API.users.resetRequests('pending').then((r) => setResetReqs(r.data || [])).catch(() => {}); };
   const refresh = () => {
@@ -252,9 +280,9 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
         if (!confirm(trU('um.removeConfirm'))) { setBusy(false); return; }
         await window.API.users.remove(u.id);
       } else if (u._new) {
-        await window.API.users.create({ name: u.name.trim(), username: u.user.trim(), password: u.pin, role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, fleetScope: u.fleetScope || 'all' });
+        await window.API.users.create({ name: u.name.trim(), username: u.user.trim(), password: u.pin, role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', unitScope: u.unitScope || 'all' });
       } else {
-        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', mustChangePassword: !!u.mustChangePassword };
+        const body = { name: u.name.trim(), username: u.user.trim(), role: u.role, sub: u.sub || '', color: u.color, permissions: u.permissions || null, fleetScope: u.fleetScope || 'all', unitScope: u.unitScope || 'all', mustChangePassword: !!u.mustChangePassword };
         if (u.pin) body.password = u.pin;   // only change the password when re-entered
         await window.API.users.update(u.id, body);
         // If this edit came from a forgot-password request AND a new password was set, close it.
@@ -269,7 +297,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
     }
   };
 
-  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.roleColor('finance'), permissions: null, fleetScope: 'all', _new: true }); };
+  const addNew = () => { setErr(null); setEdit({ id: FS.newUserId(), name: '', role: 'finance', user: '', pin: '', sub: '', color: FS.roleColor('finance'), permissions: null, fleetScope: 'all', unitScope: 'all', _new: true }); };
   const RoleBadge = window.AUTH.RoleBadge;
   if (canManageRoles && tab === 'roles') {
     return (
@@ -332,7 +360,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
           </div>
         ))}
       </div>
-      {edit && <UserModal row={edit} users={list} onSave={save} onClose={() => setEdit(null)} busy={busy} fleet={fleet} />}
+      {edit && <UserModal row={edit} users={list} onSave={save} onClose={() => setEdit(null)} busy={busy} fleet={fleet} businessUnits={businessUnits} />}
     </div>
   );
 }

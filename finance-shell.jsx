@@ -191,7 +191,13 @@ function FApp() {
   const setActiveUnit = (u) => { setActiveUnitState(u); try { localStorage.setItem(ACTIVE_UNIT_KEY, u); } catch (e) {} };
   // If the active unit was deactivated/removed, fall back to combined so nothing looks empty.
   uEh(() => { if (activeUnit !== 'all' && businessUnits.length && !businessUnits.some((u) => u.id === activeUnit && u.active !== false)) setActiveUnit('all'); }, [businessUnits]);
-  const unitDefaultForNew = () => (activeUnit === 'all' ? 'air' : activeUnit);
+  const unitDefaultForNew = () => {
+    if (activeUnit !== 'all') return activeUnit;
+    // A user scoped away from "Air" must not default new records into a unit they can't see.
+    // (unitScope is declared below but this closure only runs from later event handlers.)
+    if (unitScope && !unitScope.includes('air')) return unitScope[0];
+    return 'air';
+  };
   // Setoran now lives in the REST table (per-record), NOT the /state blob — so
   // concurrent edits by different users never overwrite each other. We seed from a
   // local read-cache (SKIP-listed, not mirrored) just for instant paint on reload;
@@ -223,6 +229,29 @@ function FApp() {
   // ABSENT value from the legacy `reset` toggle or the role default — mirrors the server's
   // resolvePerms exactly, so the sidebar and the API agree on who may administer users.
   if (p.manageUsers === undefined) p.manageUsers = !!(p.reset || (FS.perms(user ? user.role : 'cashier') || {}).manageUsers);
+
+  // Per-user BUSINESS-UNIT access (Stage A): the header selector, the active-unit view context and
+  // the default unit for new records are all constrained to the unit(s) this user may access. The
+  // SERVER already enforces this on every read (unitWhere); the client just mirrors it so the UI
+  // never offers a unit whose data the API would withhold. `unitScope` on the self user is 'all'
+  // (or absent → every unit, unchanged) or an array of businessUnitIds.
+  const unitScope = (() => {
+    const raw = user && user.unitScope;
+    if (raw == null || raw === 'all' || raw === '') return null;   // full access
+    if (Array.isArray(raw)) { const a = raw.filter(Boolean); return a.length ? a : null; }
+    try { const j = JSON.parse(raw); if (Array.isArray(j)) { const a = j.filter(Boolean); return a.length ? a : null; } } catch (e) {}
+    return null;
+  })();
+  const allowedUnits = unitScope ? businessUnits.filter((u) => unitScope.includes(u.id)) : businessUnits;
+  // Keep the active-unit view context inside the user's scope: one allowed unit → fix to it (no
+  // "Semua" that would imply other units); an out-of-scope selection → fall back to combined
+  // (which, being server-filtered, only ever shows this user's own units anyway).
+  uEh(() => {
+    if (!unitScope) return;
+    const ids = allowedUnits.filter((u) => u.active !== false).map((u) => u.id);
+    if (ids.length === 1) { if (activeUnit !== ids[0]) setActiveUnit(ids[0]); return; }
+    if (activeUnit !== 'all' && !unitScope.includes(activeUnit)) setActiveUnit('all');
+  }, [user, businessUnits]);
 
   // Load the unit dictionary once the user is authenticated (keyed on a cap that flips true
   // after login, so the request carries a token — an at-mount fetch would 401). Placed after
@@ -1376,7 +1405,7 @@ function FApp() {
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
               {(screen === 'overview' || screen === 'entries') && periodBar}
-              {p.cashflow && <UnitSelector units={businessUnits} value={activeUnit} onChange={setActiveUnit} />}
+              {p.cashflow && <UnitSelector units={allowedUnits} value={activeUnit} onChange={setActiveUnit} />}
               {window.CLOUD && (window.CLOUD.active || syncStatus === 'expired') && (
                 <span className={`sync-pill ${syncStatus}`} title={tr('sync.' + syncStatus)}>
                   <span className="sync-dot" /><span className="sync-txt">{tr('sync.' + syncStatus)}</span>
@@ -1573,7 +1602,7 @@ function FApp() {
           )}
 
           {screen === 'users' && p.manageUsers && (
-            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={!!p.manageUsers} fleet={fleet} />
+            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={!!p.manageUsers} fleet={fleet} businessUnits={businessUnits} />
           )}
 
           <footer className="app-footer">

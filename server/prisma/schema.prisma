@@ -29,6 +29,7 @@ model User {
   active       Boolean  @default(true)
   permissions  String? // JSON capability map; null = use the role's defaults
   fleetScope   String   @default("all") // distribusi fleet access: "all" or a JSON array of fleet names
+  unitScope    String   @default("all") // business-unit access: "all" or a JSON array of businessUnitIds
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

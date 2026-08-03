@@ -2,6 +2,7 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const businessUnit = require('./businessUnit.service');
+const { unitWhere, canAccessUnit } = require('../lib/scope');   // per-user business-unit access (Stage A)
 
 // Resolve an account's unit: 'shared' (Bersama) is kept verbatim; anything else resolves to a
 // real unit id or defaults to "Air". A shared account shows only in the combined view, so its
@@ -11,13 +12,22 @@ async function resolveAcctUnit(id) {
   return businessUnit.resolveUnitId(id);
 }
 
-async function list() {
-  return prisma.account.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
+// A unit-scoped user still sees 'shared' (Bersama) accounts — they belong to no single unit and
+// appear in the combined view — but not another unit's accounts.
+function acctScopeWhere(user) {
+  const scoped = unitWhere(user);
+  if (!Object.keys(scoped).length) return undefined;   // full access
+  return { OR: [scoped, { businessUnitId: 'shared' }] };
 }
 
-async function getById(id) {
+async function list(user) {
+  return prisma.account.findMany({ where: acctScopeWhere(user), orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
+}
+
+async function getById(id, user) {
   const account = await prisma.account.findUnique({ where: { id } });
   if (!account) throw ApiError.notFound('Account not found');
+  if (user && account.businessUnitId !== 'shared' && !canAccessUnit(user, account.businessUnitId)) throw ApiError.notFound('Account not found');
   return account;
 }
 

@@ -3,6 +3,7 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const settingsService = require('./settings.service');
 const engine = require('./payroll.engine');
+const { unitWhere } = require('../lib/scope');   // per-user business-unit access (Stage A)
 
 // Resolve the active rate table (stored override merged onto defaults).
 async function resolveRates() {
@@ -11,9 +12,11 @@ async function resolveRates() {
 }
 
 // Full payroll run for all active employees: per-employee breakdown + totals.
-async function run() {
+// A unit-scoped user sees only their unit(s)' staff (the READ side). `post()` deliberately passes
+// no user so a company-wide payroll posting always covers every unit (Stage A defers scoping writes).
+async function run(user) {
   const [staff, rates] = await Promise.all([
-    prisma.employee.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
+    prisma.employee.findMany({ where: { AND: [{ active: true }, unitWhere(user)] }, orderBy: { name: 'asc' } }),
     resolveRates(),
   ]);
   const breakdown = staff.map((s) => ({

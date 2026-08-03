@@ -30,8 +30,8 @@ const nipSchema = z.object({
   contractStart: DATE_OPT,
 });
 
-const list = asyncHandler(async (req, res) => res.json({ data: await service.list(req.query.includeInactive) }));
-const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id) }));
+const list = asyncHandler(async (req, res) => res.json({ data: await service.list(req.query.includeInactive, req.user) }));
+const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id, req.user) }));
 const create = asyncHandler(async (req, res) => { const e = await service.create(req.body, req.user?.id); bus.broadcast({ entity: 'employee', action: 'create', id: e.id }); res.status(201).json({ data: e }); });
 const update = asyncHandler(async (req, res) => { const e = await service.update(req.params.id, req.body, req.user?.id); bus.broadcast({ entity: 'employee', action: 'update', id: e.id }); res.json({ data: e }); });
 const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bus.broadcast({ entity: 'employee', action: 'delete', id: req.params.id }); res.status(204).send(); });

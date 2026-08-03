@@ -15,6 +15,8 @@ const createSchema = z.object({
   permissions: z.record(z.boolean()).nullable().optional(),
   // Distribusi fleet access: 'all' or a list of fleet names.
   fleetScope: z.union([z.literal('all'), z.array(z.string().max(60)).max(50)]).optional(),
+  // Business-unit access: 'all' or a list of businessUnitIds.
+  unitScope: z.union([z.literal('all'), z.array(z.string().max(60)).max(50)]).optional(),
   // Admin password reset: force the user to set a new password on next login.
   mustChangePassword: z.boolean().optional(),
 });

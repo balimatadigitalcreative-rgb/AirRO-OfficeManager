@@ -4,6 +4,7 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const { resolvePerms } = require('../config/permissions');
 const { PUBLIC_FIELDS, publicUser, normUsername, isWeakPassword } = require('./auth.service');
+const { unitScopeOf } = require('../lib/scope');
 
 // LOCKOUT GUARD: the system must never end up with zero ACTIVE users who hold
 // `manageUsers` — otherwise nobody can ever administer users again. Given a pending
@@ -26,24 +27,44 @@ async function assertManageUsersKept({ targetId, deleting, next }) {
   if (holders === 0) throw ApiError.badRequest('Minimal satu pengguna harus punya akses Kelola Pengguna.');
 }
 
+// UNIT-ACCESS LOCKOUT GUARD: the system must never end up with zero ACTIVE admins (manageUsers
+// holders) who have ALL-unit access — otherwise no one could ever administer users across units,
+// nor grant anyone back full access. Mirrors assertManageUsersKept for the unitScope='all' case:
+// restricting the last all-access admin to specific unit(s) (or removing their manageUsers /
+// deactivating / deleting them) is rejected.
+const holdsAllUnitAdmin = (u) => holdsManageUsers(u) && unitScopeOf(u) === null;
+async function assertUnitAccessKept({ targetId, deleting, next }) {
+  const users = await prisma.user.findMany({ select: { id: true, role: true, permissions: true, active: true, unitScope: true } });
+  let holders = 0;
+  for (const u of users) {
+    if (u.id === targetId) {
+      if (deleting) continue;
+      if (holdsAllUnitAdmin({ role: u.role, permissions: u.permissions, active: u.active, unitScope: u.unitScope, ...next })) holders++;
+    } else if (holdsAllUnitAdmin(u)) {
+      holders++;
+    }
+  }
+  if (holders === 0) throw ApiError.badRequest('Minimal satu admin (Kelola Pengguna) harus punya akses semua unit bisnis.');
+}
+
 // Guard: a user's role must reference an existing role in the Role table.
 async function assertRole(role) {
   if (role == null) return;
   if (!(await prisma.role.count({ where: { id: role } }))) throw ApiError.badRequest(`Peran "${role}" tidak ada`);
 }
 
-// `permissions` arrives as an object (or null) and `fleetScope` as 'all' | string[] —
-// both are stored as strings.
-function normalize({ permissions, fleetScope, ...rest }) {
+// `permissions` arrives as an object (or null); `fleetScope` and `unitScope` as 'all' | string[] —
+// all are stored as strings.
+const scopeToStr = (v) => (v === 'all' || v == null || (Array.isArray(v) && v.length === 0))
+  ? 'all'
+  : JSON.stringify((Array.isArray(v) ? v : []).filter((x) => typeof x === 'string' && x.trim()));
+function normalize({ permissions, fleetScope, unitScope, ...rest }) {
   const data = { ...rest };
   if (permissions !== undefined) {
     data.permissions = permissions ? JSON.stringify(permissions) : null;
   }
-  if (fleetScope !== undefined) {
-    data.fleetScope = (fleetScope === 'all' || fleetScope == null || (Array.isArray(fleetScope) && fleetScope.length === 0))
-      ? 'all'
-      : JSON.stringify((Array.isArray(fleetScope) ? fleetScope : []).filter((x) => typeof x === 'string' && x.trim()));
-  }
+  if (fleetScope !== undefined) data.fleetScope = scopeToStr(fleetScope);
+  if (unitScope !== undefined) data.unitScope = scopeToStr(unitScope);
   return data;
 }
 
@@ -82,6 +103,16 @@ async function update(id, { password, ...rest }) {
     if ('role' in rest) next.role = rest.role;
     await assertManageUsersKept({ targetId: id, next });
   }
+  // Unit-access lockout guard — a change to unitScope (or anything that could strip an all-unit
+  // admin: manageUsers via permissions/role, or deactivation) must not remove the last one.
+  if ('unitScope' in rest || 'permissions' in rest || 'active' in rest || 'role' in rest) {
+    const next = {};
+    if ('unitScope' in rest) next.unitScope = rest.unitScope;
+    if ('permissions' in rest) next.permissions = rest.permissions;
+    if ('active' in rest) next.active = rest.active;
+    if ('role' in rest) next.role = rest.role;
+    await assertUnitAccessKept({ targetId: id, next });
+  }
   const data = normalize(rest);
   if (password) { data.passwordHash = await bcrypt.hash(password, 10); data.weakPassword = isWeakPassword(password); }   // admin reset → re-evaluate the flag
   const u = await prisma.user.update({ where: { id }, data, select: PUBLIC_FIELDS });
@@ -91,6 +122,7 @@ async function remove(id, currentUserId) {
   if (id === currentUserId) throw ApiError.badRequest('You cannot delete your own account');
   await getById(id);
   await assertManageUsersKept({ targetId: id, deleting: true });   // don't delete the last admin
+  await assertUnitAccessKept({ targetId: id, deleting: true });    // …nor the last all-unit admin
   await prisma.user.delete({ where: { id } });
 }
 

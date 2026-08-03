@@ -26,8 +26,8 @@ const syncSchema = z.object({
   items: z.array(createSchema.extend({ id: z.string().min(1) })).max(500),
 });
 
-const list = asyncHandler(async (req, res) => res.json({ data: await service.list() }));
-const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id) }));
+const list = asyncHandler(async (req, res) => res.json({ data: await service.list(req.user) }));
+const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id, req.user) }));
 const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body) }));
 const update = asyncHandler(async (req, res) => res.json({ data: await service.update(req.params.id, req.body) }));
 const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); res.status(204).send(); });

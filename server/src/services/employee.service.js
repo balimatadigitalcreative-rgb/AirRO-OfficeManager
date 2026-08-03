@@ -2,6 +2,7 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const businessUnit = require('./businessUnit.service');
+const { unitWhere, canAccessUnit } = require('../lib/scope');   // per-user business-unit access (Stage A)
 
 // Read the actor's name/role from the DB (never trust the client) so a placement change is
 // audited to a real, unforgeable identity.
@@ -105,9 +106,10 @@ function toClient(row) {
     createdById: row.createdById || null, createdAt: row.createdAt ? new Date(row.createdAt).getTime() : null };
 }
 
-async function list(includeInactive) {
+async function list(includeInactive, user) {
+  // Per-user unit access enforced server-side: an "air"-scoped user never reads another unit's staff.
   const rows = await prisma.employee.findMany({
-    where: includeInactive ? undefined : { active: true },
+    where: { AND: [includeInactive ? {} : { active: true }, unitWhere(user)] },
     orderBy: { name: 'asc' },
   });
   return rows.map(toClient);
@@ -117,7 +119,11 @@ async function getRow(id) {
   if (!e) throw ApiError.notFound('Employee not found');
   return e;
 }
-async function getById(id) { return toClient(await getRow(id)); }
+async function getById(id, user) {
+  const e = await getRow(id);
+  if (user && !canAccessUnit(user, e.businessUnitId)) throw ApiError.notFound('Employee not found');
+  return toClient(e);
+}
 
 async function create(body, userId) {
   const cols = toColumns(body);
