@@ -34,8 +34,8 @@ const idParams = z.object({ id: z.string().min(1) });
 
 const list = asyncHandler(async (req, res) => res.json(await service.list(req.query, req.user)));
 const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id, req.user) }));
-const create = asyncHandler(async (req, res) => { const data = await service.create(req.body, req.user?.id); bus.broadcast({ entity: 'setoran', action: 'create', id: data.id }); res.status(201).json({ data }); });
-const update = asyncHandler(async (req, res) => { const data = await service.update(req.params.id, req.body); bus.broadcast({ entity: 'setoran', action: 'update', id: data.id }); res.json({ data }); });
-const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); bus.broadcast({ entity: 'setoran', action: 'delete', id: req.params.id }); res.status(204).send(); });
+const create = asyncHandler(async (req, res) => { const data = await service.create(req.body, req.user); bus.broadcast({ entity: 'setoran', action: 'create', id: data.id }); res.status(201).json({ data }); });
+const update = asyncHandler(async (req, res) => { const data = await service.update(req.params.id, req.body, req.user); bus.broadcast({ entity: 'setoran', action: 'update', id: data.id }); res.json({ data }); });
+const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id, req.user); bus.broadcast({ entity: 'setoran', action: 'delete', id: req.params.id }); res.status(204).send(); });
 
 module.exports = { list, getOne, create, update, remove, schemas: { createSchema, updateSchema, listQuery, idParams } };

@@ -2,10 +2,15 @@
 const { Router } = require('express');
 const ctrl = require('../controllers/distribution.controller');
 const validate = require('../middleware/validate');
-const { requireAuth, requireCap, requireAnyCap } = require('../middleware/auth');
+const { requireAuth, requireCap, requireAnyCap, requireUnit } = require('../middleware/auth');
 
 const router = Router();
 router.use(requireAuth);
+// STAGE B — distribution is the WATER business, mapped wholesale to unit "air" (its models are keyed
+// by fleetId, not businessUnitId, so there is no per-transaction unit). A user scoped to only
+// mfg/nsn therefore has no distribution access at all (every endpoint 403s); "air"/all users are
+// unaffected. This is the single, consistent rule applied uniformly across the whole module.
+router.use(requireUnit('air'));
 
 // ── Customers ──
 // Viewing the customer list/detail is part of base module access ('distribusi').

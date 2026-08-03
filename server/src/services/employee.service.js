@@ -2,7 +2,7 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const businessUnit = require('./businessUnit.service');
-const { unitWhere, canAccessUnit } = require('../lib/scope');   // per-user business-unit access (Stage A)
+const { unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor } = require('../lib/scope');   // per-user business-unit access (Stage A/B)
 
 // Read the actor's name/role from the DB (never trust the client) so a placement change is
 // audited to a real, unforgeable identity.
@@ -125,7 +125,8 @@ async function getById(id, user) {
   return toClient(e);
 }
 
-async function create(body, userId) {
+async function create(body, actor) {
+  const userId = actor && actor.id;
   const cols = toColumns(body);
   // NIP is controlled by the frontend, which pre-allocates via POST /employees/nip
   // and includes it here. Do NOT auto-allocate on create — that would burn an extra
@@ -143,8 +144,9 @@ async function create(body, userId) {
     if (u) { snap.createdByName = u.name; snap.createdByRole = u.role; }
   }
   // Business-unit placement (Stage 2): stamp the authoritative column from the resolved unit
-  // (defaults to "Air"). Purely a label — it changes no pay amount, only grouping.
-  const businessUnitId = await businessUnit.resolveUnitId(body.businessUnitId);
+  // (defaults to "Air"). Stage B: a scoped user may only place staff in a unit they can access —
+  // a specified out-of-scope unit is 403; an unspecified unit lands in their first allowed unit.
+  const businessUnitId = writableUnitFor(actor, body.businessUnitId, await businessUnit.resolveUnitId(body.businessUnitId));
   full.businessUnitId = businessUnitId;
   // Office (the NIP prefix) is DERIVED from the placement — never taken from the request body.
   const office = await businessUnit.officeCodeFor(businessUnitId);
@@ -154,8 +156,11 @@ async function create(body, userId) {
   const row = await prisma.employee.create({ data });
   return toClient(row);
 }
-async function update(id, body, userId) {
+async function update(id, body, actor) {
+  const userId = actor && actor.id;
   const existing = await getRow(id);
+  // Stage B: a scoped user can't touch (or read) staff outside their unit(s).
+  if (actor && !canAccessUnit(actor, existing.businessUnitId)) throw ApiError.notFound('Employee not found');
   let prev = {}; try { prev = existing.data ? JSON.parse(existing.data) : {}; } catch (e) {}
   const merged = { ...prev, ...body };
   merged.nip = existing.nip;                          // NIP is immutable on a normal edit
@@ -172,6 +177,7 @@ async function update(id, body, userId) {
   let businessUnitId = curUnit;
   if (body.businessUnitId !== undefined) {
     businessUnitId = await businessUnit.resolveUnitId(body.businessUnitId);
+    assertCanAccessUnit(actor, businessUnitId);   // Stage B: no moving staff into a unit you can't access
     if (businessUnitId !== curUnit) {
       // Audit the move to an unforgeable identity (from the token, not the client body).
       const snap = await actorSnap(userId);

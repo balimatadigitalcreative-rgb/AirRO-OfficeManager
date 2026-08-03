@@ -2,7 +2,7 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const businessUnit = require('./businessUnit.service');
-const { unitWhere, canAccessUnit } = require('../lib/scope');   // per-user business-unit access (Stage A)
+const { unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor } = require('../lib/scope');   // per-user business-unit access (Stage A/B)
 
 // Resolve an account's unit: 'shared' (Bersama) is kept verbatim; anything else resolves to a
 // real unit id or defaults to "Air". A shared account shows only in the combined view, so its
@@ -31,20 +31,26 @@ async function getById(id, user) {
   return account;
 }
 
-async function create(data) {
-  const businessUnitId = await resolveAcctUnit(data.businessUnitId);
+async function create(data, user) {
+  let businessUnitId = await resolveAcctUnit(data.businessUnitId);
+  // Stage B: a scoped user may only create an account in a unit they can access. 'shared' (Bersama)
+  // is a common account visible to everyone, so it's always allowed.
+  if (businessUnitId !== 'shared') businessUnitId = writableUnitFor(user, data.businessUnitId, businessUnitId);
   return prisma.account.create({ data: { ...data, businessUnitId } });
 }
 
-async function update(id, data) {
-  await getById(id);
+async function update(id, data, user) {
+  await getById(id, user);   // 404 if missing OR out of the actor's unit scope (Stage B)
   const safe = { ...data };
-  if (safe.businessUnitId !== undefined) safe.businessUnitId = await resolveAcctUnit(safe.businessUnitId);
+  if (safe.businessUnitId !== undefined) {
+    safe.businessUnitId = await resolveAcctUnit(safe.businessUnitId);
+    if (safe.businessUnitId !== 'shared') assertCanAccessUnit(user, safe.businessUnitId);   // no moving into another unit
+  }
   return prisma.account.update({ where: { id }, data: safe });
 }
 
-async function remove(id) {
-  await getById(id);
+async function remove(id, user) {
+  await getById(id, user);   // 404 if out of the actor's unit scope (Stage B)
   // Detach entries/transfers rather than cascade-deleting financial history.
   await prisma.$transaction([
     prisma.entry.updateMany({ where: { accountId: id }, data: { accountId: null } }),
@@ -56,8 +62,8 @@ async function remove(id) {
 }
 
 // balance = opening + Σ(income) − Σ(expense) + Σ(transfers in) − Σ(transfers out)
-async function balance(id) {
-  const account = await getById(id);
+async function balance(id, user) {
+  const account = await getById(id, user);   // 404 if the account is outside the caller's unit scope (Stage B)
   const [income, expense, xferIn, xferOut] = await Promise.all([
     prisma.entry.aggregate({ _sum: { amount: true }, where: { accountId: id, type: 'income' } }),
     prisma.entry.aggregate({ _sum: { amount: true }, where: { accountId: id, type: 'expense' } }),

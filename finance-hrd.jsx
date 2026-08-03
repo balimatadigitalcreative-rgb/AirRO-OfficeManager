@@ -230,11 +230,16 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
     return (u && u.officeCode) || f.office || 'AIRRO';
   })();
   const buOptions = (() => {
-    const act = buUnits.filter((u) => u.active !== false);
+    // STAGE B — only offer units this user may access; keep the staff's CURRENT placement even if
+    // it's outside scope/deactivated, so an in-scope edit never silently drops it.
+    const scoped = (window.CLOUD && CLOUD.allowedUnits) ? CLOUD.allowedUnits(buUnits) : buUnits;
+    const act = scoped.filter((u) => u.active !== false);
     const cur = f.businessUnitId || 'air';
     if (cur && !act.some((u) => u.id === cur)) { const c = buUnits.find((u) => u.id === cur); if (c) act.push(c); }
     return act.map((u) => ({ value: u.id, label: u.name }));
   })();
+  // For a NEW record a scoped user should default into an allowed unit, not the "air" default.
+  const buDefault = (buOptions.find((o) => o.value === 'air') || buOptions[0] || { value: 'air' }).value;
   const [showSalary, setShowSalary] = uShr(!ident);   // identity: salary collapsed
   const [showIdent, setShowIdent] = uShr(true);        // payroll: identity shown below salary
   const [nipBusy, setNipBusy] = uShr(false);
@@ -309,7 +314,7 @@ function StaffModal({ staff, rates, onSave, onClose, variant, departments, posit
       <label className="ed-af"><span>{trH('hrd.position')}</span><UI.Dropdown value={f.pos || ''} options={posOptions} placeholder={trH('pos.placeholder')} onChange={onPosChange} /></label>
       <label className="ed-af"><span>{trH('hrd.dept')}</span><UI.Dropdown value={f.dept || deptList[0]} options={deptList} onChange={(v) => set({ dept: v })} /></label>
       {/* Business-unit placement (Stage 2). Drives payroll grouping; changes NO pay amount. */}
-      <label className="ed-af"><span>{trH('bu.unitLabel')}</span><UI.Dropdown value={f.businessUnitId || 'air'} options={buOptions} onChange={(v) => set({ businessUnitId: v })} /></label>
+      <label className="ed-af"><span>{trH('bu.unitLabel')}</span><UI.Dropdown value={f.businessUnitId || buDefault} options={buOptions} onChange={(v) => set({ businessUnitId: v })} /></label>
       <label className="ed-af"><span>{trH('co.empStatus')}</span><UI.Dropdown value={f.status || 'Tetap'} options={['Tetap', 'Kontrak', 'Probation', 'Harian']} onChange={(v) => set({ status: v })} /></label>
       <label className="ed-af"><span>{trH('co.noSurat')}</span><input value={f.noSurat || ''} onChange={(e) => set({ noSurat: e.target.value })} /></label>
       <label className="ed-af"><span>{trH('co.joined')}</span><DP.DateField value={f.joinedDate || ''} max={today} onChange={(v) => set({ joinedDate: v })} /></label>

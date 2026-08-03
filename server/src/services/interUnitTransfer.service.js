@@ -11,6 +11,7 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const businessUnit = require('./businessUnit.service');
+const { assertCanAccessUnit, canAccessUnit, unitScopeOf } = require('../lib/scope');   // per-user business-unit access (Stage B)
 
 function newGroupId() { return 'iut_' + require('crypto').randomBytes(9).toString('hex'); }
 
@@ -30,6 +31,9 @@ async function createTransfer(body, actor) {
   const fromUnit = await businessUnit.resolveUnitId(body.fromUnitId);
   const toUnit = await businessUnit.resolveUnitId(body.toUnitId);
   if (fromUnit === toUnit) throw ApiError.badRequest('Unit asal dan tujuan harus berbeda.');
+  // Stage B: a scoped user may only INITIATE a transfer FROM a unit they can access. The receiving
+  // (to) unit may be ANY unit — moving money between units is the whole point of this feature.
+  assertCanAccessUnit(actor, fromUnit, 'unit asal');
   const fromAccount = body.fromAccountId ? String(body.fromAccountId) : null;
   const toAccount = body.toAccountId ? String(body.toAccountId) : null;
   if (!fromAccount || !toAccount) throw ApiError.badRequest('Pilih akun asal dan tujuan.');
@@ -60,8 +64,12 @@ async function getTransfer(groupId) {
 
 // Void = permanently remove BOTH legs atomically. Reversing one always reverses both, so a leg is
 // never orphaned. Permanent (no soft-undo); the linked pair simply ceases to exist.
-async function voidTransfer(groupId) {
+async function voidTransfer(groupId, actor) {
   const legs = await getTransfer(groupId);
+  // Stage B: a scoped user may only void a transfer that TOUCHES one of their units (either leg).
+  if (actor && unitScopeOf(actor) !== null && !legs.some((l) => canAccessUnit(actor, l.businessUnitId))) {
+    throw ApiError.notFound('Transfer tidak ditemukan');
+  }
   await prisma.entry.deleteMany({ where: { transferGroupId: String(groupId), interUnit: true } });
   return { transferGroupId: String(groupId), voided: legs.length };
 }

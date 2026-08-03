@@ -1,7 +1,7 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
-const { unitWhere, canAccessUnit } = require('../lib/scope');   // per-user business-unit access (Stage A)
+const { unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor } = require('../lib/scope');   // per-user business-unit access (Stage A/B)
 
 // setoran (deposit) = cash sales + bon (receivable) payments − field expenses.
 const deposit = (r) => (r.cash || 0) + (r.bonPay || 0) - (r.expense || 0);
@@ -40,23 +40,28 @@ async function getById(id, user) {
   return withDeposit(r);
 }
 
-async function create(data, userId) {
+async function create(data, actor) {
   if (data.fleetId) {
     const exists = await prisma.fleet.count({ where: { id: data.fleetId } });
     if (!exists) throw ApiError.badRequest('fleetId does not reference an existing fleet vehicle');
   }
-  const r = await prisma.setoran.create({ data: { ...data, createdById: userId || null }, include: { fleet: true } });
+  // Stage B: a setoran carries a businessUnitId (default "air"). A scoped user may only create in a
+  // unit they can access; an unspecified unit lands in their first allowed unit.
+  const businessUnitId = writableUnitFor(actor, data.businessUnitId, data.businessUnitId || 'air');
+  const r = await prisma.setoran.create({ data: { ...data, businessUnitId, createdById: (actor && actor.id) || null }, include: { fleet: true } });
   return withDeposit(r);
 }
 
-async function update(id, data) {
-  await getById(id);
-  const r = await prisma.setoran.update({ where: { id }, data, include: { fleet: true } });
+async function update(id, data, actor) {
+  await getById(id, actor);   // 404 if the row is outside the caller's unit scope (Stage B)
+  const safe = { ...data };
+  if (safe.businessUnitId !== undefined) assertCanAccessUnit(actor, safe.businessUnitId);   // no moving into another unit
+  const r = await prisma.setoran.update({ where: { id }, data: safe, include: { fleet: true } });
   return withDeposit(r);
 }
 
-async function remove(id) {
-  await getById(id);
+async function remove(id, actor) {
+  await getById(id, actor);   // 404 if outside scope
   await prisma.setoran.delete({ where: { id } });
 }
 

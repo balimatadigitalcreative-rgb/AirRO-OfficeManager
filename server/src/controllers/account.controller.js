@@ -28,10 +28,10 @@ const syncSchema = z.object({
 
 const list = asyncHandler(async (req, res) => res.json({ data: await service.list(req.user) }));
 const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id, req.user) }));
-const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body) }));
-const update = asyncHandler(async (req, res) => res.json({ data: await service.update(req.params.id, req.body) }));
-const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); res.status(204).send(); });
-const balance = asyncHandler(async (req, res) => res.json({ data: await service.balance(req.params.id) }));
+const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body, req.user) }));
+const update = asyncHandler(async (req, res) => res.json({ data: await service.update(req.params.id, req.body, req.user) }));
+const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id, req.user); res.status(204).send(); });
+const balance = asyncHandler(async (req, res) => res.json({ data: await service.balance(req.params.id, req.user) }));
 const sync = asyncHandler(async (req, res) => {
   const data = await replaceCollection(prisma.account, req.body.items);
   bus.broadcast({ entity: 'config', action: 'accounts', id: null });

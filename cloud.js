@@ -358,10 +358,24 @@
     }
   }
 
+  // STAGE B — the logged-in user's business-unit scope, for filtering the unit pickers on forms
+  // (entry/account/employee). null = full access; else an array of allowed businessUnitIds.
+  function unitScopeArr() {
+    const raw = state.user && state.user.unitScope;
+    if (raw == null || raw === 'all' || raw === '') return null;
+    if (Array.isArray(raw)) { const a = raw.filter(Boolean); return a.length ? a : null; }
+    try { const j = JSON.parse(raw); if (Array.isArray(j)) { const a = j.filter(Boolean); return a.length ? a : null; } } catch (e) {}
+    return null;
+  }
+  // Filter a unit dictionary to those the user may access (returns the list unchanged for full access).
+  function allowedUnits(units) { const s = unitScopeArr(); return (s && Array.isArray(units)) ? units.filter((u) => u && s.includes(u.id)) : units; }
+
   window.CLOUD = {
     get active() { return state.active; },
     get syncStatus() { return status(); },
     get sessionExpired() { return state.sessionExpired; },
+    get user() { return state.user || null; },
+    unitScopeArr, allowedUnits,
     login, logout, restore, activate, frontendUser,
     onSync: null,     // set by the app shell to re-read slices on remote change
     onStatus: null,   // set by the app shell to show a saving/saved/error indicator

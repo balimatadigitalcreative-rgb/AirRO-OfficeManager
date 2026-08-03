@@ -1,4 +1,5 @@
 'use strict';
+const ApiError = require('../utils/ApiError');
 // Per-user BUSINESS-UNIT access control (Stage A) — a shared helper mirroring the proven
 // fleetScope pattern (distribution.service.fleetScopeOf/fleetWhere), but for core finance
 // records (Entry / Account / Employee / Setoran) that carry a `businessUnitId`.
@@ -51,4 +52,26 @@ function unitWhere(user, col) {
   return base;
 }
 
-module.exports = { unitScopeOf, unitWhere, canAccessUnit, DEFAULT_UNIT_ID };
+// STAGE B — WRITE GUARD. Throw 403 if `user` may not create/edit a record in `unitId`.
+// (unitId null/blank ⇒ the DEFAULT_UNIT_ID row, same rule as reads.) A full-access user passes.
+function assertCanAccessUnit(user, unitId, label) {
+  if (!canAccessUnit(user, unitId)) {
+    throw ApiError.forbidden(`Anda tidak punya akses ke unit bisnis ini${label ? ` (${label})` : ''}.`);
+  }
+}
+
+// STAGE B — pick the unit a scoped user's NEW record should land in. If the client specified a unit
+// it must be within scope (else 403). If it specified NONE, default to the user's first allowed unit
+// (so a user scoped away from "air" doesn't get rejected by the "air" default). Full-access users are
+// unaffected — `resolvedDefault` (usually "air") is returned as-is.
+function writableUnitFor(user, requestedRaw, resolvedDefault) {
+  const scope = unitScopeOf(user);
+  if (scope === null) return resolvedDefault;   // full access — no constraint
+  const provided = requestedRaw != null && requestedRaw !== '';
+  if (!provided) return scope[0];               // no unit asked → land it in an allowed unit
+  const target = resolvedDefault == null || resolvedDefault === '' ? DEFAULT_UNIT_ID : resolvedDefault;
+  if (!scope.includes(target)) throw ApiError.forbidden('Anda tidak punya akses ke unit bisnis ini.');
+  return target;
+}
+
+module.exports = { unitScopeOf, unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor, DEFAULT_UNIT_ID };

@@ -27,10 +27,10 @@ const syncSchema = z.object({
   items: z.array(createSchema.extend({ id: z.string().min(1) })).max(2000),
 });
 
-const list = asyncHandler(async (req, res) => res.json(await service.list(req.query)));
-const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id) }));
-const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body, req.user?.id) }));
-const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id); res.status(204).send(); });
+const list = asyncHandler(async (req, res) => res.json(await service.list(req.query, req.user)));
+const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id, req.user) }));
+const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body, req.user) }));
+const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id, req.user); res.status(204).send(); });
 const sync = asyncHandler(async (req, res) => {
   const data = await replaceCollection(prisma.transfer, req.body.items);
   bus.broadcast({ entity: 'config', action: 'transfers', id: null });

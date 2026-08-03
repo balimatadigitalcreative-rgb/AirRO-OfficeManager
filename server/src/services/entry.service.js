@@ -3,7 +3,7 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const distribution = require('./distribution.service');   // gallon-purchase movement sync (intentional cash-flow ↔ distribusi link)
 const businessUnit = require('./businessUnit.service');   // Stage 3: unit label on each entry (default "Air")
-const { unitWhere, canAccessUnit } = require('../lib/scope');   // per-user business-unit access (Stage A)
+const { unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor } = require('../lib/scope');   // per-user business-unit access (Stage A/B)
 
 // Build a Prisma `where` clause from validated list filters.
 function buildWhere(q) {
@@ -83,9 +83,10 @@ async function create(data, actor) {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, role: true } });
     if (u) { snap.createdByName = u.name; snap.createdByRole = u.role; }
   }
-  // Stage 3: stamp the unit label (defaults to "Air"; unknown ids fall back too). Purely a
-  // label — it changes no amount, only which unit view the entry appears under.
-  const businessUnitId = await businessUnit.resolveUnitId(data.businessUnitId);
+  // Stage 3: stamp the unit label (defaults to "Air"; unknown ids fall back too). Stage B: a scoped
+  // user may only create in a unit they can access — a specified out-of-scope unit is 403; an
+  // unspecified unit lands in their first allowed unit instead of the "Air" default.
+  const businessUnitId = writableUnitFor(actor, data.businessUnitId, await businessUnit.resolveUnitId(data.businessUnitId));
   const entry = await prisma.entry.create({ data: { ...data, businessUnitId, ...snap } });
   // A "Pembelian Galon" expense mirrors into the gallon ledger (purchase movement).
   if (entry.type === 'expense' && +entry.gallonQty > 0) await distribution.syncPurchaseMovement(entry.id, entry.gallonQty, actor);
@@ -93,7 +94,7 @@ async function create(data, actor) {
 }
 
 async function update(id, data, actor) {
-  const cur = await getById(id); // 404 if missing
+  const cur = await getById(id, actor); // 404 if missing OR out of the actor's unit scope (Stage B)
   // An inter-unit leg is half of a linked pair — editing it in isolation would desync the two
   // books. It must be voided (which reverses BOTH legs) and re-created, never patched.
   if (cur.interUnit) throw ApiError.badRequest('Transaksi antar-unit tidak bisa diedit — batalkan lalu buat ulang.');
@@ -101,8 +102,12 @@ async function update(id, data, actor) {
   // the update schema anyway, but strip defensively).
   const { createdById, createdByName, createdByRole, ...safe } = data;
   // Only re-resolve the unit when the request carries it, so a normal edit that omits it keeps
-  // the entry's current unit (never silently reset to "Air").
-  if (safe.businessUnitId !== undefined) safe.businessUnitId = await businessUnit.resolveUnitId(safe.businessUnitId);
+  // the entry's current unit (never silently reset to "Air"). Stage B: a scoped user can't MOVE a
+  // record into a unit they can't access.
+  if (safe.businessUnitId !== undefined) {
+    safe.businessUnitId = await businessUnit.resolveUnitId(safe.businessUnitId);
+    assertCanAccessUnit(actor, safe.businessUnitId);
+  }
   const entry = await prisma.entry.update({ where: { id }, data: safe });
   // Re-sync the gallon purchase movement (replace-on-change) so an edit never leaves
   // stock out of step; a non-gallon or income entry clears any prior movement.

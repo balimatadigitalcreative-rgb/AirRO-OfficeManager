@@ -23,7 +23,7 @@ const create = asyncHandler(async (req, res) => {
   res.status(201).json({ data: r });
 });
 const remove = asyncHandler(async (req, res) => {
-  const r = await service.voidTransfer(req.params.groupId);
+  const r = await service.voidTransfer(req.params.groupId, req.user);
   bus.broadcast({ entity: 'entry', action: 'inter-unit-void', id: req.params.groupId });
   res.json({ data: r });
 });

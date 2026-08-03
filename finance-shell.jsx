@@ -243,6 +243,10 @@ function FApp() {
     return null;
   })();
   const allowedUnits = unitScope ? businessUnits.filter((u) => unitScope.includes(u.id)) : businessUnits;
+  // STAGE B — distribution is the water business, mapped wholesale to unit "air". A user scoped to
+  // only mfg/nsn has no distribution access; the server 403s every /distribusi endpoint and the
+  // client shows a clear "no access" notice instead of the (empty) screens. 'all'/'air' users pass.
+  const canDistribution = !unitScope || unitScope.includes('air');
   // Keep the active-unit view context inside the user's scope: one allowed unit → fix to it (no
   // "Semua" that would imply other units); an out-of-scope selection → fall back to combined
   // (which, being server-filtered, only ever shows this user's own units anyway).
@@ -1420,6 +1424,15 @@ function FApp() {
           {/* Which unit am I looking at? Shown on EVERY screen while a single unit is selected. */}
           <UnitViewBar unitName={activeUnitName} exempt={UNIT_EXEMPT(screen)} />
 
+          {/* STAGE B — a user without "air" access opening any distribution screen sees a clear
+              no-access notice (the API already 403s the data). Keeps the water module invisible to
+              a pure mfg/nsn user without hiding the nav for everyone. */}
+          {screen && screen.indexOf('dist-') === 0 && !canDistribution ? (
+            <div className="card" style={{ padding: 28, textAlign: 'center', color: 'var(--text-mut)' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{tr('unit.distNoAccessTitle')}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-faint)' }}>{tr('unit.distNoAccessHint')}</div>
+            </div>
+          ) : (<>
           {screen === 'dist-dashboard' && p.distribusiDashboard && (
             <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
@@ -1469,6 +1482,7 @@ function FApp() {
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          </>)}
 
           {screen === 'gudang' && p.gudangView && (
             <GUDANG.Dept refreshKey={distTick} canAddStock={!!p.gudangAddStock} canKoreksi={!!p.gudangKoreksi} canBuffer={!!p.gudangBuffer}
@@ -1483,7 +1497,7 @@ function FApp() {
           )}
 
           {screen === 'moneyspots' && p.cashflow && (
-            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} catMap={catMap} onOpenEntry={p.edit ? editEntryRow : null} units={businessUnits} activeUnit={activeUnit} defaultUnit={unitDefaultForNew()} canInterUnit={!!p.interUnitTransfer} onInterUnit={doInterUnitTransfer} />
+            <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} catMap={catMap} onOpenEntry={p.edit ? editEntryRow : null} units={allowedUnits} activeUnit={activeUnit} defaultUnit={unitDefaultForNew()} canInterUnit={!!p.interUnitTransfer} onInterUnit={doInterUnitTransfer} />
           )}
 
           {screen === 'overview' && p.cashflow && (
@@ -1522,7 +1536,7 @@ function FApp() {
               )}
               <div className="fin-grid">
                 <div className="fin-col">
-                  {p.addEntry ? <FIN.AddEntry onAdd={add} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={businessUnits} defaultUnit={unitDefaultForNew()} /> : null}
+                  {p.addEntry ? <FIN.AddEntry onAdd={add} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={allowedUnits} defaultUnit={unitDefaultForNew()} /> : null}
                   <FIN.EntriesList entries={recent} onDelete={del} onEdit={editEntryRow} title={tr('recent.title')} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
                 </div>
                 <div className="fin-col">
@@ -1648,7 +1662,7 @@ function FApp() {
       )}
       <PROOFMOUNT />
       {editing && p.edit && (
-        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={businessUnits} onSave={saveEdit} onClose={dismissOverlay} />
+        <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={allowedUnits} onSave={saveEdit} onClose={dismissOverlay} />
       )}
       {empDetail && p.empDetail && (
         <COMPANY.EmployeeDetail staff={empDetail} rates={hrdRates} departments={departments} positions={positions} setPositions={applyPositions} monthKey={monthKey} today={FIN.TODAY} syncTick={syncTick} seeMoney={p.seeMoney} canEdit={p.employees} canEditAtt={p.attendance && p.payroll} onSyncDeduct={syncLateDeduct} onEdit={() => navigateFromOverlay('payroll')} onClose={dismissOverlay} onSaveStaff={upsertStaff} cashbons={cashbons} onAddCashbon={onAddCashbon} onUpdateCashbon={onUpdateCashbon} onDecideCashbon={onDecideCashbon} onRemoveCashbon={onRemoveCashbon} canApprove={p.kasbonApprove} canReject={p.kasbonReject} canCancelCap={p.kasbonCancel} canDeleteCap={p.kasbonDelete} currentUserId={user.id} onGraduate={graduateOrientation} onFailOrientation={failOrientation} onPayOrientation={payOrientation} orientationPaid={orientationPaidIds.includes(empDetail.id)} canAddEntry={p.addEntry} />

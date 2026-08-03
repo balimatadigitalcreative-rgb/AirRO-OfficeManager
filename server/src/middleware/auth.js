@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const { resolvePerms } = require('../config/permissions');
+const { canAccessUnit } = require('../lib/scope');
 
 // Verifies the Bearer token and attaches { id, role, username, permissions } to req.user.
 function requireAuth(req, res, next) {
@@ -60,4 +61,19 @@ function requireAnyCap(perms) {
   };
 }
 
-module.exports = { requireAuth, requireRole, requireCap, requireAnyCap };
+// STAGE B — business-unit gate. Restricts a whole route/router to users who may access `unitId`.
+// Distribution is keyed by fleetId (no businessUnitId), so the project's ONE consistent mapping is:
+// "all distribution data belongs to unit 'air' (the water business)". A user scoped to only
+// mfg/nsn therefore has no distribution access (403 → the client shows a clear "no access" state);
+// an "air"/all user is unaffected. Use after requireAuth.
+function requireUnit(unitId) {
+  return (req, res, next) => {
+    if (!req.user) return next(ApiError.unauthorized());
+    if (!canAccessUnit(req.user, unitId)) {
+      return next(ApiError.forbidden(`Akun kamu tidak punya akses ke unit bisnis untuk modul ini.`));
+    }
+    next();
+  };
+}
+
+module.exports = { requireAuth, requireRole, requireCap, requireAnyCap, requireUnit };
