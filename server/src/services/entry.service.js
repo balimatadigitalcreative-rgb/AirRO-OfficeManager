@@ -87,6 +87,7 @@ async function create(data, actor) {
   // user may only create in a unit they can access — a specified out-of-scope unit is 403; an
   // unspecified unit lands in their first allowed unit instead of the "Air" default.
   const businessUnitId = writableUnitFor(actor, data.businessUnitId, await businessUnit.resolveUnitId(data.businessUnitId));
+  await businessUnit.assertModuleEnabled(businessUnitId, 'finance');   // module toggle: no finance write to a unit where finance is off
   const entry = await prisma.entry.create({ data: { ...data, businessUnitId, ...snap } });
   // A "Pembelian Galon" expense mirrors into the gallon ledger (purchase movement).
   if (entry.type === 'expense' && +entry.gallonQty > 0) await distribution.syncPurchaseMovement(entry.id, entry.gallonQty, actor);
@@ -108,6 +109,9 @@ async function update(id, data, actor) {
     safe.businessUnitId = await businessUnit.resolveUnitId(safe.businessUnitId);
     assertCanAccessUnit(actor, safe.businessUnitId);
   }
+  // Module toggle: no finance write to a unit where finance is off (the target unit — the new one if
+  // the edit moves it, else the entry's current unit).
+  await businessUnit.assertModuleEnabled(safe.businessUnitId !== undefined ? safe.businessUnitId : cur.businessUnitId, 'finance');
   const entry = await prisma.entry.update({ where: { id }, data: safe });
   // Re-sync the gallon purchase movement (replace-on-change) so an edit never leaves
   // stock out of step; a non-gallon or income entry clears any prior movement.

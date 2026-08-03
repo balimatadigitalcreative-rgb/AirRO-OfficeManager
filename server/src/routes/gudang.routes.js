@@ -2,11 +2,15 @@
 const { Router } = require('express');
 const ctrl = require('../controllers/gudang.controller');
 const validate = require('../middleware/validate');
-const { requireAuth, requireCap } = require('../middleware/auth');
+const { requireAuth, requireCap, requireModule } = require('../middleware/auth');
 const { resolvePerms } = require('../config/permissions');
 
 const router = Router();
 router.use(requireAuth);
+// MODULE TOGGLE — the warehouse (gudang) has no per-row business unit (its models carry no
+// businessUnitId), so like distribution it maps to the "air" unit. Its availability follows the Air
+// unit's enabledModules: turn the gudang module off for Air and every warehouse endpoint 403s.
+router.use(requireModule('gudang', 'air'));
 
 // A stock 'correction' rewrites the counted quantity, so it needs the correction cap; every
 // other type is an ordinary stock-in. Runs AFTER validate(), so req.body.type is known-good.

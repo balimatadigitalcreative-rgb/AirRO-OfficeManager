@@ -70,6 +70,20 @@ function navForRole(p, role) {
 }
 const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'];
 
+// PER-UNIT MODULE TOGGLE (client mirror of BusinessUnit.enabledModules). The toggleable modules are
+// the four operational nav groups; 'overview' and 'admin' (company/reports-overview + settings/users/
+// approvals) are ALWAYS available so a unit can never be made unmanageable and the owner is never
+// locked out. A nav item is shown only if its module is enabled for the ACTIVE unit AND the user's
+// caps allow it (caps are already applied in navForRole) AND the user's unit access permits.
+const MODULE_KEYS = ['finance', 'hr', 'distribusi', 'gudang'];
+const NAV_MODULE_OF = { finance: 'finance', hr: 'hr', distribusi: 'distribusi', gudang: 'gudang' };   // overview/admin → always-on (undefined)
+// The set of modules enabled for a unit row (enabledModules is 'all' | array of keys).
+function unitModuleSet(u) {
+  const em = u && u.enabledModules;
+  if (!em || em === 'all') return new Set(MODULE_KEYS);
+  return new Set((Array.isArray(em) ? em : MODULE_KEYS).filter((m) => MODULE_KEYS.includes(m)));
+}
+
 function FToast({ msg, onDone }) {
   uEh(() => { const t = setTimeout(onDone, 2400); return () => clearTimeout(t); }, [msg]);
   return <div className="fin-toast"><span style={{ color: '#22A7A1' }}><IconCheck s={17} /></span>{msg}</div>;
@@ -247,6 +261,25 @@ function FApp() {
   // only mfg/nsn has no distribution access; the server 403s every /distribusi endpoint and the
   // client shows a clear "no access" notice instead of the (empty) screens. 'all'/'air' users pass.
   const canDistribution = !unitScope || unitScope.includes('air');
+  // Which modules are active for the CURRENT view. Single unit → that unit's enabledModules. "Semua"
+  // → the UNION of enabled modules across the units this user can see, so a module needed by any of
+  // their units never disappears in the combined view. Unknown/absent unit → all modules (default).
+  const activeModules = (() => {
+    if (activeUnit !== 'all') return unitModuleSet(businessUnits.find((u) => u.id === activeUnit));
+    const pool = (allowedUnits && allowedUnits.length) ? allowedUnits : businessUnits;
+    const s = new Set();
+    (pool.length ? pool : [{ enabledModules: 'all' }]).forEach((u) => unitModuleSet(u).forEach((m) => s.add(m)));
+    return s;
+  })();
+  // A nav item passes the module gate if its group isn't a module (overview/admin → always on), or
+  // its module is enabled for the active unit. Distribusi additionally needs "air" access (Stage B).
+  const navPassesModule = (grp) => {
+    const mod = NAV_MODULE_OF[grp];
+    if (!mod) return true;
+    if (!activeModules.has(mod)) return false;
+    if (mod === 'distribusi' && !canDistribution) return false;
+    return true;
+  };
   // Keep the active-unit view context inside the user's scope: one allowed unit → fix to it (no
   // "Semua" that would imply other units); an out-of-scope selection → fall back to combined
   // (which, being server-filtered, only ever shows this user's own units anyway).
@@ -265,6 +298,15 @@ function FApp() {
   // true on the same render as `user`, which can still be BEFORE the cloud adapter has installed the
   // JWT — the request then 401s and the old `.catch(() => {})` swallowed it, leaving the 1-item
   // fallback forever. So: wait for a token, and retry a bounded number of times on failure.
+  // Fetch the unit dictionary (incl. each unit's enabledModules) once a token is installed. Exposed
+  // as a ref so a live "config" SSE event (e.g. the GM toggling a unit's modules) can re-pull it and
+  // the nav/module intersection updates without a reload.
+  const reloadUnits = React.useCallback(() => {
+    if (!(window.API && window.API.businessUnits && window.API.getToken && window.API.getToken())) return;
+    window.API.businessUnits.list()
+      .then((r) => { const list = (r && r.data && r.data.length) ? r.data : null; if (list) { setBusinessUnits(list); try { localStorage.setItem('airro_bunits_cache_v1', JSON.stringify(list)); } catch (e) {} } })
+      .catch(() => {});
+  }, []);
   uEh(() => {
     if (!user || !(p.cashflow || p.employees) || !(window.API && window.API.businessUnits)) return;
     let live = true, tries = 0;
@@ -417,9 +459,12 @@ function FApp() {
   // feature they don't have. Applies to EVERY menu group, not just distribusi.
   uEh(() => {
     if (!user) return;
-    const nav = navForRole(p, user.role);
+    // Intersect with the active unit's enabled modules too, so switching to a unit that disables the
+    // current screen's module bounces the user to their first still-available screen (never a
+    // module the active unit turned off).
+    const nav = navForRole(p, user.role).filter((n) => navPassesModule(n.grp));
     if (nav.length && !nav.some((n) => n.id === screen)) navigate(nav[0].id, { replace: true });
-  }, [screen, user]);
+  }, [screen, user, activeUnit, businessUnits]);
   // Delivery notifications (AlertBell), refreshed whenever a distribusi SSE event bumps
   // distTick: (a) helpers with the board cap → today's new extra orders; (b) admins with
   // the dashboard cap → any fleet that CLOSED the day with undelivered stops (+reason).
@@ -886,7 +931,7 @@ function FApp() {
       if (r && Array.isArray(r.data) && r.data.length) { FS.setRoles(r.data); setRolesState(r.data); try { localStorage.setItem('airro_roles_cache_v1', JSON.stringify(r.data)); } catch (e) {} }
     }).catch(() => {});
   };
-  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); posSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); reloadAtt(); reloadOriAtt(); reloadRoles(); };
+  const reloadConfig = () => { reloadAccounts(); reloadCats(); settingsSlice.reload(); ratesSlice.reload(); budgetSlice.reload(); deptSlice.reload(); posSlice.reload(); projSlice.reload(); fleetSlice.reload(); reloadTransfers(); reloadAtt(); reloadOriAtt(); reloadRoles(); reloadUnits(); };
   uEh(() => {
     if (!(window.API && window.API.accounts)) return;
     reloadConfig();
@@ -1305,7 +1350,10 @@ function FApp() {
   // ---- not logged in ----
   if (!user) return <AUTH.LoginScreen onLogin={login} lang={lang} onLang={changeLang} users={users} />;
 
-  const NAV = navForRole(p, user ? user.role : '');
+  // NAV = caps (navForRole) ∩ active-unit modules ∩ unit access. Filtering here means BOTH the
+  // desktop sidebar and the mobile drawer/bottom-bar (which reuse this NAV) update together, and
+  // switching the active unit re-filters the nav to that unit's enabled modules.
+  const NAV = navForRole(p, user ? user.role : '').filter((n) => navPassesModule(n.grp));
   // NAV only ever contains screens the user may access, so navigating is just "go if it's
   // in NAV". A cross-screen button targeting something the user lacks silently no-ops (its
   // own control is already hidden). The 2nd arg is legacy/ignored.

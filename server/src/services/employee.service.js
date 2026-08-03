@@ -147,6 +147,7 @@ async function create(body, actor) {
   // (defaults to "Air"). Stage B: a scoped user may only place staff in a unit they can access —
   // a specified out-of-scope unit is 403; an unspecified unit lands in their first allowed unit.
   const businessUnitId = writableUnitFor(actor, body.businessUnitId, await businessUnit.resolveUnitId(body.businessUnitId));
+  await businessUnit.assertModuleEnabled(businessUnitId, 'hr');   // module toggle: no HR write to a unit where hr is off
   full.businessUnitId = businessUnitId;
   // Office (the NIP prefix) is DERIVED from the placement — never taken from the request body.
   const office = await businessUnit.officeCodeFor(businessUnitId);
@@ -184,6 +185,7 @@ async function update(id, body, actor) {
       merged.businessUnitAudit = [...merged.businessUnitAudit.slice(-49), { from: curUnit, to: businessUnitId, at: new Date().toISOString(), ...snap }];
     }
   }
+  await businessUnit.assertModuleEnabled(businessUnitId, 'hr');   // module toggle: HR must be on for the effective unit
   merged.businessUnitId = businessUnitId;
   // Derive the office from the (possibly new) placement. The employee's EXISTING NIP is a historical
   // identifier and is NEVER rewritten when the unit changes — only a future "Regenerasi NIP" picks up

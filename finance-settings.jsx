@@ -274,6 +274,20 @@ function BusinessUnitsPanel() {
       .then(() => { setBusy(false); load(); })
       .catch((e) => { setErr(msg(e)); setBusy(false); });
   };
+  // Per-unit MODULE TOGGLE. enabledModules is 'all' (every module) or an array of keys; we normalise
+  // to a set, flip one key, and PATCH back — a full selection collapses to 'all' server-side.
+  const BU_MODULES = ['finance', 'hr', 'distribusi', 'gudang'];
+  const moduleSet = (u) => { const em = u.enabledModules; return (!em || em === 'all') ? new Set(BU_MODULES) : new Set(Array.isArray(em) ? em : BU_MODULES); };
+  const toggleModule = (u, key) => {
+    if (busy) return;
+    const cur = moduleSet(u);
+    if (cur.has(key)) cur.delete(key); else cur.add(key);
+    const next = BU_MODULES.filter((k) => cur.has(k));
+    setBusy(true); setErr('');
+    window.API.businessUnits.update(u.id, { enabledModules: next.length >= BU_MODULES.length ? 'all' : next })
+      .then(() => { setBusy(false); load(); })
+      .catch((e) => { setErr(msg(e)); setBusy(false); });
+  };
 
   return (
     <div className="card alert-settings">
@@ -287,22 +301,37 @@ function BusinessUnitsPanel() {
       {units === null && !loadErr && <div className="dist-empty">{trS('common.loading')}</div>}
 
       {(units || []).map((u) => (
-        <div key={u.id} className="bu-row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
-          {editId === u.id ? (
-            <>
-              <input className="fld" style={{ flex: 1, margin: 0 }} value={editName} autoFocus onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveEdit()} />
-              <button className="btn btn-primary btn-sm" disabled={busy} onClick={saveEdit}>{trS('bu.save')}</button>
-              <button className="btn btn-ghost btn-sm" onClick={() => { setEditId(null); setErr(''); }}>{trS('bu.cancel')}</button>
-            </>
-          ) : (
-            <>
-              {u.code ? <span className="dist-badge" style={{ background: 'var(--navy-50, #EAF1F4)', color: 'var(--brand, #065489)' }}>{u.code}</span> : null}
-              <span style={{ flex: 1, fontWeight: 600, opacity: u.active ? 1 : 0.5 }}>{u.name}{u.id === 'air' ? ' · ' + trS('bu.default') : ''}</span>
-              {!u.active && <span className="dist-badge arsip">{trS('bu.inactive')}</span>}
-              <button className="dist-link" onClick={() => { setEditId(u.id); setEditName(u.name); setErr(''); }}>{trS('bu.rename')}</button>
-              {u.id !== 'air' && <button className="dist-link" style={{ color: u.active ? 'var(--neg)' : 'var(--green-800)' }} disabled={busy} onClick={() => toggleActive(u)}>{u.active ? trS('bu.deactivate') : trS('bu.activate')}</button>}
-            </>
+        <div key={u.id} style={{ borderBottom: '1px solid var(--border)', padding: '9px 0' }}>
+          <div className="bu-row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {editId === u.id ? (
+              <>
+                <input className="fld" style={{ flex: 1, margin: 0 }} value={editName} autoFocus onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveEdit()} />
+                <button className="btn btn-primary btn-sm" disabled={busy} onClick={saveEdit}>{trS('bu.save')}</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setEditId(null); setErr(''); }}>{trS('bu.cancel')}</button>
+              </>
+            ) : (
+              <>
+                {u.code ? <span className="dist-badge" style={{ background: 'var(--navy-50, #EAF1F4)', color: 'var(--brand, #065489)' }}>{u.code}</span> : null}
+                <span style={{ flex: 1, fontWeight: 600, opacity: u.active ? 1 : 0.5 }}>{u.name}{u.id === 'air' ? ' · ' + trS('bu.default') : ''}</span>
+                {!u.active && <span className="dist-badge arsip">{trS('bu.inactive')}</span>}
+                <button className="dist-link" onClick={() => { setEditId(u.id); setEditName(u.name); setErr(''); }}>{trS('bu.rename')}</button>
+                {u.id !== 'air' && <button className="dist-link" style={{ color: u.active ? 'var(--neg)' : 'var(--green-800)' }} disabled={busy} onClick={() => toggleActive(u)}>{u.active ? trS('bu.deactivate') : trS('bu.activate')}</button>}
+              </>
+            )}
+          </div>
+          {/* Per-unit MODULE TOGGLE — which app modules are active for this unit. Management screens
+              (settings/users/business-units) are always available regardless, so a unit is never
+              locked out. Overview/company is always on too. */}
+          {editId !== u.id && (
+            <div className="bu-modules" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              <span style={{ fontSize: 11.5, color: 'var(--text-faint)', marginRight: 2 }}>{trS('bu.modulesLabel')}</span>
+              {BU_MODULES.map((k) => { const on = moduleSet(u).has(k); return (
+                <button key={k} type="button" className={`cat-chip ${on ? 'on' : ''}`} disabled={busy} onClick={() => toggleModule(u, k)}>
+                  {on ? IcS('IconCheck', { s: 13 }) : <span style={{ width: 13 }} />}{trS('bu.mod.' + k)}
+                </button>
+              ); })}
+            </div>
           )}
         </div>
       ))}

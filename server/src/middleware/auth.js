@@ -76,4 +76,21 @@ function requireUnit(unitId) {
   };
 }
 
-module.exports = { requireAuth, requireRole, requireCap, requireAnyCap, requireUnit };
+// PER-UNIT MODULE TOGGLE — router-level gate for a module that is NOT unit-scoped in the data
+// (distribusi + gudang are keyed by fleetId, not businessUnitId, and map wholesale to unit "air").
+// Their availability follows the given unit's enabledModules: if the GM turns the module off for
+// that unit, every endpoint under this router 403s. Finance/HR modules are enforced per-target-unit
+// inside their services instead (the record's own businessUnitId decides). Use after requireAuth.
+function requireModule(moduleKey, unitId) {
+  return async (req, res, next) => {
+    try {
+      const bu = require('../services/businessUnit.service');   // lazy require avoids any load-order cycle
+      if (!(await bu.isModuleEnabled(unitId || bu.DEFAULT_UNIT_ID, moduleKey))) {
+        return next(ApiError.forbidden('Modul ini tidak aktif untuk unit bisnis terkait.'));
+      }
+      next();
+    } catch (e) { next(e); }
+  };
+}
+
+module.exports = { requireAuth, requireRole, requireCap, requireAnyCap, requireUnit, requireModule };

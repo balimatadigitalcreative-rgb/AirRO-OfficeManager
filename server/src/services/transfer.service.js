@@ -2,6 +2,7 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const { unitWhere, canAccessUnit, unitScopeOf } = require('../lib/scope');   // per-user business-unit access (Stage B)
+const businessUnit = require('./businessUnit.service');   // module toggle (finance)
 
 // A Transfer has NO businessUnitId of its own — its unit is that of the from/to accounts. So a
 // scoped user may see a transfer only when it TOUCHES one of their units (either leg's account),
@@ -51,11 +52,13 @@ async function assertAccounts(fromId, toId) {
 
 async function create(data, user) {
   await assertAccounts(data.fromId, data.toId);
+  const from = await prisma.account.findUnique({ where: { id: data.fromId }, select: { businessUnitId: true } });
   // Stage B: a scoped user may only move money OUT of a unit they can access (the PAYING account).
-  if (user && unitScopeOf(user) !== null) {
-    const from = await prisma.account.findUnique({ where: { id: data.fromId }, select: { businessUnitId: true } });
-    if (!from || !canAccessUnit(user, from.businessUnitId)) throw ApiError.forbidden('Anda tidak punya akses ke unit bisnis akun sumber transfer.');
+  if (user && unitScopeOf(user) !== null && (!from || !canAccessUnit(user, from.businessUnitId))) {
+    throw ApiError.forbidden('Anda tidak punya akses ke unit bisnis akun sumber transfer.');
   }
+  // Module toggle: a transfer is a finance action — the PAYING account's unit must have finance on.
+  if (from) await businessUnit.assertModuleEnabled(from.businessUnitId, 'finance');
   return prisma.transfer.create({ data: { ...data, createdById: (user && user.id) || null } });
 }
 

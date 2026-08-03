@@ -1004,5 +1004,10 @@ model BusinessUnit {
   officeCode String  @default("AIRRO")                // AIRRO | NSN | MFG
   active    Boolean  @default(true)                   // deactivate (never delete) once data references it
   sortOrder Int      @default(0)
+  // Per-unit MODULE TOGGLE: which app modules are active for this unit. JSON array of module keys
+  // (finance | hr | distribusi | gudang). null / "all" = every module (the default → existing units
+  // behave exactly as before). The nav shows a module only if it is enabled for the active unit AND
+  // the user's caps allow it; writes to a unit are rejected when that unit's module is off.
+  enabledModules String @default("all")
   createdAt DateTime @default(now())
 }

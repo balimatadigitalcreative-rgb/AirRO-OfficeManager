@@ -35,17 +35,23 @@ async function create(data, user) {
   let businessUnitId = await resolveAcctUnit(data.businessUnitId);
   // Stage B: a scoped user may only create an account in a unit they can access. 'shared' (Bersama)
   // is a common account visible to everyone, so it's always allowed.
-  if (businessUnitId !== 'shared') businessUnitId = writableUnitFor(user, data.businessUnitId, businessUnitId);
+  if (businessUnitId !== 'shared') {
+    businessUnitId = writableUnitFor(user, data.businessUnitId, businessUnitId);
+    await businessUnit.assertModuleEnabled(businessUnitId, 'finance');   // module toggle
+  }
   return prisma.account.create({ data: { ...data, businessUnitId } });
 }
 
 async function update(id, data, user) {
-  await getById(id, user);   // 404 if missing OR out of the actor's unit scope (Stage B)
+  const cur = await getById(id, user);   // 404 if missing OR out of the actor's unit scope (Stage B)
   const safe = { ...data };
   if (safe.businessUnitId !== undefined) {
     safe.businessUnitId = await resolveAcctUnit(safe.businessUnitId);
     if (safe.businessUnitId !== 'shared') assertCanAccessUnit(user, safe.businessUnitId);   // no moving into another unit
   }
+  // Module toggle: finance must be enabled for the effective unit (skip the always-shared account).
+  const target = safe.businessUnitId !== undefined ? safe.businessUnitId : cur.businessUnitId;
+  if (target !== 'shared') await businessUnit.assertModuleEnabled(target, 'finance');
   return prisma.account.update({ where: { id }, data: safe });
 }
 

@@ -23,6 +23,47 @@ const DEFAULT_OFFICE = 'AIRRO';
 // the backfill; the delegate name is the Prisma model accessor.
 const LABELLED_MODELS = ['entry', 'account', 'employee', 'setoran'];
 
+// ── PER-UNIT MODULE TOGGLE ────────────────────────────────────────────────────
+// The fixed registry of toggleable app modules, keyed by the nav groups already in use. Overview,
+// company, settings, users and business-unit management are NOT modules — they are always available
+// (so a unit can never be made unmanageable and the owner is never locked out). Adding a new module
+// is: add its key here + tag its nav group + gate its endpoints.
+const MODULES = ['finance', 'hr', 'distribusi', 'gudang'];
+
+// Parse a unit's stored enabledModules ("all" | JSON array) → null (= every module) or a clean array.
+function parseEnabledModules(str) {
+  if (str == null || str === 'all' || str === '') return null;
+  try { const a = JSON.parse(str); if (Array.isArray(a)) return a.filter((m) => MODULES.includes(m)); if (a === 'all') return null; } catch (e) {}
+  return null;   // unrecognised → treat as ALL enabled (never silently disable a module)
+}
+// Store form: 'all' | array-of-known-keys → the string persisted on the column.
+function serializeEnabledModules(v) {
+  if (v === 'all' || v == null) return 'all';
+  const arr = (Array.isArray(v) ? v : []).filter((m) => MODULES.includes(m));
+  // A unit with EVERY module enabled is stored as 'all' (canonical) so the default and an explicit
+  // full selection are indistinguishable.
+  return arr.length >= MODULES.length ? 'all' : JSON.stringify(arr);
+}
+// Is `moduleKey` enabled given a unit's stored enabledModules value? null/all/unknown → true.
+function moduleEnabledFor(enabledModulesStr, moduleKey) {
+  const arr = parseEnabledModules(enabledModulesStr);
+  return arr === null ? true : arr.includes(moduleKey);
+}
+// Load a unit and report whether `moduleKey` is enabled for it (default true for an unknown unit, so
+// a missing/blank unit never over-restricts). Used by the server enforcement in the write paths.
+async function isModuleEnabled(unitId, moduleKey) {
+  const id = unitId || DEFAULT_UNIT_ID;
+  const u = await prisma.businessUnit.findUnique({ where: { id: String(id) }, select: { enabledModules: true } });
+  return u ? moduleEnabledFor(u.enabledModules, moduleKey) : true;
+}
+// Assert a module is enabled for a unit; 403 otherwise. Server-side enforcement of the toggle so a
+// disabled module can't be written to even by a crafted request (not just hidden in the nav).
+async function assertModuleEnabled(unitId, moduleKey) {
+  if (!(await isModuleEnabled(unitId, moduleKey))) {
+    throw ApiError.forbidden('Modul ini tidak aktif untuk unit bisnis terkait.');
+  }
+}
+
 // Ensure the seed units exist (idempotent — create-if-absent by fixed id). Safe on every boot.
 async function seedBusinessUnits() {
   try {
@@ -86,9 +127,16 @@ async function auditOfficeUnitMismatch() {
   return out;
 }
 
+// Shape a unit row for the API: enabledModules returned parsed ('all' | array of module keys) so the
+// client can intersect the nav without re-parsing the stored string.
+function shapeUnit(u) {
+  const arr = parseEnabledModules(u.enabledModules);
+  return { ...u, enabledModules: arr === null ? 'all' : arr };
+}
+
 async function listUnits(includeInactive = true) {
   const data = await prisma.businessUnit.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] });
-  return includeInactive ? data : data.filter((u) => u.active);
+  return (includeInactive ? data : data.filter((u) => u.active)).map(shapeUnit);
 }
 
 async function createUnit(body) {
@@ -130,11 +178,16 @@ async function updateUnit(id, body) {
     }
     data.active = !!body.active;
   }
-  return prisma.businessUnit.update({ where: { id }, data });
+  // Per-unit module toggle. Management (users/settings/business-units) is never a module, so even a
+  // unit with ZERO operational modules stays fully manageable by the owner/GM.
+  if (body.enabledModules !== undefined) data.enabledModules = serializeEnabledModules(body.enabledModules);
+  const updated = await prisma.businessUnit.update({ where: { id }, data });
+  return shapeUnit(updated);
 }
 
 module.exports = {
-  DEFAULT_UNIT_ID, SEED_UNITS, LABELLED_MODELS,
+  DEFAULT_UNIT_ID, SEED_UNITS, LABELLED_MODELS, MODULES,
   seedBusinessUnits, backfillBusinessUnit, listUnits, createUnit, updateUnit, resolveUnitId,
   officeCodeFor, OFFICE_CODES, DEFAULT_OFFICE, auditOfficeUnitMismatch,
+  parseEnabledModules, serializeEnabledModules, moduleEnabledFor, isModuleEnabled, assertModuleEnabled,
 };

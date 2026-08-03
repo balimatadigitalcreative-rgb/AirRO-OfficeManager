@@ -2,7 +2,7 @@
 const { Router } = require('express');
 const ctrl = require('../controllers/distribution.controller');
 const validate = require('../middleware/validate');
-const { requireAuth, requireCap, requireAnyCap, requireUnit } = require('../middleware/auth');
+const { requireAuth, requireCap, requireAnyCap, requireUnit, requireModule } = require('../middleware/auth');
 
 const router = Router();
 router.use(requireAuth);
@@ -11,6 +11,11 @@ router.use(requireAuth);
 // mfg/nsn therefore has no distribution access at all (every endpoint 403s); "air"/all users are
 // unaffected. This is the single, consistent rule applied uniformly across the whole module.
 router.use(requireUnit('air'));
+// MODULE TOGGLE — distribution's availability follows the "air" unit's enabledModules (consistent
+// with the air mapping above): if the GM turns the distribusi module off for the Air unit, every
+// distribution endpoint 403s for everyone. Turning it off for another unit only affects that unit's
+// nav (client), since distribution data is air's.
+router.use(requireModule('distribusi', 'air'));
 
 // ── Customers ──
 // Viewing the customer list/detail is part of base module access ('distribusi').
