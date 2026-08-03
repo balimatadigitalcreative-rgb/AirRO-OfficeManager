@@ -76,16 +76,19 @@ function requireUnit(unitId) {
   };
 }
 
-// PER-UNIT MODULE TOGGLE — router-level gate for a module that is NOT unit-scoped in the data
-// (distribusi + gudang are keyed by fleetId, not businessUnitId, and map wholesale to unit "air").
-// Their availability follows the given unit's enabledModules: if the GM turns the module off for
-// that unit, every endpoint under this router 403s. Finance/HR modules are enforced per-target-unit
-// inside their services instead (the record's own businessUnitId decides). Use after requireAuth.
-function requireModule(moduleKey, unitId) {
+// PER-UNIT MODULE TOGGLE — router-level gate for a whole module that is NOT unit-scoped in the data
+// (distribusi + gudang are keyed by fleetId, not businessUnitId). The module is AVAILABLE when it is
+// enabled for ANY unit the caller can access — the SAME union the client nav uses (activeModules),
+// so the nav gate and this server gate never disagree, and an unconfigured (default-'all') unit is
+// always available. If the GM turns the module off for one unit but leaves it on for another the
+// caller can see, it stays available; it only 403s when off for every unit they can access.
+// Finance/HR modules are enforced per-target-unit inside their services instead (the record's own
+// businessUnitId decides). Use after requireAuth.
+function requireModule(moduleKey) {
   return async (req, res, next) => {
     try {
       const bu = require('../services/businessUnit.service');   // lazy require avoids any load-order cycle
-      if (!(await bu.isModuleEnabled(unitId || bu.DEFAULT_UNIT_ID, moduleKey))) {
+      if (!(await bu.moduleEnabledForAnyAccessible(req.user, moduleKey))) {
         return next(ApiError.forbidden('Modul ini tidak aktif untuk unit bisnis terkait.'));
       }
       next();

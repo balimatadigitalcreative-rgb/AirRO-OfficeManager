@@ -11,11 +11,11 @@ router.use(requireAuth);
 // mfg/nsn therefore has no distribution access at all (every endpoint 403s); "air"/all users are
 // unaffected. This is the single, consistent rule applied uniformly across the whole module.
 router.use(requireUnit('air'));
-// MODULE TOGGLE — distribution's availability follows the "air" unit's enabledModules (consistent
-// with the air mapping above): if the GM turns the distribusi module off for the Air unit, every
-// distribution endpoint 403s for everyone. Turning it off for another unit only affects that unit's
-// nav (client), since distribution data is air's.
-router.use(requireModule('distribusi', 'air'));
+// MODULE TOGGLE — distribution stays available while the distribusi module is enabled for ANY unit
+// the caller can access (the same union the client nav uses), so the nav and the API never disagree
+// and a default-'all' unit is always available. It only 403s when distribusi is off for every unit
+// the caller can see.
+router.use(requireModule('distribusi'));
 
 // ── Customers ──
 // Viewing the customer list/detail is part of base module access ('distribusi').

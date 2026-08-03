@@ -7,10 +7,10 @@ const { resolvePerms } = require('../config/permissions');
 
 const router = Router();
 router.use(requireAuth);
-// MODULE TOGGLE — the warehouse (gudang) has no per-row business unit (its models carry no
-// businessUnitId), so like distribution it maps to the "air" unit. Its availability follows the Air
-// unit's enabledModules: turn the gudang module off for Air and every warehouse endpoint 403s.
-router.use(requireModule('gudang', 'air'));
+// MODULE TOGGLE — the warehouse (gudang) has no per-row business unit, so its availability follows
+// the SAME union the client nav uses: available while gudang is enabled for ANY unit the caller can
+// access (a default-'all' unit is always available), 403 only when off for every accessible unit.
+router.use(requireModule('gudang'));
 
 // A stock 'correction' rewrites the counted quantity, so it needs the correction cap; every
 // other type is an ordinary stock-in. Runs AFTER validate(), so req.body.type is known-good.

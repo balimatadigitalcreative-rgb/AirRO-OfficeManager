@@ -80,23 +80,38 @@ describe('finance/hr per-unit enforcement', () => {
   });
 });
 
-describe('distribusi + gudang follow the AIR unit\'s modules', () => {
-  afterEach(async () => { await setModules(gm, 'air', 'all'); });   // always restore
+describe('distribusi + gudang availability = UNION across accessible units (nav ↔ API agree)', () => {
+  const units = ['air', 'manufaktur', 'unit3'];
+  afterEach(async () => { for (const u of units) await setModules(gm, u, 'all'); });   // always restore
 
-  it('distribusi OFF for Air → every distribution endpoint 403s', async () => {
-    await setModules(gm, 'air', ['finance', 'hr', 'gudang']);   // distribusi off
-    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(403);
-    expect((await request(app).get('/api/v1/distribusi/dashboard/summary').set(auth(gm))).status).toBe(403);
-    // gudang still fine (still enabled)
+  it('REGRESSION: distribusi OFF for Air but ON elsewhere → endpoints STILL 200 (no false 403)', async () => {
+    // This is the reported bug: the nav (union) showed the module while the API (air-only) 403'd.
+    await setModules(gm, 'air', ['finance', 'hr', 'gudang']);   // distribusi off for AIR only
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
+    expect((await request(app).get('/api/v1/distribusi/dashboard/summary').set(auth(gm))).status).toBe(200);
+  });
+  it('REGRESSION: gudang OFF for Air but ON elsewhere → warehouse endpoints STILL 200', async () => {
+    await setModules(gm, 'air', ['finance', 'hr', 'distribusi']);   // gudang off for AIR only
     expect((await request(app).get('/api/v1/gudang/summary').set(auth(gm))).status).toBe(200);
   });
-  it('gudang OFF for Air → every warehouse endpoint 403s (distribusi still fine)', async () => {
-    await setModules(gm, 'air', ['finance', 'hr', 'distribusi']);   // gudang off
+  it('a module 403s ONLY when it is off for EVERY unit the user can access', async () => {
+    for (const u of units) await setModules(gm, u, ['finance', 'hr', 'distribusi']);   // gudang off everywhere
     expect((await request(app).get('/api/v1/gudang/summary').set(auth(gm))).status).toBe(403);
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);   // distribusi still on
+  });
+  it('a SCOPED user: distribusi 403s when off for THEIR unit(s), even if another unit still has it', async () => {
+    // rezz can only access "air". Turn distribusi off for air (on elsewhere) → for rezz it's gone.
+    const r = await reg({ name: 'Rezz', username: 'mt_rezz', password: 'secret123', role: 'gm' });
+    await request(app).patch('/api/v1/users/' + r.user.id).set(auth(gm)).send({ unitScope: ['air'] });
+    const rezz = await require('supertest')(app).post('/api/v1/auth/login').send({ username: 'mt_rezz', password: 'secret123' }).then((x) => x.body.token);
+    await setModules(gm, 'air', ['finance', 'hr', 'gudang']);        // distribusi off for air
+    await setModules(gm, 'manufaktur', 'all');                        // still on for manufaktur (rezz can't see it)
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(rezz))).status).toBe(403);
+    // the all-access GM still reaches it (union includes manufaktur)
     expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
   });
-  it('re-enabling restores access', async () => {
-    await setModules(gm, 'air', 'all');
+  it('re-enabling restores access for everyone', async () => {
+    for (const u of units) await setModules(gm, u, 'all');
     expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
     expect((await request(app).get('/api/v1/gudang/summary').set(auth(gm))).status).toBe(200);
   });

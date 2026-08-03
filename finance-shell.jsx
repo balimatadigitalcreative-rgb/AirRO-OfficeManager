@@ -273,12 +273,42 @@ function FApp() {
   })();
   // A nav item passes the module gate if its group isn't a module (overview/admin → always on), or
   // its module is enabled for the active unit. Distribusi additionally needs "air" access (Stage B).
+  // THIS IS THE SINGLE SOURCE OF TRUTH for "is module M active for the current view" — the nav gate
+  // AND the screen-level guard both derive from it, so they can never disagree.
   const navPassesModule = (grp) => {
     const mod = NAV_MODULE_OF[grp];
     if (!mod) return true;
     if (!activeModules.has(mod)) return false;
     if (mod === 'distribusi' && !canDistribution) return false;
     return true;
+  };
+  // Screen id → nav group (for the screen-level guard). Built from the SAME navForRole list the nav
+  // uses, so a screen and its nav item always resolve to the same module.
+  const navGrpOf = (() => { const m = {}; navForRole(p, user ? user.role : '').forEach((n) => { m[n.id] = n.grp; }); return m; })();
+  // A module SCREEN is blocked only when its module is inactive for the current view AND we are
+  // viewing a SPECIFIC unit (never in the "Semua"/union view, never for a default-'all' unit) — with
+  // the one exception that a distribusi screen with no "air" access is blocked in every view (a pure
+  // mfg/nsn user). Reuses navPassesModule, so nav and screen agree by construction.
+  const screenModuleBlocked = (id) => {
+    const grp = navGrpOf[id];
+    const mod = grp && NAV_MODULE_OF[grp];
+    if (!mod) return false;                 // not a module screen (overview/admin) → never blocked
+    if (navPassesModule(grp)) return false; // module active for this view
+    if (mod === 'distribusi' && !canDistribution) return true;   // no air access — blocked in any view
+    return activeUnit !== 'all';            // module off for THIS specific unit (never surface in "Semua")
+  };
+  // The friendly "module off" notice for a blocked screen. A distribusi screen with no air access
+  // keeps its Stage-B "no access" wording; a plain module-off gets the "enable it in Unit settings"
+  // hint. (Management/overview screens are never modules, so they never reach here.)
+  const moduleNotice = (id) => {
+    const grp = navGrpOf[id]; const mod = grp && NAV_MODULE_OF[grp];
+    const distNoAir = mod === 'distribusi' && !canDistribution;
+    return (
+      <div className="card" style={{ padding: 28, textAlign: 'center', color: 'var(--text-mut)' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{tr(distNoAir ? 'unit.distNoAccessTitle' : 'unit.modOffTitle')}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-faint)' }}>{tr(distNoAir ? 'unit.distNoAccessHint' : 'unit.modOffHint')}</div>
+      </div>
+    );
   };
   // Keep the active-unit view context inside the user's scope: one allowed unit → fix to it (no
   // "Semua" that would imply other units); an out-of-scope selection → fall back to combined
@@ -1475,12 +1505,7 @@ function FApp() {
           {/* STAGE B — a user without "air" access opening any distribution screen sees a clear
               no-access notice (the API already 403s the data). Keeps the water module invisible to
               a pure mfg/nsn user without hiding the nav for everyone. */}
-          {screen && screen.indexOf('dist-') === 0 && !canDistribution ? (
-            <div className="card" style={{ padding: 28, textAlign: 'center', color: 'var(--text-mut)' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{tr('unit.distNoAccessTitle')}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--text-faint)' }}>{tr('unit.distNoAccessHint')}</div>
-            </div>
-          ) : (<>
+          {screen && screen.indexOf('dist-') === 0 && screenModuleBlocked(screen) ? moduleNotice(screen) : (<>
           {screen === 'dist-dashboard' && p.distribusiDashboard && (
             <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
@@ -1532,6 +1557,10 @@ function FApp() {
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
           </>)}
 
+          {/* Warehouse (gudang) + Setoran are module screens too — show the same friendly notice when
+              their module is off for the active unit (nav already hides them; this is the fallback so
+              the raw API 403 never leaks). Uses the SAME screenModuleBlocked as the nav gate. */}
+          {(screen === 'gudang' || screen === 'suppliers' || screen === 'setoran') && screenModuleBlocked(screen) ? moduleNotice(screen) : (<>
           {screen === 'gudang' && p.gudangView && (
             <GUDANG.Dept refreshKey={distTick} canAddStock={!!p.gudangAddStock} canKoreksi={!!p.gudangKoreksi} canBuffer={!!p.gudangBuffer}
               canItems={!!p.gudangItems} canSupplier={!!p.gudangSupplier} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} fleet={fleet} today={FIN.TODAY} />
@@ -1543,6 +1572,7 @@ function FApp() {
           {screen === 'setoran' && p.setoran && (
             <SETORAN.SetoranScreen setoran={setoran} onAdd={addSetoran} onEdit={editSetoran} onRemove={removeSetoran} fleet={fleet} setFleet={p.setoran ? applyFleet : null} accounts={accounts} canEdit={true} postedDays={setoranPosted} autoSynced={true} costPerGalon={settings.costPerGalon} onCostChange={(v) => applySettings((prev) => ({ ...prev, costPerGalon: v }))} depositAcct={settings.setoranAcct} onDepositAcctChange={(v) => applySettings((prev) => ({ ...prev, setoranAcct: v }))} mfgAcct={settings.mfgAcct} onMfgAcctChange={(v) => applySettings((prev) => ({ ...prev, mfgAcct: v }))} payments={custPayments} onAddPayment={addPayment} onDelPayment={delPayment} />
           )}
+          </>)}
 
           {screen === 'moneyspots' && p.cashflow && (
             <FIN.MoneySpots accounts={accounts} setAccounts={applyAccounts} entries={entries} transfers={transfers} setTransfers={applyTransfers} canEdit={p.addEntry} catMap={catMap} onOpenEntry={p.edit ? editEntryRow : null} units={allowedUnits} activeUnit={activeUnit} defaultUnit={unitDefaultForNew()} canInterUnit={!!p.interUnitTransfer} onInterUnit={doInterUnitTransfer} />

@@ -64,6 +64,22 @@ async function assertModuleEnabled(unitId, moduleKey) {
   }
 }
 
+// SINGLE SOURCE OF TRUTH for whole-module availability (distribusi/gudang — the "air-mapped" modules
+// with no per-row unit). A module is AVAILABLE to a user if it is enabled for ANY unit that user can
+// access — exactly the UNION the client nav uses (activeModules), so the nav gate and this server
+// gate never disagree. Default-on: a unit whose enabledModules is null/'all' counts as enabled, and
+// a user with no matching unit is never over-restricted. `unitScopeOf` is required lazily to avoid a
+// load-order cycle (scope.js ← auth.js ← this module's consumers).
+async function moduleEnabledForAnyAccessible(user, moduleKey) {
+  const { unitScopeOf } = require('../lib/scope');
+  const scope = unitScopeOf(user);   // null = full access (every unit)
+  const units = await prisma.businessUnit.findMany({ select: { id: true, enabledModules: true } });
+  const pool = (scope === null) ? units : units.filter((u) => scope.includes(u.id));
+  const effective = pool.length ? pool : units;   // scoped user with no matching unit → don't over-restrict
+  if (!effective.length) return true;              // no units at all → default-on
+  return effective.some((u) => moduleEnabledFor(u.enabledModules, moduleKey));
+}
+
 // Ensure the seed units exist (idempotent — create-if-absent by fixed id). Safe on every boot.
 async function seedBusinessUnits() {
   try {
@@ -190,4 +206,5 @@ module.exports = {
   seedBusinessUnits, backfillBusinessUnit, listUnits, createUnit, updateUnit, resolveUnitId,
   officeCodeFor, OFFICE_CODES, DEFAULT_OFFICE, auditOfficeUnitMismatch,
   parseEnabledModules, serializeEnabledModules, moduleEnabledFor, isModuleEnabled, assertModuleEnabled,
+  moduleEnabledForAnyAccessible,
 };
