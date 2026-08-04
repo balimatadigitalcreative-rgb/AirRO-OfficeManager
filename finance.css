@@ -2957,3 +2957,50 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
   .cl-cards { grid-template-columns: 1fr; }
   .cl-sort, .cl-viewtoggle { display: none; }
 }
+
+/* ============ Shared Print Center (pc-*) ============ */
+.pc-optcard { max-width: 460px; }
+.pc-check { display: flex; align-items: center; gap: 9px; margin-top: 12px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.pc-check input { width: 17px; height: 17px; }
+
+/* Document markers */
+.pc-tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; background: #eef1f4; color: #475569; vertical-align: middle; }
+.pc-tag.arsip { background: #eef2f6; color: #64748b; }
+.pc-tag.pnys { background: #f3ecfd; color: #7c3aed; }
+.pc-tag.batal { background: #fdecec; color: #dc2626; }
+.pc-note { color: var(--text-mut); font-size: 11.5px; }
+.pc-voidrow td { text-decoration: line-through; color: #94a3b8 !important; }
+
+.pc-notasisa { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.pc-notasisa b { font-size: 16px; color: var(--warn); }
+
+/* Totals — SISA BON AKHIR emphasized */
+.pc-totals .pc-sisa { border-left: 2px solid var(--green-800); padding-left: 10px; }
+.pc-totals .pc-sisa span { font-weight: 700; color: var(--ink); }
+.pc-totals .pc-sisa b { font-size: 18px; }
+
+/* Signature block */
+.pc-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 34px; }
+.pc-sign > div { text-align: center; font-size: 12.5px; color: var(--text-mut); }
+.pc-sign-line { border-bottom: 1px solid var(--ink); height: 46px; margin-bottom: 6px; }
+
+/* Receipt widths (screen preview) */
+.pc-sheet.pc-r58 { max-width: 320px; }
+.pc-sheet.pc-r80 { max-width: 420px; }
+.pc-sheet.pc-r58 .pc-table, .pc-sheet.pc-r80 .pc-table { min-width: 0; font-size: 11px; }
+.pc-sheet.pc-r58 .pc-sign { grid-template-columns: 1fr; gap: 18px; }
+
+/* ---- Print stylesheet: statement/receipt must print cleanly regardless of app chrome ---- */
+@media print {
+  @page { margin: 15mm; }
+  body.invoice-open .pc-table { width: 100%; min-width: 0 !important; }
+  body.invoice-open .pc-table thead { display: table-header-group; }   /* repeat header across pages */
+  body.invoice-open .pc-table tr, body.invoice-open .pc-totals, body.invoice-open .pc-sign, body.invoice-open .pc-notasisa { break-inside: avoid; }
+  body.invoice-open .pc-tag { border: 1px solid #cbd5e1; background: #fff !important; color: #000 !important; }
+  body.invoice-open .pc-voidrow td { color: #666 !important; }
+  body.invoice-open .pc-sign-line { border-bottom: 1px solid #000; }
+  /* Thermal widths — narrow content; the printer/driver selects the paper roll. */
+  body.invoice-open .pc-r58 { font-size: 10px; }
+  body.invoice-open .pc-r80 { font-size: 11px; }
+  body.invoice-open .pc-r58 .pc-sign, body.invoice-open .pc-r80 .pc-sign { grid-template-columns: 1fr; gap: 16px; }
+}

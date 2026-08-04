@@ -1588,106 +1588,204 @@ function InvoiceViewer({ invoice, onClose }) {
   );
 }
 
-// Printable FULL transaction-history document — evidence for when a customer disputes a
-// transaction. Reuses the invoice PRINT machinery (invoice-open body class + .invoice-overlay
-// / .no-print) and window.print, plus an optional period filter (all / date range / month).
-// Corrected & adjusted transactions are shown WITH their status + delta (never hidden) so the
-// record is credible; every row carries who recorded it (actorName) + when, and the footer
-// stamps who printed it and when.
-function TxnHistoryDoc({ customer, userName, onClose }) {
-  uEx(() => { document.body.classList.add('invoice-open'); const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => { document.body.classList.remove('invoice-open'); window.removeEventListener('keydown', o); }; }, []);
-  const [mode, setMode] = uSx('all');
-  const [from, setFrom] = uSx('');
-  const [to, setTo] = uSx('');
-  const [month, setMonth] = uSx(new Date().toISOString().slice(0, 7));
-  // Oldest → newest reads like a ledger on paper.
-  const all = (customer.transactions || []).slice().sort((a, b) => (a.txnDate < b.txnDate ? -1 : a.txnDate > b.txnDate ? 1 : (a.createdAt || 0) - (b.createdAt || 0)));
-  const inPeriod = (t) => {
-    if (mode === 'range') return (!from || t.txnDate >= from) && (!to || t.txnDate <= to);
-    if (mode === 'month') return (t.txnDate || '').slice(0, 7) === month;
-    return true;
-  };
-  const rows = all.filter(inPeriod);
-  let galon = 0, nilai = 0, terbayar = 0;
+// ════════════════ SHARED PRINT CENTER — one source of truth ════════════════
+// Options dialog (periode · arsip · penyesuaian · format · keluaran, remembered per user) → a
+// printable sheet that reuses the invoice PRINT machinery (body.invoice-open + .invoice-overlay /
+// .no-print + window.print). `mode`:
+//   'statement' — full ledger for a period, with a running "Sisa Bon Berjalan" column, arsip /
+//                 penyesuaian / cancelled markers, totals, and a signature block (bon disputes).
+//   'nota'      — a single-transaction receipt (props.txn).
+// `initial` carries the caller's on-screen filters (period/type/archive/search) so the toolbar
+// "Cetak" prints EXACTLY what is on screen. The final SISA BON AKHIR always shows customer.sisaBon
+// (the same figure as the on-screen KPI) so the printed statement reconciles to the app.
+const PRINT_PREF_KEY = 'airro_print_prefs_v1';
+const loadPrintPrefs = () => { try { return JSON.parse(localStorage.getItem(PRINT_PREF_KEY)) || {}; } catch (e) { return {}; } };
+const savePrintPrefs = (p) => { try { localStorage.setItem(PRINT_PREF_KEY, JSON.stringify(p)); } catch (e) {} };
+const printToday = () => (window.FIN && FIN.TODAY) || new Date().toISOString().slice(0, 10);
+const printPeriodBounds = (period, from, to) => {
+  const today = printToday();
+  if (period === '30') return { from: isoAddDays(today, -29), to: today };
+  if (period === 'month') return { from: today.slice(0, 8) + '01', to: today };
+  if (period === 'lastMonth') { const dt = new Date(today + 'T00:00:00'); const lm = new Date(dt.getFullYear(), dt.getMonth() - 1, 1); const end = new Date(dt.getFullYear(), dt.getMonth(), 0); const p2 = (n) => String(n).padStart(2, '0'); const iso = (x) => x.getFullYear() + '-' + p2(x.getMonth() + 1) + '-' + p2(x.getDate()); return { from: iso(lm), to: iso(end) }; }
+  if (period === 'range') return (from && to) ? { from, to } : null;
+  return null;   // 'all'
+};
+
+function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
+  const pref = loadPrintPrefs();
+  const init = initial || {};
+  const [step, setStep] = uSx('opt');   // 'opt' (options) → 'doc' (preview sheet)
+  const [period, setPeriod] = uSx(() => init.period || pref.period || 'all');   // all | 30 | month | lastMonth | range
+  const [from, setFrom] = uSx(init.from || '');
+  const [to, setTo] = uSx(init.to || '');
+  const [incArchive, setIncArchive] = uSx(() => init.incArchive != null ? init.incArchive : (pref.incArchive != null ? pref.incArchive : true));
+  const [incAdj, setIncAdj] = uSx(() => pref.incAdj != null ? pref.incAdj : true);
+  const [format, setFormat] = uSx(() => pref.format || 'a4');    // a4 | r58 | r80
+  const [output, setOutput] = uSx(() => pref.output || 'print'); // print | pdf | wa
+  const isNota = mode === 'nota';
+  const today = printToday();
+  const now = new Date(); const p2 = (n) => String(n).padStart(2, '0');
+  const stamp = now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate());
+  const stampTime = p2(now.getHours()) + ':' + p2(now.getMinutes());
+
+  // Sheet lifecycle: only add body.invoice-open while the SHEET is showing (not the options step),
+  // so the print machinery targets the document. Escape closes the current step.
+  uEx(() => {
+    if (step !== 'doc') return;
+    document.body.classList.add('invoice-open');
+    return () => document.body.classList.remove('invoice-open');
+  }, [step]);
+  uEx(() => { const o = (e) => { if (e.key === 'Escape') { step === 'doc' ? setStep('opt') : onClose(); } }; window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, [step]);
+
+  // Running receivable over ALL transactions (oldest→newest) so a period subset still shows the
+  // TRUE carried balance at each row. bonEffectOf mirrors the server BON rule.
+  const allOldNew = (customer.transactions || []).slice().sort((a, b) => (a.txnDate || '').localeCompare(b.txnDate || '') || (a.createdAt || 0) - (b.createdAt || 0));
+  const runMap = {}; let rb = 0; allOldNew.forEach((t) => { rb += bonEffectOf(t); runMap[t.id] = rb; });
+  const pb = printPeriodBounds(period, from, to);
+  const q = String(init.search || '').trim().toLowerCase();
+  const matchSearch = (t) => !q || [txnCode(t), t.note, String(t.amount)].some((x) => String(x || '').toLowerCase().includes(q));
+  const rows = isNota ? (txn ? [txn] : []) : allOldNew.filter((t) => (
+    (!pb || ((t.txnDate || '') >= pb.from && (t.txnDate || '') <= pb.to)) &&
+    (incArchive || !t.legacy) &&
+    (!init.type || init.type === 'all' || t.method === init.type) &&
+    matchSearch(t)
+  ));
+  const effOf = (t) => (t.effectiveAmount != null ? t.effectiveAmount : t.amount);
+  let galon = 0, pembelian = 0, pembayaran = 0;
   rows.forEach((t) => {
-    galon += t.qty || 0;
-    const eff = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
-    if (t.method === 'lunas') { nilai += eff; terbayar += eff; }
-    else if (t.method === 'bon') { nilai += eff; }
-    else if (t.method === 'pelunasan') { terbayar += t.amount; }
+    if (t.voided) return;
+    galon += t.legacy ? 0 : (t.qty || 0);
+    if (t.method === 'lunas') { pembelian += effOf(t); pembayaran += effOf(t); }
+    else if (t.method === 'bon') { pembelian += effOf(t); }
+    else if (t.method === 'pelunasan') { pembayaran += t.amount; }
   });
-  const now = new Date(); const pad = (n) => String(n).padStart(2, '0');
-  const stamp = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-  const stampTime = pad(now.getHours()) + ':' + pad(now.getMinutes());
-  const docNo = 'RWT-' + String(customer.id || '').slice(-6).toUpperCase() + '-' + stamp.replace(/-/g, '');
-  const periodLabel = mode === 'range' ? ((from || '…') + ' – ' + (to || '…')) : mode === 'month' ? month : trD('dist.periodAll');
+  const approvedAdj = (customer.adjustments || []).filter((a) => a.status === 'approved');
+  const adjBonTotal = approvedAdj.filter((a) => a.kind === 'bon').reduce((s, a) => s + ((a.after || 0) - (a.before || 0)), 0);
+  const sisaAkhir = customer.sisaBon || 0;   // == the on-screen Sisa Bon KPI, by construction
+  const docNo = (isNota ? 'NOTA-' : 'RWT-') + String((isNota && txn ? txn.id : customer.id) || '').slice(-6).toUpperCase() + '-' + stamp.replace(/-/g, '');
+  const periodLabel = isNota ? '—' : (period === 'range' ? ((from || '…') + ' – ' + (to || '…')) : period === 'all' ? trD('dist.periodAll') : trD('pc.p' + period.charAt(0).toUpperCase() + period.slice(1)));
+
   const share = () => {
-    const lines = ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + (customer.code ? customer.code + ' · ' : '') + customer.name, trD('dist.period') + ': ' + periodLabel, '',
-      trD('dist.totalGalon') + ': ' + numX(galon), trD('dist.histTotalValue') + ': ' + rpFull(nilai), trD('dist.histTotalPaid') + ': ' + rpFull(terbayar), trD('dist.sisaBon') + ': ' + rpFull(customer.sisaBon || 0),
-      '', trD('dist.txnCount', { n: rows.length }) + ' · ' + docNo];
+    const lines = isNota && txn
+      ? ['*' + trD('pc.docNota') + '*', BIZ_NAME, (customer.code ? customer.code + ' · ' : '') + customer.name, '',
+          txnCode(txn) + ' · ' + txn.txnDate, methodLabel(txn.method) + ' · ' + numX(txn.qty) + ' ' + trD('dist.galonUnit') + ' × ' + rpFull(txn.unitPriceLocked), trD('dist.amount') + ': ' + rpFull(effOf(txn)),
+          txn.method === 'bon' ? trD('dist.sisaBon') + ': ' + rpFull(Math.max(0, runMap[txn.id] || 0)) : '', '', docNo].filter(Boolean)
+      : ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + (customer.code ? customer.code + ' · ' : '') + customer.name, trD('dist.period') + ': ' + periodLabel, '',
+          trD('dist.totalGalon') + ': ' + numX(galon), trD('pc.totPembelian') + ': ' + rpFull(pembelian), trD('pc.totPembayaran') + ': ' + rpFull(pembayaran), trD('pc.sisaAkhir') + ': ' + rpFull(sisaAkhir), '', trD('dist.txnCount', { n: rows.length }) + ' · ' + docNo];
     window.open('https://wa.me/' + waNumber(customer.phone) + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
   };
+  const commit = () => {
+    savePrintPrefs({ period, incArchive, incAdj, format, output });
+    if (output === 'wa') { share(); onClose(); return; }
+    setStep('doc');
+  };
+  const doPrint = () => window.print();
+
+  // ── OPTIONS STEP ──
+  if (step === 'opt') {
+    const periodOpts = [['all', trD('dist.periodAll')], ['30', trD('pc.p30')], ['month', trD('pc.pMonth')], ['lastMonth', trD('pc.pLastMonth')], ['range', trD('pc.pRange')]];
+    const fmtOpts = [['a4', trD('pc.fmtA4')], ['r58', trD('pc.fmt58')], ['r80', trD('pc.fmt80')]];
+    const outOpts = [['print', trD('pc.outPrint')], ['pdf', trD('pc.outPdf')]].concat(customer.phone ? [['wa', trD('pc.outWa')]] : []);
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+        <div className="modal-card pc-optcard" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{isNota ? trD('pc.titleNota') : trD('pc.titleStatement')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.code ? customer.code + ' · ' : ''}{customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+          <div className="modal-body">
+            {!isNota && (<>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('pc.period')}</label>
+              <div className="cat-chips">{periodOpts.map(([k, l]) => <button key={k} type="button" className={`cat-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+              {period === 'range' && (
+                <div className="dist-form-row" style={{ marginTop: 10 }}>
+                  <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.from')}</label><DP.DateField value={from} onChange={setFrom} max={to || today} /></div>
+                  <div style={{ flex: 1 }}><label className="fld-label">{trD('dist.to')}</label><DP.DateField value={to} onChange={setTo} min={from || undefined} max={today} /></div>
+                </div>
+              )}
+              <label className="pc-check"><input type="checkbox" checked={incArchive} onChange={(e) => setIncArchive(e.target.checked)} /><span>{trD('pc.incArchive')}</span></label>
+              <label className="pc-check"><input type="checkbox" checked={incAdj} onChange={(e) => setIncAdj(e.target.checked)} /><span>{trD('pc.incAdj')}</span></label>
+            </>)}
+            <label className="fld-label">{trD('pc.format')}</label>
+            <div className="cat-chips">{fmtOpts.map(([k, l]) => <button key={k} type="button" className={`cat-chip ${format === k ? 'on' : ''}`} onClick={() => setFormat(k)}>{l}</button>)}</div>
+            <label className="fld-label">{trD('pc.output')}</label>
+            <div className="cat-chips">{outOpts.map(([k, l]) => <button key={k} type="button" className={`cat-chip ${output === k ? 'on' : ''}`} onClick={() => setOutput(k)}>{l}</button>)}</div>
+          </div>
+          <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" onClick={commit}>{output === 'wa' ? trD('pc.outWa') : trD('pc.preview')}</button></div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PREVIEW / DOCUMENT STEP ──
+  const custLine2 = [customer.phone || '—', customer.type ? typeLabel(customer.type) : '', customer.armada || ''].filter(Boolean).join(' · ');
   return (
-    <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 210 }}>
-      <div className="invoice-sheet dist-hist-sheet" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className={'invoice-sheet dist-hist-sheet pc-sheet pc-' + format} data-sisa-akhir={sisaAkhir} onClick={(e) => e.stopPropagation()}>
         <div className="inv-head">
           <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><Logo s={34} /><div><div className="inv-biz">{BIZ_NAME}</div><div className="inv-biz-sub">{BIZ_SUB}</div></div></div>
           <div className="inv-actions no-print">
-            <button className="btn btn-ghost" onClick={() => window.print()}><IconDownload s={16} />{trD('dist.print')}</button>
-            {customer.phone ? <button className="btn btn-ghost" onClick={share}><IconInvoice s={16} />WhatsApp</button> : null}
+            <button className="btn btn-ghost" onClick={() => setStep('opt')}><IconCaret s={15} style={{ transform: 'rotate(90deg)' }} />{trD('pc.back')}</button>
+            <button className="btn btn-primary" onClick={doPrint}><IconDownload s={16} />{output === 'pdf' ? trD('pc.outPdf') : trD('dist.print')}</button>
+            {customer.phone ? <button className="btn btn-ghost" onClick={share}><IconWhatsApp s={16} />WhatsApp</button> : null}
             <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
           </div>
         </div>
-        <div className="dist-hist-filter no-print">
-          <span className="dist-hist-flabel">{trD('dist.period')}:</span>
-          {[['all', 'dist.periodAll'], ['range', 'dist.periodRange'], ['month', 'dist.periodMonth']].map(([k, l]) => <button key={k} type="button" className={`cat-chip ${mode === k ? 'on' : ''}`} onClick={() => setMode(k)}>{trD(l)}</button>)}
-          {mode === 'range' && (<><DP.DateField value={from} onChange={setFrom} max={to || stamp} /><span>–</span><DP.DateField value={to} onChange={setTo} min={from || undefined} max={stamp} /></>)}
-          {mode === 'month' && <input type="month" className="fld dist-hist-date" value={month} onChange={(e) => setMonth(e.target.value)} />}
-        </div>
         <div className="inv-meta">
-          <div><div className="inv-title">{trD('dist.histTitle')}</div><div className="inv-num">{docNo}</div></div>
-          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{customer.code ? customer.code + ' · ' : ''}{customer.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{customer.phone || '—'}{customer.armada ? ' · ' + customer.armada : ''}</div></div>
+          <div><div className="inv-title">{isNota ? trD('pc.docNota') : trD('pc.docStatement')}</div><div className="inv-num">{docNo}</div></div>
+          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{customer.code ? customer.code + ' · ' : ''}{customer.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{custLine2}</div>{customer.address ? <div style={{ color: 'var(--text-mut)', fontSize: 12 }}>{customer.address}</div> : null}</div>
         </div>
-        <div className="inv-dates"><span>{trD('dist.issueDate')}: <b>{stamp}</b></span><span>{trD('dist.period')}: <b>{periodLabel}</b></span></div>
+        <div className="inv-dates"><span>{trD('pc.printDate')}: <b>{stamp}</b></span>{!isNota && <span>{trD('dist.period')}: <b>{periodLabel}</b></span>}</div>
         <div className="inv-table-wrap">
-          <table className="inv-table dist-hist-table">
-            <thead><tr><th>{trD('dist.docNoShort')}</th><th>{trD('dist.date')}</th><th>{trD('dist.method')}</th><th className="r">Qty × {trD('dist.hargaPerGalon')}</th><th className="r">{trD('dist.amount')}</th></tr></thead>
+          <table className="inv-table dist-hist-table pc-table">
+            <thead><tr>
+              <th>{trD('pc.colDate')}</th><th>{trD('pc.colCode')}</th><th>{trD('pc.colType')}</th>
+              <th className="r">{trD('pc.colGalon')}</th><th className="r">{trD('pc.colUnit')}</th><th className="r">{trD('pc.colAmount')}</th>
+              {!isNota && <th className="r">{trD('pc.colRunning')}</th>}
+            </tr></thead>
             <tbody>{rows.length === 0
-              ? <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('dist.noTxn')}</td></tr>
-              : rows.map((t) => {
-                // Always the EFFECTIVE amount (corrections/adjustments folded in) so totals are
-                // accurate — no status/koreksi markers, just the correct number.
-                const eff = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
-                return (
-                  <tr key={t.id}>
-                    <td className="tnum">{shortRef(t.id)}</td>
-                    <td className="tnum">{t.txnDate}</td>
-                    <td>{methodLabel(t.method)}{t.openingBon ? ' · ' + trD('dist.obLabel') : ''}{t.note ? ' · ' + t.note : ''}</td>
-                    <td className="r tnum">{t.method === 'pelunasan' ? '—' : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}</td>
-                    <td className="r tnum">{rpFull(eff)}</td>
-                  </tr>
-                );
-              })}</tbody>
+              ? <tr><td colSpan={isNota ? 6 : 7} style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('dist.noTxn')}</td></tr>
+              : rows.map((t) => (
+                <tr key={t.id} className={t.voided ? 'pc-voidrow' : ''}>
+                  <td className="tnum">{fmtDateShort(t.txnDate)}</td>
+                  <td className="tnum">{txnCode(t)}</td>
+                  <td>{methodLabel(t.method)}
+                    {t.legacy ? <span className="pc-tag arsip">{trD('pc.tagArsip')}</span> : null}
+                    {t.openingBon ? <span className="pc-tag">{trD('dist.obLabel')}</span> : null}
+                    {t.voided ? <span className="pc-tag batal">{trD('pc.tagBatal')}</span> : null}
+                    {t.note ? <span className="pc-note"> · {t.note}</span> : null}
+                  </td>
+                  <td className="r tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</td>
+                  <td className="r tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</td>
+                  <td className="r tnum">{rpFull(effOf(t))}</td>
+                  {!isNota && <td className="r tnum">{rpFull(Math.max(0, runMap[t.id] || 0))}</td>}
+                </tr>
+              ))}</tbody>
           </table>
         </div>
-        {/* Approved balance adjustments — printed as their own section so the statement reconciles. */}
-        {(customer.adjustments || []).filter((a) => a.status === 'approved').length > 0 && (
+        {/* Approved balance adjustments — their own section so the statement reconciles to sisa bon. */}
+        {!isNota && incAdj && approvedAdj.length > 0 && (
           <div style={{ marginTop: 12 }}>
-            <div className="sec-title" style={{ marginBottom: 6 }}>{trD('adj.tableTitle')}</div>
-            <table className="dist-hist-table"><thead><tr><th>{trD('adj.colDate')}</th><th>{trD('adj.colKind')}</th><th className="r">{trD('adj.colChange')}</th><th>{trD('adj.colReason')}</th></tr></thead>
-              <tbody>{(customer.adjustments || []).filter((a) => a.status === 'approved').map((a) => (
+            <div className="sec-title" style={{ marginBottom: 6 }}>{trD('adj.tableTitle')} <span className="pc-tag pnys">{trD('pc.tagPenyesuaian')}</span></div>
+            <table className="dist-hist-table pc-table"><thead><tr><th>{trD('adj.colDate')}</th><th>{trD('adj.colKind')}</th><th className="r">{trD('adj.colChange')}</th><th>{trD('adj.colReason')}</th></tr></thead>
+              <tbody>{approvedAdj.map((a) => (
                 <tr key={a.id}><td>{fmtDT(a.createdAt)}</td><td>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}{a.reversalOf ? ' · ' + trD('adj.reversalBadge') : ''}</td><td className="r tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → {(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</td><td>{adjReasonLabel(a.reason)}</td></tr>
               ))}</tbody>
             </table>
           </div>
         )}
-        <div className="dist-hist-summary">
+        {isNota && txn && txn.method === 'bon' && (
+          <div className="pc-notasisa"><span>{trD('pc.notaSisaAfter')}</span><b className="tnum">{rpFull(Math.max(0, runMap[txn.id] || 0))}</b></div>
+        )}
+        <div className="dist-hist-summary pc-totals">
           <div><span>{trD('dist.totalGalon')}</span><b className="tnum">{numX(galon)}</b></div>
-          <div><span>{trD('dist.histTotalValue')}</span><b className="tnum">{rpFull(nilai)}</b></div>
-          <div><span>{trD('dist.histTotalPaid')}</span><b className="tnum">{rpFull(terbayar)}</b></div>
-          <div><span>{trD('dist.sisaBon')}</span><b className="tnum" style={{ color: (customer.sisaBon || 0) > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{rpFull(customer.sisaBon || 0)}</b></div>
+          <div><span>{trD('pc.totPembelian')}</span><b className="tnum">{rpFull(pembelian)}</b></div>
+          <div><span>{trD('pc.totPembayaran')}</span><b className="tnum">{rpFull(pembayaran)}</b></div>
+          {!isNota && <div><span>{trD('pc.totPenyesuaian')}</span><b className="tnum">{rpFull(adjBonTotal)}</b></div>}
+          <div className="pc-sisa"><span>{trD('pc.sisaAkhir')}</span><b className="tnum" data-testid="pc-sisa" style={{ color: sisaAkhir > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{rpFull(sisaAkhir)}</b></div>
         </div>
-        <div className="inv-by">{trD('dist.printedBy', { u: userName || '—', t: stamp + ' ' + stampTime })} · {trD('dist.txnCount', { n: rows.length })}</div>
+        <div className="pc-sign">
+          <div><div className="pc-sign-line" />{trD('pc.signCust')}</div>
+          <div><div className="pc-sign-line" />{trD('pc.signStaff')}</div>
+        </div>
+        <div className="inv-by">{trD('dist.printedBy', { u: userName || '—', t: stamp + ' ' + stampTime })}{!isNota ? ' · ' + trD('dist.txnCount', { n: rows.length }) : ''}</div>
       </div>
     </div>
   );
@@ -2069,7 +2167,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [invoices, setInvoices] = uSx([]);       // this customer's invoice history
   const [invBuilder, setInvBuilder] = uSx(false); // Buat Invoice modal
   const [invView, setInvView] = uSx(null);        // printable invoice viewer
-  const [histOpen, setHistOpen] = uSx(false);     // printable full transaction-history doc
+  const [printFor, setPrintFor] = uSx(null);      // { mode:'statement'|'nota', txn?, initial? } → shared PrintCenter
   const [legacyOpen, setLegacyOpen] = uSx(false); // legacy (archive) transaction import modal
   const [payFor, setPayFor] = uSx(null);          // standalone Pelunasan Bon for this customer
   const [pnrFor, setPnrFor] = uSx(null);          // "Pelunasan tidak diterima" adjustment (cap-gated)
@@ -2536,7 +2634,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
       canBonAdjust && d.sisaBon > 0 && { k: 'pnr', label: trD('pnr.btn'), ic: 'IconWarn', fn: () => setPnrFor(d) },
       canPenyesuaian && { k: 'adjg', label: trD('adj.title') + ' · ' + trD('adj.kindGalon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'galon' }) },
       canPenyesuaian && { k: 'adjb', label: trD('adj.title') + ' · ' + trD('adj.kindBon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'bon' }) },
-      { k: 'hist', label: trD('dist.printHistory'), ic: 'IconDownload', fn: () => setHistOpen(true) },
+      { k: 'hist', label: trD('dist.printHistory'), ic: 'IconDownload', fn: () => setPrintFor({ mode: 'statement' }) },
       canLegacyImport && { k: 'imp', label: trD('dist.liBtn'), ic: 'IconDownload', fn: () => setLegacyOpen(true) },
       canCustomers && { k: 'edit', label: trD('dist.editCust'), ic: 'IconPencil', fn: () => openEdit(d) },
       canDelete && d.active === false && { k: 're', label: trD('dist.reactivate'), ic: 'IconRefresh', fn: () => doReactivate(d) },
@@ -2570,7 +2668,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
               <div><span>{trD('cd.expandSrc')}</span><b>{src.lbl}{t.importBatchId ? ' · ' + t.importBatchId : ''}</b></div>
               {t.note ? <div><span>{trD('cd.expandNote')}</span><b>{t.note}</b></div> : null}
               {t.voided ? <div><span>{trD('cd.actVoid')}</span><b>{t.voidReason || '—'}{t.voidedByName ? ' · ' + t.voidedByName : ''}</b></div> : null}
-              <div className="cd-txn-detail-act"><button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(t)}><IconInvoice s={13} />{trD('cd.copyDetail')}</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={13} />{trD('cd.printNota')}</button></div>
+              <div className="cd-txn-detail-act"><button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(t)}><IconInvoice s={13} />{trD('cd.copyDetail')}</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrintFor({ mode: 'nota', txn: t })}><IconDownload s={13} />{trD('cd.printNota')}</button></div>
             </div>
           )}
         </div>
@@ -2671,7 +2769,9 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                 <label className="cd-toggle"><input type="checkbox" checked={cdArchive} onChange={(e) => setCdArchive(e.target.checked)} />{trD('cd.showArchive')}</label>
                 <div style={{ flex: 1 }} />
                 <button type="button" className="btn btn-ghost btn-sm" disabled={!rowsFiltered.length} onClick={exportCsv}><IconDownload s={13} style={{ transform: 'rotate(180deg)' }} />{trD('rep.csv')}</button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={13} />{trD('dist.print')}</button>
+                {/* Prints EXACTLY the on-screen view: pass the resolved period bounds + type + archive
+                    + search so the document filters identically to what's rendered. */}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrintFor({ mode: 'statement', initial: { period: pb ? 'range' : 'all', from: pb ? pb.from : '', to: pb ? pb.to : '', incArchive: cdArchive, type: cdType, search: cdSearch } })}><IconDownload s={13} />{trD('dist.print')}</button>
               </div>
               <div className="card cd-card cd-txn-card">
                 <div className="cd-txn-head" role="row">
@@ -2766,7 +2866,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
         </>)}
         {invBuilder && d && <InvoiceBuilder customer={d} onClose={() => setInvBuilder(false)} onCreated={(iv) => { setInvBuilder(false); setInvView(iv); loadInvoices(d.id); if (onChanged) onChanged(); }} />}
         {invView && <InvoiceViewer invoice={invView} onClose={() => setInvView(null)} />}
-        {histOpen && d && <TxnHistoryDoc customer={d} userName={userName} onClose={() => setHistOpen(false)} />}
+        {printFor && d && <PrintCenter customer={d} userName={userName} mode={printFor.mode} txn={printFor.txn} initial={printFor.initial} onClose={() => setPrintFor(null)} />}
         {legacyOpen && d && <LegacyImportModal customer={d} onClose={() => setLegacyOpen(false)} onDone={(res) => { setLegacyOpen(false); flash(trD('dist.liDone', { n: res.imported, m: res.skipped })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {pnrFor && <PaymentNotReceivedModal customer={pnrFor} today={new Date().toISOString().slice(0, 10)} onClose={() => setPnrFor(null)} onSaved={(res) => { setPnrFor(null); flash(trD('pnr.saved', { amt: rpFull(res.amount), who: res.responsibleName || '' })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
