@@ -538,31 +538,28 @@ function parseLegacyDate(v) {
 // and NO GallonMovement is ever written. Idempotent: dedupe by (customerId+date+qty+amount) within
 // the batch AND against existing rows. The customerId comes from the ROUTE — any customer column in
 // the file is ignored. Fleet scope + audit enforced.
-// Derive the transaction from one imported row (the SAME rule the client preview uses). Columns:
-// Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan. Exactly ONE of Lunas/Bon must be
-// filled (this archive import records PURCHASES only). The date is re-parsed robustly from the raw
-// value (any d/m/y format), never trusting a pre-normalised client string. Returns { ok, method,
-// qty, price, amount } or { ok:false, reason }. Also accepts the legacy shape {qty, method}.
-function deriveLegacyRow(row) {
+// EXPAND one imported row into ALL its transactions (the SAME rule the client preview uses). Columns:
+// Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan. A single row may
+// produce 1–3 transactions, all on the row's date: Lunas (qty×Harga), Bon (qty×Harga), Pelunasan
+// (payment amount). Harga is required for a purchase qty. The date is re-parsed robustly from the raw
+// value (any d/m/y format), never trusting a pre-normalised client string. Returns { date, note,
+// txns:[{method,qty,price,amount}] }; date=null (or empty txns) means the row is skipped. Also
+// accepts the legacy {qty, method} shape. (The new client sends pre-expanded single-action rows, so
+// each call usually yields one txn; expanding here also handles a hand-crafted multi-action row.)
+function expandLegacyRow(row) {
   const date = parseLegacyDate(row.txnDate);
-  if (!date) return { ok: false, reason: 'Tanggal tidak valid' };
+  if (!date) return { date: null, txns: [] };
   const price = Math.round(+row.price || 0);
   const lunasQty = Math.round(+row.lunasQty || 0);
   const bonQty = Math.round(+row.bonQty || 0);
-  // legacy fallback: {qty, method} with no action columns → treat as that purchase
-  const legacyQty = Math.round(+row.qty || 0);
-  const filled = [lunasQty > 0, bonQty > 0].filter(Boolean).length;
-  if (filled === 0 && legacyQty > 0) {
-    const method = row.method === 'bon' ? 'bon' : 'lunas';
-    if (!(price > 0)) return { ok: false, reason: 'Harga wajib untuk pembelian' };
-    return { ok: true, date, method, qty: legacyQty, price, amount: legacyQty * price };
-  }
-  if (filled === 0) return { ok: false, reason: 'Tidak ada aksi (isi salah satu: Lunas/Bon)' };
-  if (filled > 1) return { ok: false, reason: 'Lunas dan Bon terisi keduanya — isi hanya satu' };
-  const method = lunasQty > 0 ? 'lunas' : 'bon';
-  const qty = lunasQty > 0 ? lunasQty : bonQty;
-  if (!(price > 0)) return { ok: false, reason: 'Harga wajib untuk pembelian' };
-  return { ok: true, date, method, qty, price, amount: qty * price };
+  const pay = Math.round(+row.paymentAmount || 0);
+  const legacyQty = Math.round(+row.qty || 0);   // legacy fallback: plain qty + optional metode
+  const txns = [];
+  if (lunasQty > 0 && price > 0) txns.push({ method: 'lunas', qty: lunasQty, price, amount: lunasQty * price });
+  if (bonQty > 0 && price > 0) txns.push({ method: 'bon', qty: bonQty, price, amount: bonQty * price });
+  if (pay > 0) txns.push({ method: 'pelunasan', qty: 0, price: 0, amount: pay });
+  if (!txns.length && legacyQty > 0 && price > 0) txns.push({ method: row.method === 'bon' ? 'bon' : 'lunas', qty: legacyQty, price, amount: legacyQty * price });
+  return { date, note: String(row.note || '').slice(0, 300), txns };
 }
 
 async function importLegacyTransactions(customerId, rows, actor, clientSkipped, includeBon) {
@@ -582,19 +579,23 @@ async function importLegacyTransactions(customerId, rows, actor, clientSkipped, 
   const bonCounted = includeBon !== false;
   let created = 0, serverSkipped = 0;
   for (const row of list) {
-    const d = deriveLegacyRow(row);
-    if (!d.ok) { serverSkipped++; continue; }
-    if (d.amount <= 0 || overCeiling(d.amount)) { serverSkipped++; continue; }
-    const k = key(d.date, d.method, d.amount);
-    if (seen.has(k)) { serverSkipped++; continue; }   // duplicate
-    seen.add(k);
-    await prisma.distTransaction.create({ data: {
-      customerId, fleetId: customer.armada || '', qty: d.qty, unitPriceLocked: d.price, amount: d.amount, method: d.method, bonCounted,
-      note: String(row.note || '').slice(0, 300), txnDate: d.date, legacy: true, importBatchId: batchId,
-      actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
-    } });   // legacy=true + NO GallonMovement — purchases stay archive-only; a pelunasan reduces sisa
-            // bon because the receivable math (BON_TXN) counts legacy bon/pelunasan (see top of file).
-    created++;
+    const ex = expandLegacyRow(row);
+    if (!ex.date || !ex.txns.length) { serverSkipped++; continue; }   // bad date / no action
+    // Each transaction the row expands to is created + deduped INDEPENDENTLY, so a same-date lunas &
+    // bon both land (different type/amount) and a re-import skips the exact transactions already there.
+    for (const t of ex.txns) {
+      if (t.amount <= 0 || overCeiling(t.amount)) { serverSkipped++; continue; }
+      const k = key(ex.date, t.method, t.amount);
+      if (seen.has(k)) { serverSkipped++; continue; }   // duplicate
+      seen.add(k);
+      await prisma.distTransaction.create({ data: {
+        customerId, fleetId: customer.armada || '', qty: t.qty, unitPriceLocked: t.price, amount: t.amount, method: t.method, bonCounted,
+        note: ex.note, txnDate: ex.date, legacy: true, importBatchId: batchId,
+        actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+      } });   // legacy=true + NO GallonMovement — purchases stay archive-only; a pelunasan reduces sisa
+              // bon because the receivable math (BON_TXN) counts legacy bon/pelunasan (see top of file).
+      created++;
+    }
   }
   const skipped = Math.max(0, Math.round(+clientSkipped || 0)) + serverSkipped;
   await logAudit('impor', `Impor riwayat: ${customer.name}`, `batch ${batchId} · ${created} ditambah · ${skipped} dilewati (duplikat/invalid)`, snap, customer.armada);

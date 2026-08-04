@@ -531,47 +531,53 @@ function parseLegacyDate(v) {
   return null;
 }
 // Ready-to-fill CSV template for the per-customer legacy transaction import: Tanggal · Harga ·
-// Pembelian Lunas · Pembelian Bon · Catatan. Fill exactly ONE of Lunas/Bon per row. The Tanggal
-// column accepts any day/month/year format (dd/mm/yyyy, d-m-yy, yyyy-mm-dd, …).
+// Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan. A single row may hold any mix of
+// Lunas / Bon / Pembayaran (they become separate transactions on the same date). The Tanggal column
+// accepts any day/month/year format (dd/mm/yyyy, d-m-yy, yyyy-mm-dd, …).
 function downloadLegacyTemplate() {
   const rows = [
-    ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Catatan'],
-    ['15/01/2026', '12000', '10', '', 'penjualan lunas'],
-    ['16/01/2026', '12000', '', '5', 'penjualan bon'],
+    ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan'],
+    ['15/01/2026', '12000', '10', '', '', 'penjualan lunas'],
+    ['16/01/2026', '13000', '2', '3', '', 'lunas + bon sekaligus'],
+    ['20/01/2026', '', '', '', '30000', 'pembayaran bon'],
   ];
   const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-riwayat-transaksi.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-// Derive the transaction from one parsed legacy row — the SAME rule the server uses. Columns:
-// Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan. Exactly ONE of lunasQty / bonQty
-// must be > 0 (this archive import records PURCHASES only). Returns { type, qty, price, amount,
-// status }. Also accepts the legacy {qty, metode} shape when no action column is filled.
-function deriveLegacyImportRow(cells, colMap, cellAt) {
+// EXPAND one parsed legacy row into ALL its transactions (the SAME rule the server uses). Columns:
+// Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan. A single row may
+// produce 1–3 transactions, all on the row's date:
+//   • Pembelian Lunas qty > 0 → LUNAS  (qty × Harga)
+//   • Pembelian Bon   qty > 0 → BON    (qty × Harga, adds to sisa bon)
+//   • Pembayaran Bon  amount>0 → PELUNASAN (reduces sisa bon)
+// Harga is required when either qty > 0. Returns an ARRAY of preview items { type, qty, price,
+// amount, status, date, dateRaw, note }. A bad date or a fully empty row yields ONE skipped item.
+function expandLegacyImportRow(cells, colMap, cellAt) {
   const dateRaw = cellAt(cells, colMap.date);
   const date = parseLegacyDate(dateRaw);
   const digits = (i) => { const c = cellAt(cells, i); return c === '' ? null : (parseInt(c.replace(/[^0-9]/g, ''), 10)); };
   const price = colMap.price >= 0 ? digits(colMap.price) : null;
   const lunasQty = colMap.lunas >= 0 ? (digits(colMap.lunas) || 0) : 0;
   const bonQty = colMap.bon >= 0 ? (digits(colMap.bon) || 0) : 0;
+  const pay = colMap.pay >= 0 ? (digits(colMap.pay) || 0) : 0;
   // legacy fallback: a plain qty + optional metode column, no action columns filled
   const legQty = colMap.qty >= 0 ? (digits(colMap.qty) || 0) : 0;
   const legMethod = colMap.method >= 0 && /bon/i.test(cellAt(cells, colMap.method)) ? 'bon' : 'lunas';
   const note = colMap.note >= 0 ? cellAt(cells, colMap.note) : '';
   const base = { dateRaw, date, note };
-  if (!date) return { ...base, type: null, qty: 0, price, amount: 0, status: 'baddate' };
-  const filled = [lunasQty > 0, bonQty > 0].filter(Boolean).length;
-  if (filled === 0 && legQty > 0) {
-    if (!(price > 0)) return { ...base, type: legMethod, qty: legQty, price, amount: 0, status: 'noprice' };
-    return { ...base, type: legMethod, qty: legQty, price, amount: legQty * price, status: 'ok' };
-  }
-  if (filled === 0) return { ...base, type: null, qty: 0, price, amount: 0, status: 'noaction' };
-  if (filled > 1) return { ...base, type: null, qty: 0, price, amount: 0, status: 'multi' };   // both Lunas & Bon
-  const type = lunasQty > 0 ? 'lunas' : 'bon';
-  const qty = lunasQty > 0 ? lunasQty : bonQty;
-  if (!(price > 0)) return { ...base, type, qty, price, amount: 0, status: 'noprice' };
-  return { ...base, type, qty, price, amount: qty * price, status: 'ok' };
+  if (!date) return [{ ...base, type: null, qty: 0, price, amount: 0, status: 'baddate' }];
+  const items = [];
+  const addPurchase = (type, qty) => items.push((price > 0)
+    ? { ...base, type, qty, price, amount: qty * price, status: 'ok' }
+    : { ...base, type, qty, price, amount: 0, status: 'noprice' });   // Harga wajib untuk pembelian
+  if (lunasQty > 0) addPurchase('lunas', lunasQty);
+  if (bonQty > 0) addPurchase('bon', bonQty);
+  if (pay > 0) items.push({ ...base, type: 'pelunasan', qty: 0, price: 0, amount: pay, status: 'ok' });
+  if (!items.length && legQty > 0) addPurchase(legMethod, legQty);
+  if (!items.length) return [{ ...base, type: null, qty: 0, price, amount: 0, status: 'empty' }];
+  return items;
 }
 // Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
 const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng;
@@ -1641,12 +1647,11 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const existing = new Set((customer.transactions || []).map((t) => `${t.txnDate}|${t.method}|${t.amount}`));
   const rawCells = fileRows || text.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
   // Header synonyms (case-insensitive, ID/EN). Columns: Tanggal · Harga · Pembelian Lunas · Pembelian
-  // Bon · Catatan. A legacy "Pembayaran Bon" (payment) column also contains "bon"; we still DETECT it
-  // (regex `pay`) only so it can be excluded from the bon-purchase column — it is otherwise ignored
-  // (this archive import records PURCHASES only; historical payments go through the payment flow).
+  // Bon · Pembayaran Bon · Catatan. "Pembelian Bon" (purchase) and "Pembayaran Bon" (payment) both
+  // contain "bon" → the payment regex is matched FIRST so it wins its column, then bon avoids it.
   const HRE = { date: /tanggal|tgl|date/i, price: /harga|price|tarif|unit/i, pay: /bayar|pembayaran|payment|pelunasan|setor/i, lunas: /lunas|tunai|cash/i, bon: /bon|hutang|kredit|piutang/i, qty: /galon|jumlah|qty/i, method: /metode|method|cara/i, note: /catatan|note|keterangan|ket/i };
-  // fixed-order fallback (no header): Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan
-  let colMap = { date: 0, price: 1, lunas: 2, bon: 3, pay: -1, note: 4, qty: -1, method: -1 };
+  // fixed-order fallback (no header): Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan
+  let colMap = { date: 0, price: 1, lunas: 2, bon: 3, pay: 4, note: 5, qty: -1, method: -1 };
   let dataRows = rawCells;
   if (rawCells.length) {
     const hdr = rawCells[0]; const h = hdr.join(' ');
@@ -1664,27 +1669,29 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   }
   const cellAt = (row, i) => (i >= 0 && row && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
   const seen = new Set();
-  const rows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim())).map((cols) => {
-    const d = deriveLegacyImportRow(cols, colMap, cellAt);
-    let status = d.status;
-    // Over-ceiling rows are skipped with a clear reason (not sent, not silently dropped server-side).
-    if (status === 'ok' && d.amount > MAX_ROW_AMOUNT) status = 'toobig';
-    if (status === 'ok') {
-      const k = `${d.date}|${d.type}|${d.amount}`;
-      if (existing.has(k) || seen.has(k)) status = 'dup'; else seen.add(k);
-    }
-    return { ...d, status, valid: status === 'ok' };
-  });
+  // One spreadsheet row EXPANDS into 1–3 transactions, each its own preview item. Dedupe/ceiling are
+  // applied PER TRANSACTION (date+type+amount) so a same-date lunas & bon are never dups of each other.
+  const rows = dataRows.filter((r) => r && r.some((c) => String(c || '').trim()))
+    .flatMap((cols) => expandLegacyImportRow(cols, colMap, cellAt))
+    .map((d) => {
+      let status = d.status;
+      if (status === 'ok' && d.amount > MAX_ROW_AMOUNT) status = 'toobig';
+      if (status === 'ok') {
+        const k = `${d.date}|${d.type}|${d.amount}`;
+        if (existing.has(k) || seen.has(k)) status = 'dup'; else seen.add(k);
+      }
+      return { ...d, status, valid: status === 'ok' };
+    });
   const valid = rows.filter((r) => r.valid);
   const skipped = rows.filter((r) => !r.valid);
   const shown = filter === 'ok' ? valid : filter === 'skip' ? skipped : rows;
   const reset = () => { setText(''); setFileRows(null); setFileName(''); setErr(''); setFilter('all'); if (fileRef.current) fileRef.current.value = ''; };
   const typeLbl = (t) => t === 'bon' ? trD('dist.bon') : t === 'pelunasan' ? trD('dist.pelunasan') : trD('dist.lunas');
-  const reasonOf = (s) => s === 'baddate' ? trD('dist.liBadDate') : s === 'noaction' ? trD('dist.liNoAction') : s === 'multi' ? trD('dist.liMulti') : s === 'noprice' ? trD('dist.liNoPrice') : s === 'toobig' ? trD('dist.liTooBig') : s === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
+  const reasonOf = (s) => s === 'baddate' ? trD('dist.liBadDate') : s === 'empty' ? trD('dist.liEmpty') : s === 'noprice' ? trD('dist.liNoPrice') : s === 'toobig' ? trD('dist.liTooBig') : s === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
   // Download ONLY the skipped rows + their reason, so the user fixes them and re-imports.
   const downloadSkipped = () => {
-    const head = ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Catatan', 'Alasan'];
-    const out = [head, ...skipped.map((r) => [r.dateRaw || '', r.price || '', r.type === 'lunas' ? r.qty : '', r.type === 'bon' ? r.qty : '', r.note || '', reasonOf(r.status)])];
+    const head = ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan', 'Alasan'];
+    const out = [head, ...skipped.map((r) => [r.dateRaw || '', r.price || '', r.type === 'lunas' ? r.qty : '', r.type === 'bon' ? r.qty : '', r.type === 'pelunasan' ? r.amount : '', r.note || '', reasonOf(r.status)])];
     const csv = out.map((row) => row.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'riwayat-dilewati.csv';
@@ -1722,10 +1729,13 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const commit = () => {
     if (!valid.length || saving) return;
     setSaving(true); setErr('');
-    // Send the RAW action columns; the server re-derives + re-validates the date (authoritative).
+    // The preview is already EXPANDED (one item per transaction); send each item as a single-action
+    // legacy row. The server re-parses the date + re-derives (authoritative) and stamps them all with
+    // one importBatchId, so a row's lunas + bon + pelunasan import together and undo together.
     const payload = valid.map((r) => {
-      const o = { txnDate: r.date, price: r.price };
-      if (r.type === 'bon') o.bonQty = r.qty; else o.lunasQty = r.qty;
+      const o = { txnDate: r.date };
+      if (r.type === 'pelunasan') o.paymentAmount = r.amount;
+      else { o.price = r.price; if (r.type === 'bon') o.bonQty = r.qty; else o.lunasQty = r.qty; }
       if (r.note) o.note = r.note;
       return o;
     });
@@ -1739,7 +1749,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
         <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.liTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.code ? customer.code + ' · ' : ''}{customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
         <div className="modal-body">
           <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.liInfo')}</span></div>
-          <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan</b> <span style={{ color: 'var(--text-faint)' }}>· {trD('dist.liDateAny')}</span></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+          <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan</b> <span style={{ color: 'var(--text-faint)' }}>· {trD('dist.liDateAny')}</span></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
           <label className="dist-arch-bon"><input type="checkbox" checked={includeBon} onChange={(e) => setIncludeBon(e.target.checked)} /><span><b>{trD('dist.liIncludeBon')}</b><small>{trD('dist.liIncludeBonHint')}</small></span></label>
           <div className="dist-imp-upload">
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onFile} />
@@ -1749,7 +1759,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
               : <span className="dist-imp-or">{trD('dist.importOr')}</span>}
           </div>
           {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={13} />{err}</div>}
-          {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'15/01/2026\t12000\t10\t\tlunas\n16/01/2026\t12000\t\t5\tbon'} onChange={(e) => setText(e.target.value)} />}
+          {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'15/01/2026\t12000\t10\t\t\tlunas\n16/01/2026\t13000\t2\t3\t\tlunas + bon\n20/01/2026\t\t\t\t30000\tbayar bon'} onChange={(e) => setText(e.target.value)} />}
           {rows.length > 0 && (<>
             {/* Status filter chips + "Unduh yang dilewati" so the user fixes skips and re-imports. */}
             <div className="dist-imp-chips">

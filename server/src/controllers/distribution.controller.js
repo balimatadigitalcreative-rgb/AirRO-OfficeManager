@@ -50,15 +50,16 @@ const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z
 const locationPhotoSchema = z.object({ photoId: z.string().max(60).nullable().optional() });
 const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000), skipped: z.number().int().nonnegative().optional() });
 // Per-customer legacy (archive) transaction import — customerId comes from the route, NOT the body.
-// Columns: Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan. Exactly ONE of Lunas/Bon per
-// row (PURCHASES only). txnDate is intentionally lenient here (max 20) — the server re-parses it with
-// the robust d/m/y parser and skips a row whose date is unparseable, with a reason.
+// Columns: Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan. A single
+// row EXPANDS into 1–3 transactions (lunas + bon + pelunasan may all be present, same date). txnDate
+// is intentionally lenient here (max 20) — the server re-parses it with the robust d/m/y parser and
+// skips a row whose date is unparseable.
 const legacyRow = z.object({
   txnDate: z.string().max(20),
-  price: z.number().int().nonnegative().optional(),      // Harga (required for purchases)
+  price: z.number().int().nonnegative().optional(),      // Harga (required for a purchase qty)
   lunasQty: z.number().int().optional(),                 // Pembelian Lunas (gallons)
   bonQty: z.number().int().optional(),                   // Pembelian Bon (gallons)
-  paymentAmount: z.number().int().optional(),            // tolerated for backward-compat; ignored (no pelunasan via this import)
+  paymentAmount: z.number().int().optional(),            // Pembayaran Bon (rupiah) → pelunasan
   note: z.string().max(300).optional(),
   // legacy shape kept accepted so an old client/paste still works (qty+method → lunas/bon).
   qty: z.number().int().optional(),
