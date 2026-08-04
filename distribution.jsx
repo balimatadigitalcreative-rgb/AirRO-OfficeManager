@@ -2059,7 +2059,8 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
 function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
-  const [statusFilter, setStatusFilter] = uSx('active');   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
+  const clParam0 = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
+  const [statusFilter, setStatusFilter] = uSx(() => clParam0('st', 'active'));   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
   const [delFor, setDelFor] = uSx(null);                   // customer being removed → opens the 2-option DeleteCustomerModal
   const [delBusy, setDelBusy] = uSx(false);
   const [loadErr, setLoadErr] = uSx('');   // customer-list load failure → message + retry (never a silent hang)
@@ -2072,8 +2073,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [legacyOpen, setLegacyOpen] = uSx(false); // legacy (archive) transaction import modal
   const [payFor, setPayFor] = uSx(null);          // standalone Pelunasan Bon for this customer
   const [pnrFor, setPnrFor] = uSx(null);          // "Pelunasan tidak diterima" adjustment (cap-gated)
-  const [q, setQ] = uSx('');
-  const [filter, setFilter] = uSx('all');
+  const [q, setQ] = uSx(() => clParam0('q', ''));
+  const [filter, setFilter] = uSx(() => clParam0('chip', 'all'));
   const [toast, setToast] = uSx('');
   const [form, setForm] = uSx(null);        // {id?, name, phone, type, price, deliveryDays[], armada} — Add/Edit modal
   const [saving, setSaving] = uSx(false);
@@ -2112,6 +2113,60 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [flt, setFlt] = uSx(EMPTY_FILTER);
   const [fltOpen, setFltOpen] = uSx(false);
   const [fTotal, setFTotal] = uSx(null);
+
+  // ── Customer-LIST redesign (presentation-only) state ── sort/view/search/chip/status are mirrored
+  // into the URL so a detail round-trip + browser Back restores the exact same list; `clScroll`
+  // captures the .content scrollTop before a detail open and re-applies it on return.
+  const [clSort, setClSort] = uSx(() => clParam0('sort', 'nama'));   // nama | bon | last | spend
+  const [clView, setClView] = uSx(() => clParam0('cv', 'table'));    // table | kartu
+  const [clVisible, setClVisible] = uSx(60);                          // infinite-scroll window (rows rendered)
+  const [isNarrow, setIsNarrow] = uSx(() => { try { return window.matchMedia('(max-width: 720px)').matches; } catch (e) { return false; } });
+  const clScroll = React.useRef(0);
+  const clSentinel = React.useRef(null);
+  // Narrow viewports always get cards (regardless of the table/kartu toggle) so 375px never scrolls sideways.
+  uEx(() => {
+    let mq; try { mq = window.matchMedia('(max-width: 720px)'); } catch (e) { return; }
+    const on = () => setIsNarrow(mq.matches); on();
+    mq.addEventListener ? mq.addEventListener('change', on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on); };
+  }, []);
+  // Keep the URL in step with every list control (replaceState — no history spam).
+  uEx(() => {
+    try {
+      const u = new URL(window.location.href);
+      const setp = (k, v, dflt) => { if (v && v !== dflt) u.searchParams.set(k, v); else u.searchParams.delete(k); };
+      setp('q', q, ''); setp('chip', filter, 'all'); setp('sort', clSort, 'nama'); setp('cv', clView, 'table'); setp('st', statusFilter, 'active');
+      window.history.replaceState(null, '', u);
+    } catch (e) {}
+  }, [q, filter, clSort, clView, statusFilter]);
+  // A changed filter/sort resets the render window; view changes (detail round-trip) do NOT, so the
+  // same number of rows is re-rendered and the saved scrollTop lands on the same customer.
+  uEx(() => { setClVisible(60); }, [q, filter, clSort, statusFilter, flt]);
+  // Infinite scroll: reveal 60 more rows whenever the sentinel nears the bottom of .content.
+  uEx(() => {
+    const el = clSentinel.current; if (!el || typeof IntersectionObserver === 'undefined') return;
+    const root = document.querySelector('.content') || null;
+    const io = new IntersectionObserver((ents) => { if (ents.some((e) => e.isIntersecting)) setClVisible((n) => n + 60); }, { root, rootMargin: '600px' });
+    io.observe(el); return () => io.disconnect();
+  }, [view, clView, custs]);
+  // Restore the list's scroll position when returning from a customer detail.
+  uEx(() => {
+    if (view !== 'list' || !clScroll.current) return;
+    const c = document.querySelector('.content'); if (!c) return;
+    const y = clScroll.current;
+    requestAnimationFrame(() => { c.scrollTop = y; requestAnimationFrame(() => { c.scrollTop = y; }); });
+  }, [view]);
+  // Open a customer's detail, first remembering where the list was scrolled to.
+  const openDetailKeepScroll = (id) => { try { const c = document.querySelector('.content'); clScroll.current = c ? c.scrollTop : 0; } catch (e) {} openDetail(id); };
+  // Export the CURRENT filter (all matching rows, not just the rendered window) to CSV.
+  const exportCustCsv = () => {
+    const head = [trD('cl.colCode'), trD('cl.colName'), trD('cl.colPhone'), trD('cl.colType'), trD('cl.colArmada'), trD('cl.colDays'), trD('cl.colBon'), trD('cl.colGalon'), trD('cl.colLast'), trD('cl.colSpend')];
+    const body = clFiltered.map((c) => [c.code || '', c.name || '', c.phone || '', typeLabelOf(c.type), c.armada || '', fmtDays(c.deliveryDays) || '', c.sisaBon || 0, c.gallonsHeld || 0, c.lastDate || '', c.spend || 0]);
+    const csv = [head, ...body].map((row) => row.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'pelanggan.csv';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
 
   const ef = effFleet(fleetScope, distFleet);
   // Load the customer list. Never hangs: a stalled request is bounded by a 20s timeout, and any
@@ -2725,18 +2780,39 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     );
   }
 
-  // ── LIST ──
-  // Search + the detailed criteria are applied SERVER-side (so they cover the whole dataset,
-  // not just the loaded page); only the quick chips still narrow the returned rows.
-  const rows = (custs || []).filter((c) => (
-    filter === 'all' ? true : filter === 'bon' ? c.sisaBon > 0 : filter === 'bulk' ? c.type === 'bulk' : filter === 'reguler' ? c.type === 'reguler' : filter === 'belum' ? c.complete === false : true
+  // ── LIST ── (redesigned to mirror the customer-detail page)
+  // Search + the detailed criteria run SERVER-side (whole dataset); the quick chips, sort and the
+  // render window are applied client-side to the returned rows.
+  const clDaysSince = (d) => { if (!d) return Infinity; const t = new Date(String(d) + 'T00:00:00'); const ms = Date.now() - t.getTime(); return ms > 0 ? Math.floor(ms / 86400000) : 0; };
+  const clFiltered = (custs || []).filter((c) => (
+    filter === 'all' ? true
+      : filter === 'bon' ? c.sisaBon > 0
+      : filter === 'galon' ? (c.gallonsHeld || 0) > 0
+      : filter === 'bulk' ? c.type === 'bulk'
+      : filter === 'reguler' ? c.type === 'reguler'
+      : filter === 'belum' ? c.complete === false : true
   ));
+  const clCmp = {
+    nama: (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'id'),
+    bon: (a, b) => (b.sisaBon || 0) - (a.sisaBon || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'id'),
+    last: (a, b) => String(b.lastDate || '').localeCompare(String(a.lastDate || '')) || String(a.name || '').localeCompare(String(b.name || ''), 'id'),
+    spend: (a, b) => (b.spend || 0) - (a.spend || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'id'),
+  };
+  const clSorted = clFiltered.slice().sort(clCmp[clSort] || clCmp.nama);
+  const rows = clSorted.slice(0, clVisible);   // the render window (infinite scroll extends it)
+  const clSumBon = clFiltered.reduce((s, c) => s + (c.sisaBon || 0), 0);
+  const clSumGalon = clFiltered.reduce((s, c) => s + (c.gallonsHeld || 0), 0);
   const incompleteN = (custs || []).filter((c) => c.complete === false).length;
-  const chips = [['all', trD('dist.fAll')], ['bon', trD('dist.filterBon')], ['reguler', trD('dist.filterReg')], ['bulk', trD('dist.filterBulk')], ['belum', trD('dist.filterIncomplete') + (incompleteN ? ' (' + incompleteN + ')' : '')]];
+  const chips = [['all', trD('dist.fAll')], ['bon', trD('dist.filterBon')], ['galon', trD('cl.chipGalon')], ['reguler', trD('dist.filterReg')], ['bulk', trD('dist.filterBulk')], ['belum', trD('dist.filterIncomplete') + (incompleteN ? ' (' + incompleteN + ')' : '')]];
+  const sortOpts = [['nama', trD('cl.sortName')], ['bon', trD('cl.sortBon')], ['last', trD('cl.sortLast')], ['spend', trD('cl.sortSpend')]];
+  const effView = isNarrow ? 'kartu' : clView;
+  const waHref = (c) => { const n = String(c.phone || '').replace(/[^0-9]/g, '').replace(/^0/, '62'); return n ? 'https://wa.me/' + n : ''; };
+  const listState = custs === null ? (loadErr ? 'error' : 'loading') : (rows.length === 0 ? (filterIsEmpty(flt) && filter === 'all' && !q ? 'empty' : 'nofilter') : 'ready');
+  const inactiveHint = (c) => c.active !== false && clDaysSince(c.lastDate) >= 30;
   return (
     <div className="dist-dash screen-enter">
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
-      <div className="dist-tx-toolbar">
+      <div className="dist-tx-toolbar cl-toolbar">
         <div className="dist-search"><IconSearch s={16} /><input value={q} placeholder={trD('dist.searchCust')} onChange={(e) => setQ(e.target.value)} /></div>
         <button type="button" className={`btn btn-ghost dist-filter-btn ${!filterIsEmpty(flt) ? 'on' : ''}`} onClick={() => setFltOpen(true)}>
           <IconFilter s={15} />{trD('dist.filter')}{filterCount(flt) ? <span className="dist-filter-n">{filterCount(flt)}</span> : null}
@@ -2749,6 +2825,14 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
           </div>
         )}
         <div style={{ flex: 1 }} />
+        <label className="cl-sort"><span className="cl-sort-lbl">{trD('cl.sortBy')}</span>
+          <select value={clSort} onChange={(e) => setClSort(e.target.value)}>{sortOpts.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        </label>
+        <div className="cl-viewtoggle" role="group" aria-label={trD('cl.view')}>
+          <button type="button" className={clView === 'table' ? 'on' : ''} onClick={() => setClView('table')} title={trD('cl.viewTable')} aria-pressed={clView === 'table'}><IconList s={15} /></button>
+          <button type="button" className={clView === 'kartu' ? 'on' : ''} onClick={() => setClView('kartu')} title={trD('cl.viewCards')} aria-pressed={clView === 'kartu'}><IconGrid s={15} /></button>
+        </div>
+        <button type="button" className="btn btn-ghost" disabled={!clFiltered.length} onClick={exportCustCsv}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
         {(canCustomers || canCustImport) ? (
           <div className="dist-cust-actions">
             {canCustomers && <button type="button" className="btn btn-ghost" onClick={() => setTypesOpen(true)}><IconSettings s={15} />{trD('dist.kelolaTipe')}</button>}
@@ -2772,9 +2856,18 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
           <div style={{ flex: 1 }} />
           {custs !== null && (
             <span className="dist-filter-count">
-              {fTotal != null ? trD('dist.fShowing', { n: rows.length, total: fTotal }) : trD('dist.fShowingN', { n: rows.length })}
+              {fTotal != null ? trD('dist.fShowing', { n: clFiltered.length, total: fTotal }) : trD('dist.fShowingN', { n: clFiltered.length })}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Summary bar — always reflects the CURRENT filter (client chips + server criteria). */}
+      {custs !== null && (
+        <div className="cl-summary">
+          <div className="cl-sumcard"><span className="cl-sumlbl">{trD('cl.sumCount')}</span><span className="cl-sumval">{numX(clFiltered.length)}</span></div>
+          <div className="cl-sumcard"><span className="cl-sumlbl">{trD('cl.sumBon')}</span><span className={`cl-sumval ${clSumBon > 0 ? 'amber' : ''}`}>{rpFull(clSumBon)}</span></div>
+          <div className="cl-sumcard"><span className="cl-sumlbl">{trD('cl.sumGalon')}</span><span className="cl-sumval">{numX(clSumGalon)} {trD('dist.galonUnit')}</span></div>
         </div>
       )}
 
@@ -2784,56 +2877,87 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
         />
       )}
 
-      <div className="card dist-card" style={{ padding: '6px 18px' }}>
-        {loadErr && custs === null && (
-          <div className="dist-empty dist-load-err">
-            <span>{loadErr}</span>
-            <button type="button" className="btn btn-ghost dist-retry" onClick={retry}><IconRefresh s={15} />{trD('common.retry')}</button>
-          </div>
-        )}
-        {!loadErr && custs === null && <div className="dist-empty dist-loading"><span className="dist-spin" />{trD('common.loading')}</div>}
-        {custs !== null && rows.length === 0 && <div className="dist-empty">{loadErr ? loadErr : trD('dist.noCust')}</div>}
-        {rows.map((c) => {
-          const days = fmtDays(c.deliveryDays);
-          return (
-            <div key={c.id} className={`dist-cust-row ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetail(c.id)}>
-              <span className="dist-txn-av">{initialsOf(c.name)}</span>
-              <div className="dist-cust-main">
-                {/* Card order: code → name (FULL, wraps to 2 lines) → type. The code chip and
-                    type tag sit on their OWN lines so they never steal the name's width and the
-                    name — the card's key info — is never truncated to "A.A. AN…". */}
-                {c.code && <div className="dist-cust-code"><span className="dist-code">{c.code}</span></div>}
-                <div className="dist-txn-name dist-txn-name--card" title={c.name}>{c.name}</div>
-                <div className="dist-cust-tagline">{tag(c.type)}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
-                <div className="dist-txn-sub">{c.phone || '—'} · {numX(c.totalGalon)} {trD('dist.galonUnit')}{c.lastDate ? ' · ' + c.lastDate : ''}</div>
-                {c.active !== false && c.complete === false && (
-                  <div className="dist-incomplete" onClick={(e) => { e.stopPropagation(); canCustomers ? openEdit(c) : openDetail(c.id); }}>
-                    <span className="dist-incomplete-badge"><IconWarn s={11} />{trD('dist.incomplete')}</span>
-                    {missChips(c.missing)}
-                  </div>
-                )}
-                {(days || c.armada) && (
-                  <div className="dist-cust-meta">
-                    {days && <span><IconCalendar s={11} />{days}</span>}
-                    {c.armada && <span className={isActiveArmada(c.armada) ? '' : 'inactive'}><IconTruck s={11} />{armadaFull(c.armada)}</span>}
-                  </div>
-                )}
-              </div>
-              {/* Price/bon/chevron grouped so they can WRAP below the name on narrow phones,
-                  giving the name the full row width (never squeezed to a cut-off sliver). */}
-              <div className="dist-cust-side">
-                <div className="dist-cust-price">
-                  <div className="dist-cust-priceval">{rpFull(c.masterPrice)} <IconLock s={11} /></div>
-                  <div className="dist-cust-pricecap">{trD('dist.txLocked')}</div>
+      {listState === 'loading' && (
+        <div className="card dist-card cl-listcard"><div className="cl-skel">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="cl-skel-row"><span className="cl-skel-av" /><span className="cl-skel-lines"><span /><span /></span><span className="cl-skel-amt" /></div>)}</div></div>
+      )}
+      {listState === 'error' && (
+        <div className="card dist-card cl-listcard"><div className="dist-empty dist-load-err"><span>{loadErr}</span><button type="button" className="btn btn-ghost dist-retry" onClick={retry}><IconRefresh s={15} />{trD('common.retry')}</button></div></div>
+      )}
+      {listState === 'nofilter' && (
+        <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconSearch s={26} /><div className="cl-empty-t">{trD('dist.noResultFilter')}</div><button type="button" className="dist-link" onClick={() => { setFilter('all'); setQ(''); setFlt(EMPTY_FILTER); }}>{trD('dist.clearFilter')}</button></div></div>
+      )}
+      {listState === 'empty' && (
+        <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconHome s={26} /><div className="cl-empty-t">{trD('cl.emptyTitle')}</div>{(canCustomers || canCustImport) && <div className="cl-empty-actions">{canCustomers && <button type="button" className="btn btn-primary" onClick={openAdd}><IconPlus s={16} />{trD('dist.addCust')}</button>}{canCustImport && <button type="button" className="btn btn-ghost" onClick={() => setImpOpen(true)}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('dist.import')}</button>}</div>}</div></div>
+      )}
+
+      {listState === 'ready' && effView === 'table' && (
+        <div className="card dist-card cl-listcard cl-tablewrap">
+          <table className="cl-table">
+            <thead><tr>
+              <th>{trD('cl.colCode')}</th><th>{trD('cl.colName')}</th><th>{trD('cl.colType')}</th><th>{trD('cl.colArmada')}</th>
+              <th>{trD('cl.colDays')}</th><th className="num">{trD('cl.colBon')}</th><th className="num">{trD('cl.colGalon')}</th><th>{trD('cl.colLast')}</th><th aria-label="aksi" />
+            </tr></thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.id} className={`cl-trow ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetailKeepScroll(c.id)}>
+                  <td className="cl-td-code">{c.code ? <span className="dist-code">{c.code}</span> : '—'}</td>
+                  <td className="cl-td-name">
+                    <div className="cl-name">{c.name}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
+                    <div className="cl-sub">{c.phone || '—'}{inactiveHint(c) && <span className="cl-idle">· {trD('cl.idle30')}</span>}</div>
+                  </td>
+                  <td>{tag(c.type)}</td>
+                  <td>{c.armada ? <span className={isActiveArmada(c.armada) ? 'cl-armada' : 'cl-armada inactive'}><IconTruck s={12} />{armadaFull(c.armada)}</span> : <span className="cl-muted">—</span>}</td>
+                  <td>{fmtDays(c.deliveryDays) || <span className="cl-muted">—</span>}</td>
+                  <td className="num">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpFull(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</td>
+                  <td className="num">{(c.gallonsHeld || 0) > 0 ? <b>{numX(c.gallonsHeld)}</b> : <span className="cl-muted">0</span>}</td>
+                  <td>{c.lastDate ? <span title={c.lastDate}>{fmtDateShort(c.lastDate)}</span> : <span className="cl-muted">{trD('cl.never')}</span>}</td>
+                  <td className="cl-td-act">
+                    {canDelete && c.active === false
+                      ? <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={(e) => { e.stopPropagation(); doReactivate(c); }}><IconRefresh s={14} />{trD('dist.reactivate')}</button>
+                      : <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)' }} />}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div ref={clSentinel} className="cl-sentinel" />
+          {clVisible < clFiltered.length && <div className="cl-more">{trD('cl.showingWindow', { n: rows.length, total: clFiltered.length })}</div>}
+        </div>
+      )}
+
+      {listState === 'ready' && effView === 'kartu' && (
+        <div className="cl-cards">
+          {rows.map((c) => (
+            <div key={c.id} className={`cl-card ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetailKeepScroll(c.id)}>
+              <div className="cl-card-top">
+                <span className="dist-txn-av">{initialsOf(c.name)}</span>
+                <div className="cl-card-id">
+                  {c.code && <span className="dist-code">{c.code}</span>}
+                  <div className="cl-card-name" title={c.name}>{c.name}</div>
+                  <div className="cl-card-tags">{tag(c.type)}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
                 </div>
-                <div className="dist-cust-bon">{c.sisaBon > 0 ? <span className="dist-bonpill">{rpFull(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}</div>
-                {canDelete && c.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={(e) => { e.stopPropagation(); doReactivate(c); }}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
-                <IconCaret s={16} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)', flexShrink: 0 }} />
+                <div className="cl-card-bon">
+                  {c.sisaBon > 0 ? <span className="dist-bonpill">{rpFull(c.sisaBon)}</span> : <span className="dist-bonmuted">{trD('dist.lunas')}</span>}
+                  <span className="cl-card-bonlbl">{trD('cl.colBon')}</span>
+                </div>
+              </div>
+              <div className="cl-card-meta">
+                <span>{c.phone || '—'}</span>
+                {(c.gallonsHeld || 0) > 0 && <span><IconHome s={11} />{numX(c.gallonsHeld)} {trD('dist.galonUnit')}</span>}
+                <span className={inactiveHint(c) ? 'cl-idle' : 'cl-muted'}>{c.lastDate ? fmtDateShort(c.lastDate) : trD('cl.never')}{inactiveHint(c) ? ' · ' + trD('cl.idle30') : ''}</span>
+              </div>
+              <div className="cl-card-actions" onClick={(e) => e.stopPropagation()}>
+                {waHref(c) ? <a className="cl-qa" href={waHref(c)} target="_blank" rel="noopener noreferrer"><IconWhatsApp s={15} />WA</a> : <span className="cl-qa disabled"><IconWhatsApp s={15} />WA</span>}
+                {c.mapsUrl ? <a className="cl-qa" href={c.mapsUrl} target="_blank" rel="noopener noreferrer"><IconPin s={15} />Maps</a> : <span className="cl-qa disabled"><IconPin s={15} />Maps</span>}
+                <button type="button" className="cl-qa primary" onClick={() => openDetailKeepScroll(c.id)}><IconCaret s={14} style={{ transform: 'rotate(-90deg)' }} />{trD('cd.more')}</button>
+                {canDelete && c.active === false && <button type="button" className="cl-qa" onClick={(e) => { e.stopPropagation(); doReactivate(c); }}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
               </div>
             </div>
-          );
-        })}
-      </div>
+          ))}
+          <div ref={clSentinel} className="cl-sentinel" />
+          {clVisible < clFiltered.length && <div className="cl-more">{trD('cl.showingWindow', { n: rows.length, total: clFiltered.length })}</div>}
+        </div>
+      )}
 
       {renderForm()}
       {typesModal()}

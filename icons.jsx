@@ -62,9 +62,11 @@ const IconTrash = (p) => <Ic {...p}><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M
 const IconWarn = (p) => <Ic {...p}><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></Ic>;
 const IconPhone = (p) => <Ic {...p}><path d="M4 5c0-.6.4-1 1-1h2.4c.5 0 .9.3 1 .8l.8 3c.1.4 0 .8-.3 1L7.6 10.5a12 12 0 0 0 5.9 5.9l1.7-1.3c.3-.2.7-.3 1-.2l3 .8c.5.1.8.5.8 1V19c0 .6-.4 1-1 1A15 15 0 0 1 4 5z"/></Ic>;
 const IconWhatsApp = (p) => <Ic {...p}><path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.5-1.2A9 9 0 1 0 12 3z"/><path d="M8.5 8.2c.2-.5.4-.5.7-.5h.5c.2 0 .4 0 .6.5l.7 1.6c.1.2 0 .4-.1.6l-.5.6c-.1.2-.2.3 0 .6a6 6 0 0 0 2.6 2.3c.3.1.4.1.6-.1l.6-.7c.2-.2.3-.2.6-.1l1.5.7c.3.1.4.2.4.4 0 .6-.4 1.3-.7 1.5-.4.3-1.3.7-2.4.4a8 8 0 0 1-5-4.6c-.3-1 0-1.9.3-2.2z" fill="currentColor" stroke="none"/></Ic>;
+const IconList = (p) => <Ic {...p}><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none"/></Ic>;
+const IconGrid = (p) => <Ic {...p}><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></Ic>;
 
 Object.assign(window, {
-  IconPhone, IconWhatsApp,
+  IconPhone, IconWhatsApp, IconList, IconGrid,
   Logo, IconDashboard, IconTx, IconCustomers, IconInvoice, IconExpense, IconReport,
   IconTruck, IconSettings, IconSearch, IconBell, IconChat, IconCaret, IconPlus,
   IconArrowUp, IconArrowDown, IconTrendUp, IconTrendDown, IconClock, IconWallet,

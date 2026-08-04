@@ -317,9 +317,10 @@ async function listCustomers(user, qFleet, status, filters) {
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const agg = {};
   txns.forEach((t) => {
-    const a = agg[t.customerId] || (agg[t.customerId] = { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 });
+    const a = agg[t.customerId] || (agg[t.customerId] = { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0, spend: 0 });
     const eff = t.amount + (deltaMap[t.id] || 0);
     if (t.bonCounted) { if (t.method === 'bon') a.bon += eff; else if (t.method === 'pelunasan') a.pelunasan += t.amount; }   // receivable (bonCounted, incl. legacy)
+    if (t.method === 'lunas' || t.method === 'bon') a.spend += eff;   // read-only: lifetime purchase total (for the list "total belanja" sort)
     if (!t.legacy) { a.totalGalon += t.qty; a.txnCount++; if (t.txnDate > a.lastDate) a.lastDate = t.txnDate; }   // stats exclude archive
   });
   const heldMap = await gallonBalances(user, qFleet);   // gallons each customer holds (incl. approved 'penyesuaian' movements)
@@ -327,8 +328,8 @@ async function listCustomers(user, qFleet, status, filters) {
   const adjBonRows = await prisma.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved', ...fleetWhere(user, 'fleetId', qFleet) }, select: { customerId: true, delta: true } });
   const adjBonMap = {}; adjBonRows.forEach((r) => { adjBonMap[r.customerId] = (adjBonMap[r.customerId] || 0) + r.delta; });
   let data = rows.map((c) => {
-    const a = agg[c.id] || { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 };
-    return { ...custClient(c), totalGalon: a.totalGalon, sisaBon: Math.max(0, a.bon - a.pelunasan + (adjBonMap[c.id] || 0)), lastDate: a.lastDate || null, txnCount: a.txnCount, gallonsHeld: heldMap[c.id] || 0 };
+    const a = agg[c.id] || { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0, spend: 0 };
+    return { ...custClient(c), totalGalon: a.totalGalon, sisaBon: Math.max(0, a.bon - a.pelunasan + (adjBonMap[c.id] || 0)), lastDate: a.lastDate || null, txnCount: a.txnCount, spend: a.spend, gallonsHeld: heldMap[c.id] || 0 };
   });
   // `bon` is the one criterion that can't be a DB predicate — sisaBon is derived from the
   // transaction ledger (+ active price adjustments), so it's applied to the computed rows.

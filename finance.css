@@ -2872,3 +2872,88 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
   .cd-txn-run { color: #b45309; font-weight: 600; }
   .cd-txn-caret { text-align: right; }
 }
+
+/* ============ Customer LIST redesign (cl-*) ============ */
+.cl-toolbar { flex-wrap: wrap; row-gap: 10px; }
+.cl-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-mut); }
+.cl-sort-lbl { font-weight: 600; }
+.cl-sort select { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 10px; padding: 7px 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.cl-viewtoggle { display: inline-flex; border: 1px solid var(--border); border-radius: 11px; overflow: hidden; }
+.cl-viewtoggle button { border: 0; background: var(--surface); color: var(--text-mut); padding: 7px 10px; cursor: pointer; display: inline-flex; align-items: center; }
+.cl-viewtoggle button + button { border-left: 1px solid var(--border); }
+.cl-viewtoggle button.on { background: var(--mint-100, #e6f6f1); color: var(--mint-700, #0e7a5f); }
+
+/* Summary bar */
+.cl-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.cl-sumcard { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 12px 16px; display: flex; flex-direction: column; gap: 3px; }
+.cl-sumlbl { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); }
+.cl-sumval { font-size: 20px; font-weight: 800; color: var(--text); }
+.cl-sumval.amber { color: #b45309; }
+
+.cl-listcard { padding: 0; overflow: hidden; }
+
+/* Table view */
+.cl-tablewrap { overflow-x: auto; }
+.cl-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.cl-table thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); padding: 11px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.cl-table th.num, .cl-table td.num { text-align: right; }
+.cl-trow { cursor: pointer; border-bottom: 1px solid var(--border-soft, var(--border)); transition: background .12s; }
+.cl-trow:hover { background: var(--mint-50, #f2fbf8); }
+.cl-trow.is-inactive { opacity: .62; }
+.cl-table td { padding: 10px 14px; vertical-align: middle; }
+.cl-td-code .dist-code { font-size: 12px; }
+.cl-name { font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 7px; }
+.cl-sub { font-size: 12px; color: var(--text-mut); margin-top: 1px; }
+.cl-idle { color: #b45309; font-weight: 600; }
+.cl-muted { color: var(--text-faint); }
+.cl-armada { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.cl-armada.inactive { color: var(--text-faint); }
+.cl-td-act { text-align: right; white-space: nowrap; }
+
+.cl-sentinel { height: 1px; }
+.cl-more { text-align: center; padding: 12px; font-size: 12.5px; color: var(--text-mut); }
+
+/* Skeleton */
+.cl-skel { padding: 8px 14px; }
+.cl-skel-row { display: flex; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--border-soft, var(--border)); }
+.cl-skel-av { width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0; }
+.cl-skel-lines { flex: 1; display: flex; flex-direction: column; gap: 7px; }
+.cl-skel-lines span { height: 11px; border-radius: 6px; }
+.cl-skel-lines span:first-child { width: 44%; }
+.cl-skel-lines span:last-child { width: 26%; }
+.cl-skel-amt { width: 76px; height: 22px; border-radius: 8px; flex-shrink: 0; }
+.cl-skel-av, .cl-skel-lines span, .cl-skel-amt { background: linear-gradient(90deg, var(--border-soft, #eef1f2) 25%, var(--surface-2, #f6f8f9) 37%, var(--border-soft, #eef1f2) 63%); background-size: 400% 100%; animation: clShimmer 1.3s ease infinite; }
+@keyframes clShimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* Empty / no-filter box */
+.cl-emptybox { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 40px 20px; color: var(--text-mut); }
+.cl-emptybox svg { color: var(--text-faint); }
+.cl-empty-t { font-size: 14.5px; font-weight: 700; color: var(--text); }
+.cl-empty-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+
+/* Card view */
+.cl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.cl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 11px; cursor: pointer; transition: box-shadow .14s, border-color .14s; }
+.cl-card:hover { border-color: var(--mint-300, #a7e0d0); box-shadow: var(--shadow-sm, 0 2px 8px rgba(0,0,0,.05)); }
+.cl-card.is-inactive { opacity: .64; }
+.cl-card-top { display: flex; gap: 11px; align-items: flex-start; }
+.cl-card-id { flex: 1; min-width: 0; }
+.cl-card-name { font-weight: 800; font-size: 15px; color: var(--text); line-height: 1.25; margin: 3px 0; overflow-wrap: anywhere; }
+.cl-card-tags { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.cl-card-bon { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.cl-card-bonlbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); font-weight: 700; }
+.cl-card-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--text-mut); }
+.cl-card-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.cl-card-actions { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border-soft, var(--border)); padding-top: 11px; }
+.cl-qa { flex: 1; min-width: 62px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; text-decoration: none; }
+.cl-qa:hover { background: var(--mint-50, #f2fbf8); }
+.cl-qa.primary { background: var(--mint-100, #e6f6f1); border-color: transparent; color: var(--mint-700, #0e7a5f); }
+.cl-qa.disabled { opacity: .4; pointer-events: none; }
+
+@media (max-width: 720px) {
+  .cl-summary { grid-template-columns: 1fr; gap: 8px; }
+  .cl-sumcard { flex-direction: row; align-items: baseline; justify-content: space-between; }
+  .cl-sumval { font-size: 17px; }
+  .cl-cards { grid-template-columns: 1fr; }
+  .cl-sort, .cl-viewtoggle { display: none; }
+}
