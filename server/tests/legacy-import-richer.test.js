@@ -1,8 +1,9 @@
 'use strict';
-// Richer per-customer legacy import: Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran
-// Bon. Exactly one action column per row → lunas / bon / pelunasan. Purchases stay archive-only for
-// gallons/KPIs/cash, but bon and pelunasan reconcile the customer's sisa bon
-// (= Σ bon − Σ pelunasan). Dedupe by (date+type+amount); batch undo removes the whole batch.
+// Per-customer legacy (archive) import — columns: Tanggal · Harga · Pembelian Lunas · Pembelian Bon
+// · Catatan. Exactly ONE of Lunas/Bon per row (PURCHASES only). The server re-parses the date
+// ROBUSTLY from ANY day/month/year format (dd/mm/yyyy, d-m-yy, yyyy-mm-dd, Excel serial), day-first,
+// and skips unparseable dates. Purchases stay archive-only (no gallon movement); bon rows reconcile
+// the customer's sisa bon. Dedupe by (date+type+amount); batch undo removes the whole batch.
 const request = require('supertest');
 const createApp = require('../src/app');
 const { resetDb, prisma } = require('./helpers');
@@ -14,18 +15,6 @@ const imp = (t, id, rows) => request(app).post(`/api/v1/distribusi/customers/${i
 const detail = (t, id) => request(app).get(`/api/v1/distribusi/customers/${id}`).set(auth(t)).then((r) => r.body.data);
 
 let gm, cid;
-// mixed rows: a lunas purchase, two bon purchases, and a payment against the bon
-const ROWS = [
-  { txnDate: '2026-01-05', price: 12000, lunasQty: 10 },                 // LUNAS  → 120,000
-  { txnDate: '2026-01-06', price: 12000, bonQty: 5 },                    // BON    → 60,000
-  { txnDate: '2026-01-10', price: 10000, bonQty: 4 },                    // BON    → 40,000
-  { txnDate: '2026-01-20', paymentAmount: 30000 },                       // PELUNASAN → −30,000
-  { txnDate: '2026-01-21', price: 12000, lunasQty: 2, bonQty: 1 },       // two actions → SKIP
-  { txnDate: '2026-01-22', price: 12000 },                               // no action → SKIP
-  { txnDate: 'bad-date', price: 12000, lunasQty: 1 },                    // bad date → SKIP
-  { txnDate: '2026-01-23', bonQty: 3 },                                  // purchase w/o Harga → SKIP
-];
-
 beforeAll(async () => {
   await resetDb();
   gm = (await reg({ name: 'Boss', username: 'gm_rich', password: 'secret123', role: 'gm' })).token;
@@ -33,60 +22,83 @@ beforeAll(async () => {
 });
 afterAll(() => prisma.$disconnect());
 
-describe('Distribusi — richer legacy import (lunas / bon / pelunasan)', () => {
-  let batchId;
-  it('derives the right TYPE per row; skips multi/empty/invalid rows', async () => {
-    const r = await imp(gm, cid, ROWS);
+describe('legacy import — ROBUST date parsing (any d/m/y format, day-first)', () => {
+  it('accepts dd/mm/yyyy, d-m-yy, ISO and an Excel serial → the correct ISO date', async () => {
+    const rows = [
+      { txnDate: '25/12/2026', price: 12000, lunasQty: 1 },   // dd/mm/yyyy
+      { txnDate: '5-1-26', price: 12000, lunasQty: 1 },        // d-m-yy → 2026-01-05
+      { txnDate: '2026-12-25', price: 12000, bonQty: 1 },      // already ISO (bon; different type → not a dup of #1)
+      { txnDate: '46017', price: 12000, lunasQty: 1 },         // Excel serial → 2025-12-26
+    ];
+    const r = await imp(gm, cid, rows);
     expect(r.status).toBe(201);
-    expect(r.body).toMatchObject({ imported: 4, skipped: 4, received: 8 });   // 4 valid, 4 skipped
+    expect(r.body).toMatchObject({ imported: 4, received: 4 });
+    const got = (await prisma.distTransaction.findMany({ where: { customerId: cid }, select: { txnDate: true }, orderBy: { txnDate: 'asc' } })).map((t) => t.txnDate);
+    expect(got).toEqual(['2025-12-26', '2026-01-05', '2026-12-25', '2026-12-25']);
+  });
+
+  it('day-first is assumed for an ambiguous date: 03/04/2026 → 3 April (2026-04-03)', async () => {
+    const c2 = (await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'DayFirst', type: 'reguler', masterPrice: 5000, armada: 'Merah' })).body.data.id;
+    await imp(gm, c2, [{ txnDate: '03/04/2026', price: 10000, lunasQty: 1 }]);
+    const t = await prisma.distTransaction.findFirst({ where: { customerId: c2 } });
+    expect(t.txnDate).toBe('2026-04-03');   // April 3rd, never March 4th
+  });
+
+  it('an impossible date (32/13/2026) is skipped as invalid, not coerced', async () => {
+    const c3 = (await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'BadDate', type: 'reguler', masterPrice: 5000, armada: 'Merah' })).body.data.id;
+    const r = await imp(gm, c3, [
+      { txnDate: '32/13/2026', price: 10000, lunasQty: 1 },   // invalid → skip
+      { txnDate: '01/02/2026', price: 10000, lunasQty: 1 },   // valid
+    ]);
+    expect(r.body).toMatchObject({ imported: 1, skipped: 1 });
+    expect((await prisma.distTransaction.findFirst({ where: { customerId: c3 } })).txnDate).toBe('2026-02-01');
+  });
+});
+
+describe('legacy import — columns (Lunas / Bon only) + sisa bon', () => {
+  let cid2, batchId;
+  const ROWS = [
+    { txnDate: '05/01/2026', price: 12000, lunasQty: 10 },              // LUNAS → 120,000
+    { txnDate: '06/01/2026', price: 12000, bonQty: 5 },                 // BON   → 60,000
+    { txnDate: '10/01/2026', price: 10000, bonQty: 4 },                 // BON   → 40,000
+    { txnDate: '21/01/2026', price: 12000, lunasQty: 2, bonQty: 1 },    // both actions → SKIP
+    { txnDate: '22/01/2026', price: 12000 },                            // no action → SKIP
+    { txnDate: '23/01/2026', bonQty: 3 },                               // purchase w/o Harga → SKIP
+    { txnDate: '20/01/2026', paymentAmount: 30000 },                    // legacy payment field → ignored → SKIP
+  ];
+  beforeAll(async () => {
+    cid2 = (await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'Cols', type: 'reguler', masterPrice: 5000, armada: 'Merah' })).body.data.id;
+  });
+
+  it('derives lunas/bon; skips both-filled / no-action / no-price / payment-only rows', async () => {
+    const r = await imp(gm, cid2, ROWS);
+    expect(r.body).toMatchObject({ imported: 3, skipped: 4, received: 7 });
     batchId = r.body.batchId;
     const raw = await prisma.distTransaction.findMany({ where: { importBatchId: batchId }, orderBy: { txnDate: 'asc' } });
-    expect(raw.map((t) => t.method)).toEqual(['lunas', 'bon', 'bon', 'pelunasan']);
-    expect(raw.every((t) => t.legacy === true)).toBe(true);
-    // computed amounts
+    expect(raw.map((t) => t.method)).toEqual(['lunas', 'bon', 'bon']);   // no pelunasan
     expect(raw.find((t) => t.method === 'lunas')).toMatchObject({ qty: 10, unitPriceLocked: 12000, amount: 120000 });
     expect(raw.filter((t) => t.method === 'bon').map((t) => t.amount).sort((a, b) => a - b)).toEqual([40000, 60000]);
-    const pay = raw.find((t) => t.method === 'pelunasan');
-    expect(pay).toMatchObject({ qty: 0, unitPriceLocked: 0, amount: 30000 });
-    // no gallon movement for any archive row
-    expect(await prisma.gallonMovement.count({ where: { customerId: cid } })).toBe(0);
+    expect(await prisma.gallonMovement.count({ where: { customerId: cid2 } })).toBe(0);   // archive-only
   });
 
-  it('sisa bon reconciles: Σ bon − Σ pelunasan = 60,000 + 40,000 − 30,000 = 70,000', async () => {
-    const d = await detail(gm, cid);
-    expect(d.sisaBon).toBe(70000);
-    // and the customer LIST agrees
-    const list = (await request(app).get('/api/v1/distribusi/customers?fleet=Merah').set(auth(gm))).body.data.find((c) => c.id === cid);
-    expect(list.sisaBon).toBe(70000);
-    // purchases stay archive-only: gallons-sold stat still 0 (no live sales), history shows all 4 rows
+  it('sisa bon reflects the imported bon purchases: 60,000 + 40,000 = 100,000', async () => {
+    const d = await detail(gm, cid2);
+    expect(d.sisaBon).toBe(100000);
+    const list = (await request(app).get('/api/v1/distribusi/customers?fleet=Merah').set(auth(gm))).body.data.find((c) => c.id === cid2);
+    expect(list.sisaBon).toBe(100000);
     expect(list.totalGalon).toBe(0);
-    expect(d.transactions.filter((t) => t.legacy).length).toBe(4);
   });
 
-  it('re-importing the same file is idempotent (all skipped as duplicates)', async () => {
-    const r = await imp(gm, cid, ROWS);
+  it('re-importing the same rows is idempotent (all skipped as duplicates)', async () => {
+    const r = await imp(gm, cid2, ROWS);
     expect(r.body.imported).toBe(0);
-    expect(r.body.skipped).toBe(8);
-    expect(await prisma.distTransaction.count({ where: { customerId: cid, legacy: true } })).toBe(4);   // still 4
+    expect(await prisma.distTransaction.count({ where: { customerId: cid2, legacy: true } })).toBe(3);
   });
 
-  it('a same-day purchase and payment of the same amount are BOTH kept (dedupe keys on type)', async () => {
-    const r = await imp(gm, cid, [
-      { txnDate: '2026-02-01', price: 5000, lunasQty: 1 },   // lunas 5,000
-      { txnDate: '2026-02-01', paymentAmount: 5000 },        // pelunasan 5,000 — same date+amount, different TYPE
-    ]);
-    expect(r.body.imported).toBe(2);   // not collapsed
-  });
-
-  it('undo removes exactly the batch (only its 4 rows); sisa bon drops accordingly', async () => {
-    const before = (await detail(gm, cid)).sisaBon;   // batch1 net 70,000 + batch2 (5k lunas + 5k pelunasan) → 65,000
-    expect(before).toBe(65000);
-    const del = await request(app).delete(`/api/v1/distribusi/customers/${cid}/transactions/legacy-batch/${batchId}`).set(auth(gm));
+  it('undo removes exactly the batch; sisa bon drops back to 0', async () => {
+    const del = await request(app).delete(`/api/v1/distribusi/customers/${cid2}/transactions/legacy-batch/${batchId}`).set(auth(gm));
     expect(del.status).toBe(200);
-    expect(del.body.data.deleted).toBe(4);                       // only batch1's rows
-    expect(await prisma.distTransaction.count({ where: { customerId: cid, legacy: true } })).toBe(2);   // batch2 survives
-    // batch1's bon (60k+40k) and pelunasan (30k) are gone; the leftover batch2 pelunasan (5k) has no
-    // bon to offset it → sisa bon floors at 0.
-    expect((await detail(gm, cid)).sisaBon).toBe(0);
+    expect(del.body.data.deleted).toBe(3);
+    expect((await detail(gm, cid2)).sisaBon).toBe(0);
   });
 });

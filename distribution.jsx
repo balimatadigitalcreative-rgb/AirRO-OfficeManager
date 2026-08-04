@@ -509,32 +509,45 @@ function downloadImportTemplate() {
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 // Parse a date cell (imported legacy history) into strict YYYY-MM-DD, or null if unparseable.
-// Accepts ISO, dd/mm/yyyy (and . or - separators), and Excel serial numbers.
-function realDate(y, mo, d) { const dt = new Date(Date.UTC(+y, +mo - 1, +d)); return (dt.getUTCFullYear() === +y && dt.getUTCMonth() === +mo - 1 && dt.getUTCDate() === +d) ? `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null; }
-function parseLegacyDate(s) {
-  s = String(s || '').trim(); if (!s) return null;
-  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return realDate(m[1], m[2], m[3]);
-  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/); if (m) return realDate(m[3], m[2], m[1]);   // dd/mm/yyyy
-  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000).toISOString().slice(0, 10); }
-  const t = Date.parse(s); if (!isNaN(t)) return new Date(t).toISOString().slice(0, 10);
+// ROBUST + DAY-FIRST (Indonesian convention). Accepts, in this order:
+//   • a real Date object / Excel date (from cellDates:true)
+//   • already-ISO  yyyy-mm-dd   (also yyyy/mm/dd, yyyy.mm.dd)
+//   • day/month/year in ANY separator (/ - .) with a 2- OR 4-digit year → dd/mm/yyyy, d-m-yy,
+//     dd.mm.yyyy, d/m/yyyy (2-digit year yy → 20yy). Ambiguous → DAY-FIRST, never month-first.
+//   • an Excel serial number (e.g. 46017) via the 1899-12-30 epoch
+// The result must be a REAL calendar date (32/13 etc. → null). NO Date.parse fallback — it is
+// locale/engine-dependent and silently guesses month-first, which corrupts d/m/y dates.
+// NOTE: this logic is mirrored on the server (distribution.service.js parseLegacyDate) — keep both
+// in sync so the client preview and the server import always agree.
+function realDate(y, mo, d) { y = +y; mo = +mo; d = +d; const dt = new Date(Date.UTC(y, mo - 1, d)); return (dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d) ? `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null; }
+function excelSerialToISO(n) { return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000).toISOString().slice(0, 10); }
+function parseLegacyDate(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  const s = String(v == null ? '' : v).trim(); if (!s) return null;
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return realDate(m[1], m[2], m[3]);   // ISO
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/);                                         // d/m/y (day-first)
+  if (m) { const yr = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return realDate(yr, m[2], m[1]); }
+  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return excelSerialToISO(n); } // Excel serial
   return null;
 }
-// Ready-to-fill CSV template for the per-customer legacy transaction import — the richer 5-column
-// shape (fill exactly ONE of the three action columns per row). Header + one example of each type.
+// Ready-to-fill CSV template for the per-customer legacy transaction import: Tanggal · Harga ·
+// Pembelian Lunas · Pembelian Bon · Catatan. Fill exactly ONE of Lunas/Bon per row. The Tanggal
+// column accepts any day/month/year format (dd/mm/yyyy, d-m-yy, yyyy-mm-dd, …).
 function downloadLegacyTemplate() {
   const rows = [
-    ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan'],
-    ['2026-01-15', '12000', '10', '', '', 'penjualan lunas'],
-    ['2026-01-16', '12000', '', '5', '', 'penjualan bon'],
-    ['2026-01-20', '', '', '', '30000', 'pembayaran bon'],
+    ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Catatan'],
+    ['15/01/2026', '12000', '10', '', 'penjualan lunas'],
+    ['16/01/2026', '12000', '', '5', 'penjualan bon'],
   ];
   const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-riwayat-transaksi.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-// Derive the transaction from one parsed legacy row — the SAME rule the server uses. Exactly one of
-// lunasQty / bonQty / paymentAmount must be > 0. Returns { type, qty, price, amount, status, reason }.
+// Derive the transaction from one parsed legacy row — the SAME rule the server uses. Columns:
+// Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan. Exactly ONE of lunasQty / bonQty
+// must be > 0 (this archive import records PURCHASES only). Returns { type, qty, price, amount,
+// status }. Also accepts the legacy {qty, metode} shape when no action column is filled.
 function deriveLegacyImportRow(cells, colMap, cellAt) {
   const dateRaw = cellAt(cells, colMap.date);
   const date = parseLegacyDate(dateRaw);
@@ -542,27 +555,23 @@ function deriveLegacyImportRow(cells, colMap, cellAt) {
   const price = colMap.price >= 0 ? digits(colMap.price) : null;
   const lunasQty = colMap.lunas >= 0 ? (digits(colMap.lunas) || 0) : 0;
   const bonQty = colMap.bon >= 0 ? (digits(colMap.bon) || 0) : 0;
-  const pay = colMap.pay >= 0 ? (digits(colMap.pay) || 0) : 0;
   // legacy fallback: a plain qty + optional metode column, no action columns filled
   const legQty = colMap.qty >= 0 ? (digits(colMap.qty) || 0) : 0;
   const legMethod = colMap.method >= 0 && /bon/i.test(cellAt(cells, colMap.method)) ? 'bon' : 'lunas';
   const note = colMap.note >= 0 ? cellAt(cells, colMap.note) : '';
   const base = { dateRaw, date, note };
   if (!date) return { ...base, type: null, qty: 0, price, amount: 0, status: 'baddate' };
-  const filled = [lunasQty > 0, bonQty > 0, pay > 0].filter(Boolean).length;
+  const filled = [lunasQty > 0, bonQty > 0].filter(Boolean).length;
   if (filled === 0 && legQty > 0) {
     if (!(price > 0)) return { ...base, type: legMethod, qty: legQty, price, amount: 0, status: 'noprice' };
     return { ...base, type: legMethod, qty: legQty, price, amount: legQty * price, status: 'ok' };
   }
   if (filled === 0) return { ...base, type: null, qty: 0, price, amount: 0, status: 'noaction' };
-  if (filled > 1) return { ...base, type: null, qty: 0, price, amount: 0, status: 'multi' };
-  if (lunasQty > 0 || bonQty > 0) {
-    const type = lunasQty > 0 ? 'lunas' : 'bon';
-    const qty = lunasQty > 0 ? lunasQty : bonQty;
-    if (!(price > 0)) return { ...base, type, qty, price, amount: 0, status: 'noprice' };
-    return { ...base, type, qty, price, amount: qty * price, status: 'ok' };
-  }
-  return { ...base, type: 'pelunasan', qty: 0, price: 0, amount: pay, status: 'ok' };
+  if (filled > 1) return { ...base, type: null, qty: 0, price, amount: 0, status: 'multi' };   // both Lunas & Bon
+  const type = lunasQty > 0 ? 'lunas' : 'bon';
+  const qty = lunasQty > 0 ? lunasQty : bonQty;
+  if (!(price > 0)) return { ...base, type, qty, price, amount: 0, status: 'noprice' };
+  return { ...base, type, qty, price, amount: qty * price, status: 'ok' };
 }
 // Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
 const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng;
@@ -1631,11 +1640,13 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   // dedupe against existing rows keyed on (date + TYPE + amount) — matches the server
   const existing = new Set((customer.transactions || []).map((t) => `${t.txnDate}|${t.method}|${t.amount}`));
   const rawCells = fileRows || text.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
-  // Header synonyms (case-insensitive, ID/EN). "Pembelian Bon" (purchase) vs "Pembayaran Bon"
-  // (payment) both contain "bon" → the payment regex is checked FIRST so it wins.
+  // Header synonyms (case-insensitive, ID/EN). Columns: Tanggal · Harga · Pembelian Lunas · Pembelian
+  // Bon · Catatan. A legacy "Pembayaran Bon" (payment) column also contains "bon"; we still DETECT it
+  // (regex `pay`) only so it can be excluded from the bon-purchase column — it is otherwise ignored
+  // (this archive import records PURCHASES only; historical payments go through the payment flow).
   const HRE = { date: /tanggal|tgl|date/i, price: /harga|price|tarif|unit/i, pay: /bayar|pembayaran|payment|pelunasan|setor/i, lunas: /lunas|tunai|cash/i, bon: /bon|hutang|kredit|piutang/i, qty: /galon|jumlah|qty/i, method: /metode|method|cara/i, note: /catatan|note|keterangan|ket/i };
-  // fixed-order fallback (no header): Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan
-  let colMap = { date: 0, price: 1, lunas: 2, bon: 3, pay: 4, note: 5, qty: -1, method: -1 };
+  // fixed-order fallback (no header): Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan
+  let colMap = { date: 0, price: 1, lunas: 2, bon: 3, pay: -1, note: 4, qty: -1, method: -1 };
   let dataRows = rawCells;
   if (rawCells.length) {
     const hdr = rawCells[0]; const h = hdr.join(' ');
@@ -1672,8 +1683,8 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const reasonOf = (s) => s === 'baddate' ? trD('dist.liBadDate') : s === 'noaction' ? trD('dist.liNoAction') : s === 'multi' ? trD('dist.liMulti') : s === 'noprice' ? trD('dist.liNoPrice') : s === 'toobig' ? trD('dist.liTooBig') : s === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
   // Download ONLY the skipped rows + their reason, so the user fixes them and re-imports.
   const downloadSkipped = () => {
-    const head = ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan', 'Alasan'];
-    const out = [head, ...skipped.map((r) => [r.dateRaw || '', r.price || '', r.type === 'lunas' ? r.qty : '', r.type === 'bon' ? r.qty : '', r.type === 'pelunasan' ? r.amount : '', r.note || '', reasonOf(r.status)])];
+    const head = ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Catatan', 'Alasan'];
+    const out = [head, ...skipped.map((r) => [r.dateRaw || '', r.price || '', r.type === 'lunas' ? r.qty : '', r.type === 'bon' ? r.qty : '', r.note || '', reasonOf(r.status)])];
     const csv = out.map((row) => row.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'riwayat-dilewati.csv';
@@ -1691,7 +1702,10 @@ function LegacyImportModal({ customer, onClose, onDone }) {
           try {
             const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array', cellDates: true });
             const ws = wb.Sheets[wb.SheetNames[0]];
-            const rws = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: false, dateNF: 'yyyy-mm-dd', defval: '' }).map((r) => r.map((c) => (c == null ? '' : String(c).trim())));
+            // cellDates:true → date cells arrive as real Date objects; raw:false + dateNF render most
+            // to 'yyyy-mm-dd', but convert any surviving Date to ISO so parseLegacyDate never sees a
+            // locale toString(). Everything else is trimmed to a string.
+            const rws = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: false, dateNF: 'yyyy-mm-dd', defval: '' }).map((r) => r.map((c) => (c == null ? '' : (c instanceof Date ? c.toISOString().slice(0, 10) : String(c).trim()))));
             setFileRows(rws); setFileBusy(false);
           } catch (ex) { setErr(trD('dist.importFileErr')); setFileBusy(false); setFileName(''); }
         };
@@ -1708,11 +1722,10 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const commit = () => {
     if (!valid.length || saving) return;
     setSaving(true); setErr('');
-    // Send the RAW action columns; the server re-derives + re-validates (authoritative).
+    // Send the RAW action columns; the server re-derives + re-validates the date (authoritative).
     const payload = valid.map((r) => {
-      const o = { txnDate: r.date };
-      if (r.type === 'pelunasan') o.paymentAmount = r.amount;
-      else { o.price = r.price; if (r.type === 'bon') o.bonQty = r.qty; else o.lunasQty = r.qty; }
+      const o = { txnDate: r.date, price: r.price };
+      if (r.type === 'bon') o.bonQty = r.qty; else o.lunasQty = r.qty;
       if (r.note) o.note = r.note;
       return o;
     });
@@ -1726,7 +1739,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
         <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.liTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.code ? customer.code + ' · ' : ''}{customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
         <div className="modal-body">
           <div className="dist-infobox"><IconInvoice s={16} /><span>{trD('dist.liInfo')}</span></div>
-          <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan</b></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
+          <div className="dist-imp-fmt"><span>{trD('dist.importFmt')}: <b>Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan</b> <span style={{ color: 'var(--text-faint)' }}>· {trD('dist.liDateAny')}</span></span><button type="button" className="dist-link" onClick={downloadLegacyTemplate}><IconDownload s={13} />{trD('dist.importTemplate')}</button></div>
           <label className="dist-arch-bon"><input type="checkbox" checked={includeBon} onChange={(e) => setIncludeBon(e.target.checked)} /><span><b>{trD('dist.liIncludeBon')}</b><small>{trD('dist.liIncludeBonHint')}</small></span></label>
           <div className="dist-imp-upload">
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onFile} />
@@ -1736,7 +1749,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
               : <span className="dist-imp-or">{trD('dist.importOr')}</span>}
           </div>
           {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={13} />{err}</div>}
-          {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'2026-01-15\t12000\t10\t\t\tlunas\n2026-01-16\t12000\t\t5\t\tbon\n2026-01-20\t\t\t\t30000\tbayar bon'} onChange={(e) => setText(e.target.value)} />}
+          {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'15/01/2026\t12000\t10\t\tlunas\n16/01/2026\t12000\t\t5\tbon'} onChange={(e) => setText(e.target.value)} />}
           {rows.length > 0 && (<>
             {/* Status filter chips + "Unduh yang dilewati" so the user fixes skips and re-imports. */}
             <div className="dist-imp-chips">

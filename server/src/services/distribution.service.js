@@ -519,41 +519,50 @@ function validTxnDate(s) {
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   return (d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]) ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
+// ROBUST legacy-import date parser → strict YYYY-MM-DD, or null. DON'T TRUST THE CLIENT: the server
+// re-parses the raw txnDate with the SAME rules the client preview uses, so a hand-crafted or old
+// payload in any d/m/y format is accepted, and an invalid one is rejected identically.
+// Mirrors distribution.jsx parseLegacyDate — keep both in sync. DAY-FIRST (Indonesian), no Date.parse.
+function realCalDate(y, mo, d) { y = +y; mo = +mo; d = +d; const dt = new Date(Date.UTC(y, mo - 1, d)); return (dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d) ? `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null; }
+function parseLegacyDate(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  const s = String(v == null ? '' : v).trim(); if (!s) return null;
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return realCalDate(m[1], m[2], m[3]);   // ISO
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/);                                            // d/m/y (day-first)
+  if (m) { const yr = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return realCalDate(yr, m[2], m[1]); }
+  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000).toISOString().slice(0, 10); }   // Excel serial
+  return null;
+}
 // Import LEGACY (historical) transactions for ONE customer — ARCHIVE ONLY. Every row is created
 // with legacy=true + a shared importBatchId, unit price = the row's price (NOT the master price),
 // and NO GallonMovement is ever written. Idempotent: dedupe by (customerId+date+qty+amount) within
 // the batch AND against existing rows. The customerId comes from the ROUTE — any customer column in
 // the file is ignored. Fleet scope + audit enforced.
-// Derive the transaction from one imported row (the SAME rule the client preview uses). Exactly one
-// action column must be filled: Pembelian Lunas (qty) → lunas, Pembelian Bon (qty) → bon,
-// Pembayaran Bon (rupiah) → pelunasan (qty 0, reduces sisa bon). Returns { ok, method, qty, price,
-// amount } or { ok:false, reason }. Also accepts the legacy shape {qty, method}.
+// Derive the transaction from one imported row (the SAME rule the client preview uses). Columns:
+// Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Catatan. Exactly ONE of Lunas/Bon must be
+// filled (this archive import records PURCHASES only). The date is re-parsed robustly from the raw
+// value (any d/m/y format), never trusting a pre-normalised client string. Returns { ok, method,
+// qty, price, amount } or { ok:false, reason }. Also accepts the legacy shape {qty, method}.
 function deriveLegacyRow(row) {
-  const date = validTxnDate(row.txnDate);
+  const date = parseLegacyDate(row.txnDate);
   if (!date) return { ok: false, reason: 'Tanggal tidak valid' };
   const price = Math.round(+row.price || 0);
   const lunasQty = Math.round(+row.lunasQty || 0);
   const bonQty = Math.round(+row.bonQty || 0);
-  const pay = Math.round(+row.paymentAmount || 0);
   // legacy fallback: {qty, method} with no action columns → treat as that purchase
   const legacyQty = Math.round(+row.qty || 0);
-  const filled = [lunasQty > 0, bonQty > 0, pay > 0].filter(Boolean).length;
+  const filled = [lunasQty > 0, bonQty > 0].filter(Boolean).length;
   if (filled === 0 && legacyQty > 0) {
     const method = row.method === 'bon' ? 'bon' : 'lunas';
     if (!(price > 0)) return { ok: false, reason: 'Harga wajib untuk pembelian' };
     return { ok: true, date, method, qty: legacyQty, price, amount: legacyQty * price };
   }
-  if (filled === 0) return { ok: false, reason: 'Tidak ada aksi (isi salah satu: Lunas/Bon/Pembayaran)' };
-  if (filled > 1) return { ok: false, reason: 'Lebih dari satu kolom aksi terisi — isi hanya satu' };
-  if (lunasQty > 0 || bonQty > 0) {
-    const method = lunasQty > 0 ? 'lunas' : 'bon';
-    const qty = lunasQty > 0 ? lunasQty : bonQty;
-    if (!(price > 0)) return { ok: false, reason: 'Harga wajib untuk pembelian' };
-    return { ok: true, date, method, qty, price, amount: qty * price };
-  }
-  // payment
-  if (!(pay > 0)) return { ok: false, reason: 'Nominal pembayaran harus > 0' };
-  return { ok: true, date, method: 'pelunasan', qty: 0, price: 0, amount: pay };
+  if (filled === 0) return { ok: false, reason: 'Tidak ada aksi (isi salah satu: Lunas/Bon)' };
+  if (filled > 1) return { ok: false, reason: 'Lunas dan Bon terisi keduanya — isi hanya satu' };
+  const method = lunasQty > 0 ? 'lunas' : 'bon';
+  const qty = lunasQty > 0 ? lunasQty : bonQty;
+  if (!(price > 0)) return { ok: false, reason: 'Harga wajib untuk pembelian' };
+  return { ok: true, date, method, qty, price, amount: qty * price };
 }
 
 async function importLegacyTransactions(customerId, rows, actor, clientSkipped, includeBon) {
