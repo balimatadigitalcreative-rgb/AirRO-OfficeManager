@@ -508,38 +508,95 @@ function downloadImportTemplate() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'template-pelanggan.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-// Parse a date cell (imported legacy history) into strict YYYY-MM-DD, or null if unparseable.
-// ROBUST + DAY-FIRST (Indonesian convention). Accepts, in this order:
-//   • a real Date object / Excel date (from cellDates:true)
-//   • already-ISO  yyyy-mm-dd   (also yyyy/mm/dd, yyyy.mm.dd)
-//   • day/month/year in ANY separator (/ - .) with a 2- OR 4-digit year → dd/mm/yyyy, d-m-yy,
-//     dd.mm.yyyy, d/m/yyyy (2-digit year yy → 20yy). Ambiguous → DAY-FIRST, never month-first.
-//   • an Excel serial number (e.g. 46017) via the 1899-12-30 epoch
-// The result must be a REAL calendar date (32/13 etc. → null). NO Date.parse fallback — it is
-// locale/engine-dependent and silently guesses month-first, which corrupts d/m/y dates.
-// NOTE: this logic is mirrored on the server (distribution.service.js parseLegacyDate) — keep both
-// in sync so the client preview and the server import always agree.
-function realDate(y, mo, d) { y = +y; mo = +mo; d = +d; const dt = new Date(Date.UTC(y, mo - 1, d)); return (dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d) ? `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null; }
-function excelSerialToISO(n) { return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000).toISOString().slice(0, 10); }
+// Parse a date CELL (imported legacy history) into strict YYYY-MM-DD, or null if unparseable.
+// ROBUST + DAY-FIRST (Indonesian convention). Accepts:
+//   • a real Date object / Excel date  — read LOCAL y/m/d parts (never toISOString: that shifts the
+//     day across a timezone; SheetJS builds date cells at local midnight).
+//   • an Excel serial number (e.g. 45678, 46017) — 1899-12-30 epoch (already accounts for the fake
+//     1900 leap day for serials ≥ 60).
+//   • ISO  yyyy-mm-dd  (also / or . separators)
+//   • numeric d/m/y with any separator (/ - .), 2- or 4-digit year → dd/mm/yyyy, d-m-yy, 6.4.2026.
+//     Ambiguous d/m vs m/d → ALWAYS day-first. 2-digit year: 00–79 → 2000s, 80–99 → 1900s.
+//   • d MonthName y  — "12 Januari 2026", "9 Feb 2026", "6-Apr-26" — Indonesian month names
+//     (Januari…Desember + Jan/Peb/Mei/Agu/Okt/Des) and English abbreviations (Jan…Dec), any sep.
+// A REAL calendar date is required (32/13 → null). NO new Date(string)/Date.parse — locale-dependent.
+// MIRRORED on the server (distribution.service.js parseLegacyDate) — keep both in sync.
+const LEGACY_MONTHS = { jan: 1, januari: 1, feb: 2, februari: 2, peb: 2, pebruari: 2, mar: 3, maret: 3, apr: 4, april: 4, mei: 5, may: 5, jun: 6, juni: 6, jul: 7, juli: 7, agu: 8, agt: 8, ags: 8, agustus: 8, aug: 8, sep: 9, sept: 9, september: 9, okt: 10, oct: 10, oktober: 10, nov: 11, november: 11, nop: 11, des: 12, dec: 12, desember: 12 };
+function isoFromYMD(y, mo, d) { y = +y; mo = +mo; d = +d; const dt = new Date(Date.UTC(y, mo - 1, d)); return (dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d) ? `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null; }
+function fullYear(yy) { yy = +yy; return yy >= 100 ? yy : (yy <= 79 ? 2000 + yy : 1900 + yy); }   // 00–79→2000s, 80–99→1900s
+function excelSerialToISO(n) { const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000); return isNaN(dt.getTime()) ? null : `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`; }
 function parseLegacyDate(v) {
-  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : isoFromYMD(v.getFullYear(), v.getMonth() + 1, v.getDate());
+  if (typeof v === 'number') return (v > 59 && v < 80000) ? excelSerialToISO(v) : null;   // Excel serial
   const s = String(v == null ? '' : v).trim(); if (!s) return null;
-  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return realDate(m[1], m[2], m[3]);   // ISO
-  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/);                                         // d/m/y (day-first)
-  if (m) { const yr = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return realDate(yr, m[2], m[1]); }
-  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return excelSerialToISO(n); } // Excel serial
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return isoFromYMD(m[1], m[2], m[3]);         // ISO
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/); if (m) return isoFromYMD(fullYear(m[3]), m[2], m[1]);   // d/m/y day-first
+  m = s.match(/^(\d{1,2})[\s./-]+([A-Za-z]+)\.?[\s./-]+(\d{2}|\d{4})$/);                                       // d MonthName y
+  if (m) { const mo = LEGACY_MONTHS[m[2].toLowerCase()]; if (mo) return isoFromYMD(fullYear(m[3]), mo, m[1]); return null; }
+  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return excelSerialToISO(n); }          // serial as text
   return null;
+}
+// Parse a MONEY/qty cell → integer. Accepts "Rp 25.000", "25.000", "25 000", "25,000", "1.234,56",
+// "", "-", "0". Strips currency + spaces; a comma or dot is the DECIMAL point only when it is the
+// last separator with 1–2 trailing digits (so "25.000"/"25,000" = 25000 thousands, "1.234,56" =
+// 1234.56). Empty / "-" → 0. Whole units (rupiah/gallons) → rounded.
+function parseAmountCell(v) {
+  if (typeof v === 'number') return Math.round(v);
+  let s = String(v == null ? '' : v).trim();
+  if (!s || s === '-') return 0;
+  s = s.replace(/[^0-9.,]/g, '');
+  if (!s) return 0;
+  const dots = (s.match(/\./g) || []).length, commas = (s.match(/,/g) || []).length;
+  let dec = null;
+  if (dots && commas) dec = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
+  else if (dots === 1 && s.lastIndexOf('.') > 0 && s.length - s.lastIndexOf('.') - 1 <= 2) dec = '.';
+  else if (commas === 1 && s.lastIndexOf(',') > 0 && s.length - s.lastIndexOf(',') - 1 <= 2) dec = ',';
+  let intp, frac = '';
+  if (dec) { const i = s.lastIndexOf(dec); intp = s.slice(0, i).replace(/[.,]/g, ''); frac = s.slice(i + 1).replace(/[.,]/g, ''); }
+  else intp = s.replace(/[.,]/g, '');
+  const n = parseFloat((intp || '0') + (frac ? '.' + frac : ''));
+  return isNaN(n) ? 0 : Math.round(n);
+}
+// Normalise a header cell for matching: lowercase, strip accents + punctuation, collapse whitespace.
+function normHeader(s) { return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+const LEGACY_HDR = {
+  date: /\b(tanggal|tgl|date)\b/, price: /\b(harga satuan|harga|price)\b/,
+  lunas: /\b(pembelian lunas|beli lunas|lunas|tunai|cash)\b/,
+  bon: /\b(pembelian bon|beli bon|hutang|piutang|kredit|bon)\b/,
+  pay: /\b(pembayaran bon|bayar bon|pembayaran|pelunasan|setor)\b/,
+  note: /\b(catatan|note|keterangan|ket)\b/,
+};
+// FIX 2 — find the header row (the first row where ≥2 cells match known headers) and map each field
+// to its column, ORDER-INDEPENDENT, tolerant of blank/title rows above it. "Pembayaran Bon" is
+// matched to `pay` first so the `bon` column (which also contains "bon") avoids it. If no header row
+// is found → fixed column order with headerUnknown=true (surfaced in the preview).
+function detectLegacyColumns(rawCells) {
+  const FIELDS = ['date', 'price', 'lunas', 'bon', 'pay', 'note'];
+  const FIXED = { date: 0, price: 1, lunas: 2, bon: 3, pay: 4, note: 5, qty: -1, method: -1 };
+  for (let i = 0; i < Math.min(rawCells.length, 15); i++) {
+    const cells = (rawCells[i] || []).map(normHeader);
+    const hits = FIELDS.filter((f) => cells.some((c) => LEGACY_HDR[f].test(c))).length;
+    if (hits >= 2) {
+      const iPay = cells.findIndex((c) => LEGACY_HDR.pay.test(c));
+      const iLunas = cells.findIndex((c, idx) => LEGACY_HDR.lunas.test(c) && idx !== iPay);
+      const iBon = cells.findIndex((c, idx) => LEGACY_HDR.bon.test(c) && idx !== iPay && idx !== iLunas);
+      return { headerRow: i, headerUnknown: false, colMap: { date: cells.findIndex((c) => LEGACY_HDR.date.test(c)), price: cells.findIndex((c) => LEGACY_HDR.price.test(c)), lunas: iLunas, bon: iBon, pay: iPay, note: cells.findIndex((c) => LEGACY_HDR.note.test(c)), qty: -1, method: -1 } };
+    }
+  }
+  return { headerRow: -1, headerUnknown: true, colMap: FIXED };
 }
 // Ready-to-fill CSV template for the per-customer legacy transaction import: Tanggal · Harga ·
 // Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan. A single row may hold any mix of
-// Lunas / Bon / Pembayaran (they become separate transactions on the same date). The Tanggal column
-// accepts any day/month/year format (dd/mm/yyyy, d-m-yy, yyyy-mm-dd, …).
+// Lunas / Bon / Pembayaran (they become separate transactions on the same date).
+// FIX 5 (round-trip guard): the Tanggal column is written as UNAMBIGUOUS ISO "YYYY-MM-DD" TEXT, so
+// re-importing our own template reads back exactly as written (no locale m/d/yy trap). Any d/m/y
+// format still works on import; ISO is just what we EMIT.
 function downloadLegacyTemplate() {
   const rows = [
     ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan'],
-    ['15/01/2026', '12000', '10', '', '', 'penjualan lunas'],
-    ['16/01/2026', '13000', '2', '3', '', 'lunas + bon sekaligus'],
-    ['20/01/2026', '', '', '', '30000', 'pembayaran bon'],
+    ['2026-01-15', '12000', '10', '', '', 'penjualan lunas'],
+    ['2026-01-16', '13000', '2', '3', '', 'lunas + bon sekaligus'],
+    ['2026-01-20', '', '', '', '30000', 'pembayaran bon'],
   ];
   const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
@@ -553,30 +610,36 @@ function downloadLegacyTemplate() {
 //   • Pembelian Bon   qty > 0 → BON    (qty × Harga, adds to sisa bon)
 //   • Pembayaran Bon  amount>0 → PELUNASAN (reduces sisa bon)
 // Harga is required when either qty > 0. Returns an ARRAY of preview items { type, qty, price,
-// amount, status, date, dateRaw, note }. A bad date or a fully empty row yields ONE skipped item.
+// amount, status, date, dateRaw, note }.
+// FIX 4 — INDEPENDENT VALIDATION: every column that is readable is parsed and shown even when the
+// date is bad, so the preview always reflects the real file content (Tipe/Nominal never blanked by a
+// date error). A row with actions but a bad date shows each transaction line with status 'baddate';
+// a row with a good date but no action → one 'nominal' (Nominal kosong) line. Status per line:
+// ok · baddate · nominal (no valid amount) — dedupe/ceiling ('dup'/'toobig') are layered on later.
 function expandLegacyImportRow(cells, colMap, cellAt) {
   const dateRaw = cellAt(cells, colMap.date);
   const date = parseLegacyDate(dateRaw);
-  const digits = (i) => { const c = cellAt(cells, i); return c === '' ? null : (parseInt(c.replace(/[^0-9]/g, ''), 10)); };
-  const price = colMap.price >= 0 ? digits(colMap.price) : null;
-  const lunasQty = colMap.lunas >= 0 ? (digits(colMap.lunas) || 0) : 0;
-  const bonQty = colMap.bon >= 0 ? (digits(colMap.bon) || 0) : 0;
-  const pay = colMap.pay >= 0 ? (digits(colMap.pay) || 0) : 0;
-  // legacy fallback: a plain qty + optional metode column, no action columns filled
-  const legQty = colMap.qty >= 0 ? (digits(colMap.qty) || 0) : 0;
+  const amt = (i) => (i >= 0 ? parseAmountCell(cellAt(cells, i)) : 0);
+  const price = colMap.price >= 0 ? parseAmountCell(cellAt(cells, colMap.price)) : 0;
+  const lunasQty = amt(colMap.lunas);
+  const bonQty = amt(colMap.bon);
+  const pay = amt(colMap.pay);
+  const legQty = amt(colMap.qty);   // legacy fallback: plain qty (+ optional metode)
   const legMethod = colMap.method >= 0 && /bon/i.test(cellAt(cells, colMap.method)) ? 'bon' : 'lunas';
   const note = colMap.note >= 0 ? cellAt(cells, colMap.note) : '';
-  const base = { dateRaw, date, note };
-  if (!date) return [{ ...base, type: null, qty: 0, price, amount: 0, status: 'baddate' }];
+  const base = { dateRaw, date, note, price };
+  // A purchase line: needs Harga and a good date to be 'ok'; still SHOWN (type + qty) otherwise.
+  const purchase = (type, qty) => {
+    const amount = price > 0 ? qty * price : 0;
+    const status = !date ? 'baddate' : (price > 0 ? 'ok' : 'nominal');
+    return { ...base, type, qty, amount, status };
+  };
   const items = [];
-  const addPurchase = (type, qty) => items.push((price > 0)
-    ? { ...base, type, qty, price, amount: qty * price, status: 'ok' }
-    : { ...base, type, qty, price, amount: 0, status: 'noprice' });   // Harga wajib untuk pembelian
-  if (lunasQty > 0) addPurchase('lunas', lunasQty);
-  if (bonQty > 0) addPurchase('bon', bonQty);
-  if (pay > 0) items.push({ ...base, type: 'pelunasan', qty: 0, price: 0, amount: pay, status: 'ok' });
-  if (!items.length && legQty > 0) addPurchase(legMethod, legQty);
-  if (!items.length) return [{ ...base, type: null, qty: 0, price, amount: 0, status: 'empty' }];
+  if (lunasQty > 0) items.push(purchase('lunas', lunasQty));
+  if (bonQty > 0) items.push(purchase('bon', bonQty));
+  if (pay > 0) items.push({ ...base, type: 'pelunasan', qty: 0, amount: pay, status: !date ? 'baddate' : 'ok' });
+  if (!items.length && legQty > 0) items.push(purchase(legMethod, legQty));
+  if (!items.length) return [{ ...base, type: null, qty: 0, amount: 0, status: !date ? 'baddate' : 'nominal' }];
   return items;
 }
 // Free navigation link (opens Google/Apple Maps on the device — no API key/billing).
@@ -1642,31 +1705,15 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const [saving, setSaving] = uSx(false);
   const [filter, setFilter] = uSx('all');   // all | ok | skip
   const [includeBon, setIncludeBon] = uSx(true);   // count imported bon/pelunasan toward sisa bon?
+  const [fileDebug, setFileDebug] = uSx(null);   // FIX 0: parse diagnostics from the last XLSX read
+  const [showDebug, setShowDebug] = uSx(false);
   const fileRef = React.useRef(null);
   // dedupe against existing rows keyed on (date + TYPE + amount) — matches the server
   const existing = new Set((customer.transactions || []).map((t) => `${t.txnDate}|${t.method}|${t.amount}`));
   const rawCells = fileRows || text.split('\n').map((l) => l.trim()).filter(Boolean).map(splitCells);
-  // Header synonyms (case-insensitive, ID/EN). Columns: Tanggal · Harga · Pembelian Lunas · Pembelian
-  // Bon · Pembayaran Bon · Catatan. "Pembelian Bon" (purchase) and "Pembayaran Bon" (payment) both
-  // contain "bon" → the payment regex is matched FIRST so it wins its column, then bon avoids it.
-  const HRE = { date: /tanggal|tgl|date/i, price: /harga|price|tarif|unit/i, pay: /bayar|pembayaran|payment|pelunasan|setor/i, lunas: /lunas|tunai|cash/i, bon: /bon|hutang|kredit|piutang/i, qty: /galon|jumlah|qty/i, method: /metode|method|cara/i, note: /catatan|note|keterangan|ket/i };
-  // fixed-order fallback (no header): Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan
-  let colMap = { date: 0, price: 1, lunas: 2, bon: 3, pay: 4, note: 5, qty: -1, method: -1 };
-  let dataRows = rawCells;
-  if (rawCells.length) {
-    const hdr = rawCells[0]; const h = hdr.join(' ');
-    if (HRE.date.test(h) && (HRE.price.test(h) || HRE.lunas.test(h) || HRE.bon.test(h) || HRE.pay.test(h) || HRE.qty.test(h))) {   // header row
-      // payment matched first, then the remaining columns (a "bon" column that is NOT the payment)
-      const idxBut = (re, ...avoid) => hdr.findIndex((c, i) => re.test(c) && !avoid.some((a) => a === i));
-      const iDate = hdr.findIndex((c) => HRE.date.test(c));
-      const iPrice = hdr.findIndex((c) => HRE.price.test(c));
-      const iPay = hdr.findIndex((c) => HRE.pay.test(c));
-      const iLunas = idxBut(HRE.lunas, iPay);
-      const iBon = idxBut(HRE.bon, iPay, iLunas);
-      colMap = { date: iDate, price: iPrice, lunas: iLunas, bon: iBon, pay: iPay, note: hdr.findIndex((c) => HRE.note.test(c)), qty: hdr.findIndex((c) => HRE.qty.test(c)), method: hdr.findIndex((c) => HRE.method.test(c)) };
-      dataRows = rawCells.slice(1);
-    }
-  }
+  // FIX 2 — locate the header row (order-independent, tolerant of title rows) or fall back to fixed order.
+  const { colMap, headerRow, headerUnknown } = detectLegacyColumns(rawCells);
+  const dataRows = headerRow >= 0 ? rawCells.slice(headerRow + 1) : rawCells;
   const cellAt = (row, i) => (i >= 0 && row && i < row.length ? String(row[i] == null ? '' : row[i]).trim() : '');
   const seen = new Set();
   // One spreadsheet row EXPANDS into 1–3 transactions, each its own preview item. Dedupe/ceiling are
@@ -1685,13 +1732,14 @@ function LegacyImportModal({ customer, onClose, onDone }) {
   const valid = rows.filter((r) => r.valid);
   const skipped = rows.filter((r) => !r.valid);
   const shown = filter === 'ok' ? valid : filter === 'skip' ? skipped : rows;
-  const reset = () => { setText(''); setFileRows(null); setFileName(''); setErr(''); setFilter('all'); if (fileRef.current) fileRef.current.value = ''; };
+  const reset = () => { setText(''); setFileRows(null); setFileName(''); setErr(''); setFilter('all'); setFileDebug(null); setShowDebug(false); if (fileRef.current) fileRef.current.value = ''; };
   const typeLbl = (t) => t === 'bon' ? trD('dist.bon') : t === 'pelunasan' ? trD('dist.pelunasan') : trD('dist.lunas');
-  const reasonOf = (s) => s === 'baddate' ? trD('dist.liBadDate') : s === 'empty' ? trD('dist.liEmpty') : s === 'noprice' ? trD('dist.liNoPrice') : s === 'toobig' ? trD('dist.liTooBig') : s === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
-  // Download ONLY the skipped rows + their reason, so the user fixes them and re-imports.
+  // A bad-date chip shows the RAW cell text so the user sees exactly what was read (Tanggal salah: "abc").
+  const reasonOf = (r) => r.status === 'baddate' ? (trD('dist.liBadDate') + (r.dateRaw ? ': "' + r.dateRaw + '"' : '')) : r.status === 'nominal' ? trD('dist.liNominal') : r.status === 'toobig' ? trD('dist.liTooBig') : r.status === 'dup' ? trD('dist.impDup') : trD('dist.impReady');
+  // Download ONLY the skipped rows + their RAW cell value + reason, so the user fixes them and re-imports.
   const downloadSkipped = () => {
     const head = ['Tanggal', 'Harga', 'Pembelian Lunas', 'Pembelian Bon', 'Pembayaran Bon', 'Catatan', 'Alasan'];
-    const out = [head, ...skipped.map((r) => [r.dateRaw || '', r.price || '', r.type === 'lunas' ? r.qty : '', r.type === 'bon' ? r.qty : '', r.type === 'pelunasan' ? r.amount : '', r.note || '', reasonOf(r.status)])];
+    const out = [head, ...skipped.map((r) => [r.dateRaw || '', r.price || '', r.type === 'lunas' ? r.qty : '', r.type === 'bon' ? r.qty : '', r.type === 'pelunasan' ? r.amount : '', r.note || '', reasonOf(r)])];
     const csv = out.map((row) => row.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'riwayat-dilewati.csv';
@@ -1709,11 +1757,19 @@ function LegacyImportModal({ customer, onClose, onDone }) {
           try {
             const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array', cellDates: true });
             const ws = wb.Sheets[wb.SheetNames[0]];
-            // cellDates:true → date cells arrive as real Date objects; raw:false + dateNF render most
-            // to 'yyyy-mm-dd', but convert any surviving Date to ISO so parseLegacyDate never sees a
-            // locale toString(). Everything else is trimmed to a string.
-            const rws = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: false, dateNF: 'yyyy-mm-dd', defval: '' }).map((r) => r.map((c) => (c == null ? '' : (c instanceof Date ? c.toISOString().slice(0, 10) : String(c).trim()))));
-            setFileRows(rws); setFileBusy(false);
+            // ROOT-CAUSE FIX: read the RAW underlying values (raw:true), NOT the localised display text.
+            // With raw:false SheetJS returns each date cell's own format — its default is m/d/yy, so a
+            // 15-Jan cell came back "1/15/26" and our day-first parser rejected it (month 15). With
+            // cellDates:true + raw:true a date cell is a real Date object; we convert it via LOCAL
+            // y/m/d parts (never toISOString — that shifts the day across a timezone). Serial numbers
+            // and text dates are left for parseLegacyDate.
+            const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: true, defval: '' });
+            const dcell = (c) => parseLegacyDate(c) || '';   // Date/serial → ISO (local), else ''
+            const rws = aoa.map((r) => r.map((c) => (c == null ? '' : (c instanceof Date ? dcell(c) : String(c).trim()))));
+            // FIX 0 — parse diagnostics for the collapsible "Detail teknis" panel + console.
+            const dbg = { range: ws['!ref'] || '', sheet: wb.SheetNames[0], rows: aoa.slice(0, 4).map((r) => r.map((c) => ({ t: c instanceof Date ? 'Date' : typeof c, v: c instanceof Date ? (parseLegacyDate(c) || c.toString()) + ' (Date)' : c }))) };
+            try { console.log('[legacy-import] range=%s sheet=%s', dbg.range, dbg.sheet); dbg.rows.forEach((r, i) => console.log('  row%d:', i, r.map((c) => c.t + ':' + JSON.stringify(c.v)).join(' | '))); } catch (e) {}
+            setFileDebug(dbg); setFileRows(rws); setFileBusy(false);
           } catch (ex) { setErr(trD('dist.importFileErr')); setFileBusy(false); setFileName(''); }
         };
         rd.onerror = () => { setErr(trD('dist.importFileErr')); setFileBusy(false); setFileName(''); };
@@ -1721,7 +1777,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
       }).catch(() => { setErr(trD('dist.importXlsxCdnErr')); setFileBusy(false); setFileName(''); });
     } else {
       const rd = new FileReader();
-      rd.onload = () => { setFileRows(String(rd.result || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map(splitCells)); setFileBusy(false); };
+      rd.onload = () => { setFileDebug(null); setFileRows(String(rd.result || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map(splitCells)); setFileBusy(false); };
       rd.onerror = () => { setErr(trD('dist.importFileErr')); setFileBusy(false); setFileName(''); };
       rd.readAsText(file);
     }
@@ -1759,6 +1815,22 @@ function LegacyImportModal({ customer, onClose, onDone }) {
               : <span className="dist-imp-or">{trD('dist.importOr')}</span>}
           </div>
           {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={13} />{err}</div>}
+          {rawCells.length > 0 && headerUnknown && <div className="dist-hint" style={{ marginTop: 8, color: 'var(--warn)' }}><IconInvoice s={13} /> {trD('dist.liHeaderUnknown')}</div>}
+          {/* FIX 0 — collapsible "Detail teknis": exactly what the reader saw (range, header row +
+              mapping, and the first rows' raw value + type) so a bad file is diagnosable in the field. */}
+          {fileDebug && (
+            <div style={{ marginTop: 8, fontSize: 12 }}>
+              <button type="button" className="dist-link" onClick={() => setShowDebug((v) => !v)}>{showDebug ? '▾' : '▸'} {trD('dist.liDebug')}</button>
+              {showDebug && (
+                <div style={{ marginTop: 6, padding: 8, background: 'var(--surface-2, #f5f7f8)', borderRadius: 8, fontFamily: 'monospace', fontSize: 11.5, whiteSpace: 'pre-wrap', maxHeight: 180, overflow: 'auto' }}>
+                  {'range=' + fileDebug.range + '  sheet=' + fileDebug.sheet + '\n'}
+                  {'header row=' + (headerRow >= 0 ? '#' + (headerRow + 1) : 'tidak dikenali (urutan tetap)') + '\n'}
+                  {'kolom → date[' + colMap.date + '] harga[' + colMap.price + '] lunas[' + colMap.lunas + '] bon[' + colMap.bon + '] bayar[' + colMap.pay + '] catatan[' + colMap.note + ']\n'}
+                  {fileDebug.rows.map((r, i) => 'row' + i + ': ' + r.map((c) => c.t + ':' + JSON.stringify(c.v)).join('  |  ')).join('\n')}
+                </div>
+              )}
+            </div>
+          )}
           {!fileRows && !fileBusy && <textarea className="fld dist-imp-ta" value={text} placeholder={'15/01/2026\t12000\t10\t\t\tlunas\n16/01/2026\t13000\t2\t3\t\tlunas + bon\n20/01/2026\t\t\t\t30000\tbayar bon'} onChange={(e) => setText(e.target.value)} />}
           {rows.length > 0 && (<>
             {/* Status filter chips + "Unduh yang dilewati" so the user fixes skips and re-imports. */}
@@ -1774,7 +1846,7 @@ function LegacyImportModal({ customer, onClose, onDone }) {
                   <span className="dist-imp-name">{r.date || r.dateRaw || '—'}</span>
                   <span>{r.type ? <span className={`dist-badge ${r.type === 'bon' ? 'bon' : r.type === 'pelunasan' ? 'obon' : 'lunas'}`}>{typeLbl(r.type)}</span> : '—'}</span>
                   <span className="tnum">{r.amount ? rpFull(r.amount) : '—'}</span>
-                  <span><span className={`dist-imp-status ${r.status}`}>{reasonOf(r.status)}</span></span>
+                  <span><span className={`dist-imp-status ${r.status}`}>{reasonOf(r)}</span></span>
                 </div>
               ))}
               {shown.length > 400 && <div className="dist-hint" style={{ padding: '6px 10px' }}>… +{shown.length - 400}</div>}

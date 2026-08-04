@@ -521,16 +521,22 @@ function validTxnDate(s) {
 }
 // ROBUST legacy-import date parser → strict YYYY-MM-DD, or null. DON'T TRUST THE CLIENT: the server
 // re-parses the raw txnDate with the SAME rules the client preview uses, so a hand-crafted or old
-// payload in any d/m/y format is accepted, and an invalid one is rejected identically.
-// Mirrors distribution.jsx parseLegacyDate — keep both in sync. DAY-FIRST (Indonesian), no Date.parse.
+// payload in any d/m/y / month-name / serial format is accepted, and an invalid one is rejected
+// identically. MIRRORS distribution.jsx parseLegacyDate — keep both in sync. DAY-FIRST (Indonesian),
+// no new Date(string)/Date.parse; a real Date uses LOCAL parts; serials use the 1899-12-30 epoch.
+const LEGACY_MONTHS = { jan: 1, januari: 1, feb: 2, februari: 2, peb: 2, pebruari: 2, mar: 3, maret: 3, apr: 4, april: 4, mei: 5, may: 5, jun: 6, juni: 6, jul: 7, juli: 7, agu: 8, agt: 8, ags: 8, agustus: 8, aug: 8, sep: 9, sept: 9, september: 9, okt: 10, oct: 10, oktober: 10, nov: 11, november: 11, nop: 11, des: 12, dec: 12, desember: 12 };
 function realCalDate(y, mo, d) { y = +y; mo = +mo; d = +d; const dt = new Date(Date.UTC(y, mo - 1, d)); return (dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d) ? `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null; }
+function fullYear(yy) { yy = +yy; return yy >= 100 ? yy : (yy <= 79 ? 2000 + yy : 1900 + yy); }
+function serialToISO(n) { const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000); return isNaN(dt.getTime()) ? null : `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`; }
 function parseLegacyDate(v) {
-  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : realCalDate(v.getFullYear(), v.getMonth() + 1, v.getDate());
+  if (typeof v === 'number') return (v > 59 && v < 80000) ? serialToISO(v) : null;
   const s = String(v == null ? '' : v).trim(); if (!s) return null;
-  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return realCalDate(m[1], m[2], m[3]);   // ISO
-  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/);                                            // d/m/y (day-first)
-  if (m) { const yr = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return realCalDate(yr, m[2], m[1]); }
-  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000).toISOString().slice(0, 10); }   // Excel serial
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); if (m) return realCalDate(m[1], m[2], m[3]);        // ISO
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/); if (m) return realCalDate(fullYear(m[3]), m[2], m[1]);   // d/m/y day-first
+  m = s.match(/^(\d{1,2})[\s./-]+([A-Za-z]+)\.?[\s./-]+(\d{2}|\d{4})$/);                                        // d MonthName y
+  if (m) { const mo = LEGACY_MONTHS[m[2].toLowerCase()]; return mo ? realCalDate(fullYear(m[3]), mo, m[1]) : null; }
+  if (/^\d+(\.\d+)?$/.test(s)) { const n = +s; if (n > 59 && n < 80000) return serialToISO(n); }               // serial as text
   return null;
 }
 // Import LEGACY (historical) transactions for ONE customer — ARCHIVE ONLY. Every row is created
@@ -2250,4 +2256,5 @@ module.exports = {
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,
+  parseLegacyDate, expandLegacyRow,
 };

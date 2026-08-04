@@ -104,4 +104,17 @@ describe('one row → MULTIPLE transactions (lunas + bon + payment on the same d
     expect(del.body.data.deleted).toBe(2);   // both the lunas and the bon
     expect((await detail(gm, cid)).sisaBon).toBe(0);
   });
+
+  it('TEMPLATE round-trip: the exact rows our template writes import 100% (all siap)', async () => {
+    const c = await mkCust(gm, 'Template');
+    // The rows downloadLegacyTemplate emits (ISO dates), mapped to the import payload: a lunas row,
+    // a combined lunas+bon row (→ 2 txns), and a payment row = 4 transactions, 0 skipped.
+    const rows = [
+      { txnDate: '2026-01-15', price: 12000, lunasQty: 10 },
+      { txnDate: '2026-01-16', price: 13000, lunasQty: 2, bonQty: 3 },
+      { txnDate: '2026-01-20', paymentAmount: 30000 },
+    ];
+    const r = await imp(gm, c, rows);
+    expect(r.body).toMatchObject({ imported: 4, skipped: 0 });
+  });
 });
