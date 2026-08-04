@@ -479,6 +479,52 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
 // is locked server-side from the customer master price; we only preview it here.
 function shortRef(id) { return '#' + String(id || '').slice(-6).toUpperCase(); }
 function hhmm(ms) { if (!ms) return ''; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); }
+// ════════ Customer-detail presentation helpers (design-system, presentation-only) ════════
+// "12 Jan 2026" from an ISO string OR epoch ms OR a "YYYY-MM-DD" date. Never truncates.
+function fmtDateShort(v) {
+  if (!v) return '';
+  const d = typeof v === 'number' ? new Date(v) : (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(v + 'T00:00') : new Date(v));
+  if (isNaN(d)) return String(v);
+  return d.getDate() + ' ' + MONTHS_ID[d.getMonth()] + ' ' + d.getFullYear();
+}
+const fmtMonthYear = (ym) => { const [y, m] = ym.split('-'); return MONTHS_ID[(+m) - 1] + ' ' + y; };
+const monthKeyOf = (t) => (t.txnDate && /^\d{4}-\d{2}/.test(t.txnDate)) ? t.txnDate.slice(0, 7) : (t.createdAt ? new Date(t.createdAt).toISOString().slice(0, 7) : '');
+// A stable, copyable transaction code: the existing code if present, else TRX-<yyyymm>-<last6 of id>.
+function txnCode(t) {
+  if (t.code) return t.code;
+  const ym = (t.txnDate && /^\d{4}-\d{2}/.test(t.txnDate)) ? t.txnDate.slice(0, 7).replace('-', '') : (t.createdAt ? new Date(t.createdAt).toISOString().slice(0, 7).replace('-', '') : '000000');
+  return 'TRX-' + ym + '-' + String(t.id || '').slice(-6).toUpperCase();
+}
+// The signed receivable effect of a transaction on sisa bon (bonCounted rows only; a void contributes
+// nothing). Mirrors the server's BON_TXN rule so a client-side running balance stays honest.
+function bonEffectOf(t) {
+  if (t.voided || t.status === 'void' || !t.bonCounted) return 0;
+  if (t.method === 'bon') return (t.effectiveAmount != null ? t.effectiveAmount : t.amount);
+  if (t.method === 'pelunasan') return -t.amount;
+  return 0;
+}
+// Copy-to-clipboard chip/button. aria-labelled; shows a brief "✓" on success.
+function CopyBtn({ text, label, cls }) {
+  const [ok, setOk] = uSx(false);
+  return <button type="button" className={'dist-copy ' + (cls || '')} aria-label={(label || 'Salin') + ': ' + text} title={label || 'Salin'} onClick={(e) => { e.stopPropagation(); copyText(String(text), () => { setOk(true); setTimeout(() => setOk(false), 1200); }); }}>{ok ? <IconCheck s={12} /> : <IconInvoice s={12} />}</button>;
+}
+// One KPI card. tone: '' | 'bon' (amber) | 'ok' (green). `action` = optional inline node (link).
+function KpiCard({ label, value, sub, tone, action }) {
+  return (
+    <div className={'dist-kpi ' + (tone ? 'k-' + tone : '')}>
+      <div className="dist-kpi-lbl">{label}{action ? <span className="dist-kpi-act">{action}</span> : null}</div>
+      <div className="dist-kpi-val tnum">{value}</div>
+      {sub ? <div className="dist-kpi-sub">{sub}</div> : null}
+    </div>
+  );
+}
+// The four canonical list states. `state`: 'loading' | 'empty' | 'error' | 'nofilter'.
+function ListState({ state, onRetry, onClear, emptyText, emptyAction }) {
+  if (state === 'loading') return <div className="dist-liststate"><div className="dist-skel" /><div className="dist-skel" /><div className="dist-skel" /></div>;
+  if (state === 'error') return <div className="dist-liststate col"><IconWarn s={22} /><div>{trD('dist.loadErr')}</div>{onRetry && <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>{trD('dist.retry')}</button>}</div>;
+  if (state === 'nofilter') return <div className="dist-liststate col"><IconInvoice s={22} /><div>{trD('dist.noResultFilter')}</div>{onClear && <button type="button" className="btn btn-ghost btn-sm" onClick={onClear}>{trD('dist.clearFilter')}</button>}</div>;
+  return <div className="dist-liststate col"><IconInvoice s={22} /><div>{emptyText || trD('dist.noTxn')}</div>{emptyAction || null}</div>;
+}
 // Lazy-load SheetJS — only when an .xlsx/.xls file is chosen, so its ~930 KB never
 // touches the initial page load. (CSV needs no library; it's parsed as plain text.)
 // Served from OUR origin (vendor/), not cdn.sheetjs.com: that CDN has failed before,
@@ -2044,6 +2090,16 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [typesOpen, setTypesOpen] = uSx(false);
   const [obFor, setObFor] = uSx(null);   // customer whose opening/carry-over bon is being entered
   const [adjustFor, setAdjustFor] = uSx(null);   // { customer, kind } — balance adjustment modal
+  // ── Customer-detail redesign (presentation-only) state ──
+  const [cdTab, setCdTabState] = uSx(() => { try { return new URLSearchParams(window.location.search).get('tab') || 'ringkasan'; } catch (e) { return 'ringkasan'; } });
+  const setCdTab = (t) => { setCdTabState(t); try { const u = new URL(window.location.href); u.searchParams.set('tab', t); window.history.replaceState(null, '', u); } catch (e) {} };
+  const [cdSearch, setCdSearch] = uSx('');
+  const [cdPeriod, setCdPeriod] = uSx('all');        // all | 30 | month | lastMonth | year | range
+  const [cdFrom, setCdFrom] = uSx(''); const [cdTo, setCdTo] = uSx('');
+  const [cdType, setCdType] = uSx('all');            // all | lunas | bon | pelunasan
+  const [cdArchive, setCdArchive] = uSx(true);       // show archive rows in the list (never affects KPIs)
+  const [cdExpanded, setCdExpanded] = uSx(null);     // expanded transaction id
+  const [cdMenu, setCdMenu] = uSx(false);            // overflow "⋯" menu
   // Approve / reverse an adjustment (GM/owner). Both re-open the detail so balances refresh.
   const approveAdjustment = (adjId) => window.API.distribusi.customers.approveAdjustment(adjId)
     .then(() => { flash(trD('adj.approved')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
@@ -2378,153 +2434,280 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   if (view === 'detail') {
     const d = detail;
     const days = d ? fmtDays(d.deliveryDays) : '';
+    // ── Derived, PRESENTATION-ONLY figures from the existing response (no new business logic) ──
+    const txAll = (d && d.transactions) || [];
+    const adjustments = (d && d.adjustments) || [];
+    const pendingAdj = adjustments.filter((a) => a.status === 'pending');
+    const txOldNew = txAll.slice().sort((a, b) => (a.txnDate || '').localeCompare(b.txnDate || '') || (a.createdAt || 0) - (b.createdAt || 0));
+    const runMap = {}; let runBal = 0; txOldNew.forEach((t) => { runBal += bonEffectOf(t); runMap[t.id] = runBal; });   // running receivable after each row
+    const lastTx = txOldNew.length ? txOldNew[txOldNew.length - 1] : null;
+    const tx30 = txAll.filter((t) => (t.createdAt || 0) >= Date.now() - 30 * 86400000 && !t.voided).length;
+    const unpaidCount = txAll.filter((t) => t.method === 'bon' && !t.voided && t.bonCounted).length;
+    const lifetimeGalon = txAll.filter((t) => !t.legacy && !t.voided).reduce((s, t) => s + (t.qty || 0), 0);
+    const totalSpend = txAll.filter((t) => (t.method === 'lunas' || t.method === 'bon') && !t.voided).reduce((s, t) => s + (t.effectiveAmount != null ? t.effectiveAmount : t.amount), 0);
+    const monthsSince = d && d.createdAt ? Math.max(1, Math.round((Date.now() - new Date(d.createdAt).getTime()) / (30 * 86400000))) : 1;
+    const today = (window.FIN && FIN.TODAY) || new Date().toISOString().slice(0, 10);
+    const periodBounds = () => {
+      if (cdPeriod === 'all') return null;
+      if (cdPeriod === '30') return { from: isoAddDays(today, -29), to: today };
+      if (cdPeriod === 'month') return { from: today.slice(0, 8) + '01', to: today };
+      if (cdPeriod === 'lastMonth') { const dt = new Date(today + 'T00:00'); const lm = new Date(dt.getFullYear(), dt.getMonth() - 1, 1); const end = new Date(dt.getFullYear(), dt.getMonth(), 0); return { from: lm.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) }; }
+      if (cdPeriod === 'year') return { from: today.slice(0, 4) + '-01-01', to: today };
+      if (cdPeriod === 'range') return (cdFrom && cdTo) ? { from: cdFrom, to: cdTo } : null;
+      return null;
+    };
+    const pb = periodBounds();
+    const inPeriod = (t) => !pb || ((t.txnDate || '') >= pb.from && (t.txnDate || '') <= pb.to);
+    const q = cdSearch.trim().toLowerCase();
+    const matchSearch = (t) => !q || [txnCode(t), t.note, String(t.amount), String(t.effectiveAmount != null ? t.effectiveAmount : '')].some((x) => String(x || '').toLowerCase().includes(q));
+    const base = txAll.filter((t) => (cdArchive || !t.legacy) && inPeriod(t) && matchSearch(t));
+    const typeCounts = { all: base.length, lunas: 0, bon: 0, pelunasan: 0 };
+    base.forEach((t) => { if (typeCounts[t.method] != null) typeCounts[t.method]++; });
+    const rowsFiltered = base.filter((t) => cdType === 'all' || t.method === cdType).sort((a, b) => (b.txnDate || '').localeCompare(a.txnDate || '') || (b.createdAt || 0) - (a.createdAt || 0));
+    // Group the (newest-first) rows by month with a subtotal.
+    const monthOrder = []; const monthMap = {};
+    rowsFiltered.forEach((t) => { const k = monthKeyOf(t); if (!monthMap[k]) { monthMap[k] = { galon: 0, nilai: 0, bon: 0, rows: [] }; monthOrder.push(k); } const g = monthMap[k]; g.rows.push(t); if (!t.voided) { g.galon += (t.legacy ? 0 : t.qty || 0); g.nilai += (t.method === 'pelunasan' ? 0 : (t.effectiveAmount != null ? t.effectiveAmount : t.amount)); g.bon += bonEffectOf(t); } });
+    const anyFilter = cdSearch || cdType !== 'all' || cdPeriod !== 'all' || !cdArchive;
+    // Semantic bar colour per row.
+    const barOf = (t) => t.voided ? '#dc2626' : t.legacy ? '#94a3b8' : t.method === 'bon' ? '#e0a13c' : t.method === 'pelunasan' ? '#2f6fb0' : '#17b083';
+    const srcOf = (t) => t.legacy ? { lbl: trD('cd.srcImpor'), cls: 'arsip' } : { lbl: trD('cd.srcManual'), cls: 'manual' };
+    const waLink = d && d.phone ? 'https://wa.me/' + String(d.phone).replace(/[^0-9]/g, '').replace(/^0/, '62') : null;
+    const telLink = d && d.phone ? 'tel:' + String(d.phone).replace(/\s/g, '') : null;
+    // Overflow-menu action list (hidden, not disabled, when a capability is missing).
+    const menuActions = d ? [
+      (canInput || canCustomers) && { k: 'inv', label: trD('dist.makeInvoice'), ic: 'IconInvoice', fn: () => setInvBuilder(true) },
+      canInput && d.sisaBon > 0 && { k: 'pay', label: trD('dist.payBon'), ic: 'IconCoinIn', fn: () => setPayFor(d) },
+      canKoreksi && { k: 'ob', label: trD('dist.obBtn'), ic: 'IconInvoice', fn: () => setObFor(d) },
+      canBonAdjust && d.sisaBon > 0 && { k: 'pnr', label: trD('pnr.btn'), ic: 'IconWarn', fn: () => setPnrFor(d) },
+      canPenyesuaian && { k: 'adjg', label: trD('adj.title') + ' · ' + trD('adj.kindGalon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'galon' }) },
+      canPenyesuaian && { k: 'adjb', label: trD('adj.title') + ' · ' + trD('adj.kindBon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'bon' }) },
+      { k: 'hist', label: trD('dist.printHistory'), ic: 'IconDownload', fn: () => setHistOpen(true) },
+      canLegacyImport && { k: 'imp', label: trD('dist.liBtn'), ic: 'IconDownload', fn: () => setLegacyOpen(true) },
+      canCustomers && { k: 'edit', label: trD('dist.editCust'), ic: 'IconPencil', fn: () => openEdit(d) },
+      canDelete && d.active === false && { k: 're', label: trD('dist.reactivate'), ic: 'IconRefresh', fn: () => doReactivate(d) },
+      canDelete && { k: 'del', label: trD('dist.delCust'), ic: 'IconTrash', danger: true, fn: () => setDelFor(d) },
+    ].filter(Boolean) : [];
+    const runExpand = (t) => setCdExpanded(cdExpanded === t.id ? null : t.id);
+    const copyRow = (t) => copyText([txnCode(t), fmtDateShort(t.txnDate), methodLabel(t.method), numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked), rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount), t.actorName || '', t.note || ''].join(' · '), () => flash(trD('cd.copied')));
+    // A single transaction row (shared desktop table + mobile card via CSS).
+    const TxnRow = (t) => {
+      const amt = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
+      const src = srcOf(t); const open = cdExpanded === t.id;
+      return (
+        <div key={t.id} className={'cd-txn' + (t.voided ? ' voided' : '') + (open ? ' open' : '')}>
+          <button type="button" className="cd-txn-main" aria-expanded={open} onClick={() => runExpand(t)}>
+            <span className="cd-txn-bar" style={{ background: barOf(t) }} />
+            <span className="cd-txn-date"><b>{fmtDateShort(t.txnDate)}</b><small>{hhmm(t.createdAt)}</small></span>
+            <span className="cd-txn-code">{txnCode(t)}<CopyBtn text={txnCode(t)} label={trD('cd.colKode')} /></span>
+            <span className="cd-txn-type"><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span>{t.voided && <span className="dist-badge rev">{trD('dist.voided') || 'Batal'}</span>}{t.corrected && <span className="dist-badge corr"><IconPencil s={9} />{trD('dist.corrected')}</span>}</span>
+            <span className="cd-txn-gal tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</span>
+            <span className="cd-txn-price tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</span>
+            <span className="cd-txn-amt tnum">{rpFull(amt)}</span>
+            <span className="cd-txn-run tnum" title={trD('cd.runningTip')}>{rpFull(Math.max(0, runMap[t.id] || 0))}</span>
+            <span className={'cd-txn-src ' + src.cls}>{src.lbl}</span>
+            <span className="cd-txn-staff">{t.actorName || '—'}</span>
+            <span className="cd-txn-caret"><IconCaret s={13} style={{ transform: open ? 'rotate(180deg)' : 'none' }} /></span>
+          </button>
+          {open && (
+            <div className="cd-txn-detail">
+              <div><span>{trD('cd.expandBy')}</span><b>{t.actorName || '—'}</b></div>
+              <div><span>Tanggal & jam</span><b>{fmtDateShort(t.txnDate)}{t.createdAt ? ' · ' + hhmm(t.createdAt) : ''}</b></div>
+              <div><span>{trD('cd.expandSrc')}</span><b>{src.lbl}{t.importBatchId ? ' · ' + t.importBatchId : ''}</b></div>
+              {t.note ? <div><span>{trD('cd.expandNote')}</span><b>{t.note}</b></div> : null}
+              {t.voided ? <div><span>{trD('cd.actVoid')}</span><b>{t.voidReason || '—'}{t.voidedByName ? ' · ' + t.voidedByName : ''}</b></div> : null}
+              <div className="cd-txn-detail-act"><button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(t)}><IconInvoice s={13} />{trD('cd.copyDetail')}</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={13} />{trD('cd.printNota')}</button></div>
+            </div>
+          )}
+        </div>
+      );
+    };
+    const exportCsv = () => {
+      const head = [trD('cd.colTanggal'), trD('cd.colKode'), trD('cd.colTipe'), trD('cd.colGalon'), trD('cd.colHarga'), trD('cd.colNominal'), trD('cd.colRunning'), trD('cd.colSumber'), trD('cd.colPetugas')];
+      const out = [head].concat(rowsFiltered.map((t) => [t.txnDate, txnCode(t), methodLabel(t.method), t.method === 'pelunasan' ? '' : t.qty, t.method === 'pelunasan' ? '' : t.unitPriceLocked, t.effectiveAmount != null ? t.effectiveAmount : t.amount, Math.max(0, runMap[t.id] || 0), srcOf(t).lbl, t.actorName || '']));
+      const csv = out.map((r) => r.map((c) => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+      const bl = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(bl); a.download = 'transaksi-' + (d.code || d.id) + '.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    const TABS = [['ringkasan', trD('cd.tab.ringkasan')], ['transaksi', trD('cd.tab.transaksi')], ['penyesuaian', trD('cd.tab.penyesuaian')], ['info', trD('cd.tab.info')]].concat(isGmOwner ? [['aktivitas', trD('cd.tab.aktivitas')]] : []);
+    // Activity feed (GM/owner) — composed from existing data (no new endpoint).
+    const activity = [];
+    if (d) {
+      if (d.createdAt) activity.push({ at: new Date(d.createdAt).getTime(), t: trD('cd.actCreated'), who: d.createdByName, tone: 'ok' });
+      (d.imports || []).forEach((b) => activity.push({ at: b.at, t: trD('cd.actImport', { n: b.count }), who: b.byName, tone: 'arsip' }));
+      adjustments.forEach((a) => { activity.push({ at: a.createdAt, t: trD('cd.actAdjust', { kind: a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon') }) + ' · ' + (a.kind === 'bon' ? rpFull(a.before) + '→' + rpFull(a.after) : numX(a.before) + '→' + numX(a.after)), who: a.createdByName, tone: 'adj' }); if (a.approvedAt) activity.push({ at: a.approvedAt, t: trD('cd.actAdjustApproved'), who: a.approvedByName, tone: 'adj' }); });
+      (d.priceAdjustments || []).forEach((b) => activity.push({ at: b.createdAt, t: trD('cd.actPrice') + ' · ' + rpFull(b.oldPrice) + '→' + rpFull(b.newPrice), who: b.actorName, tone: 'bon' }));
+      txAll.filter((t) => t.voided).forEach((t) => activity.push({ at: t.voidedAt, t: trD('cd.actVoid') + ' · ' + txnCode(t), who: t.voidedByName, tone: 'rev' }));
+    }
+    activity.sort((a, b) => (b.at || 0) - (a.at || 0));
     return (
-      <div className="dist-dash screen-enter">
-        <button type="button" className="dist-back" onClick={() => { setView('list'); setDetail(null); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backCust')}</button>
-        {!d ? <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div> : (<>
-          <div className="card dist-cd-head">
-            <span className="dist-cd-av">{initialsOf(d.name)}</span>
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <div className="dist-cd-namerow">{d.code && <span className="dist-code lg">{d.code}</span>}<h2 className="dist-cd-name">{d.name}</h2>{tag(d.type)}{d.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
-              {d.complete === false && (
-                <div className="dist-incomplete" style={{ marginTop: 6 }} onClick={() => canCustomers && openEdit(d)}>
-                  <span className="dist-incomplete-badge"><IconWarn s={11} />{trD('dist.incomplete')}</span>
-                  {missChips(d.missing)}
+      <div className="dist-dash screen-enter cd-page">
+        <button type="button" className="dist-back no-print" onClick={() => { setView('list'); setDetail(null); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backCust')}</button>
+        {!d ? <div className="card cd-skeleton"><div className="dist-skel" style={{ height: 60 }} /><div className="dist-skel" /><div className="dist-skel" /></div> : (<>
+          {/* ── STICKY HEADER ── */}
+          <div className="card cd-head">
+            <div className="cd-head-top">
+              <span className="cd-avatar" aria-hidden="true">{initialsOf(d.name)}</span>
+              <div className="cd-head-id">
+                <div className="cd-head-nrow"><h2 className="cd-name">{d.name}</h2>{d.code && <span className="cd-code">{d.code}<CopyBtn text={d.code} label={trD('cd.colKode')} /></span>}</div>
+                <div className="cd-chips">
+                  {tag(d.type)}
+                  {d.armada && <span className={'cd-chip ' + (isActiveArmada(d.armada) ? '' : 'inactive')}><IconTruck s={11} />{armadaFull(d.armada)}</span>}
+                  {days && <span className="cd-chip"><IconCalendar s={11} />{days}</span>}
+                  <span className={'cd-chip ' + (d.active === false ? 'inactive' : 'ok')}>{d.active === false ? trD('dist.inactive') : trD('dist.aktif') || 'Aktif'}</span>
                 </div>
-              )}
-              <div className="dist-cd-phone">{d.phone || '—'}</div>
-              <div className="dist-cd-meta">
-                <span><IconCalendar s={13} />{trD('dist.kirimHari')}: <b>{days || '—'}</b></span>
-                <span className={d.armada && !isActiveArmada(d.armada) ? 'inactive' : ''}><IconTruck s={13} />{trD('dist.armada')}: <b>{d.armada ? armadaFull(d.armada) : '—'}</b></span>
-                <span className={d.locationAccuracy != null && d.locationAccuracy > ACC_LIMIT ? 'inactive' : ''}><IconPin s={13} />{trD('dist.location')}: {d.mapsLink
-                  ? <a href={d.mapsLink} target="_blank" rel="noopener noreferrer" className="dist-link">{trD('dist.directions')}</a>
-                  : <b className="dist-noloc">{trD('dist.locNotSet')}</b>}
-                  {d.hasLocation && d.locationAccuracy != null && <b className={d.locationAccuracy > ACC_LIMIT ? 'dist-acc-bad' : 'dist-acc-ok'}> · ±{Math.round(d.locationAccuracy)} m{d.locationAccuracy > ACC_LIMIT ? ' ' + trD('dist.locAccPoor') : ''}</b>}
-                  {d.hasLocation && d.locationSetByName && <span className="dist-loc-by"> · {trD('dist.locSetBy', { d: fmtDT(d.locationSetAt), who: d.locationSetByName })}</span>}</span>
               </div>
-              {d.address ? <div className="dist-cd-addr"><IconHome s={12} />{d.address}</div> : null}
-              <div className="dist-cd-photo">
-                <div className="dist-cd-photo-lbl"><IconPin s={12} />{trD('dist.locPhoto')}</div>
-                <LocPhoto custId={d.id} photoId={d.locationPhotoId} byName={d.locationPhotoByName} at={d.locationPhotoAt} canEdit={canInput || canCustomers} onChanged={() => { openDetail(d.id); reload(); }} />
+              <div className="cd-head-actions no-print">
+                {waLink && <a className="cd-iconbtn wa" href={waLink} target="_blank" rel="noopener noreferrer" aria-label={trD('cd.wa')} title={trD('cd.wa')}><IconWhatsApp s={17} /></a>}
+                {telLink && <a className="cd-iconbtn" href={telLink} aria-label={trD('cd.telp')} title={trD('cd.telp')}><IconPhone s={16} /></a>}
+                {d.mapsLink && <a className="cd-iconbtn" href={d.mapsLink} target="_blank" rel="noopener noreferrer" aria-label={trD('cd.maps')} title={trD('cd.maps')}><IconPin s={16} /></a>}
+                <div className="cd-menu-wrap">
+                  <button type="button" className="cd-iconbtn" aria-haspopup="true" aria-expanded={cdMenu} aria-label={trD('cd.more')} onClick={() => setCdMenu((v) => !v)}><IconDots s={18} /></button>
+                  {cdMenu && <><div className="cd-menu-scrim" onClick={() => setCdMenu(false)} /><div className="cd-menu" role="menu">{menuActions.map((a) => <button key={a.k} type="button" role="menuitem" className={'cd-menu-item' + (a.danger ? ' danger' : '')} onClick={() => { setCdMenu(false); a.fn(); }}>{IcX(a.ic, { s: 14 })}{a.label}</button>)}</div></>}
+                </div>
               </div>
-            </div>
-            <div className="dist-cd-stats">
-              <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}{canPenyesuaian && <button type="button" className="dist-link dist-adj-mini" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })} title={trD('adj.title')}>{trD('adj.adjustBtn')}</button>}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
-              <div><div className="dist-cd-slbl">{trD('dist.totalGalon')}</div><div className="dist-cd-sval">{numX(d.totalGalon)}</div></div>
-              <div><div className="dist-cd-slbl">{trD('dist.gallonsHeld')}{canPenyesuaian && <button type="button" className="dist-link dist-adj-mini" onClick={() => setAdjustFor({ customer: d, kind: 'galon' })} title={trD('adj.title')}>{trD('adj.adjustBtn')}</button>}</div><div className="dist-cd-sval" style={{ color: (d.gallonsHeld || 0) > 0 ? 'var(--warn)' : 'var(--text-mut)' }}>{numX(d.gallonsHeld || 0)}</div></div>
-            </div>
-            <div className="dist-cd-actions">
-              {(canInput || canCustomers) && <button type="button" className="btn btn-primary btn-sm" onClick={() => setInvBuilder(true)}><IconInvoice s={14} />{trD('dist.makeInvoice')}</button>}
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={14} />{trD('dist.printHistory')}</button>
-              {canLegacyImport && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLegacyOpen(true)}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('dist.liBtn')}</button>}
-              {(canInput || canCustomers) && <GpsButton custId={d.id} hasLoc={d.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); openDetail(d.id); reload(); }} onFlash={flash} />}
-              {canInput && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayFor(d)}><IconCoinIn s={14} />{trD('dist.payBon')}</button>}
-              {/* The customer paid but the money never reached us. Writes off a receivable AND names
-                  a responsible staff member → its own owner/GM-tier cap, never a plain input helper. */}
-              {canBonAdjust && d.sisaBon > 0 && <button type="button" className="btn btn-ghost btn-sm dist-pnr-btn" onClick={() => setPnrFor(d)}><IconWarn s={14} />{trD('pnr.btn')}</button>}
-              {/* Carry-over receivable from the old books. Correction-tier cap: this creates a
-                  real bon out of nothing, so a plain input helper must not be able to. */}
-              {canKoreksi && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setObFor(d)}><IconInvoice s={14} />{trD('dist.obBtn')}</button>}
-              {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(d)}><IconPencil s={14} />{trD('dist.editCust')}</button>}
-              {canDelete && d.active === false && <button type="button" className="btn btn-ghost btn-sm dist-reactivate" onClick={() => doReactivate(d)}><IconRefresh s={14} />{trD('dist.reactivate')}</button>}
-              {canDelete && <button type="button" className="btn btn-ghost btn-sm dist-del-btn" onClick={() => setDelFor(d)}><IconTrash s={14} />{trD('dist.delCust')}</button>}
             </div>
           </div>
-          <div className="dist-cd-cols">
-            <div className="card dist-cd-price">
-              <div className="dist-card-head"><div className="sec-title">{trD('dist.hargaMenempel')}</div><span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span></div>
-              <p className="dist-cd-pricenote">{trD('dist.hargaMenempelNote')}</p>
-              <div className="dist-cd-pricebox"><div className="dist-cd-pricelbl">{trD('dist.hargaPerGalon')}</div><div className="dist-cd-priceval">{rpFull(d.masterPrice)}</div></div>
-              {canPrice
-                ? <button type="button" className="btn btn-ghost" style={{ width: '100%', marginTop: 14 }} onClick={onGoHarga}><IconPencil s={14} />{trD('dist.ubahHarga')}</button>
-                : <div className="dist-cd-lockednote"><IconLock s={14} />{trD('dist.hargaOwnerOnly')}</div>}
-              {(d.priceAdjustments || []).length > 0 && (
-                <div className="dist-cd-adj">
-                  <div className="dist-cd-adj-h"><IconInvoice s={13} />{trD('dist.pcActiveT')}</div>
-                  {(d.priceAdjustments || []).map((b) => (
-                    <div key={b.batchId} className="dist-cd-adj-row">
-                      <div className="dist-cd-adj-txt"><b>{rpFull(b.oldPrice)} → {rpFull(b.newPrice)}</b><span>{trD('dist.pcAdjMeta', { n: b.count, d: (b.totalDelta >= 0 ? '+' : '') + rpFull(b.totalDelta) })}</span></div>
-                      {canPrice && <button type="button" className="btn btn-ghost btn-sm" onClick={() => cancelAdj(b.batchId)}>{trD('dist.batalkan')}</button>}
+          {/* ── KPI STRIP ── */}
+          <div className="cd-kpis">
+            <KpiCard label={trD('cd.kpiSisaBon')} tone={d.sisaBon > 0 ? 'bon' : 'ok'} value={d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')} sub={unpaidCount > 0 ? trD('cd.subUnpaid', { n: unpaidCount }) : trD('dist.lunas')} action={d.sisaBon > 0 && canPenyesuaian ? <button type="button" className="dist-link" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })}>{trD('cd.rekon')}</button> : null} />
+            <KpiCard label={trD('cd.kpiGalon')} tone={(d.gallonsHeld || 0) > 0 ? 'bon' : ''} value={numX(d.gallonsHeld || 0)} sub={canPenyesuaian ? <button type="button" className="dist-link" onClick={() => setAdjustFor({ customer: d, kind: 'galon' })}>{trD('adj.adjustBtn')}</button> : trD('dist.gallonsHeld')} />
+            <KpiCard label={trD('cd.kpiHarga')} value={rpFull(d.masterPrice)} sub={trD('dist.hargaPerGalon')} />
+            <KpiCard label={trD('cd.kpi30')} value={numX(tx30)} sub={lastTx ? trD('cd.subLast', { d: fmtDateShort(lastTx.txnDate) }) : trD('cd.subNone')} />
+            <KpiCard label={trD('cd.kpiLast')} value={lastTx ? fmtDateShort(lastTx.txnDate) : '—'} sub={lastTx ? methodLabel(lastTx.method) : trD('cd.subNone')} />
+          </div>
+          {/* ── TABS ── */}
+          <div className="cd-tabs no-print" role="tablist">
+            {TABS.map(([k, l]) => <button key={k} role="tab" aria-selected={cdTab === k} className={'cd-tab ' + (cdTab === k ? 'on' : '')} onClick={() => setCdTab(k)}>{l}{k === 'penyesuaian' && pendingAdj.length > 0 ? <span className="cd-tab-badge">{pendingAdj.length}</span> : null}</button>)}
+          </div>
+
+          {/* ── TAB: RINGKASAN ── */}
+          {cdTab === 'ringkasan' && (
+            <div className="cd-tabpanel">
+              {pendingAdj.length > 0 && <div className="cd-pending-banner"><IconClock s={15} />{trD('cd.pendingBanner', { n: pendingAdj.length })}<button type="button" className="dist-link" onClick={() => setCdTab('penyesuaian')}>{trD('cd.tab.penyesuaian')} →</button></div>}
+              <div className="cd-grid2">
+                <div className="card cd-card">
+                  <div className="dist-card-head"><div className="sec-title">{trD('dist.hargaMenempel')}</div><span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span></div>
+                  <div className="cd-priceval tnum">{rpFull(d.masterPrice)}</div>
+                  <p className="cd-muted">{trD('dist.hargaMenempelNote')}</p>
+                  {canPrice ? <button type="button" className="btn btn-ghost btn-sm" onClick={onGoHarga}><IconPencil s={13} />{trD('dist.ubahHarga')}</button> : <div className="cd-muted"><IconLock s={12} />{trD('dist.hargaOwnerOnly')}</div>}
+                </div>
+                <div className="card cd-card">
+                  <div className="sec-title">{trD('cd.ringkasanCard')}</div>
+                  <div className="cd-kv"><span>{trD('cd.lifetimeGalon')}</span><b className="tnum">{numX(lifetimeGalon)}</b></div>
+                  <div className="cd-kv"><span>{trD('cd.totalSpend')}</span><b className="tnum">{rpFull(totalSpend)}</b></div>
+                  <div className="cd-kv"><span>{trD('cd.avgMonth')}</span><b className="tnum">{rpFull(Math.round(totalSpend / monthsSince))}</b></div>
+                  <div className="cd-kv"><span>{trD('cd.custSince')}</span><b>{d.createdAt ? fmtDateShort(d.createdAt) : '—'}</b></div>
+                </div>
+              </div>
+              <div className="card cd-card">
+                <div className="dist-card-head"><div className="sec-title">{trD('dist.riwayat')}</div><button type="button" className="dist-link" onClick={() => setCdTab('transaksi')}>{trD('cd.tab.transaksi')} →</button></div>
+                {txOldNew.length === 0 ? <ListState state="empty" emptyText={trD('dist.noTxn')} emptyAction={canInput ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button> : null} /> : <div className="cd-txns compact">{rowsFiltered.slice(0, 5).map((t) => TxnRow(t))}</div>}
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB: TRANSAKSI ── */}
+          {cdTab === 'transaksi' && (
+            <div className="cd-tabpanel">
+              <div className="cd-toolbar no-print">
+                <div className="cd-search"><IconSearch s={14} /><input aria-label={trD('cd.search')} placeholder={trD('cd.search')} value={cdSearch} onChange={(e) => setCdSearch(e.target.value)} />{cdSearch && <button type="button" aria-label="clear" onClick={() => setCdSearch('')}><IconClose s={13} /></button>}</div>
+                <div className="cd-chiprow">{[['all', trD('dist.fAll')], ['30', trD('cd.per30')], ['month', trD('cd.perThisMonth')], ['lastMonth', trD('cd.perLastMonth')], ['year', trD('cd.perThisYear')], ['range', trD('cd.perCustom')]].map(([k, l]) => <button key={k} type="button" className={'dist-chip ' + (cdPeriod === k ? 'on' : '')} onClick={() => setCdPeriod(k)}>{l}</button>)}</div>
+                {cdPeriod === 'range' && <div className="dist-period-range"><DP.DateField value={cdFrom} onChange={setCdFrom} max={cdTo || today} /><span>–</span><DP.DateField value={cdTo} onChange={setCdTo} min={cdFrom || undefined} max={today} /></div>}
+                <div className="cd-chiprow">{[['all', trD('dist.fAll') || 'Semua'], ['lunas', methodLabel('lunas')], ['bon', methodLabel('bon')], ['pelunasan', methodLabel('pelunasan')]].map(([k, l]) => <button key={k} type="button" className={'dist-chip ' + (cdType === k ? 'on' : '')} onClick={() => setCdType(k)}>{l} <span className="dist-imp-chipn">{typeCounts[k]}</span></button>)}</div>
+                <label className="cd-toggle"><input type="checkbox" checked={cdArchive} onChange={(e) => setCdArchive(e.target.checked)} />{trD('cd.showArchive')}</label>
+                <div style={{ flex: 1 }} />
+                <button type="button" className="btn btn-ghost btn-sm" disabled={!rowsFiltered.length} onClick={exportCsv}><IconDownload s={13} style={{ transform: 'rotate(180deg)' }} />{trD('rep.csv')}</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistOpen(true)}><IconDownload s={13} />{trD('dist.print')}</button>
+              </div>
+              <div className="card cd-card cd-txn-card">
+                <div className="cd-txn-head" role="row">
+                  <span>{trD('cd.colTanggal')}</span><span>{trD('cd.colKode')}</span><span>{trD('cd.colTipe')}</span><span className="r">{trD('cd.colGalon')}</span><span className="r">{trD('cd.colHarga')}</span><span className="r">{trD('cd.colNominal')}</span><span className="r" title={trD('cd.runningTip')}>{trD('cd.colRunning')}</span><span>{trD('cd.colSumber')}</span><span>{trD('cd.colPetugas')}</span><span />
+                </div>
+                {txAll.length === 0 ? <ListState state="empty" emptyText={trD('dist.noTxn')} emptyAction={canInput ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button> : null} />
+                  : rowsFiltered.length === 0 ? <ListState state="nofilter" onClear={() => { setCdSearch(''); setCdType('all'); setCdPeriod('all'); setCdArchive(true); }} />
+                  : monthOrder.map((mk) => (
+                    <div key={mk} className="cd-month">
+                      <div className="cd-month-head"><b>{fmtMonthYear(mk)}</b><span>{trD('cd.monthSub', { g: numX(monthMap[mk].galon), v: rpFull(monthMap[mk].nilai), b: (monthMap[mk].bon >= 0 ? '+' : '') + rpFull(monthMap[mk].bon) })}</span></div>
+                      {monthMap[mk].rows.map((t) => TxnRow(t))}
                     </div>
                   ))}
-                </div>
-              )}
-            </div>
-            <div className="card dist-card" style={{ flex: 1, minWidth: 280 }}>
-              <div className="sec-title" style={{ marginBottom: 8 }}>{trD('dist.riwayat')}</div>
-              {(!d.transactions || d.transactions.length === 0) && <div className="dist-empty">{trD('dist.noTxn')}</div>}
-              {(d.transactions || []).map((t) => (
-                <div key={t.id} className={`dist-txn ${t.legacy ? 'is-legacy' : ''}`}>
-                  <span className="dist-cd-bar" style={{ background: t.legacy ? '#94a3b8' : t.method === 'bon' ? '#e0a13c' : t.method === 'pelunasan' ? '#2f6fb0' : '#17b083' }} />
-                  <div className="dist-txn-mid">
-                    <div className="dist-txn-line1"><span className="dist-txn-name">{shortRef(t.id)}</span><span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>{t.legacy && <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span>}{t.openingBon && <span className="dist-badge obon"><IconInvoice s={10} />{trD('dist.obLabel')}</span>}{t.corrected ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}{t.adjusted ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}</div>
-                    <div className="dist-txn-sub">{numX(t.qty)} × {rpFull(t.unitPriceLocked)} · {t.txnDate} {hhmm(t.createdAt)}{t.actorName ? ' · ' + t.actorName : ''}{t.adjusted ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}{t.note ? ' · ' + t.note : ''}</div>
-                  </div>
-                  <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
-                </div>
-              ))}
-              {/* Balance ADJUSTMENTS appear in the history too, with a distinct "Penyesuaian" badge. */}
-              {(d.adjustments || []).filter((a) => a.status !== 'reversed').map((a) => (
-                <div key={a.id} className="dist-txn">
-                  <span className="dist-cd-bar" style={{ background: a.status === 'pending' ? '#b45309' : '#7c3aed' }} />
-                  <div className="dist-txn-mid">
-                    <div className="dist-txn-line1"><span className="dist-txn-name">{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}</span><span className="dist-badge adj"><IconPencil s={10} />{trD('adj.badge')}</span>{a.status === 'pending' && <span className="dist-badge pending"><IconClock s={10} />{trD('adj.pending')}</span>}{a.reversalOf && <span className="dist-badge arsip">{trD('adj.reversalBadge')}</span>}{a.reversedById && <span className="dist-badge arsip">{trD('adj.reversedBadge')}</span>}</div>
-                    <div className="dist-txn-sub">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → {(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))} · {adjReasonLabel(a.reason)} · {fmtDT(a.createdAt)}{a.createdByName ? ' · ' + a.createdByName : ''}{a.note ? ' · ' + a.note : ''}</div>
-                  </div>
-                  <div className="tnum dist-txn-amt" style={{ color: a.delta >= 0 ? 'var(--green-700)' : 'var(--neg)' }}>{a.delta >= 0 ? '+' : ''}{a.kind === 'bon' ? rpFull(a.delta) : numX(a.delta)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-          {/* Riwayat Penyesuaian — the full audit table: tanggal · jenis · before→after · alasan ·
-              oleh · disetujui oleh · [Setujui/Batalkan]. */}
-          {(d.adjustments || []).length > 0 && (
-            <div className="card dist-card" style={{ marginTop: 16 }}>
-              <div className="sec-title" style={{ marginBottom: 8 }}><IconPencil s={14} /> {trD('adj.tableTitle')}</div>
-              <div className="dist-adj-table">
-                <div className="dist-adj-hrow"><span>{trD('adj.colDate')}</span><span>{trD('adj.colKind')}</span><span>{trD('adj.colChange')}</span><span>{trD('adj.colReason')}</span><span>{trD('adj.colBy')}</span><span>{trD('adj.colApprovedBy')}</span><span /></div>
-                {(d.adjustments || []).map((a) => (
-                  <div key={a.id} className={`dist-adj-row ${a.status}`}>
-                    <span>{fmtDT(a.createdAt)}</span>
-                    <span>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}{a.reversalOf ? ' · ' + trD('adj.reversalBadge') : ''}</span>
-                    <span className="tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → <b>{(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</b></span>
-                    <span>{adjReasonLabel(a.reason)}{a.note ? ' · ' + a.note : ''}</span>
-                    <span>{a.createdByName || '—'}</span>
-                    <span>{a.status === 'pending' ? <span className="dist-badge pending"><IconClock s={10} />{trD('adj.pending')}</span> : a.status === 'reversed' ? trD('adj.reversedBadge') : (a.approvedByName || '—')}</span>
-                    <span>
-                      {a.status === 'pending' && isGmOwner && <button type="button" className="dist-link" onClick={() => approveAdjustment(a.id)}>{trD('adj.approve')}</button>}
-                      {isGmOwner && !a.reversalOf && !a.reversedById && a.status !== 'reversed' && <button type="button" className="dist-link danger" onClick={() => reverseAdjustment(a.id)}>{trD('adj.reverse')}</button>}
-                    </span>
-                  </div>
-                ))}
               </div>
             </div>
           )}
-          {(d.imports || []).length > 0 && (
-            <div className="card dist-card dist-imp-hist" style={{ marginTop: 16 }}>
-              <div className="sec-title" style={{ marginBottom: 8 }}><IconInvoice s={14} /> {trD('dist.liHistTitle')}</div>
-              {(d.imports || []).map((b) => (
-                <div key={b.batchId} className="dist-imp-hist-row">
-                  <div className="dist-imp-hist-main">{trD('dist.liHistLine', { d: fmtDT(b.at), n: b.count, who: b.byName || '—' })}</div>
-                  {isGmOwner && <button type="button" className="dist-link danger" onClick={() => undoLegacyBatch(b.batchId)}>{trD('dist.liUndo')}</button>}
-                </div>
-              ))}
+
+          {/* ── TAB: PENYESUAIAN ── */}
+          {cdTab === 'penyesuaian' && (
+            <div className="cd-tabpanel">
+              {pendingAdj.length > 0 && <div className="cd-pending-banner"><IconClock s={15} />{trD('cd.pendingBanner', { n: pendingAdj.length })}</div>}
+              <div className="card cd-card">
+                <div className="sec-title" style={{ marginBottom: 8 }}><IconPencil s={14} /> {trD('adj.tableTitle')}</div>
+                {adjustments.length === 0 ? <ListState state="empty" emptyText={trD('adj.tableTitle')} emptyAction={canPenyesuaian ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })}>{trD('adj.adjustBtn')}</button> : null} /> : (
+                  <div className="dist-adj-table">
+                    <div className="dist-adj-hrow"><span>{trD('adj.colDate')}</span><span>{trD('adj.colKind')}</span><span>{trD('adj.colChange')}</span><span>{trD('adj.colReason')}</span><span>{trD('adj.colBy')}</span><span>{trD('adj.colApprovedBy')}</span><span /></div>
+                    {adjustments.map((a) => (
+                      <div key={a.id} className={'dist-adj-row ' + a.status}>
+                        <span>{fmtDateShort(a.createdAt)}</span>
+                        <span>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}{a.reversalOf ? ' · ' + trD('adj.reversalBadge') : ''}</span>
+                        <span className="tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → <b>{(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</b></span>
+                        <span>{adjReasonLabel(a.reason)}{a.note ? ' · ' + a.note : ''}</span>
+                        <span>{a.createdByName || '—'}</span>
+                        <span>{a.status === 'pending' ? <span className="dist-badge pending"><IconClock s={10} />{trD('adj.pending')}</span> : a.status === 'reversed' ? trD('adj.reversedBadge') : (a.approvedByName || '—')}</span>
+                        <span>{a.status === 'pending' && isGmOwner && <button type="button" className="dist-link" onClick={() => approveAdjustment(a.id)}>{trD('adj.approve')}</button>}{isGmOwner && !a.reversalOf && !a.reversedById && a.status !== 'reversed' && <button type="button" className="dist-link danger" onClick={() => reverseAdjustment(a.id)}>{trD('adj.reverse')}</button>}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
-          <div className="card dist-card" style={{ marginTop: 16 }}>
-            <div className="dist-card-head"><div className="sec-title">{trD('dist.invHistory')}</div>{(canInput || canCustomers) && <button type="button" className="dist-link" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button>}</div>
-            {invoices.length === 0 && <div className="dist-empty">{trD('dist.noInvoice')}</div>}
-            {invoices.map((iv) => (
-              <div key={iv.id} className="dist-txn dist-inv-row" onClick={() => setInvView(iv)}>
-                <span className="dist-cd-bar" style={{ background: '#5b7cff' }} />
-                <div className="dist-txn-mid">
-                  <div className="dist-txn-line1"><span className="dist-txn-name">{iv.number}</span></div>
-                  <div className="dist-txn-sub">{iv.issueDate} · {iv.items.length} item{iv.dueDate ? ' · ' + trD('dist.dueDate') + ' ' + iv.dueDate : ''}{iv.createdByName ? ' · ' + iv.createdByName : ''}</div>
+
+          {/* ── TAB: INFO & PENGIRIMAN ── */}
+          {cdTab === 'info' && (
+            <div className="cd-tabpanel">
+              <div className="cd-grid2">
+                <div className="card cd-card">
+                  <div className="dist-card-head"><div className="sec-title">{trD('cd.contact')}</div>{canCustomers && <button type="button" className="dist-link" onClick={() => openEdit(d)}><IconPencil s={12} />{trD('dist.editCust')}</button>}</div>
+                  <div className="cd-kv"><span>{trD('dist.fCust')}</span><b>{d.name}</b></div>
+                  <div className="cd-kv"><span>HP</span><b>{d.phone || '—'}{d.phone && <span className="cd-inline-ic">{waLink && <a className="cd-iconbtn sm wa" href={waLink} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp"><IconWhatsApp s={13} /></a>}<CopyBtn text={d.phone} label="HP" /></span>}</b></div>
+                  <div className="cd-kv"><span>{trD('dist.location')}</span><b>{d.mapsLink ? <a className="dist-link" href={d.mapsLink} target="_blank" rel="noopener noreferrer">{trD('dist.directions')}</a> : trD('dist.locNotSet')}</b></div>
+                  {d.address ? <div className="cd-kv"><span>{trD('dist.address') || 'Alamat'}</span><b>{d.address}</b></div> : null}
+                  <div className="cd-photo"><LocPhoto custId={d.id} photoId={d.locationPhotoId} byName={d.locationPhotoByName} at={d.locationPhotoAt} canEdit={canInput || canCustomers} onChanged={() => { openDetail(d.id); reload(); }} /></div>
                 </div>
-                <div className="tnum dist-txn-amt">{rpFull(iv.total)}</div>
+                <div className="card cd-card">
+                  <div className="dist-card-head"><div className="sec-title">{trD('cd.pengiriman')}</div>{canCustomers && <button type="button" className="dist-link" onClick={() => openEdit(d)}><IconPencil s={12} />{trD('dist.editCust')}</button>}</div>
+                  <div className="cd-kv"><span>{trD('cd.hariKirim')}</span><b>{days ? <span className="cd-daychips">{DAY_CODES.map((dd) => <span key={dd} className={'cd-daychip ' + ((d.deliveryDays || []).includes(dd) ? 'on' : '')}>{dd}</span>)}</span> : '—'}</b></div>
+                  <div className="cd-kv"><span>{trD('dist.armada')}</span><b>{d.armada ? armadaFull(d.armada) : '—'}</b></div>
+                  {d.locationSetByName ? <div className="cd-kv"><span>{trD('cd.locNote')}</span><b>{trD('dist.locSetBy', { d: fmtDateShort(d.locationSetAt), who: d.locationSetByName })}</b></div> : null}
+                </div>
+                <div className="card cd-card">
+                  <div className="dist-card-head"><div className="sec-title">{trD('cd.hargaTipe')}</div>{canPrice && <button type="button" className="dist-link" onClick={onGoHarga}><IconPencil s={12} />{trD('dist.ubahHarga')}</button>}</div>
+                  <div className="cd-kv"><span>{trD('dist.hargaPerGalon')}</span><b className="tnum">{rpFull(d.masterPrice)}</b></div>
+                  <div className="cd-kv"><span>{trD('dist.fType') || 'Tipe'}</span><b>{tag(d.type)}</b></div>
+                  <div className="cd-kv"><span>{trD('cd.custSince')}</span><b>{d.createdAt ? fmtDateShort(d.createdAt) : '—'}</b></div>
+                </div>
+                <div className="card cd-card">
+                  <div className="sec-title">{trD('cd.ringkasanCard')}</div>
+                  <div className="cd-kv"><span>{trD('cd.lifetimeGalon')}</span><b className="tnum">{numX(lifetimeGalon)}</b></div>
+                  <div className="cd-kv"><span>{trD('cd.totalSpend')}</span><b className="tnum">{rpFull(totalSpend)}</b></div>
+                  <div className="cd-kv"><span>{trD('cd.avgMonth')}</span><b className="tnum">{rpFull(Math.round(totalSpend / monthsSince))}</b></div>
+                </div>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {/* ── TAB: AKTIVITAS (GM/owner) ── */}
+          {cdTab === 'aktivitas' && isGmOwner && (
+            <div className="cd-tabpanel">
+              <div className="card cd-card">
+                <div className="sec-title" style={{ marginBottom: 4 }}>{trD('cd.activityTitle')}</div>
+                <p className="cd-muted">{trD('cd.gmOnly')}</p>
+                {activity.length === 0 ? <ListState state="empty" emptyText={trD('cd.activityTitle')} /> : (
+                  <div className="cd-activity">{activity.map((ev, i) => (
+                    <div key={i} className="cd-act-row"><span className={'cd-act-dot ' + (ev.tone || '')} /><div className="cd-act-body"><div className="cd-act-t">{ev.t}</div><div className="cd-muted">{fmtDateShort(ev.at)}{ev.at ? ' · ' + hhmm(ev.at) : ''}{ev.who ? ' · ' + ev.who : ''}</div></div></div>
+                  ))}</div>
+                )}
+              </div>
+            </div>
+          )}
         </>)}
         {invBuilder && d && <InvoiceBuilder customer={d} onClose={() => setInvBuilder(false)} onCreated={(iv) => { setInvBuilder(false); setInvView(iv); loadInvoices(d.id); if (onChanged) onChanged(); }} />}
         {invView && <InvoiceViewer invoice={invView} onClose={() => setInvView(null)} />}
