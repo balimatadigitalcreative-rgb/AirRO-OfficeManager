@@ -137,6 +137,11 @@
         setLocationPhoto: (id, photoId) => req('PATCH', '/distribusi/customers/' + id + '/location-photo', { photoId: photoId || null }),
         // Opening / carry-over bon (cap: distribusiKoreksi) — a REAL receivable dated by the admin.
         openingBon: (id, data) => req('POST', '/distribusi/customers/' + id + '/opening-bon', data),   // { amount, txnDate, note }
+        // Balance ADJUSTMENTS (penyesuaian galon/bon) — cap distribusiPenyesuaian; approve/reverse are GM/owner.
+        createAdjustment: (id, data) => req('POST', '/distribusi/customers/' + id + '/adjustments', data),   // { kind, mode, value|delta, reason, note?, evidenceUrl? }
+        listAdjustments: (id) => req('GET', '/distribusi/customers/' + id + '/adjustments'),
+        approveAdjustment: (adjId) => req('POST', '/distribusi/adjustments/' + adjId + '/approve', {}),
+        reverseAdjustment: (adjId) => req('POST', '/distribusi/adjustments/' + adjId + '/reverse', {}),
         import: (customers, skipped) => req('POST', '/distribusi/customers/import', { customers, skipped: skipped || 0 }),
         // Per-customer legacy (archive) transaction import + undo a batch.
         importLegacyTxns: (id, rows, skipped, includeBon) => req('POST', '/distribusi/customers/' + id + '/transactions/import', { rows, skipped: skipped || 0, includeBon: includeBon !== false }),
@@ -225,6 +230,7 @@
       // Kerugian / Uang Tidak Diterima — INTERNAL loss report, cap distribusiBonAdjust. Never printed
       // on anything the customer sees.
       lossReport: (opts) => { const o = opts || {}; const p = []; ['period', 'date', 'dateFrom', 'dateTo'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/reports/loss' + (p.length ? '?' + p.join('&') : '')); },
+      adjustmentReport: (opts) => { const o = opts || {}; const p = []; ['period', 'dateFrom', 'dateTo', 'reason', 'kind', 'status', 'userId'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/reports/adjustments' + (p.length ? '?' + p.join('&') : '')); },
     },
     // Gudang (warehouse) — ledger-based inventory.
     gudang: {

@@ -322,10 +322,13 @@ async function listCustomers(user, qFleet, status, filters) {
     if (t.bonCounted) { if (t.method === 'bon') a.bon += eff; else if (t.method === 'pelunasan') a.pelunasan += t.amount; }   // receivable (bonCounted, incl. legacy)
     if (!t.legacy) { a.totalGalon += t.qty; a.txnCount++; if (t.txnDate > a.lastDate) a.lastDate = t.txnDate; }   // stats exclude archive
   });
-  const heldMap = await gallonBalances(user, qFleet);   // gallons each customer currently holds
+  const heldMap = await gallonBalances(user, qFleet);   // gallons each customer holds (incl. approved 'penyesuaian' movements)
+  // Σ approved BON adjustment deltas per customer → folded into sisa bon (galon deltas are in heldMap).
+  const adjBonRows = await prisma.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved', ...fleetWhere(user, 'fleetId', qFleet) }, select: { customerId: true, delta: true } });
+  const adjBonMap = {}; adjBonRows.forEach((r) => { adjBonMap[r.customerId] = (adjBonMap[r.customerId] || 0) + r.delta; });
   let data = rows.map((c) => {
     const a = agg[c.id] || { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0 };
-    return { ...custClient(c), totalGalon: a.totalGalon, sisaBon: Math.max(0, a.bon - a.pelunasan), lastDate: a.lastDate || null, txnCount: a.txnCount, gallonsHeld: heldMap[c.id] || 0 };
+    return { ...custClient(c), totalGalon: a.totalGalon, sisaBon: Math.max(0, a.bon - a.pelunasan + (adjBonMap[c.id] || 0)), lastDate: a.lastDate || null, txnCount: a.txnCount, gallonsHeld: heldMap[c.id] || 0 };
   });
   // `bon` is the one criterion that can't be a DB predicate — sisaBon is derived from the
   // transaction ledger (+ active price adjustments), so it's applied to the computed rows.
@@ -369,8 +372,13 @@ async function getCustomer(id, user) {
     b.count++; b.totalDelta += x.deltaAmount;
   }));
   const priceAdjustments = Object.values(batches).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  const gallonsHeld = await gallonBalanceOf(id);   // computed from the gallon ledger
-  return { ...custClient(c), transactions, imports, totalGalon, sisaBon: Math.max(0, bon - pelunasan), txnCount: txns.filter((t) => !t.legacy).length, priceAdjustments, gallonsHeld };
+  const gallonsHeld = await gallonBalanceOf(id);   // gallon ledger already counts approved 'penyesuaian' movements
+  // Balance ADJUSTMENTS (penyesuaian) — the full list for the Riwayat Penyesuaian table + history
+  // badge; approved BON deltas feed sisa bon (galon deltas are already in gallonsHeld via the ledger).
+  const adjRows = await prisma.distAdjustment.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' } });
+  const adjustments = adjRows.map(adjustmentClient);
+  const adjBonDelta = adjRows.reduce((a, r) => a + (r.kind === 'bon' && r.status === 'approved' ? r.delta : 0), 0);
+  return { ...custClient(c), transactions, imports, totalGalon, sisaBon: Math.max(0, bon - pelunasan + adjBonDelta), txnCount: txns.filter((t) => !t.legacy).length, priceAdjustments, gallonsHeld, adjustments };
 }
 // Sync write columns (type is resolved separately — it needs a DB lookup).
 function customerCols(body) {
@@ -673,6 +681,7 @@ async function deleteCustomer(id, actor) {
     prisma.delivery.deleteMany({ where: { customerId: id } }),
     prisma.priceHistory.deleteMany({ where: { customerId: id } }),
     prisma.distInvoice.deleteMany({ where: { customerId: id } }),
+    prisma.distAdjustment.deleteMany({ where: { customerId: id } }),
     prisma.gallonMovement.deleteMany({ where: { customerId: id } }),
     prisma.customer.delete({ where: { id } }),
   ]);
@@ -788,13 +797,158 @@ async function listTransactions(q, user) {
   const data = rows.map((r) => { const adj = priceDelta(r.corrections); const g = galBy[r.id] || { gallonOut: 0, gallonIn: 0 }; return { ...r, legacy: !!r.legacy, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections), pendingRequest: pendBy[r.id] || null, gallonOut: g.gallonOut, gallonIn: g.gallonIn }; });
   return { data, now: new Date().toISOString() };
 }
-// Current outstanding bon (piutang) for a customer: Σ effective bon − Σ pelunasan,
-// floored at 0 — identical to the sisaBon shown on the customer list/detail.
+// ═══════════════════ CUSTOMER BALANCE ADJUSTMENTS (penyesuaian) ═══════════════════
+// Reasons — note REQUIRED for `lainnya` and `penghapusan_piutang`.
+const ADJ_REASONS = ['rekonsiliasi_fisik', 'salah_input', 'galon_pecah_hilang', 'penghapusan_piutang', 'selisih_staf', 'lainnya'];
+
+// Σ APPROVED bon-adjustment deltas for a customer (galon deltas live in the gallon ledger as
+// 'penyesuaian' movements, so gallonBalanceOf already counts them — bon has no ledger, so it's
+// summed here). This is what makes an adjustment DO affect receivables, unlike the archive import.
+async function approvedBonDelta(customerId) {
+  const rows = await prisma.distAdjustment.findMany({ where: { customerId, kind: 'bon', status: 'approved' }, select: { delta: true } });
+  return rows.reduce((a, r) => a + r.delta, 0);
+}
+
+// Current outstanding bon (piutang) for a customer: Σ effective bon − Σ pelunasan + Σ approved bon
+// adjustments, floored at 0 — identical to the sisaBon shown on the customer list/detail.
 async function customerBonBalance(customerId) {
   const txns = await prisma.distTransaction.findMany({ where: { customerId, ...BON_TXN }, include: { corrections: true } });   // includes legacy bon/pelunasan
   let bon = 0, pel = 0;
   txns.forEach((t) => { if (t.method === 'bon') bon += t.amount + priceDelta(t.corrections); else if (t.method === 'pelunasan') pel += t.amount; });
-  return Math.max(0, bon - pel);
+  return Math.max(0, bon - pel + await approvedBonDelta(customerId));
+}
+
+// API shape for one adjustment row (+ optional joined customer name for the report).
+function adjustmentClient(a) {
+  return {
+    id: a.id, customerId: a.customerId, customerName: a.customer ? a.customer.name : undefined, fleetId: a.fleetId || '',
+    kind: a.kind, mode: a.mode, before: a.before, delta: a.delta, after: a.after,
+    reason: a.reason, note: a.note || '', evidenceUrl: a.evidenceUrl || null, status: a.status,
+    reversalOf: a.reversalOf || null, reversedById: a.reversedById || null,
+    createdByName: a.createdByName || null, createdByRole: a.createdByRole || null,
+    approvedByName: a.approvedByName || null, approvedAt: a.approvedAt ? new Date(a.approvedAt).getTime() : null,
+    createdAt: a.createdAt ? new Date(a.createdAt).getTime() : null,
+  };
+}
+const isGmOwner = (actor) => !!(actor && (actor.role === 'owner' || actor.role === 'gm'));
+
+// CREATE a PENDING adjustment (never applied until a GM/owner approves it). The `before` is the
+// customer's CURRENT balance (already including prior approved adjustments), so deltas compound
+// correctly; `delta`/`after` are frozen at creation (immutable record).
+async function createAdjustment(customerId, body, actor) {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');   // out of fleet scope
+  const kind = body.kind === 'galon' ? 'galon' : body.kind === 'bon' ? 'bon' : null;
+  if (!kind) throw ApiError.badRequest('kind harus galon atau bon.');
+  const mode = body.mode === 'set' ? 'set' : body.mode === 'delta' ? 'delta' : null;
+  if (!mode) throw ApiError.badRequest('mode harus set atau delta.');
+  const reason = ADJ_REASONS.includes(body.reason) ? body.reason : null;
+  if (!reason) throw ApiError.badRequest('Alasan tidak valid.');
+  const note = String(body.note || '').trim().slice(0, 500);
+  if ((reason === 'lainnya' || reason === 'penghapusan_piutang') && !note) throw ApiError.badRequest('Catatan wajib diisi untuk alasan ini.');
+
+  const before = Math.round(kind === 'galon' ? await gallonBalanceOf(customerId) : await customerBonBalance(customerId));
+  let after = mode === 'set' ? Math.round(+body.value) : before + Math.round(+body.delta);
+  if (!Number.isFinite(after)) throw ApiError.badRequest('Nilai penyesuaian tidak valid.');
+  // Non-negative guard. Bon may only go below 0 (clamped to 0) as an explicit piutang write-off.
+  if (after < 0) {
+    if (kind === 'bon' && reason === 'penghapusan_piutang') { after = 0; if (!note) throw ApiError.badRequest('Catatan wajib untuk penghapusan piutang.'); }
+    else throw ApiError.badRequest(kind === 'galon' ? 'Galon setelah penyesuaian tidak boleh negatif.' : 'Sisa bon setelah penyesuaian tidak boleh negatif (kecuali penghapusan piutang).');
+  }
+  const delta = after - before;
+  if (delta === 0) throw ApiError.badRequest('Tidak ada perubahan (selisih 0).');
+
+  const snap = await actorSnap(actor);
+  const created = await prisma.distAdjustment.create({ data: {
+    customerId, fleetId: customer.armada || '', kind, mode, before, delta, after, reason, note,
+    evidenceUrl: body.evidenceUrl ? String(body.evidenceUrl).slice(0, 500) : null, status: 'pending',
+    createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
+  } });
+  await logAudit('koreksi', `Ajukan penyesuaian ${kind}: ${customer.name}`, `${before} → ${after} (${delta >= 0 ? '+' : ''}${delta}) · ${reason}${note ? ' · ' + note : ''}`, snap, customer.armada || '');
+  return adjustmentClient(created);
+}
+
+// List a customer's adjustments (newest first).
+async function listCustomerAdjustments(customerId, actor) {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { armada: true } });
+  if (!customer) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');
+  const rows = await prisma.distAdjustment.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' } });
+  return rows.map(adjustmentClient);
+}
+
+// Write the ledger EFFECT of an approved galon adjustment (a signed 'penyesuaian' movement). Bon
+// adjustments have no ledger — their approved delta is summed by customerBonBalance.
+async function applyAdjustmentEffect(adj, snap) {
+  if (adj.kind !== 'galon' || adj.delta === 0) return;
+  await prisma.gallonMovement.create({ data: {
+    fleetId: adj.fleetId || '', customerId: adj.customerId, type: 'penyesuaian', qty: adj.delta, active: true,
+    note: `Penyesuaian galon (${adj.reason})`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+  } });
+}
+
+// APPROVE a pending adjustment → it takes effect (GM/owner only).
+async function approveAdjustment(id, actor) {
+  if (!isGmOwner(actor)) throw ApiError.forbidden('Hanya GM/Owner yang boleh menyetujui penyesuaian.');
+  const adj = await prisma.distAdjustment.findUnique({ where: { id }, include: { customer: { select: { name: true } } } });
+  if (!adj) throw ApiError.notFound('Penyesuaian tidak ditemukan.');
+  if (!fleetAllows(actor, adj.fleetId)) throw ApiError.notFound('Penyesuaian tidak ditemukan.');
+  if (adj.status !== 'pending') throw ApiError.badRequest('Penyesuaian ini sudah diputuskan.');
+  const snap = await actorSnap(actor);
+  const updated = await prisma.distAdjustment.update({ where: { id }, data: { status: 'approved', approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date() } });
+  await applyAdjustmentEffect(updated, snap);
+  await logAudit('koreksi', `Setujui penyesuaian ${adj.kind}: ${adj.customer ? adj.customer.name : ''}`, `${adj.before} → ${adj.after} · ${adj.reason}`, snap, adj.fleetId);
+  return adjustmentClient(updated);
+}
+
+// REVERSE — never a hard delete (GM/owner only). A PENDING adjustment is cancelled (status 'reversed',
+// it never applied). An APPROVED one gets an OPPOSITE approved record (reversalOf) that nets its
+// effect to zero; both stay visible. A reversal cannot itself be reversed.
+async function reverseAdjustment(id, actor) {
+  if (!isGmOwner(actor)) throw ApiError.forbidden('Hanya GM/Owner yang boleh membatalkan penyesuaian.');
+  const adj = await prisma.distAdjustment.findUnique({ where: { id }, include: { customer: { select: { name: true } } } });
+  if (!adj) throw ApiError.notFound('Penyesuaian tidak ditemukan.');
+  if (!fleetAllows(actor, adj.fleetId)) throw ApiError.notFound('Penyesuaian tidak ditemukan.');
+  if (adj.reversalOf) throw ApiError.badRequest('Pembalikan tidak bisa dibalik lagi.');
+  if (adj.reversedById || adj.status === 'reversed') throw ApiError.badRequest('Penyesuaian ini sudah dibatalkan.');
+  const snap = await actorSnap(actor);
+
+  if (adj.status === 'pending') {
+    const updated = await prisma.distAdjustment.update({ where: { id }, data: { status: 'reversed' } });   // cancel — never applied, no opposite needed
+    await logAudit('koreksi', `Batalkan penyesuaian (pending) ${adj.kind}: ${adj.customer ? adj.customer.name : ''}`, `${adj.before} → ${adj.after}`, snap, adj.fleetId);
+    return adjustmentClient(updated);
+  }
+  // approved → create the opposite approved record and link them.
+  const reversal = await prisma.distAdjustment.create({ data: {
+    customerId: adj.customerId, fleetId: adj.fleetId || '', kind: adj.kind, mode: 'delta',
+    before: adj.after, delta: -adj.delta, after: adj.before, reason: adj.reason, note: `Pembalikan penyesuaian`,
+    status: 'approved', reversalOf: adj.id,
+    createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
+    approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
+  } });
+  await prisma.distAdjustment.update({ where: { id: adj.id }, data: { reversedById: reversal.id } });
+  await applyAdjustmentEffect(reversal, snap);   // opposite galon movement (bon: no ledger)
+  await logAudit('koreksi', `Batalkan penyesuaian ${adj.kind}: ${adj.customer ? adj.customer.name : ''}`, `kembalikan ${adj.after} → ${adj.before} · ${adj.reason}`, snap, adj.fleetId);
+  return adjustmentClient(reversal);
+}
+
+// REPORT — adjustments across customers, filterable by period / fleet / reason / user. Never counted
+// as revenue or Money-in; this is their OWN "Penyesuaian" line.
+async function adjustmentReport(user, q) {
+  const where = { ...fleetWhere(user, 'fleetId', q && q.fleet) };
+  if (q && q.reason && ADJ_REASONS.includes(q.reason)) where.reason = q.reason;
+  if (q && q.kind && (q.kind === 'galon' || q.kind === 'bon')) where.kind = q.kind;
+  if (q && q.status && ['pending', 'approved', 'reversed'].includes(q.status)) where.status = q.status;
+  if (q && q.userId) where.createdById = String(q.userId);
+  const { dateFrom, dateTo } = q || {};
+  if (dateFrom || dateTo) { where.createdAt = {}; if (dateFrom) where.createdAt.gte = new Date(dateFrom + 'T00:00:00'); if (dateTo) where.createdAt.lte = new Date(dateTo + 'T23:59:59'); }
+  const rows = await prisma.distAdjustment.findMany({ where, include: { customer: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 5000 });
+  const data = rows.map(adjustmentClient);
+  // Summary line ("Penyesuaian") — approved deltas only, split by kind.
+  const summary = { count: data.length, galonDelta: 0, bonDelta: 0 };
+  rows.forEach((r) => { if (r.status === 'approved') { if (r.kind === 'galon') summary.galonDelta += r.delta; else summary.bonDelta += r.delta; } });
+  return { data, summary, now: new Date().toISOString() };
 }
 
 async function createTransaction(body, actor) {
@@ -1584,7 +1738,9 @@ async function dashboardSummary(user, query) {
 // truth. All numbers (customer balances, depot, total) are computed from it; nothing
 // is stored loose. delivery_out moves a gallon depot→customer, return_in the reverse,
 // purchase adds to the depot, correction is a signed adjustment (customer or depot).
-const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'return_in' ? -m.qty : (m.type === 'correction' && m.customerId) ? m.qty : 0);
+// 'penyesuaian' (customer balance adjustment) carries a SIGNED delta on the gallons a customer holds
+// (approved adjustments only ever reach the ledger), so it counts toward custEffect like a correction.
+const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'return_in' ? -m.qty : ((m.type === 'correction' || m.type === 'penyesuaian') && m.customerId) ? m.qty : 0);
 // 'opening' is a depot baseline (owned + at depot, never at a customer). Its qty is a signed
 // delta so an adjustment (nilai_baru − nilai_lama) is another append, never an overwrite.
 // 'damage'/'loss' remove good gallons from the depot (broken/lost), qty positive → negative effect.
@@ -1592,6 +1748,7 @@ const totalEffect = (m) => {
   if (m.type === 'purchase' || m.type === 'opening') return m.qty;
   if (m.type === 'damage' || m.type === 'loss') return -Math.abs(m.qty);
   if (m.type === 'correction' && !m.customerId) return m.qty;
+  if (m.type === 'penyesuaian') return m.qty;   // a customer gallon adjustment changes total owned too (at-depot unchanged)
   return 0;
 };
 // A ledger row that REPRESENTS opening stock. The dedicated 'opening' type, PLUS legacy depot
@@ -2257,4 +2414,5 @@ module.exports = {
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,
   parseLegacyDate, expandLegacyRow,
+  createAdjustment, listCustomerAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport, ADJ_REASONS,
 };

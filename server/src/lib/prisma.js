@@ -31,6 +31,7 @@ const MONEY = {
   distExpense: ['amount'],
   correction: ['deltaAmount'],
   distInvoice: ['total', 'sisaBon'],
+  distAdjustment: ['before', 'delta', 'after'],
   stockMovement: ['amount'],
 };
 function moneyResultExtension() {

@@ -494,8 +494,44 @@ model Customer {
   transactions DistTransaction[]
   priceHistory PriceHistory[]
   deliveries   Delivery[]
+  adjustments  DistAdjustment[]
 
   @@index([type])
+}
+
+// Customer BALANCE ADJUSTMENT (penyesuaian) — a correction of the CURRENT gallons-held or outstanding
+// bon. UNLIKE the archive import, an adjustment DOES affect receivables + gallon stock, so it is
+// tightly controlled: an immutable delta record, GM/owner-approved before it takes effect, reversed
+// (never deleted) by an opposite record. Balances are always derived: base + Σ(approved deltas).
+model DistAdjustment {
+  id            String   @id @default(cuid())
+  customerId    String
+  fleetId       String   @default("")
+  kind          String   // 'galon' | 'bon'
+  mode          String   // 'set' (target value) | 'delta' (+/- change)
+  before        BigInt   @default(0)   // system value at creation (galon: count · bon: rupiah)
+  delta         BigInt   @default(0)   // signed after − before; the immutable correction applied on approval
+  after         BigInt   @default(0)
+  reason        String   // rekonsiliasi_fisik | salah_input | galon_pecah_hilang | penghapusan_piutang | selisih_staf | lainnya
+  note          String   @default("")
+  evidenceUrl   String?
+  status        String   @default("pending") // pending | approved (only approved rows affect balances)
+  reversalOf    String?  // id of the adjustment THIS one reverses
+  reversedById  String?  // id of the adjustment that reversed THIS one (set once reversed)
+  createdById   String?
+  createdByName String?
+  createdByRole String?
+  approvedById  String?
+  approvedByName String?
+  approvedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  customer      Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([status])
+  @@index([fleetId])
+  @@index([kind])
 }
 
 // Append-only counter for customer codes (C-0001…). A dedicated table (like EmployeeNip) keeps

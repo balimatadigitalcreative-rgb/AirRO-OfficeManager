@@ -178,6 +178,28 @@ const openingBonSchema = z.object({
   txnDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   note: z.string().trim().min(1).max(300),
 });
+// Balance ADJUSTMENT (penyesuaian): correct gallons-held or outstanding bon. Exactly ONE of
+// value (mode=set) / delta (mode=delta). Server re-reads the system value + re-computes before/after.
+const ADJ_REASON = z.enum(['rekonsiliasi_fisik', 'salah_input', 'galon_pecah_hilang', 'penghapusan_piutang', 'selisih_staf', 'lainnya']);
+const adjustCreateSchema = z.object({
+  kind: z.enum(['galon', 'bon']),
+  mode: z.enum(['set', 'delta']),
+  value: z.number().int().optional(),      // target (mode=set)
+  delta: z.number().int().optional(),      // +/- change (mode=delta)
+  reason: ADJ_REASON,
+  note: z.string().max(500).optional(),
+  evidenceUrl: z.string().max(500).optional(),
+}).refine((d) => (d.mode === 'set' ? d.value != null : d.delta != null), { message: 'value (set) atau delta (delta) wajib diisi' });
+const adjustReportQuery = z.object({
+  period: z.enum(['today', 'week', 'month', 'range']).optional(),
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  fleet: z.string().max(60).optional(),
+  reason: ADJ_REASON.optional(),
+  kind: z.enum(['galon', 'bon']).optional(),
+  status: z.enum(['pending', 'approved', 'reversed']).optional(),
+  userId: z.string().max(60).optional(),
+});
 const custListQuery = z.object({
   fleet: z.string().max(60).optional(),
   status: z.enum(['active', 'inactive', 'all']).optional(),
@@ -204,6 +226,12 @@ const invoiceCreateSchema = z.object({
 
 // ── customers ──
 const createOpeningBon = asyncHandler(async (req, res) => res.status(201).json({ data: await service.createOpeningBon(req.params.id, req.body, req.user) }));
+// Balance adjustments (penyesuaian)
+const createAdjustment = asyncHandler(async (req, res) => { const a = await service.createAdjustment(req.params.id, req.body, req.user); bcast('update', req.params.id); res.status(201).json({ data: a }); });
+const listAdjustments = asyncHandler(async (req, res) => res.json({ data: await service.listCustomerAdjustments(req.params.id, req.user) }));
+const approveAdjustment = asyncHandler(async (req, res) => { const a = await service.approveAdjustment(req.params.id, req.user); bcast('update', a.customerId); res.json({ data: a }); });
+const reverseAdjustment = asyncHandler(async (req, res) => { const a = await service.reverseAdjustment(req.params.id, req.user); bcast('update', a.customerId); res.json({ data: a }); });
+const adjustmentReport = asyncHandler(async (req, res) => res.json(await service.adjustmentReport(req.user, req.query)));
 const listCustomers = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.user, req.query.fleet, req.query.status, req.query)));
 const getCustomer = asyncHandler(async (req, res) => res.json({ data: await service.getCustomer(req.params.id, req.user) }));
 const createCustomer = asyncHandler(async (req, res) => { const c = await service.createCustomer(req.body, req.user); bcast('create', c.id); res.status(201).json({ data: c }); });
@@ -302,5 +330,6 @@ module.exports = {
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
   createPaymentNotReceived, lossReport,
-  schemas: { openingBonSchema, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

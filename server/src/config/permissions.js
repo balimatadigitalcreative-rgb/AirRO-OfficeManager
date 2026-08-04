@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiApprove: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
@@ -27,7 +27,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiApprove: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -208,12 +208,15 @@ function deriveDistribusiCaps(perms, role) {
   if (p.distribusiDashHistory === undefined) p.distribusiDashHistory = isOwnerGm;
   if (p.distribusiPengirimanReport === undefined) p.distribusiPengirimanReport = isOwnerGm;
   if (p.distribusiBonAdjust === undefined) p.distribusiBonAdjust = isOwnerGm;
+  // Creating balance ADJUSTMENTS (penyesuaian galon/bon) — owner/GM tier by default (they still need
+  // GM/owner APPROVAL to take effect, enforced by role at the endpoint).
+  if (p.distribusiPenyesuaian === undefined) p.distribusiPenyesuaian = isOwnerGm;
   // Approving correction/void requests: a plain input/koreksi user may REQUEST a change but must never
   // gain approval by derivation (least-privilege) — yet owner/GM get it by default.
   if (p.distribusiApprove === undefined) p.distribusiApprove = isOwnerGm;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport || p.distribusiBonAdjust || p.distribusiApprove);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport || p.distribusiBonAdjust || p.distribusiPenyesuaian || p.distribusiApprove);
   return p;
 }
 

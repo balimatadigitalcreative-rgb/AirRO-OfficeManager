@@ -1624,6 +1624,17 @@ function TxnHistoryDoc({ customer, userName, onClose }) {
               })}</tbody>
           </table>
         </div>
+        {/* Approved balance adjustments — printed as their own section so the statement reconciles. */}
+        {(customer.adjustments || []).filter((a) => a.status === 'approved').length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="sec-title" style={{ marginBottom: 6 }}>{trD('adj.tableTitle')}</div>
+            <table className="dist-hist-table"><thead><tr><th>{trD('adj.colDate')}</th><th>{trD('adj.colKind')}</th><th className="r">{trD('adj.colChange')}</th><th>{trD('adj.colReason')}</th></tr></thead>
+              <tbody>{(customer.adjustments || []).filter((a) => a.status === 'approved').map((a) => (
+                <tr key={a.id}><td>{fmtDT(a.createdAt)}</td><td>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}{a.reversalOf ? ' · ' + trD('adj.reversalBadge') : ''}</td><td className="r tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → {(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</td><td>{adjReasonLabel(a.reason)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
         <div className="dist-hist-summary">
           <div><span>{trD('dist.totalGalon')}</span><b className="tnum">{numX(galon)}</b></div>
           <div><span>{trD('dist.histTotalValue')}</span><b className="tnum">{rpFull(nilai)}</b></div>
@@ -1918,7 +1929,88 @@ function OpeningBonModal({ customer, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
+// The six adjustment reasons (server enum) — note required for lainnya / penghapusan_piutang.
+const ADJ_REASONS = ['rekonsiliasi_fisik', 'salah_input', 'galon_pecah_hilang', 'penghapusan_piutang', 'selisih_staf', 'lainnya'];
+const adjReasonLabel = (r) => trD('adj.reason.' + r) || r;
+// PENYESUAIAN (balance adjustment) — corrects the CURRENT gallons-held or outstanding bon. It affects
+// receivables/stock, so it's created as a PENDING record that a GM/owner must approve. before → after
+// is shown and confirmed before submit; reason + optional note/evidence are captured for the audit.
+function AdjustModal({ customer, kind, onClose, onSaved }) {
+  const isBon = kind === 'bon';
+  const before = isBon ? (customer.sisaBon || 0) : (customer.gallonsHeld || 0);
+  const [mode, setMode] = uSx('set');
+  const [target, setTarget] = uSx(String(before));
+  const [delta, setDelta] = uSx('');
+  const [reason, setReason] = uSx('rekonsiliasi_fisik');
+  const [note, setNote] = uSx('');
+  const [photo, setPhoto] = uSx(null);
+  const [busy, setBusy] = uSx(false);
+  const [err, setErr] = uSx('');
+  const [confirming, setConfirming] = uSx(false);
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const num = (s) => { const t = String(s == null ? '' : s).trim(); const neg = /^-/.test(t); const n = parseInt(t.replace(/[^0-9]/g, ''), 10) || 0; return neg ? -n : n; };
+  const after = mode === 'set' ? num(target) : before + num(delta);
+  const selisih = after - before;
+  const noteReq = reason === 'lainnya' || reason === 'penghapusan_piutang';
+  const writeOff = isBon && reason === 'penghapusan_piutang';   // bon may be clamped to 0
+  const numsOk = selisih !== 0 && (after >= 0 || writeOff);
+  const valid = numsOk && (!noteReq || note.trim()) && !busy;
+  const fmt = isBon ? rpFull : numX;
+  const save = () => {
+    if (!valid) return;
+    setBusy(true); setErr('');
+    const body = { kind, mode, reason };
+    if (mode === 'set') body.value = num(target); else body.delta = num(delta);
+    if (note.trim()) body.note = note.trim();
+    if (photo && photo.ref) body.evidenceUrl = photo.ref;
+    window.API.distribusi.customers.createAdjustment(customer.id, body)
+      .then((r) => { setBusy(false); onSaved(r.data); })
+      .catch((e) => { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('adj.title')} · {isBon ? trD('adj.kindBon') : trD('adj.kindGalon')}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.name}</div></div>
+          <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="dist-warnbox"><IconWarn s={16} /><span>{trD('adj.info')}</span></div>
+          <div className="dist-cd-stats" style={{ margin: '4px 0 10px' }}>
+            <div><div className="dist-cd-slbl">{trD('adj.system')}</div><div className="dist-cd-sval">{fmt(before)}</div></div>
+            <div><div className="dist-cd-slbl">{trD('adj.selisih')}</div><div className="dist-cd-sval" style={{ color: selisih === 0 ? 'var(--text-mut)' : selisih > 0 ? 'var(--green-700)' : 'var(--neg)' }}>{selisih >= 0 ? '+' : ''}{fmt(selisih)}</div></div>
+            <div><div className="dist-cd-slbl">{trD('adj.after')}</div><div className="dist-cd-sval">{fmt(after)}</div></div>
+          </div>
+          <div className="gran-seg" style={{ marginBottom: 10 }}>
+            <button className={`gran-btn ${mode === 'set' ? 'on' : ''}`} onClick={() => setMode('set')}>{trD('adj.modeSet')}</button>
+            <button className={`gran-btn ${mode === 'delta' ? 'on' : ''}`} onClick={() => setMode('delta')}>{trD('adj.modeDelta')}</button>
+          </div>
+          {mode === 'set'
+            ? (<><label className="fld-label">{trD('adj.newValue')}</label><input className="fld tnum" inputMode="numeric" value={target} onChange={(e) => setTarget(e.target.value)} /></>)
+            : (<><label className="fld-label">{trD('adj.delta')}</label><input className="fld tnum" inputMode="numeric" value={delta} placeholder="cth. -2" onChange={(e) => setDelta(e.target.value)} /></>)}
+          <label className="fld-label">{trD('adj.reason')}</label>
+          <UI.Dropdown value={reason} options={ADJ_REASONS.map((r) => ({ value: r, label: adjReasonLabel(r) }))} onChange={setReason} fluid />
+          <label className="fld-label">{trD('adj.note')}{noteReq ? <span style={{ color: 'var(--neg)' }}> *</span> : null}</label>
+          <input className="fld" value={note} placeholder={trD('adj.notePh')} onChange={(e) => setNote(e.target.value)} />
+          <label className="fld-label">{trD('adj.evidence')}</label>
+          <UI.FileAttach value={photo} onChange={setPhoto} camera accept="image/*" label={trD('adj.evidenceAdd')} />
+          {writeOff && after === 0 && before > 0 && <div className="dist-hint" style={{ marginTop: 6 }}>{trD('adj.writeOffHint')}</div>}
+          {err && <div className="login-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+          {confirming && <div className="dist-warnbox" style={{ marginTop: 10 }}><IconWarn s={16} /><span>{trD('adj.confirm', { before: fmt(before), after: fmt(after) })}</span></div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
+          {!confirming
+            ? <button className="btn btn-primary" disabled={!valid} onClick={() => setConfirming(true)}>{trD('dist.obNext')}</button>
+            : <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? '…' : trD('adj.submit')}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const [statusFilter, setStatusFilter] = uSx('active');   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
@@ -1951,6 +2043,14 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const impFileRef = React.useRef(null);
   const [typesOpen, setTypesOpen] = uSx(false);
   const [obFor, setObFor] = uSx(null);   // customer whose opening/carry-over bon is being entered
+  const [adjustFor, setAdjustFor] = uSx(null);   // { customer, kind } — balance adjustment modal
+  // Approve / reverse an adjustment (GM/owner). Both re-open the detail so balances refresh.
+  const approveAdjustment = (adjId) => window.API.distribusi.customers.approveAdjustment(adjId)
+    .then(() => { flash(trD('adj.approved')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
+    .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
+  const reverseAdjustment = (adjId) => { if (!window.confirm(trD('adj.reverseConfirm'))) return; window.API.distribusi.customers.reverseAdjustment(adjId)
+    .then(() => { flash(trD('adj.reversed')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
+    .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'))); };
   // ── Detailed filter (server-side, AND logic). EMPTY_FILTER is the "nothing selected"
   // baseline; `fTotal` is the denominator for "Menampilkan X dari Y".
   const [flt, setFlt] = uSx(EMPTY_FILTER);
@@ -2309,9 +2409,9 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
               </div>
             </div>
             <div className="dist-cd-stats">
-              <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
+              <div><div className="dist-cd-slbl">{trD('dist.sisaBon')}{canPenyesuaian && <button type="button" className="dist-link dist-adj-mini" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })} title={trD('adj.title')}>{trD('adj.adjustBtn')}</button>}</div><div className="dist-cd-sval" style={{ color: d.sisaBon > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')}</div></div>
               <div><div className="dist-cd-slbl">{trD('dist.totalGalon')}</div><div className="dist-cd-sval">{numX(d.totalGalon)}</div></div>
-              <div><div className="dist-cd-slbl">{trD('dist.gallonsHeld')}</div><div className="dist-cd-sval" style={{ color: (d.gallonsHeld || 0) > 0 ? 'var(--warn)' : 'var(--text-mut)' }}>{numX(d.gallonsHeld || 0)}</div></div>
+              <div><div className="dist-cd-slbl">{trD('dist.gallonsHeld')}{canPenyesuaian && <button type="button" className="dist-link dist-adj-mini" onClick={() => setAdjustFor({ customer: d, kind: 'galon' })} title={trD('adj.title')}>{trD('adj.adjustBtn')}</button>}</div><div className="dist-cd-sval" style={{ color: (d.gallonsHeld || 0) > 0 ? 'var(--warn)' : 'var(--text-mut)' }}>{numX(d.gallonsHeld || 0)}</div></div>
             </div>
             <div className="dist-cd-actions">
               {(canInput || canCustomers) && <button type="button" className="btn btn-primary btn-sm" onClick={() => setInvBuilder(true)}><IconInvoice s={14} />{trD('dist.makeInvoice')}</button>}
@@ -2363,8 +2463,43 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
                 </div>
               ))}
+              {/* Balance ADJUSTMENTS appear in the history too, with a distinct "Penyesuaian" badge. */}
+              {(d.adjustments || []).filter((a) => a.status !== 'reversed').map((a) => (
+                <div key={a.id} className="dist-txn">
+                  <span className="dist-cd-bar" style={{ background: a.status === 'pending' ? '#b45309' : '#7c3aed' }} />
+                  <div className="dist-txn-mid">
+                    <div className="dist-txn-line1"><span className="dist-txn-name">{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}</span><span className="dist-badge adj"><IconPencil s={10} />{trD('adj.badge')}</span>{a.status === 'pending' && <span className="dist-badge pending"><IconClock s={10} />{trD('adj.pending')}</span>}{a.reversalOf && <span className="dist-badge arsip">{trD('adj.reversalBadge')}</span>}{a.reversedById && <span className="dist-badge arsip">{trD('adj.reversedBadge')}</span>}</div>
+                    <div className="dist-txn-sub">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → {(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))} · {adjReasonLabel(a.reason)} · {fmtDT(a.createdAt)}{a.createdByName ? ' · ' + a.createdByName : ''}{a.note ? ' · ' + a.note : ''}</div>
+                  </div>
+                  <div className="tnum dist-txn-amt" style={{ color: a.delta >= 0 ? 'var(--green-700)' : 'var(--neg)' }}>{a.delta >= 0 ? '+' : ''}{a.kind === 'bon' ? rpFull(a.delta) : numX(a.delta)}</div>
+                </div>
+              ))}
             </div>
           </div>
+          {/* Riwayat Penyesuaian — the full audit table: tanggal · jenis · before→after · alasan ·
+              oleh · disetujui oleh · [Setujui/Batalkan]. */}
+          {(d.adjustments || []).length > 0 && (
+            <div className="card dist-card" style={{ marginTop: 16 }}>
+              <div className="sec-title" style={{ marginBottom: 8 }}><IconPencil s={14} /> {trD('adj.tableTitle')}</div>
+              <div className="dist-adj-table">
+                <div className="dist-adj-hrow"><span>{trD('adj.colDate')}</span><span>{trD('adj.colKind')}</span><span>{trD('adj.colChange')}</span><span>{trD('adj.colReason')}</span><span>{trD('adj.colBy')}</span><span>{trD('adj.colApprovedBy')}</span><span /></div>
+                {(d.adjustments || []).map((a) => (
+                  <div key={a.id} className={`dist-adj-row ${a.status}`}>
+                    <span>{fmtDT(a.createdAt)}</span>
+                    <span>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}{a.reversalOf ? ' · ' + trD('adj.reversalBadge') : ''}</span>
+                    <span className="tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → <b>{(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</b></span>
+                    <span>{adjReasonLabel(a.reason)}{a.note ? ' · ' + a.note : ''}</span>
+                    <span>{a.createdByName || '—'}</span>
+                    <span>{a.status === 'pending' ? <span className="dist-badge pending"><IconClock s={10} />{trD('adj.pending')}</span> : a.status === 'reversed' ? trD('adj.reversedBadge') : (a.approvedByName || '—')}</span>
+                    <span>
+                      {a.status === 'pending' && isGmOwner && <button type="button" className="dist-link" onClick={() => approveAdjustment(a.id)}>{trD('adj.approve')}</button>}
+                      {isGmOwner && !a.reversalOf && !a.reversedById && a.status !== 'reversed' && <button type="button" className="dist-link danger" onClick={() => reverseAdjustment(a.id)}>{trD('adj.reverse')}</button>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {(d.imports || []).length > 0 && (
             <div className="card dist-card dist-imp-hist" style={{ marginTop: 16 }}>
               <div className="sec-title" style={{ marginBottom: 8 }}><IconInvoice s={14} /> {trD('dist.liHistTitle')}</div>
@@ -2398,6 +2533,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
         {payFor && <PaymentModal customers={[payFor]} presetCustomer={payFor.id} staffMode={staffMode} today={new Date().toISOString().slice(0, 10)} onClose={() => setPayFor(null)} onSaved={() => { setPayFor(null); flash(trD('dist.corrSaved')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {pnrFor && <PaymentNotReceivedModal customer={pnrFor} today={new Date().toISOString().slice(0, 10)} onClose={() => setPnrFor(null)} onSaved={(res) => { setPnrFor(null); flash(trD('pnr.saved', { amt: rpFull(res.amount), who: res.responsibleName || '' })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {obFor && <OpeningBonModal customer={obFor} onClose={() => setObFor(null)} onSaved={(res) => { setObFor(null); flash(trD('dist.obSaved', { amt: rpFull(res.amount) })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
+        {adjustFor && <AdjustModal customer={adjustFor.customer} kind={adjustFor.kind} onClose={() => setAdjustFor(null)} onSaved={() => { setAdjustFor(null); flash(trD('adj.submitted')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {renderForm()}
         {typesModal()}
         {delFor && <DeleteCustomerModal customer={delFor} busy={delBusy} onDeactivate={doDeactivate} onDelete={doDeletePermanent} onClose={() => setDelFor(null)} />}
@@ -3946,4 +4082,78 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
   );
 }
 
-window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, DeliveryReport: DistDeliveryReport, LossReport: DistLossReport, ChangeRequests: DistChangeRequests };
+// PENYESUAIAN report — adjustments across customers, filterable by period / fleet / reason / kind /
+// status. Adjustments are their OWN line; they are never counted as revenue or Money-in.
+function DistAdjustReport({ refreshKey, today, fleetScope, fleet, distFleet, setDistFleet }) {
+  const [period, setPeriod] = uSx('month');
+  const [from, setFrom] = uSx(today);
+  const [to, setTo] = uSx(today);
+  const [reason, setReason] = uSx('');
+  const [kind, setKind] = uSx('');
+  const [status, setStatus] = uSx('');
+  const [rep, setRep] = uSx(null);
+  const [loading, setLoading] = uSx(true);
+  const [err, setErr] = uSx(false);
+  const ef = effFleet(fleetScope, distFleet);
+  uEx(() => {
+    let live = true; setLoading(true); setErr(false);
+    if (!(window.API && window.API.distribusi && window.API.distribusi.adjustmentReport)) { setLoading(false); setErr(true); return; }
+    const pr = period === 'range' ? { from, to } : periodRange(period, today);
+    const opts = { dateFrom: pr.from, dateTo: pr.to, fleet: ef };
+    if (reason) opts.reason = reason; if (kind) opts.kind = kind; if (status) opts.status = status;
+    window.API.distribusi.adjustmentReport(opts).then((r) => { if (live) { setRep(r); setLoading(false); } }).catch(() => { if (live) { setErr(true); setLoading(false); } });
+    return () => { live = false; };
+  }, [refreshKey, ef, period, from, to, reason, kind, status]);
+  const periods = [['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['range', trD('dist.perRange')]];
+  const data = (rep && rep.data) || [];
+  const exportCsv = () => {
+    const rows = [[trD('adj.reportTitle')], [], [trD('adj.colDate'), trD('adj.colCustomer'), trD('adj.colKind'), trD('adj.colChange'), trD('adj.colReason'), trD('adj.colBy'), trD('adj.colApprovedBy'), trD('adj.colStatus')]];
+    data.forEach((a) => rows.push([fmtDT(a.createdAt), a.customerName || '', a.kind, a.before + ' -> ' + a.after, adjReasonLabel(a.reason), a.createdByName || '', a.approvedByName || '', a.status]));
+    const csv = rows.map((r) => r.map((c) => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'penyesuaian.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  return (
+    <div className="dist-dash screen-enter dist-report">
+      <div className="no-print"><FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} /></div>
+      <div className="dist-tx-toolbar no-print">
+        <div className="dist-chips">{periods.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+        {period === 'range' && <div className="dist-period-range"><DP.DateField value={from} onChange={setFrom} max={to || today} /><span>–</span><DP.DateField value={to} onChange={setTo} min={from || undefined} max={today} /></div>}
+        <UI.Dropdown value={kind} options={[{ value: '', label: trD('adj.allKinds') }, { value: 'galon', label: trD('adj.kindGalon') }, { value: 'bon', label: trD('adj.kindBon') }]} onChange={setKind} />
+        <UI.Dropdown value={reason} options={[{ value: '', label: trD('adj.allReasons') }].concat(ADJ_REASONS.map((r) => ({ value: r, label: adjReasonLabel(r) })))} onChange={setReason} />
+        <UI.Dropdown value={status} options={[{ value: '', label: trD('adj.allStatus') }, { value: 'pending', label: trD('adj.pending') }, { value: 'approved', label: 'Approved' }, { value: 'reversed', label: trD('adj.reversedBadge') }]} onChange={setStatus} />
+        <div style={{ flex: 1 }} />
+        <button type="button" className="btn btn-ghost" disabled={!data.length} onClick={() => window.print()}><IconDownload s={14} />{trD('dist.print')}</button>
+        <button type="button" className="btn btn-ghost" disabled={!data.length} onClick={exportCsv}><IconDownload s={14} style={{ transform: 'rotate(180deg)' }} />{trD('rep.csv')}</button>
+      </div>
+      <div className="dist-report-head"><div><b>{trD('adj.reportTitle')}</b></div></div>
+      {loading ? <div className="card"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div>
+        : err ? <div className="card"><div className="dist-empty">{trD('dist.loadErr')}</div></div>
+        : (<>
+          <div className="dist-cd-stats" style={{ marginBottom: 12 }}>
+            <div><div className="dist-cd-slbl">{trD('adj.repCount')}</div><div className="dist-cd-sval">{numX(rep.summary.count)}</div></div>
+            <div><div className="dist-cd-slbl">{trD('adj.repGalon')}</div><div className="dist-cd-sval">{rep.summary.galonDelta >= 0 ? '+' : ''}{numX(rep.summary.galonDelta)}</div></div>
+            <div><div className="dist-cd-slbl">{trD('adj.repBon')}</div><div className="dist-cd-sval">{rep.summary.bonDelta >= 0 ? '+' : ''}{rpFull(rep.summary.bonDelta)}</div></div>
+          </div>
+          <div className="card dist-card">
+            {data.length === 0 ? <div className="dist-empty">{trD('dist.noTxn')}</div> : (
+              <div className="run-table-wrap"><table className="run-table">
+                <thead><tr><th>{trD('adj.colDate')}</th><th>{trD('adj.colCustomer')}</th><th>{trD('adj.colKind')}</th><th className="num">{trD('adj.colChange')}</th><th>{trD('adj.colReason')}</th><th>{trD('adj.colBy')}</th><th>{trD('adj.colApprovedBy')}</th><th>{trD('adj.colStatus')}</th></tr></thead>
+                <tbody>{data.map((a) => (
+                  <tr key={a.id}>
+                    <td>{fmtDT(a.createdAt)}</td><td>{a.customerName || '—'}</td><td>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}</td>
+                    <td className="num tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → {(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</td>
+                    <td>{adjReasonLabel(a.reason)}</td><td>{a.createdByName || '—'}</td><td>{a.approvedByName || '—'}</td>
+                    <td>{a.status === 'pending' ? trD('adj.pending') : a.status === 'reversed' ? trD('adj.reversedBadge') : 'OK'}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            )}
+          </div>
+        </>)}
+    </div>
+  );
+}
+
+window.DIST = { Dashboard: DistDashboard, Transactions: DistTransactions, Customers: DistCustomers, Integration: DistIntegration, Prices: DistPrices, Audit: DistAudit, Gallon: DistGallon, Deliveries: DistDeliveries, DeliveryReport: DistDeliveryReport, LossReport: DistLossReport, AdjustReport: DistAdjustReport, ChangeRequests: DistChangeRequests };

@@ -50,6 +50,7 @@ function navForRole(p, role) {
     // INTERNAL loss report (Kerugian / Uang Tidak Diterima). Same owner/GM-tier cap as the action
     // that creates the rows; never customer-facing.
     { id: 'dist-loss-report', label: tr('nav.distLossReport'), icon: 'IconWarn', caps: ['distribusiBonAdjust'] },
+    { id: 'dist-adjust-report', label: tr('nav.distAdjustReport'), icon: 'IconPencil', caps: ['distribusiPenyesuaian'] },
     // Setoran lives under DISTRIBUSI (it is field-delivery paperwork) but is otherwise UNCHANGED:
     // same screen id 'setoran' (so navigate('setoran'), the isDerivedEntry jump-back, #setoran
     // deeplink and the setoranDay/setoranMfg cash-book auto-sync all keep working), same icon, and
@@ -1527,7 +1528,7 @@ function FApp() {
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canDelete={!!p.distribusiCustomerDelete}
-              canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
+              canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} canPenyesuaian={!!p.distribusiPenyesuaian} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
@@ -1546,6 +1547,10 @@ function FApp() {
             <DIST.LossReport refreshKey={distTick} today={FIN.TODAY}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
+          {screen === 'dist-adjust-report' && p.distribusiPenyesuaian && (
+            <DIST.AdjustReport refreshKey={distTick} today={FIN.TODAY}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
+          )}
           {screen === 'dist-gallon' && p.distribusiGallon && (
             <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canReset={!!p.distribusiGallonReset}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
@@ -1559,7 +1564,7 @@ function FApp() {
           {screen === 'dist-audit' && p.distribusiAudit && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-adjust-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
           </>)}
 
           {/* Warehouse (gudang) + Setoran are module screens too — show the same friendly notice when
