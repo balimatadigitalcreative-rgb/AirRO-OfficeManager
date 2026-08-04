@@ -35,8 +35,8 @@ async function createTransfer(body, actor) {
   // (to) unit may be ANY unit — moving money between units is the whole point of this feature.
   assertCanAccessUnit(actor, fromUnit, 'unit asal');
   // Module toggle: both legs are finance movements, so both units' finance module must be on.
-  await businessUnit.assertModuleEnabled(fromUnit, 'finance');
-  await businessUnit.assertModuleEnabled(toUnit, 'finance');
+  await businessUnit.assertModuleEnabledForUser(actor, fromUnit, 'finance');
+  await businessUnit.assertModuleEnabledForUser(actor, toUnit, 'finance');
   const fromAccount = body.fromAccountId ? String(body.fromAccountId) : null;
   const toAccount = body.toAccountId ? String(body.toAccountId) : null;
   if (!fromAccount || !toAccount) throw ApiError.badRequest('Pilih akun asal dan tujuan.');

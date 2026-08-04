@@ -58,7 +58,7 @@ async function create(data, user) {
     throw ApiError.forbidden('Anda tidak punya akses ke unit bisnis akun sumber transfer.');
   }
   // Module toggle: a transfer is a finance action — the PAYING account's unit must have finance on.
-  if (from) await businessUnit.assertModuleEnabled(from.businessUnitId, 'finance');
+  if (from) await businessUnit.assertModuleEnabledForUser(user, from.businessUnitId, 'finance');
   return prisma.transfer.create({ data: { ...data, createdById: (user && user.id) || null } });
 }
 

@@ -37,7 +37,7 @@ async function create(data, user) {
   // is a common account visible to everyone, so it's always allowed.
   if (businessUnitId !== 'shared') {
     businessUnitId = writableUnitFor(user, data.businessUnitId, businessUnitId);
-    await businessUnit.assertModuleEnabled(businessUnitId, 'finance');   // module toggle
+    await businessUnit.assertModuleEnabledForUser(user, businessUnitId, 'finance');   // module toggle (full-access users bypass)
   }
   return prisma.account.create({ data: { ...data, businessUnitId } });
 }
@@ -51,7 +51,7 @@ async function update(id, data, user) {
   }
   // Module toggle: finance must be enabled for the effective unit (skip the always-shared account).
   const target = safe.businessUnitId !== undefined ? safe.businessUnitId : cur.businessUnitId;
-  if (target !== 'shared') await businessUnit.assertModuleEnabled(target, 'finance');
+  if (target !== 'shared') await businessUnit.assertModuleEnabledForUser(user, target, 'finance');
   return prisma.account.update({ where: { id }, data: safe });
 }
 

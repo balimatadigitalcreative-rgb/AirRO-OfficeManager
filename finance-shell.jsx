@@ -261,10 +261,15 @@ function FApp() {
   // only mfg/nsn has no distribution access; the server 403s every /distribusi endpoint and the
   // client shows a clear "no access" notice instead of the (empty) screens. 'all'/'air' users pass.
   const canDistribution = !unitScope || unitScope.includes('air');
-  // Which modules are active for the CURRENT view. Single unit → that unit's enabledModules. "Semua"
-  // → the UNION of enabled modules across the units this user can see, so a module needed by any of
-  // their units never disappears in the combined view. Unknown/absent unit → all modules (default).
+  // Which modules are active for the CURRENT view.
+  // FULL-ACCESS BYPASS (the fix): a user with all-unit access (unitScope 'all' → null) is NEVER
+  // narrowed by module toggles — they manage every unit, so they always see every module their caps
+  // allow. Per-unit module hiding applies only to unit-SCOPED users. This guarantees owner/GM never
+  // lose a feature no matter how any unit's enabledModules is configured.
+  // Scoped users: single unit → that unit's enabledModules; "Semua" → the UNION across the units they
+  // can see (so nothing needed disappears in the combined view). Unknown/absent unit → all (default).
   const activeModules = (() => {
+    if (unitScope === null) return new Set(MODULE_KEYS);   // full access → every module, always
     if (activeUnit !== 'all') return unitModuleSet(businessUnits.find((u) => u.id === activeUnit));
     const pool = (allowedUnits && allowedUnits.length) ? allowedUnits : businessUnits;
     const s = new Set();

@@ -64,6 +64,15 @@ async function assertModuleEnabled(unitId, moduleKey) {
   }
 }
 
+// FULL-ACCESS BYPASS for WRITES — mirrors the client: a user with all-unit access (unitScope 'all'
+// → null) is never blocked by module toggles; the per-target-unit check applies only to unit-scoped
+// users. So an owner/GM keeps full use of every capability regardless of how units are configured.
+async function assertModuleEnabledForUser(user, unitId, moduleKey) {
+  const { unitScopeOf } = require('../lib/scope');
+  if (unitScopeOf(user) === null) return;   // full access → toggles never block them
+  await assertModuleEnabled(unitId, moduleKey);
+}
+
 // SINGLE SOURCE OF TRUTH for whole-module availability (distribusi/gudang — the "air-mapped" modules
 // with no per-row unit). A module is AVAILABLE to a user if it is enabled for ANY unit that user can
 // access — exactly the UNION the client nav uses (activeModules), so the nav gate and this server
@@ -73,8 +82,9 @@ async function assertModuleEnabled(unitId, moduleKey) {
 async function moduleEnabledForAnyAccessible(user, moduleKey) {
   const { unitScopeOf } = require('../lib/scope');
   const scope = unitScopeOf(user);   // null = full access (every unit)
+  if (scope === null) return true;   // FULL-ACCESS BYPASS — owner/GM are never blocked by toggles
   const units = await prisma.businessUnit.findMany({ select: { id: true, enabledModules: true } });
-  const pool = (scope === null) ? units : units.filter((u) => scope.includes(u.id));
+  const pool = units.filter((u) => scope.includes(u.id));
   const effective = pool.length ? pool : units;   // scoped user with no matching unit → don't over-restrict
   if (!effective.length) return true;              // no units at all → default-on
   return effective.some((u) => moduleEnabledFor(u.enabledModules, moduleKey));
@@ -206,5 +216,5 @@ module.exports = {
   seedBusinessUnits, backfillBusinessUnit, listUnits, createUnit, updateUnit, resolveUnitId,
   officeCodeFor, OFFICE_CODES, DEFAULT_OFFICE, auditOfficeUnitMismatch,
   parseEnabledModules, serializeEnabledModules, moduleEnabledFor, isModuleEnabled, assertModuleEnabled,
-  moduleEnabledForAnyAccessible,
+  assertModuleEnabledForUser, moduleEnabledForAnyAccessible,
 };

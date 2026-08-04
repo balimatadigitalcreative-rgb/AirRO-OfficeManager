@@ -49,7 +49,7 @@ async function create(data, actor) {
   // Stage B: a setoran carries a businessUnitId (default "air"). A scoped user may only create in a
   // unit they can access; an unspecified unit lands in their first allowed unit.
   const businessUnitId = writableUnitFor(actor, data.businessUnitId, data.businessUnitId || 'air');
-  await businessUnit.assertModuleEnabled(businessUnitId, 'distribusi');   // module toggle (setoran lives in the distribusi group)
+  await businessUnit.assertModuleEnabledForUser(actor, businessUnitId, 'distribusi');   // module toggle (setoran in the distribusi group; full-access bypass)
   const r = await prisma.setoran.create({ data: { ...data, businessUnitId, createdById: (actor && actor.id) || null }, include: { fleet: true } });
   return withDeposit(r);
 }

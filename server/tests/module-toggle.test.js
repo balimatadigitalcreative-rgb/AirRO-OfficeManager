@@ -56,64 +56,71 @@ describe('helpers: parse / serialize / moduleEnabledFor', () => {
   });
 });
 
-describe('finance/hr per-unit enforcement', () => {
-  beforeAll(async () => {
-    // Manufaktur: only finance stays on (hr off). Air/unit3 untouched (still all).
-    await setModules(gm, 'manufaktur', ['finance']);
-  });
-  afterAll(async () => { await setModules(gm, 'manufaktur', 'all'); });   // restore
+// Unit-SCOPED users — module toggles apply to them (unlike full-access users). One scoped to
+// "manufaktur" (for finance/HR per-unit writes) and one scoped to "air" (distribusi/gudang are
+// air-mapped and require air access, so their scoped test must use an air user).
+let mfg, airUser;
+const loginTok = (u) => require('supertest')(app).post('/api/v1/auth/login').send({ username: u, password: 'secret123' }).then((x) => x.body.token);
+beforeAll(async () => {
+  const rm = await reg({ name: 'Mfg User', username: 'mt_mfg', password: 'secret123', role: 'gm' });
+  await request(app).patch('/api/v1/users/' + rm.user.id).set(auth(gm)).send({ unitScope: ['manufaktur'] });
+  mfg = await loginTok('mt_mfg');
+  const ra = await reg({ name: 'Air User', username: 'mt_air', password: 'secret123', role: 'gm' });
+  await request(app).patch('/api/v1/users/' + ra.user.id).set(auth(gm)).send({ unitScope: ['air'] });
+  airUser = await loginTok('mt_air');
+});
 
-  it('creating an HR record for a unit with hr OFF is 403', async () => {
-    expect((await mkEmp(gm, 'manufaktur')).status).toBe(403);
+describe('FULL-ACCESS BYPASS — the regression fix: owner/GM (unitScope all) are NEVER blocked by toggles', () => {
+  const units = ['air', 'manufaktur', 'unit3'];
+  afterEach(async () => { for (const u of units) await setModules(gm, u, 'all'); });
+
+  it('a full-access GM writes finance/HR into a unit even when those modules are OFF for it', async () => {
+    await setModules(gm, 'manufaktur', []);   // every module off for manufaktur
+    expect((await mkEntry(gm, 'manufaktur')).status).toBe(201);   // finance write — bypassed
+    expect((await mkEmp(gm, 'manufaktur')).status).toBe(201);     // hr write — bypassed
   });
-  it('finance still works for that unit (finance stayed on)', async () => {
-    expect((await mkEntry(gm, 'manufaktur')).status).toBe(201);
-  });
-  it('OTHER units are unaffected — hr still works for Air', async () => {
-    expect((await mkEmp(gm, 'air')).status).toBe(201);
-  });
-  it('turning finance OFF for a unit then rejects finance writes there, but not elsewhere', async () => {
-    await setModules(gm, 'manufaktur', ['hr']);   // finance off, hr on
-    expect((await mkEntry(gm, 'manufaktur')).status).toBe(403);
-    expect((await mkEntry(gm, 'air')).status).toBe(201);   // Air unaffected
-    expect((await mkEmp(gm, 'manufaktur')).status).toBe(201);   // hr now on
+  it('a full-access GM reaches distribusi + gudang even when OFF for every unit', async () => {
+    for (const u of units) await setModules(gm, u, []);   // all modules off, all units
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
+    expect((await request(app).get('/api/v1/gudang/summary').set(auth(gm))).status).toBe(200);
   });
 });
 
-describe('distribusi + gudang availability = UNION across accessible units (nav ↔ API agree)', () => {
-  const units = ['air', 'manufaktur', 'unit3'];
-  afterEach(async () => { for (const u of units) await setModules(gm, u, 'all'); });   // always restore
+describe('SCOPED-user enforcement — toggles apply per unit (default-on)', () => {
+  afterEach(async () => { await setModules(gm, 'manufaktur', 'all'); });
 
-  it('REGRESSION: distribusi OFF for Air but ON elsewhere → endpoints STILL 200 (no false 403)', async () => {
-    // This is the reported bug: the nav (union) showed the module while the API (air-only) 403'd.
-    await setModules(gm, 'air', ['finance', 'hr', 'gudang']);   // distribusi off for AIR only
-    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
-    expect((await request(app).get('/api/v1/distribusi/dashboard/summary').set(auth(gm))).status).toBe(200);
+  it('a manufaktur-scoped user: HR write to manufaktur is 403 when hr is OFF there', async () => {
+    await setModules(gm, 'manufaktur', ['finance']);   // hr off
+    expect((await mkEmp(mfg, 'manufaktur')).status).toBe(403);
+    expect((await mkEntry(mfg, 'manufaktur')).status).toBe(201);   // finance still on
   });
-  it('REGRESSION: gudang OFF for Air but ON elsewhere → warehouse endpoints STILL 200', async () => {
-    await setModules(gm, 'air', ['finance', 'hr', 'distribusi']);   // gudang off for AIR only
+  it('a manufaktur-scoped user: finance write to manufaktur is 403 when finance is OFF there', async () => {
+    await setModules(gm, 'manufaktur', ['hr']);   // finance off
+    expect((await mkEntry(mfg, 'manufaktur')).status).toBe(403);
+    expect((await mkEmp(mfg, 'manufaktur')).status).toBe(201);     // hr now on
+  });
+});
+
+describe('distribusi + gudang availability = UNION across the caller\'s accessible units', () => {
+  const units = ['air', 'manufaktur', 'unit3'];
+  afterEach(async () => { for (const u of units) await setModules(gm, u, 'all'); });
+
+  it('REGRESSION: distribusi/gudang OFF for Air only → a full-access GM still gets 200 (no false 403)', async () => {
+    await setModules(gm, 'air', []);   // everything off for AIR only
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
     expect((await request(app).get('/api/v1/gudang/summary').set(auth(gm))).status).toBe(200);
   });
-  it('a module 403s ONLY when it is off for EVERY unit the user can access', async () => {
-    for (const u of units) await setModules(gm, u, ['finance', 'hr', 'distribusi']);   // gudang off everywhere
-    expect((await request(app).get('/api/v1/gudang/summary').set(auth(gm))).status).toBe(403);
-    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);   // distribusi still on
+  it('a SCOPED (air) user 403s when the air-mapped module is off for THEIR unit', async () => {
+    // airUser is scoped to "air". Turn distribusi + gudang off for air → gone for them.
+    await setModules(gm, 'air', ['finance', 'hr']);   // distribusi + gudang off for air
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(airUser))).status).toBe(403);
+    expect((await request(app).get('/api/v1/gudang/summary').set(auth(airUser))).status).toBe(403);
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);   // GM bypass
   });
-  it('a SCOPED user: distribusi 403s when off for THEIR unit(s), even if another unit still has it', async () => {
-    // rezz can only access "air". Turn distribusi off for air (on elsewhere) → for rezz it's gone.
-    const r = await reg({ name: 'Rezz', username: 'mt_rezz', password: 'secret123', role: 'gm' });
-    await request(app).patch('/api/v1/users/' + r.user.id).set(auth(gm)).send({ unitScope: ['air'] });
-    const rezz = await require('supertest')(app).post('/api/v1/auth/login').send({ username: 'mt_rezz', password: 'secret123' }).then((x) => x.body.token);
-    await setModules(gm, 'air', ['finance', 'hr', 'gudang']);        // distribusi off for air
-    await setModules(gm, 'manufaktur', 'all');                        // still on for manufaktur (rezz can't see it)
-    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(rezz))).status).toBe(403);
-    // the all-access GM still reaches it (union includes manufaktur)
-    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
-  });
-  it('re-enabling restores access for everyone', async () => {
+  it('re-enabling restores access for the scoped user', async () => {
     for (const u of units) await setModules(gm, u, 'all');
-    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(gm))).status).toBe(200);
-    expect((await request(app).get('/api/v1/gudang/summary').set(auth(gm))).status).toBe(200);
+    expect((await request(app).get('/api/v1/distribusi/transactions').set(auth(airUser))).status).toBe(200);
+    expect((await request(app).get('/api/v1/gudang/summary').set(auth(airUser))).status).toBe(200);
   });
 });
 
