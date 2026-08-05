@@ -234,6 +234,12 @@
       // Kerugian / Uang Tidak Diterima — INTERNAL loss report, cap distribusiBonAdjust. Never printed
       // on anything the customer sees.
       lossReport: (opts) => { const o = opts || {}; const p = []; ['period', 'date', 'dateFrom', 'dateTo'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/reports/loss' + (p.length ? '?' + p.join('&') : '')); },
+      // KERUGIAN void / delete (cap distribusiBonAdjust; delete owner-only, server-checked). `source` = pnr|dispute.
+      kerugianImpact: (id, source) => req('GET', '/distribusi/kerugian/' + id + '/impact' + (source ? '?source=' + source : '')),
+      voidKerugian: (id, source, data) => req('POST', '/distribusi/kerugian/' + id + '/void' + (source ? '?source=' + source : ''), data),   // { reason, note }
+      editKerugianNote: (id, source, note) => req('POST', '/distribusi/kerugian/' + id + '/note' + (source ? '?source=' + source : ''), { note }),
+      hardDeleteKerugian: (id, source, confirm) => req('DELETE', '/distribusi/kerugian/' + id + (source ? '?source=' + source : ''), { confirm }),
+      bulkDeleteKerugian: (items) => req('POST', '/distribusi/kerugian/bulk-delete', { items }),
       adjustmentReport: (opts) => { const o = opts || {}; const p = []; ['period', 'dateFrom', 'dateTo', 'reason', 'kind', 'status', 'userId'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/reports/adjustments' + (p.length ? '?' + p.join('&') : '')); },
     },
     // Gudang (warehouse) — ledger-based inventory.

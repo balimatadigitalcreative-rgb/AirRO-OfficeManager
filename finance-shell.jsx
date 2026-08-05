@@ -1546,8 +1546,8 @@ function FApp() {
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
           {screen === 'dist-loss-report' && p.distribusiBonAdjust && (
-            <DIST.LossReport refreshKey={distTick} today={FIN.TODAY}
-              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
+            <DIST.LossReport refreshKey={distTick} today={FIN.TODAY} isOwner={user && user.role === 'owner'} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
+              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-adjust-report' && p.distribusiPenyesuaian && (
             <DIST.AdjustReport refreshKey={distTick} today={FIN.TODAY}

@@ -1563,37 +1563,47 @@ async function lossReport(user, query) {
     where: { paymentNotReceived: true, txnDate: { gte: from, lte: to }, ...fleetWhere(user, 'fleetId', q.fleet) },
     include: { customer: { select: { name: true, code: true } } }, orderBy: [{ txnDate: 'desc' }, { createdAt: 'desc' }],
   }, 'loss-report');
+  const DAY_MS = 86400000; const nowMs = Date.now();
   const pnrItems = rows.map((r) => ({
     id: r.id, source: 'pnr', transactionId: r.id, txnDate: r.txnDate, amount: r.amount, status: r.status, voided: r.status === 'void',
     customerId: r.customerId, customerName: r.customer ? r.customer.name : '', customerCode: r.customer ? r.customer.code : '',
     responsibleUserId: r.responsibleUserId || null, responsibleName: r.responsibleName || '',
-    lossReason: r.lossReason || '', lossPhotoId: r.lossPhotoId || null, fleetId: r.fleetId || '',
+    lossReason: r.lossReason || '', lossPhotoId: r.lossPhotoId || null, note: r.note || '', fleetId: r.fleetId || '',
     recordedByName: r.actorName || '', recordedByRole: r.actorRole || '', createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
-    voidReason: r.voidReason || '', voidedByName: r.voidedByName || '',
+    voidReason: r.voidReason || '', voidedByName: r.voidedByName || '', disputeApproved: false,
+    // Hard-delete eligibility hint (server re-checks): owner-only, ≤30 days, no linked approved dispute.
+    deletable: r.createdAt ? (nowMs - new Date(r.createdAt).getTime()) <= 30 * DAY_MS : false,
   }));
-  // APPROVED, non-reversed tidak_diakui/kerugian disputes are the SAME loss records (no duplicates),
-  // linked back to their customer + transaction via `transactionId` (the "source" column).
+  // LIVE (approved, non-reversed) tidak_diakui/kerugian disputes AND CANCELLED losses (lossVoidedAt
+  // set → reverted to 'disengketakan') — the SAME loss records, linked via `transactionId`.
   const dispRows = await prisma.distTransactionDispute.findMany({
-    where: { status: { in: DEDUCTS }, reversedById: null, reversalOf: null, ...fleetWhere(user, 'fleetId', q.fleet) },
+    where: { OR: [{ status: { in: DEDUCTS }, reversedById: null, reversalOf: null }, { lossVoidedAt: { not: null } }], ...fleetWhere(user, 'fleetId', q.fleet) },
     include: { customer: { select: { name: true, code: true } } }, orderBy: { createdAt: 'desc' },
   });
   const txIds = dispRows.map((d) => d.transactionId);
   const txDate = {};
   if (txIds.length) (await prisma.distTransaction.findMany({ where: { id: { in: txIds } }, select: { id: true, txnDate: true } })).forEach((t) => { txDate[t.id] = t.txnDate; });
-  const dispItems = dispRows.map((d) => ({
-    id: d.id, source: 'dispute', transactionId: d.transactionId, disputeStatus: d.status, resolution: d.resolution,
-    txnDate: txDate[d.transactionId] || (d.approvedAt ? new Date(d.approvedAt).toISOString().slice(0, 10) : ''),
-    amount: d.disputedAmount || 0, status: 'active', voided: false,
-    customerId: d.customerId, customerName: d.customer ? d.customer.name : '', customerCode: d.customer ? d.customer.code : '',
-    responsibleUserId: d.resolution === 'staf' ? (d.staffUserId || null) : null,
-    responsibleName: d.resolution === 'staf' ? (d.staffName || '') : '(Perusahaan)',
-    lossReason: d.reason || '', lossPhotoId: null, evidenceUrl: d.evidenceUrl || null, fleetId: d.fleetId || '',
-    recordedByName: d.raisedByName || '', recordedByRole: d.raisedByRole || '', approvedByName: d.approvedByName || '',
-    createdAt: d.createdAt ? new Date(d.createdAt).getTime() : null, voidReason: '', voidedByName: '',
-  })).filter((x) => x.txnDate >= from && x.txnDate <= to);
+  const dispItems = dispRows.map((d) => {
+    const cancelled = !!d.lossVoidedAt && !DEDUCTS.includes(d.status);   // reverted → still listed, "Dibatalkan"
+    return {
+      id: d.id, source: 'dispute', transactionId: d.transactionId, disputeStatus: d.status, resolution: d.resolution, disputeApproved: true,
+      txnDate: txDate[d.transactionId] || (d.approvedAt ? new Date(d.approvedAt).toISOString().slice(0, 10) : ''),
+      amount: d.disputedAmount || 0, status: cancelled ? 'void' : 'active', voided: cancelled,
+      customerId: d.customerId, customerName: d.customer ? d.customer.name : '', customerCode: d.customer ? d.customer.code : '',
+      responsibleUserId: d.resolution === 'staf' ? (d.staffUserId || null) : null,
+      responsibleName: d.resolution === 'staf' ? (d.staffName || '') : '(Perusahaan)',
+      lossReason: d.reason || '', lossPhotoId: null, evidenceUrl: d.evidenceUrl || null, note: d.note || '', fleetId: d.fleetId || '',
+      recordedByName: d.raisedByName || '', recordedByRole: d.raisedByRole || '', approvedByName: d.approvedByName || '',
+      createdAt: d.createdAt ? new Date(d.createdAt).getTime() : null,
+      voidReason: d.lossVoidReason || '', voidedByName: d.lossVoidedByName || '', voidNote: d.lossVoidNote || '',
+      deletable: false,   // an approved dispute is a loss — never hard-deletable, use Batalkan
+    };
+  }).filter((x) => x.txnDate >= from && x.txnDate <= to);
   const items = [...pnrItems, ...dispItems].sort((a, b) => (a.txnDate < b.txnDate ? 1 : a.txnDate > b.txnDate ? -1 : (b.createdAt || 0) - (a.createdAt || 0)));
-  // Voided adjustments stay listed (append-only, nothing is hidden) but never count toward totals.
+  // Cancelled/voided records stay listed (nothing is hidden) but never count toward the loss totals;
+  // a "Kerugian dibatalkan" line makes the cancellation visible rather than silent.
   const live = items.filter((x) => !x.voided);
+  const voidedItems = items.filter((x) => x.voided);
   const byStaff = {};
   live.forEach((x) => {
     const k = x.responsibleUserId || ('name:' + x.responsibleName);
@@ -1603,8 +1613,187 @@ async function lossReport(user, query) {
   return {
     from, to, period,
     items, count: live.length, total: live.reduce((a, x) => a + x.amount, 0),
+    voidedCount: voidedItems.length, voidedTotal: voidedItems.reduce((a, x) => a + x.amount, 0),
     byStaff: Object.values(byStaff).sort((a, b) => b.total - a.total),
   };
+}
+
+// ── KERUGIAN VOID / DELETE ───────────────────────────────────────────────────
+const KERUGIAN_VOID_REASONS = ['salah_input', 'sudah_tertagih', 'duplikat', 'salah_penilaian', 'lainnya'];
+const shortRefOf = (id) => '#' + String(id || '').slice(-6).toUpperCase();
+
+// Resolve a Kerugian record id (+ optional source hint) to its underlying row. A record is either a
+// paymentNotReceived transaction ('pnr') or an approved/loss-cancelled dispute ('dispute').
+async function resolveKerugian(id, source, actor) {
+  if (source !== 'pnr') {
+    const d = await prisma.distTransactionDispute.findUnique({ where: { id }, include: { customer: { select: { id: true, name: true, code: true } } } });
+    if (d && (DEDUCTS.includes(d.status) || d.lossVoidedAt)) { if (!fleetAllows(actor, d.fleetId)) throw ApiError.notFound('Kerugian tidak ditemukan.'); return { source: 'dispute', dispute: d }; }
+    if (source === 'dispute') throw ApiError.notFound('Kerugian tidak ditemukan.');
+  }
+  const t = await prisma.distTransaction.findUnique({ where: { id }, include: { customer: { select: { id: true, name: true, code: true } } } });
+  if (t && t.paymentNotReceived) { if (!fleetAllows(actor, t.fleetId)) throw ApiError.notFound('Kerugian tidak ditemukan.'); return { source: 'pnr', txn: t }; }
+  throw ApiError.notFound('Kerugian tidak ditemukan.');
+}
+
+// Repayments against a staff liability would block a void — but this codebase has NO staff-liability
+// repayment/recovery model, so this always returns []. Centralised here so the guard activates
+// automatically if repayments are ever introduced.
+async function liabilityRepayments() { return []; }
+
+// What a void / delete WOULD affect — drives the confirmation dialog. Never trust the client.
+async function kerugianImpact(id, source, actor) {
+  const rec = await resolveKerugian(id, source, actor);
+  const isOwner = !!(actor && actor.role === 'owner');
+  const DAY_MS = 86400000;
+  const effects = []; const voidBlockers = []; const deleteBlockers = [];
+  const repayments = await liabilityRepayments();
+  if (repayments.length) voidBlockers.push({ code: 'has_repayments', repayments });
+  if (rec.source === 'dispute') {
+    const d = rec.dispute; const c = d.customer || {};
+    const alreadyVoided = !!d.lossVoidedAt && !DEDUCTS.includes(d.status);
+    if (alreadyVoided) voidBlockers.push({ code: 'already_voided' });
+    else {
+      effects.push({ type: 'bon', customerCode: c.code || '', customerName: c.name || '', delta: d.disputedAmount || 0 });
+      if (d.resolution === 'staf' && d.staffName) effects.push({ type: 'liability', staffName: d.staffName, amount: d.disputedAmount || 0, action: 'void' });
+      effects.push({ type: 'disputeStatus', txnRef: shortRefOf(d.transactionId), from: d.status, to: 'disengketakan' });
+    }
+    // Hard delete: an approved dispute (a real loss) is NEVER hard-deletable — use Batalkan.
+    deleteBlockers.push({ code: 'dispute_approved' });
+    return {
+      id: d.id, source: 'dispute', amount: d.disputedAmount || 0, customerId: d.customerId, customerCode: c.code || '', customerName: c.name || '',
+      transactionId: d.transactionId, transactionRef: shortRefOf(d.transactionId), responsibleName: d.staffName || '', status: d.status, alreadyVoided,
+      effects, void: { allowed: voidBlockers.length === 0, blockers: voidBlockers }, delete: { allowed: false, blockers: deleteBlockers, ownerOnly: true },
+    };
+  }
+  // pnr transaction
+  const t = rec.txn; const c = t.customer || {};
+  const alreadyVoided = t.status === 'void';
+  if (alreadyVoided) voidBlockers.push({ code: 'already_voided' });
+  else {
+    effects.push({ type: 'bon', customerCode: c.code || '', customerName: c.name || '', delta: t.amount || 0 });
+    if (t.responsibleName) effects.push({ type: 'liability', staffName: t.responsibleName, amount: t.amount || 0, action: 'void' });
+  }
+  // Hard delete eligibility (owner · ≤30 days · not linked to an approved dispute · no repayments).
+  const ageOk = t.createdAt ? (Date.now() - new Date(t.createdAt).getTime()) <= 30 * DAY_MS : false;
+  if (!isOwner) deleteBlockers.push({ code: 'not_owner' });
+  if (!ageOk) deleteBlockers.push({ code: 'too_old' });
+  const linkedApprovedDispute = await prisma.distTransactionDispute.count({ where: { transactionId: t.id, status: { in: DEDUCTS } } });
+  if (linkedApprovedDispute > 0) deleteBlockers.push({ code: 'dispute_approved' });
+  if (repayments.length) deleteBlockers.push({ code: 'has_repayments', repayments });
+  return {
+    id: t.id, source: 'pnr', amount: t.amount || 0, customerId: t.customerId, customerCode: c.code || '', customerName: c.name || '',
+    transactionId: t.id, transactionRef: shortRefOf(t.id), responsibleName: t.responsibleName || '', status: t.status, alreadyVoided, ageDays: t.createdAt ? Math.floor((Date.now() - new Date(t.createdAt).getTime()) / DAY_MS) : null,
+    effects, void: { allowed: voidBlockers.length === 0, blockers: voidBlockers }, delete: { allowed: deleteBlockers.length === 0, blockers: deleteBlockers, ownerOnly: true },
+  };
+}
+
+// BATALKAN — reverse a loss record atomically (GM/owner). PNR → void the transaction; dispute →
+// revert to 'disengketakan' (bon restored) + stamp the loss-cancellation metadata. Fully audited.
+async function voidKerugian(id, source, body, actor) {
+  if (!isGmOwner(actor)) throw ApiError.forbidden('Hanya GM/Owner yang boleh membatalkan kerugian.');
+  const reason = KERUGIAN_VOID_REASONS.includes(body && body.reason) ? body.reason : null;
+  if (!reason) throw ApiError.badRequest('Alasan pembatalan tidak valid.');
+  const note = String((body && body.note) || '').trim().slice(0, 500);
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  const repayments = await liabilityRepayments();
+  if (repayments.length) throw ApiError.badRequest('Tanggungan staf sudah memiliki pembayaran — batalkan/selesaikan pembayaran itu dulu.');
+  const rec = await resolveKerugian(id, source, actor);
+  const snap = await actorSnap(actor);
+  if (rec.source === 'dispute') {
+    const d = rec.dispute;
+    if (!!d.lossVoidedAt && !DEDUCTS.includes(d.status)) throw ApiError.badRequest('Kerugian ini sudah dibatalkan.');
+    if (!DEDUCTS.includes(d.status)) throw ApiError.badRequest('Sengketa ini bukan kerugian aktif.');
+    const updated = await prisma.distTransactionDispute.update({ where: { id: d.id }, data: {
+      status: 'disengketakan', approvedById: null, approvedByName: null, approvedAt: null, staffLiabilityId: null, lossId: null,
+      lossVoidedAt: new Date(), lossVoidReason: reason, lossVoidNote: note, lossVoidedById: snap.actorId, lossVoidedByName: snap.actorName,
+    } });
+    await logAudit('batal', `Batalkan kerugian (sengketa): ${d.customer ? d.customer.name : ''}`, `${shortRefOf(d.transactionId)} · kembalikan bon +${d.disputedAmount} · status → disengketakan · ${reason}${note ? ' · ' + note : ''}`, snap, d.fleetId);
+    return { ok: true, id: d.id, source: 'dispute', sisaBon: await customerBonBalance(d.customerId) };
+  }
+  const t = rec.txn;
+  if (t.status === 'void') throw ApiError.badRequest('Kerugian ini sudah dibatalkan.');
+  await prisma.$transaction(async (tx) => {
+    await tx.gallonMovement.updateMany({ where: { transactionId: t.id, active: true }, data: { active: false } });
+    await tx.distTransaction.update({ where: { id: t.id }, data: { status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedByRole: snap.actorRole, voidedAt: new Date(), voidReason: reason + (note ? ' · ' + note : '') } });
+  });
+  await logAudit('batal', `Batalkan kerugian (PNR): ${t.customer ? t.customer.name : ''}`, `${shortRefOf(t.id)} · kembalikan bon +${t.amount} · ${reason}${note ? ' · ' + note : ''}`, snap, t.fleetId);
+  return { ok: true, id: t.id, source: 'pnr', sisaBon: await customerBonBalance(t.customerId) };
+}
+
+// HAPUS PERMANEN — OWNER-ONLY escape hatch for wrong/test entries. Only a PNR record ≤30 days old,
+// with no linked approved dispute and no repayments. Writes a FULL JSON snapshot to the audit log
+// (never deletable) BEFORE removing the row, so it can be reconstructed. `confirm` must match the
+// record's amount or its ref.
+async function hardDeleteKerugian(id, source, body, actor) {
+  if (!(actor && actor.role === 'owner')) throw ApiError.forbidden('Hanya Owner yang boleh menghapus permanen.');
+  const rec = await resolveKerugian(id, source, actor);
+  if (rec.source !== 'pnr') throw ApiError.badRequest('Kerugian dari sengketa tidak bisa dihapus permanen — gunakan Batalkan.');
+  const t = rec.txn;
+  const ageOk = t.createdAt ? (Date.now() - new Date(t.createdAt).getTime()) <= 30 * 86400000 : false;
+  if (!ageOk) throw ApiError.badRequest('Hanya catatan ≤30 hari yang bisa dihapus permanen — gunakan Batalkan.');
+  const linkedApprovedDispute = await prisma.distTransactionDispute.count({ where: { transactionId: t.id, status: { in: DEDUCTS } } });
+  if (linkedApprovedDispute > 0) throw ApiError.badRequest('Catatan ini terkait sengketa yang sudah disetujui — gunakan Batalkan.');
+  if ((await liabilityRepayments()).length) throw ApiError.badRequest('Tanggungan staf sudah memiliki pembayaran — tidak bisa dihapus.');
+  const typed = String((body && body.confirm) || '').trim().toUpperCase();
+  if (typed !== shortRefOf(t.id) && typed !== String(t.amount)) throw ApiError.badRequest(`Ketik ref (${shortRefOf(t.id)}) atau nominal (${t.amount}) untuk konfirmasi.`);
+  const snap = await actorSnap(actor);
+  // AUDIT FIRST with a full JSON snapshot — the row is about to disappear; the trace must survive.
+  const snapshot = { table: 'DistTransaction', role: 'kerugian_pnr', row: { ...t, amount: t.amount, customer: undefined } };
+  await logAudit('hapus', `Hapus permanen kerugian: ${t.customer ? t.customer.name : ''}`, `${shortRefOf(t.id)} · ${t.amount} · SNAPSHOT ${JSON.stringify(snapshot)}`, snap, t.fleetId);
+  await prisma.$transaction([
+    prisma.gallonMovement.deleteMany({ where: { transactionId: t.id } }),
+    prisma.correction.deleteMany({ where: { transactionId: t.id } }),
+    prisma.distTransaction.delete({ where: { id: t.id } }),
+  ]);
+  return { deleted: true, id: t.id, ref: shortRefOf(t.id), sisaBon: await customerBonBalance(t.customerId) };
+}
+
+// BULK HAPUS — same per-record eligibility; max 100; returns a per-id result so the UI can show which
+// succeeded and why others were skipped.
+async function bulkDeleteKerugian(items, actor) {
+  if (!(actor && actor.role === 'owner')) throw ApiError.forbidden('Hanya Owner yang boleh menghapus permanen.');
+  const list = Array.isArray(items) ? items.slice(0, 100) : [];
+  const results = [];
+  for (const it of list) {
+    const id = typeof it === 'string' ? it : (it && it.id);
+    const source = typeof it === 'object' && it ? it.source : undefined;
+    try {
+      // Bulk delete skips the typed-confirm (that gate is the UI's per-batch preview); all other
+      // server eligibility rules still apply per id.
+      const rec = await resolveKerugian(id, source, actor);
+      if (rec.source !== 'pnr') { results.push({ id, ok: false, reason: 'dispute_approved' }); continue; }
+      const t = rec.txn;
+      if (t.status === 'void') { results.push({ id, ok: false, reason: 'already_voided' }); continue; }
+      if (!(t.createdAt && (Date.now() - new Date(t.createdAt).getTime()) <= 30 * 86400000)) { results.push({ id, ok: false, reason: 'too_old' }); continue; }
+      if ((await prisma.distTransactionDispute.count({ where: { transactionId: t.id, status: { in: DEDUCTS } } })) > 0) { results.push({ id, ok: false, reason: 'dispute_approved' }); continue; }
+      const snap = await actorSnap(actor);
+      const snapshot = { table: 'DistTransaction', role: 'kerugian_pnr', row: { ...t, customer: undefined } };
+      await logAudit('hapus', `Hapus permanen kerugian (bulk): ${t.customer ? t.customer.name : ''}`, `${shortRefOf(t.id)} · ${t.amount} · SNAPSHOT ${JSON.stringify(snapshot)}`, snap, t.fleetId);
+      await prisma.$transaction([
+        prisma.gallonMovement.deleteMany({ where: { transactionId: t.id } }),
+        prisma.correction.deleteMany({ where: { transactionId: t.id } }),
+        prisma.distTransaction.delete({ where: { id: t.id } }),
+      ]);
+      results.push({ id, ok: true, ref: shortRefOf(t.id) });
+    } catch (e) { results.push({ id, ok: false, reason: (e && e.message) || 'error' }); }
+  }
+  return { results, deleted: results.filter((r) => r.ok).length, skipped: results.filter((r) => !r.ok).length };
+}
+
+// Edit only the NOTE/reason of a loss record (never the amount) — a small correction of the record.
+async function editKerugianNote(id, source, body, actor) {
+  if (!isGmOwner(actor)) throw ApiError.forbidden('Hanya GM/Owner yang boleh mengubah catatan.');
+  const rec = await resolveKerugian(id, source, actor);
+  const note = String((body && body.note) || '').trim().slice(0, 500);
+  const snap = await actorSnap(actor);
+  if (rec.source === 'dispute') {
+    await prisma.distTransactionDispute.update({ where: { id: rec.dispute.id }, data: { note } });
+    await logAudit('koreksi', `Edit catatan kerugian: ${rec.dispute.customer ? rec.dispute.customer.name : ''}`, `${shortRefOf(rec.dispute.transactionId)} · ${note}`, snap, rec.dispute.fleetId);
+    return { ok: true, id: rec.dispute.id, source: 'dispute', note };
+  }
+  await prisma.distTransaction.update({ where: { id: rec.txn.id }, data: { lossReason: note || rec.txn.lossReason } });
+  await logAudit('koreksi', `Edit catatan kerugian: ${rec.txn.customer ? rec.txn.customer.name : ''}`, `${shortRefOf(rec.txn.id)} · ${note}`, snap, rec.txn.fleetId);
+  return { ok: true, id: rec.txn.id, source: 'pnr', note };
 }
 
 // ── ARCHIVE TOGGLE — flip a row between ACTIVE and ARCHIVE (legacy). Cap: distribusiLegacyImport
@@ -2591,4 +2780,5 @@ module.exports = {
   parseLegacyDate, expandLegacyRow,
   createAdjustment, listCustomerAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport, ADJ_REASONS,
   raiseDispute, approveDispute, reverseDispute, DISPUTE_REASONS, DISPUTE_RESOLUTIONS,
+  kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote, KERUGIAN_VOID_REASONS,
 };

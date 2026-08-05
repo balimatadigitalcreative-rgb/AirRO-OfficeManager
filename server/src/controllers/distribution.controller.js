@@ -148,6 +148,13 @@ const disputeSchema = z.object({
   staffName: z.string().trim().max(120).optional(),
 });
 const disputeApproveSchema = z.object({ resolution: z.enum(['staf', 'perusahaan']).optional() });
+// KERUGIAN void / delete. `source` (pnr|dispute) disambiguates which underlying record the id refers
+// to. void needs a reason (dropdown) + note; hard delete needs a typed confirm (amount or ref).
+const kerugianQuery = z.object({ source: z.enum(['pnr', 'dispute']).optional() });
+const kerugianVoidSchema = z.object({ reason: z.enum(['salah_input', 'sudah_tertagih', 'duplikat', 'salah_penilaian', 'lainnya']), note: z.string().trim().min(1, 'note is required').max(500) });
+const kerugianDeleteSchema = z.object({ confirm: z.string().trim().min(1).max(60) });
+const kerugianNoteSchema = z.object({ note: z.string().trim().max(500) });
+const kerugianBulkSchema = z.object({ items: z.array(z.union([z.string().min(1), z.object({ id: z.string().min(1), source: z.enum(['pnr', 'dispute']).optional() })])).min(1).max(100) });
 const hardDeleteSchema = z.object({
   reason: z.string().trim().min(1, 'reason is required').max(1000),
   confirm: z.string().min(1).max(40),
@@ -294,6 +301,11 @@ const lossReport = asyncHandler(async (req, res) => res.json({ data: await servi
 const raiseDispute = asyncHandler(async (req, res) => { const d = await service.raiseDispute(req.params.id, req.body, req.user); bcast('txn', d.customerId); res.status(201).json({ data: d }); });
 const approveDispute = asyncHandler(async (req, res) => { const d = await service.approveDispute(req.params.id, req.body, req.user); bcast('txn', d.customerId); res.json({ data: d }); });
 const reverseDispute = asyncHandler(async (req, res) => { const d = await service.reverseDispute(req.params.id, req.user); bcast('txn', d.customerId); res.json({ data: d }); });
+const kerugianImpact = asyncHandler(async (req, res) => res.json({ data: await service.kerugianImpact(req.params.id, req.query.source, req.user) }));
+const voidKerugian = asyncHandler(async (req, res) => { const r = await service.voidKerugian(req.params.id, req.query.source, req.body, req.user); bcast('txn', r.id); res.json({ data: r }); });
+const hardDeleteKerugian = asyncHandler(async (req, res) => { const r = await service.hardDeleteKerugian(req.params.id, req.query.source, req.body, req.user); bcast('txn', r.id); res.json({ data: r }); });
+const bulkDeleteKerugian = asyncHandler(async (req, res) => { const r = await service.bulkDeleteKerugian(req.body.items, req.user); bcast('txn', 'bulk'); res.json({ data: r }); });
+const editKerugianNote = asyncHandler(async (req, res) => { const r = await service.editKerugianNote(req.params.id, req.query.source, req.body, req.user); bcast('txn', r.id); res.json({ data: r }); });
 const billingReminders = asyncHandler(async (req, res) => res.json(await service.billingReminders(req.user, req.query.fleet, req.query.date)));
 const cashIntegration = asyncHandler(async (req, res) => res.json({ data: await service.cashIntegration(req.user, req.query) }));
 
@@ -346,6 +358,7 @@ module.exports = {
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
   createPaymentNotReceived, lossReport,
   raiseDispute, approveDispute, reverseDispute,
+  kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

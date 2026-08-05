@@ -4516,7 +4516,7 @@ function DistDeliveryReport({ refreshKey, today, fleetScope, fleet, distFleet, s
 // responsible staff, reason, evidence and who recorded it, plus totals per staff and for the period.
 // Cap: distribusiBonAdjust (same as the action; server-enforced). This screen is company-internal —
 // it is never part of a customer statement or any other customer-facing print.
-function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistLossReport({ refreshKey, today, isOwner, isGmOwner, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [period, setPeriod] = uSx('month');
   const [from, setFrom] = uSx(today);
   const [to, setTo] = uSx(today);
@@ -4524,6 +4524,15 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
   const [toast, setToast] = uSx('');
+  const [tick, setTick] = uSx(0);
+  const [statusF, setStatusF] = uSx('active');   // active | void | all
+  const [sel, setSel] = uSx({});                  // { "source:id": true } — selection for bulk actions
+  const [menuFor, setMenuFor] = uSx(null);        // row key whose ⋯ menu is open
+  const [voidFor, setVoidFor] = uSx(null);        // { item, impact }
+  const [delFor, setDelFor] = uSx(null);          // { item }
+  const [detailFor, setDetailFor] = uSx(null);    // item — read-only detail
+  const [editFor, setEditFor] = uSx(null);        // item — edit note
+  const [bulkFor, setBulkFor] = uSx(null);        // { mode:'void'|'delete', items }
   const ef = effFleet(fleetScope, distFleet);
   uEx(() => {
     let live = true; setLoading(true); setErr(false);
@@ -4531,10 +4540,24 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
     const opts = period === 'range' ? { period: 'range', dateFrom: from, dateTo: to, fleet: ef } : { period, fleet: ef };
     window.API.distribusi.lossReport(opts).then((r) => { if (live) { setRep(r.data); setLoading(false); } }).catch(() => { if (live) { setErr(true); setLoading(false); } });
     return () => { live = false; };
-  }, [refreshKey, ef, period, from, to]);
+  }, [refreshKey, ef, period, from, to, tick]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
   const periods = [['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['range', trD('dist.perRange')]];
   const viewProof = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
+  // ── selection + actions ──
+  const K = (x) => x.source + ':' + x.id;
+  const items = rep ? rep.items : [];
+  const activeItems = items.filter((x) => !x.voided);
+  const voidItems = items.filter((x) => x.voided);
+  const shown = statusF === 'active' ? activeItems : statusF === 'void' ? voidItems : items;
+  const selKeys = Object.keys(sel).filter((k) => sel[k]);
+  const selItems = activeItems.filter((x) => sel[K(x)]);
+  const toggleSel = (x) => setSel((s) => ({ ...s, [K(x)]: !s[K(x)] }));
+  const clearSel = () => setSel({});
+  const afterChange = (m) => { setVoidFor(null); setDelFor(null); setBulkFor(null); setEditFor(null); clearSel(); setTick((t) => t + 1); if (onChanged) onChanged(); if (m) flash(m); };
+  const openVoid = (x) => { setMenuFor(null); window.API.distribusi.kerugianImpact(x.id, x.source).then((r) => setVoidFor({ item: x, impact: r.data })).catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'))); };
+  const openDelete = (x) => { setMenuFor(null); setDelFor({ item: x }); };
+  const eligibleDelete = (x) => isOwner && x.source === 'pnr' && !x.voided && x.deletable;
   const exportCsv = () => {
     if (!rep) return;
     const rows = [[trD('loss.title'), rep.from + ' → ' + rep.to], [],
@@ -4565,6 +4588,8 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
       </div>
       <div className="dist-warnbox loss-internal"><IconLock s={16} /><span>{trD('loss.internalOnly')}</span></div>
 
+      <div className="dist-warnbox loss-internal" style={{ marginTop: -8 }} />
+
       {loading ? <div className="card"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div>
         : err ? <div className="card"><div className="dist-empty">{trD('dist.loadErr')}</div></div>
         : !rep || rep.items.length === 0 ? <div className="card"><div className="dist-empty">{trD('loss.none')}</div></div>
@@ -4572,6 +4597,8 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
           <div className="card dist-card loss-totals">
             <div className="dist-card-head"><div className="sec-title">{trD('loss.total')}</div><span className="dist-badge">{numX(rep.count)} {trD('dist.notaWord')}</span></div>
             <div className="loss-big amt-neg">{rpFull(rep.total)}</div>
+            {/* Cancelled records are excluded from the total; shown as their own line so it's visible. */}
+            {rep.voidedCount > 0 && <div className="loss-cancelled-line"><span>{trD('kv.cancelledLine')} · {numX(rep.voidedCount)}</span><b className="tnum">− {rpFull(rep.voidedTotal)}</b></div>}
             <div className="loss-staff">
               {rep.byStaff.map((s) => (
                 <div key={s.key} className="loss-staff-row"><span className="loss-staff-name">{s.responsibleName || '—'}</span><span className="loss-staff-cnt">{numX(s.count)}×</span><b className="tnum amt-neg">{rpFull(s.total)}</b></div>
@@ -4579,32 +4606,237 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
             </div>
           </div>
 
+          {/* Status filter chips (Aktif · Dibatalkan · Semua) with counts. */}
+          <div className="dist-tx-toolbar no-print" style={{ paddingTop: 0 }}>
+            <div className="dist-chips">
+              <button type="button" className={`dist-chip ${statusF === 'active' ? 'on' : ''}`} onClick={() => setStatusF('active')}>{trD('kv.statusActive')} <span className="dist-imp-chipn">{activeItems.length}</span></button>
+              <button type="button" className={`dist-chip ${statusF === 'void' ? 'on' : ''}`} onClick={() => setStatusF('void')}>{trD('kv.statusVoid')} <span className="dist-imp-chipn">{voidItems.length}</span></button>
+              <button type="button" className={`dist-chip ${statusF === 'all' ? 'on' : ''}`} onClick={() => setStatusF('all')}>{trD('kv.statusAll')} <span className="dist-imp-chipn">{items.length}</span></button>
+            </div>
+          </div>
+
+          {/* Bulk actions bar. */}
+          {selItems.length > 0 && (
+            <div className="kv-bulkbar no-print">
+              <span><b>{selItems.length}</b> {trD('kv.selected')}</span>
+              <div style={{ flex: 1 }} />
+              {isGmOwner && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBulkFor({ mode: 'void', items: selItems })}><IconRefresh s={13} />{trD('kv.void')}</button>}
+              {isOwner && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => setBulkFor({ mode: 'delete', items: selItems })}><IconTrash s={13} />{trD('kv.delete')}</button>}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={clearSel}><IconClose s={13} />{trD('dist.cancel')}</button>
+            </div>
+          )}
+
           <div className="card dist-card">
             <div className="dist-card-head"><div className="sec-title">{trD('loss.detail')}</div></div>
             <div className="run-table-wrap">
-              <table className="run-table loss-table">
-                <thead><tr><th>{trD('dist.fDate')}</th><th>{trD('loss.colSource')}</th><th>{trD('dist.fCust')}</th><th className="num">{trD('pnr.amount')}</th><th>{trD('pnr.staff')}</th><th>{trD('pnr.reason')}</th><th>{trD('loss.recordedBy')}</th><th /></tr></thead>
+              <table className="run-table loss-table kv-table">
+                <thead><tr><th className="kv-check no-print" /><th>{trD('dist.fDate')}</th><th>{trD('loss.colSource')}</th><th>{trD('dist.fCust')}</th><th className="num">{trD('pnr.amount')}</th><th>{trD('pnr.staff')}</th><th>{trD('pnr.reason')}</th><th>{trD('loss.recordedBy')}</th><th className="no-print" /></tr></thead>
                 <tbody>
-                  {rep.items.map((x) => (
-                    <tr key={x.id} className={x.voided ? 'loss-void' : ''}>
+                  {shown.map((x) => {
+                    const key = K(x); const open = menuFor === key;
+                    return (
+                    <tr key={key} className={x.voided ? 'loss-void' : ''}>
+                      <td className="kv-check no-print">{!x.voided && isGmOwner ? <input type="checkbox" checked={!!sel[key]} onChange={() => toggleSel(x)} aria-label="pilih" /> : null}</td>
                       <td className="tnum">{x.txnDate}</td>
                       <td>{x.source === 'dispute'
                         ? <span className={'dist-badge ' + (x.disputeStatus === 'kerugian' ? 'disp-redsolid' : 'disp-redout')} title={'#' + String(x.transactionId || '').slice(-6).toUpperCase()}>{trD('loss.srcDispute')}</span>
                         : <span className="dist-badge">{trD('loss.srcPnr')}</span>}</td>
                       <td>{x.customerName}{x.customerCode ? <small> · {x.customerCode}</small> : null}{x.source === 'dispute' ? <small> · #{String(x.transactionId || '').slice(-6).toUpperCase()}</small> : null}</td>
-                      <td className="num">{rpFull(x.amount)}{x.voided ? <span className="dist-badge void">{trD('loss.voided')}</span> : null}</td>
+                      <td className="num">{x.voided ? <s className="kv-struck">{rpFull(x.amount)}</s> : rpFull(x.amount)}{x.voided ? <span className="dist-badge void">{trD('loss.voided')}</span> : null}</td>
                       <td><b>{x.responsibleName || '—'}</b></td>
-                      <td className="loss-reason">{x.source === 'dispute' ? (trD('disp.reason.' + x.lossReason) || x.lossReason) : x.lossReason}{x.voided && x.voidReason ? <small> · {trD('loss.voidReason')}: {x.voidReason}</small> : null}</td>
+                      <td className="loss-reason">{x.source === 'dispute' ? (trD('disp.reason.' + x.lossReason) || x.lossReason) : x.lossReason}{x.voided && x.voidReason ? <small> · {trD('loss.voidReason')}: {trD('kv.reason.' + x.voidReason) || x.voidReason}</small> : null}</td>
                       <td><small>{x.recordedByName || '—'}{x.createdAt ? ' · ' + fmtDT(x.createdAt) : ''}</small></td>
-                      <td>{x.lossPhotoId ? <button type="button" className="dist-link" onClick={() => viewProof(x.lossPhotoId)}>{trD('pnr.proofView')}</button> : x.evidenceUrl ? <a className="dist-link" href={x.evidenceUrl} target="_blank" rel="noopener noreferrer">{trD('pnr.proofView')}</a> : null}</td>
+                      <td className="kv-actcell no-print">
+                        <button type="button" className="jp-icon kv-dots" aria-haspopup="true" aria-expanded={open} onClick={() => setMenuFor(open ? null : key)}><IconDots s={16} /></button>
+                        {open && <><div className="cd-menu-scrim" onClick={() => setMenuFor(null)} /><div className="cd-menu kv-menu" role="menu">
+                          <button type="button" role="menuitem" className="cd-menu-item" onClick={() => { setMenuFor(null); setDetailFor(x); }}>{IcX('IconInvoice', { s: 14 })}{trD('kv.detail')}</button>
+                          {isGmOwner && <button type="button" role="menuitem" className="cd-menu-item" onClick={() => { setMenuFor(null); setEditFor(x); }}>{IcX('IconPencil', { s: 14 })}{trD('kv.editNote')}</button>}
+                          {isGmOwner && !x.voided && <button type="button" role="menuitem" className="cd-menu-item" onClick={() => openVoid(x)}>{IcX('IconRefresh', { s: 14 })}{trD('kv.void')}</button>}
+                          {isOwner && (eligibleDelete(x)
+                            ? <button type="button" role="menuitem" className="cd-menu-item danger" onClick={() => openDelete(x)}>{IcX('IconTrash', { s: 14 })}{trD('kv.delete')}</button>
+                            : (x.source === 'pnr' && !x.voided ? <div className="cd-menu-item disabled" title={trD('kv.delBlocked')}>{IcX('IconLock', { s: 14 })}{trD('kv.delete')}</div> : null))}
+                        </div></>}
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
+                  {shown.length === 0 && <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('loss.none')}</td></tr>}
                 </tbody>
               </table>
             </div>
           </div>
         </>)}
+      {voidFor && <KerugianVoidModal item={voidFor.item} impact={voidFor.impact} onClose={() => setVoidFor(null)} onDone={() => afterChange(trD('kv.voided'))} onFlash={flash} />}
+      {delFor && <KerugianDeleteModal item={delFor.item} onClose={() => setDelFor(null)} onDone={() => afterChange(trD('kv.deleted'))} onFlash={flash} />}
+      {bulkFor && <KerugianBulkModal mode={bulkFor.mode} items={bulkFor.items} onClose={() => setBulkFor(null)} onDone={(m) => afterChange(m)} onFlash={flash} />}
+      {editFor && <KerugianEditModal item={editFor} onClose={() => setEditFor(null)} onDone={() => afterChange(trD('kv.saved'))} onFlash={flash} />}
+      {detailFor && <KerugianDetailModal item={detailFor} onClose={() => setDetailFor(null)} onProof={viewProof} />}
       {toast && <div className="dist-toast no-print"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+// Reason labels shared by the void modal + row. salah_input · sudah_tertagih · duplikat · salah_penilaian · lainnya.
+const KV_VOID_REASONS = ['salah_input', 'sudah_tertagih', 'duplikat', 'salah_penilaian', 'lainnya'];
+// One line describing a side effect of a void (from the server impact — never trust the client).
+function kvEffectLine(e) {
+  if (e.type === 'bon') return trD('kv.effBon', { code: e.customerCode || e.customerName || '', amt: rpFull(e.delta || 0) });
+  if (e.type === 'liability') return trD('kv.effLiability', { staff: e.staffName || '', amt: rpFull(e.amount || 0) });
+  if (e.type === 'disputeStatus') return trD('kv.effStatus', { ref: 'TRX ' + (e.txnRef || '') });
+  return '';
+}
+
+// BATALKAN — reason + note + a preview of every side effect (from GET /impact) + a typed confirmation.
+function KerugianVoidModal({ item, impact, onClose, onDone, onFlash }) {
+  const [reason, setReason] = uSx('salah_input');
+  const [note, setNote] = uSx('');
+  const [typed, setTyped] = uSx('');
+  const [busy, setBusy] = uSx(false);
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const blocked = impact && impact.void && !impact.void.allowed ? impact.void.blockers : [];
+  const canSubmit = !!note.trim() && typed.trim().toUpperCase() === trD('kv.confirmWord').toUpperCase() && blocked.length === 0 && !busy;
+  const submit = () => {
+    if (!canSubmit) return; setBusy(true);
+    window.API.distribusi.voidKerugian(item.id, item.source, { reason, note: note.trim() })
+      .then(() => onDone()).catch((e) => { onFlash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); setBusy(false); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('kv.voidTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{item.customerName}{item.customerCode ? ' · ' + item.customerCode : ''} · {rpFull(item.amount)}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {blocked.length > 0 && <div className="dist-warnbox" style={{ marginBottom: 10 }}><IconWarn s={16} /><span>{blocked.map((b) => trD('kv.blocked.' + b.code) || b.code).join(' · ')}</span></div>}
+          <div className="kv-impact">
+            <div className="kv-impact-h">{trD('kv.voidWillLead')}</div>
+            <ul>{(impact && impact.effects || []).map((e, i) => <li key={i}>{kvEffectLine(e)}</li>)}</ul>
+          </div>
+          <label className="fld-label">{trD('kv.reason')}</label>
+          <select className="fld" value={reason} onChange={(e) => setReason(e.target.value)}>{KV_VOID_REASONS.map((r) => <option key={r} value={r}>{trD('kv.reason.' + r)}</option>)}</select>
+          <label className="fld-label">{trD('kv.note')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <textarea className="fld" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('kv.notePh')} />
+          <label className="fld-label">{trD('kv.confirmType', { w: trD('kv.confirmWord') })}</label>
+          <input className="fld" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={trD('kv.confirmWord')} />
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn dist-btn-danger" disabled={!canSubmit} onClick={submit}>{busy ? '…' : trD('kv.voidBtn')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// HAPUS PERMANEN — owner-only. Type the amount or ref to confirm; the server re-checks eligibility.
+function KerugianDeleteModal({ item, onClose, onDone, onFlash }) {
+  const [typed, setTyped] = uSx('');
+  const [busy, setBusy] = uSx(false);
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const ref = '#' + String(item.transactionId || item.id).slice(-6).toUpperCase();
+  const ok = typed.trim().toUpperCase() === ref || typed.replace(/[^0-9]/g, '') === String(item.amount);
+  const submit = () => {
+    if (!ok || busy) return; setBusy(true);
+    window.API.distribusi.hardDeleteKerugian(item.id, item.source, typed.trim().toUpperCase() === ref ? ref : String(item.amount))
+      .then(() => onDone()).catch((e) => { onFlash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); setBusy(false); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('kv.delTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{item.customerName} · {rpFull(item.amount)}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-warnbox" style={{ marginBottom: 12 }}><IconWarn s={16} /><span>{trD('kv.delWarn')}</span></div>
+          <label className="fld-label">{trD('kv.delConfirmType', { ref: ref, amt: numX(item.amount) })}</label>
+          <input className="fld" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={ref + ' / ' + item.amount} />
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn dist-btn-danger" disabled={!ok || busy} onClick={submit}>{busy ? '…' : trD('kv.delBtn')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// BULK — void (loops the void endpoint with one shared reason+note) OR delete (server bulk-delete
+// with a per-id result). Shows a preview list before confirming.
+function KerugianBulkModal({ mode, items, onClose, onDone, onFlash }) {
+  const [reason, setReason] = uSx('salah_input');
+  const [note, setNote] = uSx('');
+  const [busy, setBusy] = uSx(false);
+  const [result, setResult] = uSx(null);
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const del = mode === 'delete';
+  const run = () => {
+    if (busy) return;
+    if (!del && !note.trim()) return;
+    setBusy(true);
+    if (del) {
+      window.API.distribusi.bulkDeleteKerugian(items.map((x) => ({ id: x.id, source: x.source })))
+        .then((r) => { const d = r.data; setResult(d); if (d.skipped === 0) onDone(trD('kv.bulkResult', { ok: d.deleted, skip: d.skipped })); else { setBusy(false); onFlash(trD('kv.bulkResult', { ok: d.deleted, skip: d.skipped })); } })
+        .catch((e) => { onFlash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); setBusy(false); });
+    } else {
+      const ops = items.map((x) => window.API.distribusi.voidKerugian(x.id, x.source, { reason, note: note.trim() }).then(() => ({ id: x.id, ok: true })).catch(() => ({ id: x.id, ok: false })));
+      Promise.all(ops).then((rs) => { const okN = rs.filter((r) => r.ok).length; onDone(trD('kv.bulkResult', { ok: okN, skip: rs.length - okN })); });
+    }
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{del ? trD('kv.delete') : trD('kv.void')} · {items.length}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('kv.bulkPreview')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {del && <div className="dist-warnbox" style={{ marginBottom: 10 }}><IconWarn s={16} /><span>{trD('kv.delWarn')}</span></div>}
+          <div className="kv-preview-list">
+            {items.map((x) => { const r = result && result.results && result.results.find((y) => y.id === x.id); return (
+              <div key={x.id} className={'kv-preview-row' + (r ? (r.ok ? ' ok' : ' skip') : '')}>
+                <span>{x.customerName}{x.customerCode ? ' · ' + x.customerCode : ''}</span>
+                <b className="tnum">{rpFull(x.amount)}</b>
+                {r ? <span className="kv-preview-res">{r.ok ? trD('kv.resOk') : (trD('kv.blocked.' + r.reason) || r.reason)}</span> : null}
+              </div>
+            ); })}
+          </div>
+          {!del && (<>
+            <label className="fld-label">{trD('kv.reason')}</label>
+            <select className="fld" value={reason} onChange={(e) => setReason(e.target.value)}>{KV_VOID_REASONS.map((r) => <option key={r} value={r}>{trD('kv.reason.' + r)}</option>)}</select>
+            <label className="fld-label">{trD('kv.note')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <textarea className="fld" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('kv.notePh')} />
+          </>)}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{result ? trD('common.close') || 'Tutup' : trD('dist.cancel')}</button>{!result && <button className={'btn ' + (del ? 'dist-btn-danger' : 'btn-primary')} disabled={busy || (!del && !note.trim())} onClick={run}>{busy ? '…' : (del ? trD('kv.delBtn') : trD('kv.voidBtn'))}</button>}</div>
+      </div>
+    </div>
+  );
+}
+
+// Edit the note/reason of a loss record (never the amount).
+function KerugianEditModal({ item, onClose, onDone, onFlash }) {
+  const [note, setNote] = uSx(item.note || '');
+  const [busy, setBusy] = uSx(false);
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const submit = () => { setBusy(true); window.API.distribusi.editKerugianNote(item.id, item.source, note.trim()).then(() => onDone()).catch((e) => { onFlash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); setBusy(false); }); };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('kv.editTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{item.customerName} · {rpFull(item.amount)}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body"><label className="fld-label" style={{ marginTop: 0 }}>{trD('kv.note')}</label><textarea className="fld" rows={3} value={note} onChange={(e) => setNote(e.target.value)} /></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={busy} onClick={submit}>{busy ? '…' : trD('kv.save')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// Read-only detail view.
+function KerugianDetailModal({ item, onClose, onProof }) {
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const kv = (k, v) => <div className="cd-kv"><span>{k}</span><b>{v}</b></div>;
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('kv.detailTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{item.source === 'dispute' ? trD('loss.srcDispute') : trD('loss.srcPnr')} · #{String(item.transactionId || item.id).slice(-6).toUpperCase()}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {kv(trD('dist.fCust'), (item.customerName || '—') + (item.customerCode ? ' · ' + item.customerCode : ''))}
+          {kv(trD('pnr.amount'), rpFull(item.amount))}
+          {kv(trD('pnr.staff'), item.responsibleName || '—')}
+          {kv(trD('pnr.reason'), item.source === 'dispute' ? (trD('disp.reason.' + item.lossReason) || item.lossReason) : item.lossReason)}
+          {kv(trD('loss.recordedBy'), (item.recordedByName || '—') + (item.createdAt ? ' · ' + fmtDT(item.createdAt) : ''))}
+          {item.note ? kv(trD('kv.note'), item.note) : null}
+          {item.voided ? kv(trD('loss.voided'), (trD('kv.reason.' + item.voidReason) || item.voidReason || '') + (item.voidedByName ? ' · ' + item.voidedByName : '')) : null}
+          {(item.lossPhotoId || item.evidenceUrl) ? <div style={{ marginTop: 10 }}>{item.lossPhotoId ? <button type="button" className="dist-link" onClick={() => onProof(item.lossPhotoId)}>{trD('pnr.proofView')}</button> : <a className="dist-link" href={item.evidenceUrl} target="_blank" rel="noopener noreferrer">{trD('pnr.proofView')}</a>}</div> : null}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('common.close') || 'Tutup'}</button></div>
+      </div>
     </div>
   );
 }

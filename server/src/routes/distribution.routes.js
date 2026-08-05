@@ -103,6 +103,14 @@ router.get('/reports/loss', requireCap('distribusiBonAdjust'), validate({ query:
 router.post('/transactions/:id/dispute', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.disputeSchema }), ctrl.raiseDispute);
 router.post('/disputes/:id/approve', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.disputeApproveSchema }), ctrl.approveDispute);
 router.post('/disputes/:id/reverse', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams }), ctrl.reverseDispute);
+// KERUGIAN void / delete. Same owner/GM-tier cap (distribusiBonAdjust). Void (Batalkan) is GM/owner;
+// hard delete is OWNER-only — both enforced in the service. All eligibility rules are server-side.
+// bulk-delete is registered BEFORE :id so "bulk-delete" is never captured as an :id.
+router.post('/kerugian/bulk-delete', requireCap('distribusiBonAdjust'), validate({ body: ctrl.schemas.kerugianBulkSchema }), ctrl.bulkDeleteKerugian);
+router.get('/kerugian/:id/impact', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, query: ctrl.schemas.kerugianQuery }), ctrl.kerugianImpact);
+router.post('/kerugian/:id/void', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, query: ctrl.schemas.kerugianQuery, body: ctrl.schemas.kerugianVoidSchema }), ctrl.voidKerugian);
+router.post('/kerugian/:id/note', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, query: ctrl.schemas.kerugianQuery, body: ctrl.schemas.kerugianNoteSchema }), ctrl.editKerugianNote);
+router.delete('/kerugian/:id', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, query: ctrl.schemas.kerugianQuery, body: ctrl.schemas.kerugianDeleteSchema }), ctrl.hardDeleteKerugian);
 // HARD DELETE (permanent) — OWNER-ONLY last resort. Cap: distribusiHardDelete (granted to no one
 // but owner by default). Typed ref/HAPUS + password + reason enforced in the service; an audit
 // entry is written BEFORE the row is removed, so a trace always survives. Fleet-scoped.

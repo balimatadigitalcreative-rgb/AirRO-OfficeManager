@@ -567,6 +567,14 @@ model DistTransactionDispute {
   approvedById        String?
   approvedByName      String?
   approvedAt          DateTime?
+  // Loss CANCELLATION (Batalkan in the Kerugian module) — set when an approved loss is reverted:
+  // the dispute goes back to 'disengketakan' (bon restored, still disputed) but the cancelled loss
+  // stays visible in the Kerugian list, marked "Dibatalkan", and is excluded from loss totals.
+  lossVoidedAt        DateTime?
+  lossVoidReason      String?
+  lossVoidNote        String?
+  lossVoidedById      String?
+  lossVoidedByName    String?
   createdAt           DateTime @default(now())
 
   customer            Customer @relation(fields: [customerId], references: [id])
