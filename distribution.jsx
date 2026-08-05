@@ -208,22 +208,73 @@ function copyText(text, done) {
 }
 
 // ── 7-day stacked bar (cash = navy, bon = amber) ──
+// Round up to a "nice" axis maximum (1 · 2 · 2.5 · 5 × 10^k) so gridline ticks read cleanly.
+function niceCeil(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+  return step * p;
+}
+// Compact Rupiah for axis ticks / bar labels ("Rp 1,2jt", "Rp 500rb", "Rp 0").
+function rpTick(v) {
+  const n = Math.round(v || 0);
+  if (n >= 1e9) return 'Rp ' + (n / 1e9).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + 'M';
+  if (n >= 1e6) return 'Rp ' + (n / 1e6).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + 'jt';
+  if (n >= 1e3) return 'Rp ' + Math.round(n / 1e3) + 'rb';
+  return 'Rp ' + n;
+}
+const DIST_MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+function chartDayLabel(dateStr) { const d = new Date(dateStr + 'T00:00'); return DW_ID[d.getDay()] + ', ' + d.getDate() + ' ' + DIST_MON_SHORT[d.getMonth()]; }
+
+// Trend chart: stacked lunas/bon bars with a Rupiah Y axis + gridlines, value labels, an on-hover
+// tooltip (tanggal · lunas · bon · total), a real empty state, and bars that CENTER + cap their width
+// (never stretch the scale) when the period has only 1–2 days.
 function SevenDayChart({ last7 }) {
-  const max = Math.max(1, ...last7.map((d) => d.lunas + d.bon));
+  const [hover, setHover] = uSx(null);
+  const data = (last7 || []).map((d) => ({ date: d.date, lunas: d.lunas || 0, bon: d.bon || 0, total: (d.lunas || 0) + (d.bon || 0) }));
+  const anyData = data.some((d) => d.total > 0);
+  if (data.length === 0 || !anyData) {
+    return <div className="dist-chart-empty"><IconTx s={20} /><span>{trD('dist.chartEmpty')}</span></div>;
+  }
+  const niceMax = niceCeil(Math.max(...data.map((d) => d.total)));
+  const TICKS = 4;
+  const ticks = []; for (let i = TICKS; i >= 0; i--) ticks.push((niceMax / TICKS) * i);
+  const single = data.length <= 2;                 // 1–2 points → centered, capped bars, shorter plot
+  const labelStep = Math.max(1, Math.ceil(data.length / 8));
   return (
-    <div className="dist-chart">
-      {last7.map((d) => {
-        const wd = DW_ID[new Date(d.date + 'T00:00').getDay()];
-        return (
-          <div key={d.date} className="dist-chart-col" title={`${d.date} · ${trD('dist.lunas')} ${rpFull(d.lunas)} · ${trD('dist.bon')} ${rpFull(d.bon)}`}>
-            <div className="dist-chart-bar">
-              <div className="dist-bar-seg bon" style={{ height: (d.bon / max) * 100 + '%' }} />
-              <div className="dist-bar-seg lunas" style={{ height: (d.lunas / max) * 100 + '%' }} />
-            </div>
-            <span className="dist-chart-lbl">{wd}</span>
-          </div>
-        );
-      })}
+    <div className={'dist-chart2' + (single ? ' single' : '')}>
+      <div className="dist-chart2-yaxis">{ticks.map((t, i) => <span key={i} className="dist-chart2-tick">{rpTick(t)}</span>)}</div>
+      <div className="dist-chart2-plot">
+        <div className="dist-chart2-grid" aria-hidden="true">{ticks.map((t, i) => <span key={i} />)}</div>
+        <div className={'dist-chart2-bars' + (single ? ' single' : '')}>
+          {data.map((d, i) => {
+            const h = (d.total / niceMax) * 100;
+            const bonH = d.total ? (d.bon / d.total) * 100 : 0;
+            const lunH = d.total ? (d.lunas / d.total) * 100 : 0;
+            return (
+              <div key={d.date} className="dist-chart2-col" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover((cur) => (cur === i ? null : cur))}>
+                <div className="dist-chart2-barwrap">
+                  {d.total > 0 && <span className="dist-chart2-vlabel">{rpTick(d.total)}</span>}
+                  <div className="dist-chart2-bar" style={{ height: Math.max(h, d.total > 0 ? 2 : 0) + '%' }}>
+                    <div className="dist-bar-seg bon" style={{ height: bonH + '%' }} />
+                    <div className="dist-bar-seg lunas" style={{ height: lunH + '%' }} />
+                  </div>
+                  {hover === i && (
+                    <div className="dist-chart2-tip" role="tooltip">
+                      <div className="dist-chart2-tip-d">{chartDayLabel(d.date)}</div>
+                      <div className="dist-chart2-tip-r"><span><span className="dot navy" />{trD('dist.lunas')}</span><b>{rpFull(d.lunas)}</b></div>
+                      <div className="dist-chart2-tip-r"><span><span className="dot amber" />{trD('dist.bon')}</span><b>{rpFull(d.bon)}</b></div>
+                      <div className="dist-chart2-tip-r total"><span>{trD('dist.total')}</span><b>{rpFull(d.total)}</b></div>
+                    </div>
+                  )}
+                </div>
+                <span className="dist-chart2-xlbl">{(i % labelStep === 0 || i === data.length - 1) ? chartDayLabel(d.date) : ''}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -252,23 +303,29 @@ function FleetBar({ fleetScope, fleet, value, onChange }) {
   );
 }
 
-function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero, sub }) {
+function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero, sub, loading }) {
   // Every KPI is a `stat-box` → identical padding/size on all four. `dist-kpi-hero`
   // is a COLOUR-ONLY modifier (gradient + light text); it must not change the size.
+  // A KPI card NEVER renders without its label; a null/undefined value shows "—" + a muted
+  // "data tidak tersedia" instead of a blank card, and `loading` shows a skeleton value.
+  const hasVal = value !== null && value !== undefined && value !== '';
+  const safeLabel = label || trD('dist.kpiUnknown');
   return (
     <div className={`card stat-box dist-kpi ${hero ? 'dist-kpi-hero' : ''}`}>
       <div className="dist-kpi-top">
         <span className={`icon-tile ${hero ? 'hero' : ''}`} style={hero ? null : { background: tile, color: fg }}>{IcX(icon, { s: 19 })}</span>
         {pill ? <span className={`dist-kpi-pill ${pillCls || ''}`}>{pill}</span> : null}
       </div>
-      <div className={`tnum dist-kpi-val ${cls || ''}`}>{value}{unit ? <span className="dist-kpi-unit"> {unit}</span> : null}</div>
-      <div className="dist-kpi-lbl">{label}</div>
-      {sub ? <div className="dist-kpi-sub">{sub}</div> : null}
+      {loading
+        ? <div className="dist-kpi-skel" aria-hidden="true" />
+        : <div className={`tnum dist-kpi-val ${cls || ''} ${hasVal ? '' : 'na'}`}>{hasVal ? value : '—'}{hasVal && unit ? <span className="dist-kpi-unit"> {unit}</span> : null}</div>}
+      <div className="dist-kpi-lbl">{safeLabel}</div>
+      {loading ? null : (!hasVal ? <div className="dist-kpi-sub dist-kpi-na">{trD('dist.kpiNA')}</div> : (sub ? <div className="dist-kpi-sub">{sub}</div> : null))}
     </div>
   );
 }
 
-function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInput, onOpenCustomers, today, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInput, onOpenCustomers, onOpenTransactions, today, fleetScope, fleet, distFleet, setDistFleet }) {
   const [sum, setSum] = uSx(null);
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
@@ -319,7 +376,27 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
   const fleetBar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
   // Human caption for the ACTIVE fleet scope — so "Bon Baru / Hari ini" reads unambiguously.
   const fleetCaption = isScoped(fleetScope) ? (fleetScope || []).join(', ') : (ef && ef !== 'all' ? ef : trD('dist.fleetAll'));
-  if (loading) return <div className="dist-dash screen-enter">{fleetBar}<div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-mut)' }}>{trD('common.loading') || 'Memuat…'}</div></div>;
+  if (loading) return (
+    <div className="dist-dash screen-enter">{fleetBar}{periodSelector}
+      <div className="dist-grid">
+        <div className="dist-main">
+          <div className="dist-kpis">
+            <Kpi loading hero icon="IconDrop" label={trD('dist.kpiGalon')} pill={periodLabel} pillCls="hero" />
+            <Kpi loading icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" label={trD('dist.kpiIn')} pill={periodLabel} pillCls="pos" />
+            <Kpi loading icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" label={trD('dist.kpiBonBaru')} pill={periodLabel} pillCls="warn" />
+            <Kpi loading icon="IconWallet" tile="#F3ECFD" fg="#7c3aed" label={trD('dist.totalPiutang')} pill={trD('dist.allTimeScope')} pillCls="slate" />
+            <Kpi loading icon="IconTx" tile="#EAF1F4" fg="#5E7A88" label={trD('dist.kpiTxn')} pill={periodLabel} pillCls="blue" />
+          </div>
+          <div className="card dist-card"><div className="dist-skel" style={{ height: 150 }} /></div>
+          <div className="card dist-card"><div className="dist-skel" /><div className="dist-skel" /><div className="dist-skel" /></div>
+        </div>
+        <div className="dist-rail">
+          <div className="card dist-card"><div className="dist-skel" style={{ height: 96 }} /></div>
+          <div className="card dist-card"><div className="dist-skel" /><div className="dist-skel" /></div>
+        </div>
+      </div>
+    </div>
+  );
   if (err || !sum) return (
     <div className="dist-dash screen-enter">{fleetBar}
       <div className="card dist-loadfail" style={{ padding: 32, textAlign: 'center' }}>
@@ -344,15 +421,18 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
       <div className="dist-grid">
         <div className="dist-main">
           <div className="dist-kpis">
-            <Kpi hero icon="IconDrop" value={numX(sum.periodQty)} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={periodLabel} pillCls="hero" />
-            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={rpFull(sum.periodIn)} label={trD('dist.kpiIn')} cls="amt-pos" pill={periodLabel} pillCls="pos"
+            <Kpi hero icon="IconDrop" value={sum.periodQty != null ? numX(sum.periodQty) : null} unit={trD('dist.galonUnit')} label={trD('dist.kpiGalon')} pill={periodLabel} pillCls="hero" />
+            <Kpi icon="IconCoinIn" tile="var(--pos-bg)" fg="var(--green-800)" value={sum.periodIn != null ? rpFull(sum.periodIn) : null} label={trD('dist.kpiIn')} cls="amt-pos" pill={periodLabel} pillCls="pos"
               sub={<><span className="dist-kpi-cash"><span className="dist-cash-dot cash" />{trD('dist.cashLbl')} {rpFull(sum.periodInCash || 0)}</span><span className="dist-kpi-cash"><span className="dist-cash-dot xfer" />{trD('dist.xferLbl')} {rpFull(sum.periodInTransfer || 0)}</span></>} />
-            {/* BON BARU — bon created within the SELECTED period+fleet (sum.piutang = byMethod.bon),
-                NOT the all-time debt. The period pill + fleet caption make the scope explicit. The
-                all-time outstanding total is kept right below as a secondary line so it's never lost. */}
-            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={rpFull(sum.piutang)} label={trD('dist.kpiBonBaru')} pill={periodLabel} pillCls="warn"
-              sub={<><span className="dist-kpi-cap">{periodLabel} · {fleetCaption}</span><span className="dist-kpi-total">{trD('dist.totalPiutang')} <b className="tnum">{rpFull(sum.receivable)}</b></span></>} />
-            <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={numX(sum.count)} label={trD('dist.kpiTxn')} pill={periodLabel} pillCls="blue" />
+            {/* BON BARU — bon created within the SELECTED period+fleet (sum.piutang = byMethod.bon).
+                All-time outstanding is now its OWN card (below) so one card never mixes two scopes. */}
+            <Kpi icon="IconInvoice" tile="var(--warn-bg)" fg="var(--warn)" value={sum.piutang != null ? rpFull(sum.piutang) : null} label={trD('dist.kpiBonBaru')} pill={periodLabel} pillCls="warn"
+              sub={<span className="dist-kpi-cap">{periodLabel} · {fleetCaption}</span>} />
+            {/* TOTAL PIUTANG — all-time outstanding bon. Carries an ALL-TIME scope chip (never the
+                active-period chip) so its different time scope is unambiguous. */}
+            <Kpi icon="IconWallet" tile="#F3ECFD" fg="#7c3aed" value={sum.receivable != null ? rpFull(sum.receivable) : null} label={trD('dist.totalPiutang')} pill={trD('dist.allTimeScope')} pillCls="slate"
+              sub={<span className="dist-kpi-cap">{trD('dist.allTimeSub')} · {fleetCaption}</span>} />
+            <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={sum.count != null ? numX(sum.count) : null} label={trD('dist.kpiTxn')} pill={periodLabel} pillCls="blue" />
           </div>
 
           {(sum.reminders || []).length > 0 && (
@@ -387,7 +467,7 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
           </div>
 
           <div className="card dist-card">
-            <div className="dist-card-head"><div className="sec-title">{trD('dist.recent')}</div></div>
+            <div className="dist-card-head"><div className="sec-title">{trD('dist.recent')}</div>{onOpenTransactions && recent.length > 0 && <button className="dist-link" onClick={onOpenTransactions}>{trD('dist.seeAll')}</button>}</div>
             {recent.length === 0 && <div className="dist-empty">{trD('dist.noTxn')}</div>}
             {recent.map((t) => (
               <div key={t.id} className="dist-txn">
@@ -407,24 +487,21 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
                 </div>
               </div>
             ))}
+            {recent.length > 0 && sum.count > recent.length && (
+              <button type="button" className="dist-listfoot" onClick={onOpenTransactions}>
+                <span>{trD('dist.showingOf', { n: recent.length, total: numX(sum.count) })}</span>
+                {onOpenTransactions && <span className="dist-link">{trD('dist.seeAll')} →</span>}
+              </button>
+            )}
           </div>
         </div>
 
         <div className="dist-rail">
           <div className="card dist-today-hero">
-            <div className="dist-th-top"><span>{per === 'today' ? trD('dist.today') : periodLabel}</span><span className="dist-th-count">{numX(sum.count)} {trD('dist.notaWord')}</span></div>
-            <div className="dist-th-metrics">
-              {/* Money-in, split so it's obvious which part is CASH the driver must deposit. */}
-              <div>
-                <div className="dist-th-lbl">{trD('dist.kpiIn')}</div>
-                <div className="dist-th-val pos">{rpFull(sum.uangMasuk)}</div>
-                <div className="dist-th-split">
-                  <span><span className="dist-cash-dot cash" />{trD('dist.cashLbl')} <b>{rpFull(sum.todayCash || 0)}</b></span>
-                  <span><span className="dist-cash-dot xfer" />{trD('dist.xferLbl')} <b>{rpFull(sum.todayTransfer || 0)}</b></span>
-                </div>
-              </div>
-              <div><div className="dist-th-lbl">{trD('dist.bonBaru')}</div><div className="dist-th-val warn">{rpFull(sum.piutang)}</div></div>
-            </div>
+            {/* Right rail = ONLY what the KPI strip doesn't already show: field expenses, net cash to
+                deposit, avg/nota, and per-armada deposits. Uang Masuk / Bon Baru live in the KPI strip
+                (single source of truth) and are intentionally NOT repeated here. */}
+            <div className="dist-th-top"><span>{trD('dist.railTitle')} · {per === 'today' ? trD('dist.today') : periodLabel}</span><span className="dist-th-count">{numX(sum.count)} {trD('dist.notaWord')}</span></div>
             {/* Net cash to deposit = cash money-in − field expenses paid from that cash. */}
             <div className="dist-th-net">
               <div className="dist-th-net-row"><span>{trD('dist.fieldExpense')}</span><b className="tnum neg">− {rpFull(sum.todayExpense || 0)}</b></div>
@@ -459,10 +536,16 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
             {top.map((c, i) => (
               <div key={c.id} className="dist-topc">
                 <span className="dist-topc-rank">{i + 1}</span>
-                <div style={{ minWidth: 0, flex: 1 }}><div className="dist-topc-name">{c.name || '—'}</div><div className="dist-topc-sub">{numX(c.qty)} galon</div></div>
+                <div style={{ minWidth: 0, flex: 1 }}><div className="dist-topc-name">{c.name || '—'}</div><div className="dist-topc-sub">{numX(c.qty)} {trD('dist.galonUnit')}</div></div>
                 <b className="tnum dist-topc-amt">{rpFull(c.amount)}</b>
               </div>
             ))}
+            {top.length > 0 && sum.customers > top.length && (
+              <button type="button" className="dist-listfoot" onClick={onOpenCustomers}>
+                <span>{trD('dist.showingOf', { n: top.length, total: numX(sum.customers) })}</span>
+                {onOpenCustomers && <span className="dist-link">{trD('dist.seeAll')} →</span>}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -511,10 +594,10 @@ function CopyBtn({ text, label, cls }) {
 // One KPI card. tone: '' | 'bon' (amber) | 'ok' (green). `action` = optional inline node (link).
 function KpiCard({ label, value, sub, tone, action }) {
   return (
-    <div className={'dist-kpi ' + (tone ? 'k-' + tone : '')}>
-      <div className="dist-kpi-lbl">{label}{action ? <span className="dist-kpi-act">{action}</span> : null}</div>
-      <div className="dist-kpi-val tnum">{value}</div>
-      {sub ? <div className="dist-kpi-sub">{sub}</div> : null}
+    <div className={'cd-kpicard ' + (tone ? 'k-' + tone : '')}>
+      <div className="cd-kpi-lbl">{label}{action ? <span className="cd-kpi-act">{action}</span> : null}</div>
+      <div className="cd-kpi-val tnum">{value}</div>
+      {sub ? <div className="cd-kpi-sub">{sub}</div> : null}
     </div>
   );
 }
