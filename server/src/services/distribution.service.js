@@ -981,12 +981,14 @@ async function adjustmentReport(user, q) {
 const DISPUTE_REASONS = ['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya'];
 const DISPUTE_RESOLUTIONS = ['staf', 'perusahaan', 'investigasi'];
 const DEDUCTS = ['tidak_diakui', 'kerugian'];   // statuses that remove the amount from receivables
+// A non-empty evidence link must be a real http(s) URL (rejects junk like ".").
+function isHttpUrl(s) { try { const u = new URL(String(s)); return u.protocol === 'http:' || u.protocol === 'https:'; } catch (e) { return false; } }
 
 function disputeClient(d) {
   return {
     id: d.id, transactionId: d.transactionId, customerId: d.customerId, fleetId: d.fleetId || '',
     customerName: d.customer ? d.customer.name : undefined, customerCode: d.customer ? d.customer.code : undefined,
-    status: d.status, resolution: d.resolution || 'investigasi', reason: d.reason,
+    status: d.status, resolution: d.resolution || 'investigasi', reason: d.reason || null,
     disputedAmount: d.disputedAmount || 0, customerClaimAmount: d.customerClaimAmount || 0,
     note: d.note || '', evidenceUrl: d.evidenceUrl || null,
     staffUserId: d.staffUserId || null, staffName: d.staffName || null,
@@ -1026,11 +1028,15 @@ async function raiseDispute(transactionId, body, actor) {
   if (!fleetAllows(actor, txn.customer.armada)) throw ApiError.notFound('Transaksi tidak ditemukan.');
   // The staff who handled the transaction can never dispute their OWN transaction (server-enforced).
   if (actor && actor.id && txn.actorId && actor.id === txn.actorId) throw ApiError.forbidden('Anda tidak boleh mengajukan sengketa atas transaksi Anda sendiri.');
-  const reason = DISPUTE_REASONS.includes(body.reason) ? body.reason : null;
-  if (!reason) throw ApiError.badRequest('Alasan sengketa tidak valid.');
+  // Alasan is OPTIONAL — an empty/absent/invalid reason is stored as '' (shown as "—"), never a
+  // fake default. Only Catatan is mandatory (it is the evidence trail).
+  const reason = DISPUTE_REASONS.includes(body.reason) ? body.reason : '';
   const resolution = DISPUTE_RESOLUTIONS.includes(body.resolution) ? body.resolution : 'investigasi';
   const note = String(body.note || '').trim().slice(0, 500);
   if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  // Evidence, when provided, must be a real URL (reject junk like "."); empty = none.
+  const evidenceUrl = String(body.evidenceUrl || '').trim();
+  if (evidenceUrl && !isHttpUrl(evidenceUrl)) throw ApiError.badRequest('Tautan bukti tidak valid (harus URL http/https).');
   // Reject a second live dispute while one is still open (disengketakan) or in effect (tidak_diakui/
   // kerugian) and not reversed. A re-dispute is allowed only after a reversal.
   const existing = await prisma.distTransactionDispute.findMany({ where: { transactionId, reversalOf: null } });
@@ -1038,7 +1044,9 @@ async function raiseDispute(transactionId, body, actor) {
   const sysAmount = Math.max(0, Math.round(txn.amount));
   const claim = Math.max(0, Math.min(sysAmount, Math.round(+body.customerClaimAmount || 0)));
   const disputedAmount = sysAmount - claim;
-  if (disputedAmount <= 0) throw ApiError.badRequest('Selisih sengketa harus lebih dari 0 (nominal diakui < nominal sistem).');
+  // selisih = 0 is VALID for "Masih diselidiki" (investigasi) — raising a dispute before amounts are
+  // agreed. Only a staff-charge or company-loss outcome needs a positive difference.
+  if ((resolution === 'staf' || resolution === 'perusahaan') && disputedAmount <= 0) throw ApiError.badRequest('Untuk "Tanggung staf" atau "Kerugian perusahaan", selisih harus lebih dari 0 (nominal diakui < nominal sistem).');
   // Staff linked to the loss: prefilled from the transaction actor, editable by the raiser.
   let staffUserId = body.staffUserId ? String(body.staffUserId) : (txn.actorId || null);
   let staffName = body.staffName ? String(body.staffName).slice(0, 120) : (txn.actorName || null);
@@ -1047,11 +1055,11 @@ async function raiseDispute(transactionId, body, actor) {
   const created = await prisma.distTransactionDispute.create({ data: {
     transactionId, customerId: txn.customerId, fleetId: txn.fleetId || txn.customer.armada || '',
     status: 'disengketakan', resolution, reason, disputedAmount, customerClaimAmount: claim, note,
-    evidenceUrl: body.evidenceUrl ? String(body.evidenceUrl).slice(0, 500) : null,
+    evidenceUrl: evidenceUrl ? evidenceUrl.slice(0, 500) : null,
     staffUserId, staffName,
     raisedById: snap.actorId, raisedByName: snap.actorName, raisedByRole: snap.actorRole,
   } });
-  await logAudit('koreksi', `Ajukan sengketa transaksi: ${txn.customer.name}`, `#${String(txn.id).slice(-6).toUpperCase()} · sistem ${sysAmount} → diakui ${claim} (selisih ${disputedAmount}) · ${reason} · ${resolution}${note ? ' · ' + note : ''}`, snap, txn.fleetId || txn.customer.armada || '');
+  await logAudit('koreksi', `Ajukan sengketa transaksi: ${txn.customer.name}`, `#${String(txn.id).slice(-6).toUpperCase()} · sistem ${sysAmount} → diakui ${claim} (selisih ${disputedAmount}) · ${reason || '—'} · ${resolution}${note ? ' · ' + note : ''}`, snap, txn.fleetId || txn.customer.armada || '');
   const withCust = await prisma.distTransactionDispute.findUnique({ where: { id: created.id }, include: { customer: { select: { name: true, code: true } } } });
   return disputeClient(withCust);
 }

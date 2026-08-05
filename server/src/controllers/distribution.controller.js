@@ -139,11 +139,12 @@ const lossQuery = z.object({ period: z.enum(['today', 'week', 'month', 'range'])
 // TRANSACTION DISPUTE — raise a dispute on an existing transaction. `note` is mandatory; the
 // customer-acknowledged amount may be 0 (the whole nota is disputed). resolution picks the outcome.
 const disputeSchema = z.object({
-  reason: z.enum(['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya']),
+  // Alasan is OPTIONAL — null/absent is accepted and stored as "no reason" (never a fake default).
+  reason: z.enum(['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya']).nullable().optional(),
   resolution: z.enum(['staf', 'perusahaan', 'investigasi']).optional(),
   customerClaimAmount: z.number().int().min(0).optional(),
-  note: z.string().trim().min(1, 'note is required').max(500),
-  evidenceUrl: z.string().max(500).optional(),
+  note: z.string().trim().min(1, 'note is required').max(500),          // the only required field
+  evidenceUrl: z.string().trim().max(500).optional(),                    // validated as a URL in the service
   staffUserId: z.string().max(60).optional(),
   staffName: z.string().trim().max(120).optional(),
 });

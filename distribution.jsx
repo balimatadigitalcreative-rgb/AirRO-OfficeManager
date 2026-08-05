@@ -600,6 +600,8 @@ const DISPUTE_META = {
   kerugian: { cls: 'disp-redsolid', label: 'cd.dispKerugian' },
   diakui_kembali: { cls: 'disp-greenout', label: 'cd.dispDiakuiKembali' },
 };
+// Reason label that tolerates an ABSENT reason (Alasan is optional) — shows "—" instead of a raw key.
+const dispReasonLabel = (r) => (r ? trD('disp.reason.' + r) : '—');
 // Copy-to-clipboard chip/button. aria-labelled; shows a brief "✓" on success.
 function CopyBtn({ text, label, cls }) {
   const [ok, setOk] = uSx(false);
@@ -2188,48 +2190,93 @@ const adjReasonLabel = (r) => trD('adj.reason.' + r) || r;
 // the auto selisih, the settlement choice, and a before→after preview of the customer's Sisa Bon.
 function DisputeModal({ txn, customer, onClose, onSubmit }) {
   const sys = Math.max(0, Math.round(txn.amount || 0));
-  const [claim, setClaim] = uSx('0');
-  const [reason, setReason] = uSx('nota_fiktif');
+  const [claimN, setClaimN] = uSx(0);                 // acknowledged amount as a NUMBER (Rupiah-formatted on screen)
+  const [reason, setReason] = uSx('');                // '' = "— pilih —" (Alasan is OPTIONAL)
   const [resolution, setResolution] = uSx('staf');
   const [note, setNote] = uSx('');
   const [evidence, setEvidence] = uSx('');
   const [staffName, setStaffName] = uSx(txn.actorName || '');
   const [busy, setBusy] = uSx(false);
-  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  const claimN = Math.max(0, Math.min(sys, parseInt(String(claim).replace(/[^0-9]/g, ''), 10) || 0));
-  const selisih = sys - claimN;
+  const [errors, setErrors] = uSx({});                // { field: message } — inline field errors
+  const [banner, setBanner] = uSx('');                // top summary / API error
+  const noteRef = React.useRef(null), claimRef = React.useRef(null), eviRef = React.useRef(null);
+  React.useEffect(() => { const o = (e) => { if (e.key === 'Escape' && !busy) onClose(); }; window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, [busy]);
+  const selisih = Math.max(0, sys - claimN);
   const before = customer.sisaBon || 0;
   const after = resolution === 'investigasi' ? before : Math.max(0, before - selisih);
   const staffEdited = (staffName || '').trim() !== (txn.actorName || '');
-  const canSubmit = !!note.trim() && selisih > 0 && !busy;
-  const submit = () => {
-    if (!canSubmit) return; setBusy(true);
-    const body = { reason, resolution, customerClaimAmount: claimN, note: note.trim(), evidenceUrl: evidence.trim() || undefined,
-      staffUserId: staffEdited ? undefined : (txn.actorId || undefined), staffName: staffEdited ? staffName.trim() : undefined };
-    Promise.resolve(onSubmit(txn.id, body)).catch(() => {}).finally(() => setBusy(false));
+  const isUrl = (s) => { try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; } catch (e) { return false; } };
+  const needsSelisih = resolution === 'staf' || resolution === 'perusahaan';
+  const noteMissing = !note.trim();
+  // Validate → { errors, firstRef }. selisih>0 is required ONLY for staf/perusahaan (investigasi ok at 0).
+  const validate = () => {
+    const er = {}; let first = null;
+    if (noteMissing) { er.note = trD('disp.errNote'); first = first || noteRef; }
+    if (needsSelisih && selisih <= 0) { er.claim = trD('disp.errSelisih'); first = first || claimRef; }
+    const ev = evidence.trim();
+    if (ev && !isUrl(ev)) { er.evidence = trD('disp.errUrl'); first = first || eviRef; }
+    return { er, first };
   };
+  const submit = () => {
+    if (busy) return;
+    const { er, first } = validate();
+    setErrors(er);
+    if (Object.keys(er).length) { setBanner(trD('disp.bannerFix')); if (first && first.current) first.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    setBanner(''); setBusy(true);
+    const body = { reason: reason || null, resolution, customerClaimAmount: claimN, note: note.trim(), evidenceUrl: evidence.trim() || undefined,
+      staffUserId: staffEdited ? undefined : (txn.actorId || undefined), staffName: staffEdited ? staffName.trim() : undefined };
+    Promise.resolve(onSubmit(txn.id, body)).catch((e) => {
+      setBusy(false);
+      setBanner((e && e.body && e.body.error && e.body.error.message) || (e && e.message) || trD('common.loadFail'));   // API error VERBATIM
+    });
+  };
+  const setClaim = (raw) => { const n = Math.max(0, Math.min(sys, parseInt(String(raw).replace(/[^0-9]/g, ''), 10) || 0)); setClaimN(n); if (errors.claim) setErrors((p) => ({ ...p, claim: null })); };
   const RES = [['staf', trD('disp.resStaf'), trD('disp.resStafSub')], ['perusahaan', trD('disp.resPerusahaan'), trD('disp.resPerusahaanSub')], ['investigasi', trD('disp.resInvestigasi'), trD('disp.resInvestigasiSub')]];
   return (
-    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 220 }}>
-      <div className="modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('disp.modalTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{txnCode(txn)} · {customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
-        <div className="modal-body">
+    <div className="modal-scrim" onClick={() => !busy && onClose()} style={{ zIndex: 220 }}>
+      <div className="modal-card disp-modal" onClick={(e) => e.stopPropagation()}>
+        {/* FIXED header — never scrolls. */}
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('disp.modalTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{txnCode(txn)} · {customer.name}</div></div><button className="jp-icon" onClick={() => !busy && onClose()}><IconClose s={18} /></button></div>
+        {/* SCROLLING body. */}
+        <div className="modal-body disp-body">
+          {banner && <div className="disp-banner"><IconWarn s={15} /><span>{banner}</span></div>}
           <div className="disp-amtrow">
-            <div><label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.nomSistem')}</label><div className="disp-sys tnum">{rpFull(sys)} <IconLock s={12} /></div></div>
-            <div><label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.nomDiakui')}</label><div className="dist-priceinput"><input value={claim} inputMode="numeric" onChange={(e) => setClaim(e.target.value.replace(/[^0-9]/g, ''))} /></div></div>
-            <div><label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.selisih')}</label><div className={'disp-selisih tnum ' + (selisih > 0 ? 'neg' : '')}>{rpFull(selisih)}</div></div>
+            <div className="disp-amtcell">
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.nomSistem')}</label>
+              <div className="disp-sys tnum">{rpFull(sys)} <IconLock s={12} /></div>
+            </div>
+            <div className="disp-amtcell" ref={claimRef}>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.nomDiakui')}</label>
+              <div className={'dist-priceinput' + (errors.claim ? ' has-err' : '')}><input value={claimN ? claimN.toLocaleString('id-ID') : ''} inputMode="numeric" placeholder="0" onChange={(e) => setClaim(e.target.value)} /></div>
+              <div className="disp-quickfill">
+                <button type="button" onClick={() => setClaim('0')}>{trD('disp.qfNone')}</button>
+                <button type="button" onClick={() => setClaim(String(sys))}>{trD('disp.qfFull')}</button>
+              </div>
+              <div className="fld-help">{trD('disp.nomDiakuiHelp')}</div>
+              {errors.claim && <div className="fld-err"><IconWarn s={12} />{errors.claim}</div>}
+            </div>
+            <div className="disp-amtcell">
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.selisih')}</label>
+              <div className={'disp-selisih tnum ' + (selisih > 0 ? 'neg' : '')}>{rpFull(selisih)}</div>
+              <div className="fld-help">{trD('disp.selisihHelp')}</div>
+            </div>
           </div>
-          <label className="fld-label">{trD('disp.alasan')}</label>
-          <select className="fld" value={reason} onChange={(e) => setReason(e.target.value)}>{['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya'].map((r) => <option key={r} value={r}>{trD('disp.reason.' + r)}</option>)}</select>
+          <label className="fld-label">{trD('disp.alasanOpt')}</label>
+          <select className="fld" value={reason} onChange={(e) => setReason(e.target.value)}>
+            <option value="">{trD('disp.pilih')}</option>
+            {['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya'].map((r) => <option key={r} value={r}>{trD('disp.reason.' + r)}</option>)}
+          </select>
           <label className="fld-label">{trD('disp.petugas')}</label>
           <input className="fld" value={staffName} onChange={(e) => setStaffName(e.target.value)} placeholder={trD('disp.petugasPh')} />
-          <label className="fld-label">{trD('disp.catatan')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-          <textarea className="fld" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('disp.catatanPh')} />
-          <label className="fld-label">{trD('disp.buktiUrl')}</label>
-          <input className="fld" value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="https://…" />
+          <label className="fld-label" ref={noteRef}>{trD('disp.catatan')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <textarea className={'fld' + (errors.note ? ' has-err' : '')} rows={2} value={note} onChange={(e) => { setNote(e.target.value); if (errors.note) setErrors((p) => ({ ...p, note: null })); }} placeholder={trD('disp.catatanPh')} />
+          {errors.note && <div className="fld-err"><IconWarn s={12} />{errors.note}</div>}
+          <label className="fld-label" ref={eviRef}>{trD('disp.buktiUrl')}</label>
+          <input className={'fld' + (errors.evidence ? ' has-err' : '')} value={evidence} onChange={(e) => { setEvidence(e.target.value); if (errors.evidence) setErrors((p) => ({ ...p, evidence: null })); }} placeholder="https://…" />
+          {errors.evidence && <div className="fld-err"><IconWarn s={12} />{errors.evidence}</div>}
           <label className="fld-label">{trD('disp.penyelesaian')}</label>
           <div className="disp-res">{RES.map(([k, l, s]) => (
-            <button key={k} type="button" className={'disp-res-opt ' + (resolution === k ? 'on' : '')} onClick={() => setResolution(k)}>
+            <button key={k} type="button" className={'disp-res-opt ' + (resolution === k ? 'on' : '')} onClick={() => { setResolution(k); if (errors.claim) setErrors((p) => ({ ...p, claim: null })); }}>
               <span className="disp-res-radio">{resolution === k ? <IconCheck s={12} /> : null}</span>
               <span className="disp-res-body"><b>{l}</b><span className="disp-res-sub">{s}</span></span>
             </button>
@@ -2240,7 +2287,14 @@ function DisputeModal({ txn, customer, onClose, onSubmit }) {
             <small>{resolution !== 'investigasi' && after < before ? trD('disp.previewApply') : trD('disp.previewInvestigasi')}</small>
           </div>
         </div>
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!canSubmit} onClick={submit}>{busy ? '…' : trD('disp.submitBtn')}</button></div>
+        {/* FIXED footer — never scrolls. A disabled button always shows WHY below it (never silently dead). */}
+        <div className="modal-foot disp-foot">
+          {noteMissing && !busy && <div className="disp-foot-help"><IconWarn s={12} />{trD('disp.helpNote')}</div>}
+          <div className="disp-foot-btns">
+            <button className="btn btn-ghost" disabled={busy} onClick={() => !busy && onClose()}>{trD('dist.cancel')}</button>
+            <button className="btn btn-primary" disabled={busy || noteMissing} onClick={submit}>{busy ? <><span className="dist-spin" style={{ marginRight: 7 }} />{trD('disp.processing')}</> : trD('disp.submitBtn')}</button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -2377,9 +2431,11 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'))); };
   // ── Transaction DISPUTES (raise / approve / reverse). Approve+reverse are GM/owner; all re-open the
   // detail so sisa bon + badges refresh. `raiseDispute` is submitted by the DisputeModal below. ──
+  // On success the modal closes (setDisputeFor(null)); on error we RETHROW so the modal shows the
+  // API message verbatim in its banner and stays open with the input preserved (no silent swallow).
   const submitDispute = (txnId, body) => window.API.distribusi.customers.raiseDispute(txnId, body)
     .then(() => { setDisputeFor(null); flash(trD('disp.raised')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
-    .catch((e) => { const m = (e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'); flash(m); throw e; });
+    .catch((e) => { throw e; });
   const approveDispute = (dId) => window.API.distribusi.customers.approveDispute(dId)
     .then(() => { flash(trD('disp.approved')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
     .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
@@ -2869,7 +2925,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   {(dsp.trail || []).map((x) => (
                     <div key={x.id} className="cd-disp-t-row">
                       <div className="cd-disp-t-main">
-                        <b>{trD('disp.reason.' + x.reason) || x.reason}</b>{x.disputedAmount ? ' · ' + trD('disp.selisih') + ' ' + rpFull(x.disputedAmount) : ''}
+                        <b>{dispReasonLabel(x.reason)}</b>{x.disputedAmount ? ' · ' + trD('disp.selisih') + ' ' + rpFull(x.disputedAmount) : ''}
                         <div className="cd-disp-t-sub">{x.note}</div>
                         <div className="cd-disp-t-meta">
                           {trD('disp.raisedBy')}: <b>{x.raisedByName || '—'}</b> · {fmtDateShort(x.createdAt)}
@@ -4644,7 +4700,7 @@ function DistLossReport({ refreshKey, today, isOwner, isGmOwner, fleetScope, fle
                       <td>{x.customerName}{x.customerCode ? <small> · {x.customerCode}</small> : null}{x.source === 'dispute' ? <small> · #{String(x.transactionId || '').slice(-6).toUpperCase()}</small> : null}</td>
                       <td className="num">{x.voided ? <s className="kv-struck">{rpFull(x.amount)}</s> : rpFull(x.amount)}{x.voided ? <span className="dist-badge void">{trD('loss.voided')}</span> : null}</td>
                       <td><b>{x.responsibleName || '—'}</b></td>
-                      <td className="loss-reason">{x.source === 'dispute' ? (trD('disp.reason.' + x.lossReason) || x.lossReason) : x.lossReason}{x.voided && x.voidReason ? <small> · {trD('loss.voidReason')}: {trD('kv.reason.' + x.voidReason) || x.voidReason}</small> : null}</td>
+                      <td className="loss-reason">{x.source === 'dispute' ? dispReasonLabel(x.lossReason) : (x.lossReason || '—')}{x.voided && x.voidReason ? <small> · {trD('loss.voidReason')}: {trD('kv.reason.' + x.voidReason) || x.voidReason}</small> : null}</td>
                       <td><small>{x.recordedByName || '—'}{x.createdAt ? ' · ' + fmtDT(x.createdAt) : ''}</small></td>
                       <td className="kv-actcell no-print">
                         <button type="button" className="jp-icon kv-dots" aria-haspopup="true" aria-expanded={open} onClick={() => setMenuFor(open ? null : key)}><IconDots s={16} /></button>
@@ -4829,7 +4885,7 @@ function KerugianDetailModal({ item, onClose, onProof }) {
           {kv(trD('dist.fCust'), (item.customerName || '—') + (item.customerCode ? ' · ' + item.customerCode : ''))}
           {kv(trD('pnr.amount'), rpFull(item.amount))}
           {kv(trD('pnr.staff'), item.responsibleName || '—')}
-          {kv(trD('pnr.reason'), item.source === 'dispute' ? (trD('disp.reason.' + item.lossReason) || item.lossReason) : item.lossReason)}
+          {kv(trD('pnr.reason'), item.source === 'dispute' ? dispReasonLabel(item.lossReason) : (item.lossReason || '—'))}
           {kv(trD('loss.recordedBy'), (item.recordedByName || '—') + (item.createdAt ? ' · ' + fmtDT(item.createdAt) : ''))}
           {item.note ? kv(trD('kv.note'), item.note) : null}
           {item.voided ? kv(trD('loss.voided'), (trD('kv.reason.' + item.voidReason) || item.voidReason || '') + (item.voidedByName ? ' · ' + item.voidedByName : '')) : null}
