@@ -142,6 +142,10 @@
         listAdjustments: (id) => req('GET', '/distribusi/customers/' + id + '/adjustments'),
         approveAdjustment: (adjId) => req('POST', '/distribusi/adjustments/' + adjId + '/approve', {}),
         reverseAdjustment: (adjId) => req('POST', '/distribusi/adjustments/' + adjId + '/reverse', {}),
+        // TRANSACTION DISPUTES / LOSS — cap distribusiBonAdjust; approve/reverse are GM/owner.
+        raiseDispute: (txnId, data) => req('POST', '/distribusi/transactions/' + txnId + '/dispute', data),   // { reason, resolution, customerClaimAmount?, note, evidenceUrl?, staffUserId?, staffName? }
+        approveDispute: (dId, data) => req('POST', '/distribusi/disputes/' + dId + '/approve', data || {}),
+        reverseDispute: (dId) => req('POST', '/distribusi/disputes/' + dId + '/reverse', {}),
         import: (customers, skipped) => req('POST', '/distribusi/customers/import', { customers, skipped: skipped || 0 }),
         // Per-customer legacy (archive) transaction import + undo a batch.
         importLegacyTxns: (id, rows, skipped, includeBon) => req('POST', '/distribusi/customers/' + id + '/transactions/import', { rows, skipped: skipped || 0, includeBon: includeBon !== false }),

@@ -1532,7 +1532,8 @@ function FApp() {
               canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} canPenyesuaian={!!p.distribusiPenyesuaian} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
-              onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)} />
+              onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)}
+              onOpenLoss={p.distribusiBonAdjust ? () => go('dist-loss-report', false) : null} />
           )}
           {screen === 'dist-deliveries' && p.distribusiPengiriman && (
             <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}

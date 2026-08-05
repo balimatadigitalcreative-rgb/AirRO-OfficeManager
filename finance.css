@@ -3039,3 +3039,63 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
   body.invoice-open .pc-r80 { font-size: 11px; }
   body.invoice-open .pc-r58 .pc-sign, body.invoice-open .pc-r80 .pc-sign { grid-template-columns: 1fr; gap: 16px; }
 }
+
+/* ============ Transaction DISPUTE / LOSS (disp-*) ============ */
+.dist-badge.disp-amber { background: #fef3c7; color: #b45309; border: 1px solid #fcd9a3; }
+.dist-badge.disp-redout { background: #fff; color: #dc2626; border: 1px solid #f4b4b4; }
+.dist-badge.disp-redsolid { background: #dc2626; color: #fff; border: 1px solid #dc2626; }
+.dist-badge.disp-greenout { background: #fff; color: #0e7a5f; border: 1px solid #a7e0d0; }
+
+.cd-amt-struck { color: var(--text-faint); }
+.cd-amt-ack { color: #dc2626; font-weight: 700; white-space: nowrap; }
+.cd-txn.disputed-out .cd-txn-run { color: var(--text-faint); }
+
+/* Dispute trail inside the expanded transaction panel */
+.cd-disp-trail { grid-column: 1 / -1; margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.cd-disp-t-head { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; color: #b45309; margin-bottom: 8px; }
+.cd-disp-t-head svg { color: #dc2626; }
+.cd-disp-t-row { padding: 8px 10px; border-radius: 10px; background: var(--surface-2, #f6f8f9); margin-bottom: 6px; }
+.cd-disp-t-main { font-size: 12.5px; }
+.cd-disp-t-sub { color: var(--text); margin-top: 3px; }
+.cd-disp-t-meta { font-size: 11.5px; color: var(--text-mut); margin-top: 4px; }
+.cd-disp-evi { display: inline-flex; align-items: center; gap: 4px; margin-top: 5px; font-size: 11.5px; color: var(--green-700); text-decoration: none; }
+.cd-disp-btn { color: #b45309 !important; }
+.cd-txn-detail-act .btn.danger { color: #dc2626; }
+
+/* Dispute filter chips */
+.cd-chip-disp.on { background: #fdecec; color: #dc2626; }
+
+/* Problem-transaction summary card (Ringkasan) */
+.cd-problem-card { border-color: #f4c7c7; }
+.cd-problem-total { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 6px 0 10px; }
+.cd-problem-total b { font-size: 16px; }
+.cd-problem-total span { font-size: 16px; font-weight: 800; color: #dc2626; }
+.cd-problem-break { display: flex; flex-direction: column; gap: 6px; }
+.cd-problem-seg { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; font-size: 12.5px; }
+.cd-problem-seg b { text-align: right; }
+.cd-problem-seg span:last-child { color: var(--text-mut); min-width: 90px; text-align: right; }
+
+/* Dispute modal */
+.disp-amtrow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.disp-sys { display: flex; align-items: center; gap: 6px; height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--card-soft); font-weight: 800; color: var(--text-mut); }
+.disp-selisih { display: flex; align-items: center; height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--card-soft); font-weight: 800; }
+.disp-selisih.neg { color: #dc2626; }
+.disp-res { display: flex; flex-direction: column; gap: 8px; }
+.disp-res-opt { display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 11px 13px; border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer; }
+.disp-res-opt.on { border-color: var(--green-700, #0e7a5f); background: var(--mint-50, #f2fbf8); }
+.disp-res-radio { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border); flex-shrink: 0; margin-top: 1px; color: var(--green-700); }
+.disp-res-opt.on .disp-res-radio { border-color: var(--green-700); }
+.disp-res-body { display: flex; flex-direction: column; }
+.disp-res-body b { font-size: 13.5px; }
+.disp-res-sub { font-size: 12px; color: var(--text-mut); margin-top: 1px; }
+.disp-preview { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--warn-bg, #fff7ed); border: 1px solid var(--sand-soft, #f6d9a6); }
+.disp-preview > span { font-size: 12px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; }
+.disp-preview b { font-size: 16px; }
+.disp-preview b .neg { color: #dc2626; }
+.disp-preview small { flex-basis: 100%; font-size: 11.5px; color: var(--text-mut); }
+@media (max-width: 560px) { .disp-amtrow { grid-template-columns: 1fr; } }
+
+/* Print: disputed rows */
+@media print {
+  body.invoice-open .pc-disprow td:nth-child(6) s { color: #666; }
+}

@@ -315,11 +315,12 @@ async function listCustomers(user, qFleet, status, filters) {
   // activity below still exclude legacy so archive rows never distort those stats.
   const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...NOT_VOID }, select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true, legacy: true, bonCounted: true } });
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
+  const dedMap = await disputeDeductions(fleetWhere(user, 'fleetId', qFleet));   // tidak_diakui/kerugian carve-outs
   const agg = {};
   txns.forEach((t) => {
     const a = agg[t.customerId] || (agg[t.customerId] = { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0, spend: 0 });
     const eff = t.amount + (deltaMap[t.id] || 0);
-    if (t.bonCounted) { if (t.method === 'bon') a.bon += eff; else if (t.method === 'pelunasan') a.pelunasan += t.amount; }   // receivable (bonCounted, incl. legacy)
+    if (t.bonCounted) { if (t.method === 'bon') a.bon += Math.max(0, eff - (dedMap[t.id] || 0)); else if (t.method === 'pelunasan') a.pelunasan += t.amount; }   // receivable excl. disputed portion
     if (t.method === 'lunas' || t.method === 'bon') a.spend += eff;   // read-only: lifetime purchase total (for the list "total belanja" sort)
     if (!t.legacy) { a.totalGalon += t.qty; a.txnCount++; if (t.txnDate > a.lastDate) a.lastDate = t.txnDate; }   // stats exclude archive
   });
@@ -346,20 +347,33 @@ async function getCustomer(id, user) {
   // The transaction LIST includes legacy (archive) rows — flagged — because the printed statement
   // needs them; the STATS below (totalGalon / sisaBon) count only real (non-legacy) rows.
   const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' }, include: { corrections: true } });
-  let bon = 0, pelunasan = 0, totalGalon = 0;
+  // Disputes for this customer, grouped by transaction (oldest→newest so the reversal supersedes).
+  const dispRows = await prisma.distTransactionDispute.findMany({ where: { customerId: id }, orderBy: { createdAt: 'asc' } });
+  const dispByTxn = {}; dispRows.forEach((r) => { (dispByTxn[r.transactionId] || (dispByTxn[r.transactionId] = [])).push(disputeClient(r)); });
+  let rawBon = 0, pelunasan = 0, totalGalon = 0, tidakDiakuiTotal = 0, kerugianTotal = 0;
+  const disputeSummary = { disengketakan: { n: 0, amount: 0 }, tidak_diakui: { n: 0, amount: 0 }, kerugian: { n: 0, amount: 0 } };
   const transactions = txns.map((t) => {
     const adj = priceDelta(t.corrections);
     const eff = t.amount + adj;
     const voided = t.status === 'void';
+    const ed = effectiveDispute(dispByTxn[t.id]);
+    const deduction = ed && ed.deducts ? (ed.latest.disputedAmount || 0) : 0;
     if (!voided) {
       // Receivable (sisa bon) counts a bon/pelunasan row iff bonCounted (default true) — independent
-      // of legacy, so an archive can keep or drop its receivable. bon uses the EFFECTIVE (adjusted)
-      // amount; a paid txn's adjustment is reported but does not become a new receivable.
-      if (t.bonCounted) { if (t.method === 'bon') bon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; }
+      // of legacy. A tidak_diakui/kerugian dispute carves `disputedAmount` OUT of the bon receivable
+      // (the row STAYS visible; only the number is excluded — see the running-balance tooltip).
+      if (t.bonCounted) { if (t.method === 'bon') rawBon += eff; else if (t.method === 'pelunasan') pelunasan += t.amount; }
       if (!t.legacy) totalGalon += t.qty;   // gallons-sold stat still excludes archive rows
     }
-    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
-      status: t.status || 'active', voided, voidReason: t.voidReason || null, voidedByName: t.voidedByName || null, voidedAt: t.voidedAt ? new Date(t.voidedAt).getTime() : null };
+    if (ed && !voided) {
+      const st = ed.latest.status;
+      if (st === 'disengketakan') { disputeSummary.disengketakan.n++; disputeSummary.disengketakan.amount += ed.latest.disputedAmount || 0; }
+      else if (st === 'tidak_diakui' && deduction) { disputeSummary.tidak_diakui.n++; disputeSummary.tidak_diakui.amount += deduction; tidakDiakuiTotal += deduction; }
+      else if (st === 'kerugian' && deduction) { disputeSummary.kerugian.n++; disputeSummary.kerugian.amount += deduction; kerugianTotal += deduction; }
+    }
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, actorId: t.actorId || null, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
+      status: t.status || 'active', voided, voidReason: t.voidReason || null, voidedByName: t.voidedByName || null, voidedAt: t.voidedAt ? new Date(t.voidedAt).getTime() : null,
+      dispute: ed ? { ...ed.latest, deducts: ed.deducts, trail: ed.trail } : null };
   });
   // Legacy import batches (for the "Batalkan" undo list): one entry per importBatchId.
   const impMap = {};
@@ -379,7 +393,12 @@ async function getCustomer(id, user) {
   const adjRows = await prisma.distAdjustment.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' } });
   const adjustments = adjRows.map(adjustmentClient);
   const adjBonDelta = adjRows.reduce((a, r) => a + (r.kind === 'bon' && r.status === 'approved' ? r.delta : 0), 0);
-  return { ...custClient(c), transactions, imports, totalGalon, sisaBon: Math.max(0, bon - pelunasan + adjBonDelta), txnCount: txns.filter((t) => !t.legacy).length, priceAdjustments, gallonsHeld, adjustments };
+  const sisaBon = Math.max(0, rawBon - pelunasan - tidakDiakuiTotal - kerugianTotal + adjBonDelta);
+  // RECONCILIATION INVARIANT: total transaksi (bon) = sisa bon + dibayar + tidak diakui + kerugian
+  // (before the ≥0 floor and adjustments). Exposed so the UI + a test can assert it never drifts.
+  const reconcile = { totalBon: rawBon, dibayar: pelunasan, tidakDiakui: tidakDiakuiTotal, kerugian: kerugianTotal, adjBonDelta, sisaBon };
+  const disputes = dispRows.map((r) => disputeClient({ ...r, customer: { name: c.name, code: c.code } }));
+  return { ...custClient(c), transactions, imports, totalGalon, sisaBon, txnCount: txns.filter((t) => !t.legacy).length, priceAdjustments, gallonsHeld, adjustments, disputes, disputeSummary, reconcile };
 }
 // Sync write columns (type is resolved separately — it needs a DB lookup).
 function customerCols(body) {
@@ -814,8 +833,9 @@ async function approvedBonDelta(customerId) {
 // adjustments, floored at 0 — identical to the sisaBon shown on the customer list/detail.
 async function customerBonBalance(customerId) {
   const txns = await prisma.distTransaction.findMany({ where: { customerId, ...BON_TXN }, include: { corrections: true } });   // includes legacy bon/pelunasan
+  const ded = await disputeDeductions({ customerId });   // tidak_diakui/kerugian carve-outs
   let bon = 0, pel = 0;
-  txns.forEach((t) => { if (t.method === 'bon') bon += t.amount + priceDelta(t.corrections); else if (t.method === 'pelunasan') pel += t.amount; });
+  txns.forEach((t) => { if (t.method === 'bon') bon += Math.max(0, t.amount + priceDelta(t.corrections) - (ded[t.id] || 0)); else if (t.method === 'pelunasan') pel += t.amount; });
   return Math.max(0, bon - pel + await approvedBonDelta(customerId));
 }
 
@@ -950,6 +970,138 @@ async function adjustmentReport(user, q) {
   const summary = { count: data.length, galonDelta: 0, bonDelta: 0 };
   rows.forEach((r) => { if (r.status === 'approved') { if (r.kind === 'galon') summary.galonDelta += r.delta; else summary.bonDelta += r.delta; } });
   return { data, summary, now: new Date().toISOString() };
+}
+
+// ── TRANSACTION DISPUTES / LOSS ─────────────────────────────────────────────
+// A dispute changes a transaction's STATUS only — the transaction row is never mutated or deleted.
+// Lifecycle mirrors DistAdjustment: raise (disengketakan, still counted) → approve (tidak_diakui /
+// kerugian, GM/owner only, removes `disputedAmount` from receivables) → reverse (diakui_kembali,
+// counted again). An approved tidak_diakui/kerugian dispute IS the record surfaced by lossReport
+// (no duplicate rows), and reversing it removes it from that report too.
+const DISPUTE_REASONS = ['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya'];
+const DISPUTE_RESOLUTIONS = ['staf', 'perusahaan', 'investigasi'];
+const DEDUCTS = ['tidak_diakui', 'kerugian'];   // statuses that remove the amount from receivables
+
+function disputeClient(d) {
+  return {
+    id: d.id, transactionId: d.transactionId, customerId: d.customerId, fleetId: d.fleetId || '',
+    customerName: d.customer ? d.customer.name : undefined, customerCode: d.customer ? d.customer.code : undefined,
+    status: d.status, resolution: d.resolution || 'investigasi', reason: d.reason,
+    disputedAmount: d.disputedAmount || 0, customerClaimAmount: d.customerClaimAmount || 0,
+    note: d.note || '', evidenceUrl: d.evidenceUrl || null,
+    staffUserId: d.staffUserId || null, staffName: d.staffName || null,
+    lossId: d.lossId || null, staffLiabilityId: d.staffLiabilityId || null,
+    reversalOf: d.reversalOf || null, reversedById: d.reversedById || null,
+    raisedByName: d.raisedByName || null, raisedByRole: d.raisedByRole || null,
+    approvedByName: d.approvedByName || null, approvedAt: d.approvedAt ? new Date(d.approvedAt).getTime() : null,
+    createdAt: d.createdAt ? new Date(d.createdAt).getTime() : null,
+  };
+}
+
+// { transactionId: Σ disputedAmount } for ACTIVE (approved, non-reversed) tidak_diakui/kerugian
+// disputes in scope — the amounts to subtract from the receivable. `whereScope` is a fleet filter.
+async function disputeDeductions(whereScope) {
+  const rows = await prisma.distTransactionDispute.findMany({
+    where: { status: { in: DEDUCTS }, reversedById: null, reversalOf: null, ...(whereScope || {}) },
+    select: { transactionId: true, disputedAmount: true },
+  });
+  const m = {}; rows.forEach((r) => { m[r.transactionId] = (m[r.transactionId] || 0) + (r.disputedAmount || 0); });
+  return m;
+}
+
+// The EFFECTIVE dispute for a transaction = its most recent record (a reversal 'diakui_kembali'
+// supersedes the original for display). Deducts only when that record is an active tidak_diakui/
+// kerugian (i.e. not itself reversed).
+function effectiveDispute(disputesForTxn) {
+  if (!disputesForTxn || !disputesForTxn.length) return null;
+  const sorted = disputesForTxn.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const latest = sorted[sorted.length - 1];
+  const deducts = DEDUCTS.includes(latest.status) && !latest.reversedById && !latest.reversalOf;
+  return { latest, deducts, trail: sorted };
+}
+
+async function raiseDispute(transactionId, body, actor) {
+  const txn = await prisma.distTransaction.findUnique({ where: { id: transactionId }, include: { customer: { select: { id: true, name: true, code: true, armada: true } } } });
+  if (!txn || !txn.customer) throw ApiError.notFound('Transaksi tidak ditemukan.');
+  if (!fleetAllows(actor, txn.customer.armada)) throw ApiError.notFound('Transaksi tidak ditemukan.');
+  // The staff who handled the transaction can never dispute their OWN transaction (server-enforced).
+  if (actor && actor.id && txn.actorId && actor.id === txn.actorId) throw ApiError.forbidden('Anda tidak boleh mengajukan sengketa atas transaksi Anda sendiri.');
+  const reason = DISPUTE_REASONS.includes(body.reason) ? body.reason : null;
+  if (!reason) throw ApiError.badRequest('Alasan sengketa tidak valid.');
+  const resolution = DISPUTE_RESOLUTIONS.includes(body.resolution) ? body.resolution : 'investigasi';
+  const note = String(body.note || '').trim().slice(0, 500);
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  // Reject a second live dispute while one is still open (disengketakan) or in effect (tidak_diakui/
+  // kerugian) and not reversed. A re-dispute is allowed only after a reversal.
+  const existing = await prisma.distTransactionDispute.findMany({ where: { transactionId, reversalOf: null } });
+  if (existing.some((d) => (d.status === 'disengketakan' || DEDUCTS.includes(d.status)) && !d.reversedById)) throw ApiError.badRequest('Transaksi ini sudah punya sengketa yang aktif.');
+  const sysAmount = Math.max(0, Math.round(txn.amount));
+  const claim = Math.max(0, Math.min(sysAmount, Math.round(+body.customerClaimAmount || 0)));
+  const disputedAmount = sysAmount - claim;
+  if (disputedAmount <= 0) throw ApiError.badRequest('Selisih sengketa harus lebih dari 0 (nominal diakui < nominal sistem).');
+  // Staff linked to the loss: prefilled from the transaction actor, editable by the raiser.
+  let staffUserId = body.staffUserId ? String(body.staffUserId) : (txn.actorId || null);
+  let staffName = body.staffName ? String(body.staffName).slice(0, 120) : (txn.actorName || null);
+  if (staffUserId) { const su = await prisma.user.findUnique({ where: { id: staffUserId }, select: { name: true } }); if (su) staffName = su.name; else staffUserId = null; }
+  const snap = await actorSnap(actor);
+  const created = await prisma.distTransactionDispute.create({ data: {
+    transactionId, customerId: txn.customerId, fleetId: txn.fleetId || txn.customer.armada || '',
+    status: 'disengketakan', resolution, reason, disputedAmount, customerClaimAmount: claim, note,
+    evidenceUrl: body.evidenceUrl ? String(body.evidenceUrl).slice(0, 500) : null,
+    staffUserId, staffName,
+    raisedById: snap.actorId, raisedByName: snap.actorName, raisedByRole: snap.actorRole,
+  } });
+  await logAudit('koreksi', `Ajukan sengketa transaksi: ${txn.customer.name}`, `#${String(txn.id).slice(-6).toUpperCase()} · sistem ${sysAmount} → diakui ${claim} (selisih ${disputedAmount}) · ${reason} · ${resolution}${note ? ' · ' + note : ''}`, snap, txn.fleetId || txn.customer.armada || '');
+  const withCust = await prisma.distTransactionDispute.findUnique({ where: { id: created.id }, include: { customer: { select: { name: true, code: true } } } });
+  return disputeClient(withCust);
+}
+
+// APPROVE — GM/owner only. Moves the dispute past 'disengketakan' to its resolution outcome and
+// applies the receivable deduction. resolution may be overridden here (e.g. 'investigasi' → 'staf').
+async function approveDispute(id, body, actor) {
+  if (!isGmOwner(actor)) throw ApiError.forbidden('Hanya GM/Owner yang boleh menyetujui sengketa.');
+  const d = await prisma.distTransactionDispute.findUnique({ where: { id }, include: { customer: { select: { name: true } } } });
+  if (!d) throw ApiError.notFound('Sengketa tidak ditemukan.');
+  if (!fleetAllows(actor, d.fleetId)) throw ApiError.notFound('Sengketa tidak ditemukan.');
+  if (d.status !== 'disengketakan') throw ApiError.badRequest('Sengketa ini sudah diputuskan.');
+  const txn = await prisma.distTransaction.findUnique({ where: { id: d.transactionId }, select: { actorId: true } });
+  if (txn && txn.actorId && actor && actor.id === txn.actorId) throw ApiError.forbidden('Anda tidak boleh menyetujui sengketa atas transaksi Anda sendiri.');
+  const resolution = DISPUTE_RESOLUTIONS.includes(body && body.resolution) ? body.resolution : d.resolution;
+  if (resolution === 'investigasi') throw ApiError.badRequest('Pilih penyelesaian (staf atau perusahaan) sebelum menyetujui.');
+  const status = resolution === 'staf' ? 'tidak_diakui' : 'kerugian';
+  const snap = await actorSnap(actor);
+  const updated = await prisma.distTransactionDispute.update({ where: { id }, data: {
+    status, resolution, approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
+    // The dispute record IS the loss/liability record (no separate table) — self-link for the trail.
+    staffLiabilityId: resolution === 'staf' ? id : null, lossId: resolution === 'perusahaan' ? id : null,
+  }, include: { customer: { select: { name: true, code: true } } } });
+  await logAudit('koreksi', `Setujui sengketa (${status}): ${d.customer ? d.customer.name : ''}`, `selisih ${d.disputedAmount} · ${resolution}${d.staffName ? ' · staf ' + d.staffName : ''}`, snap, d.fleetId);
+  return disputeClient(updated);
+}
+
+// REVERSE — GM/owner only. Never a hard delete: appends a 'diakui_kembali' record linked via
+// reversalOf and marks the original reversed, so the transaction counts again AND its linked loss /
+// staff-liability drops out of the Kerugian report (same record). A reversal can't be reversed.
+async function reverseDispute(id, actor) {
+  if (!isGmOwner(actor)) throw ApiError.forbidden('Hanya GM/Owner yang boleh membatalkan sengketa.');
+  const d = await prisma.distTransactionDispute.findUnique({ where: { id }, include: { customer: { select: { name: true, code: true } } } });
+  if (!d) throw ApiError.notFound('Sengketa tidak ditemukan.');
+  if (!fleetAllows(actor, d.fleetId)) throw ApiError.notFound('Sengketa tidak ditemukan.');
+  if (d.reversalOf) throw ApiError.badRequest('Pembalikan tidak bisa dibalik lagi.');
+  if (d.reversedById || d.status === 'diakui_kembali') throw ApiError.badRequest('Sengketa ini sudah dibatalkan.');
+  const snap = await actorSnap(actor);
+  const reversal = await prisma.distTransactionDispute.create({ data: {
+    transactionId: d.transactionId, customerId: d.customerId, fleetId: d.fleetId || '',
+    status: 'diakui_kembali', resolution: 'investigasi', reason: d.reason,
+    disputedAmount: 0, customerClaimAmount: 0, note: 'Pembalikan sengketa — transaksi diakui kembali',
+    reversalOf: d.id, staffUserId: d.staffUserId, staffName: d.staffName,
+    raisedById: snap.actorId, raisedByName: snap.actorName, raisedByRole: snap.actorRole,
+    approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
+  } });
+  await prisma.distTransactionDispute.update({ where: { id: d.id }, data: { reversedById: reversal.id } });
+  await logAudit('koreksi', `Batalkan sengketa: ${d.customer ? d.customer.name : ''}`, `kembalikan selisih ${d.disputedAmount} · transaksi diakui kembali`, snap, d.fleetId);
+  const withCust = await prisma.distTransactionDispute.findUnique({ where: { id: reversal.id }, include: { customer: { select: { name: true, code: true } } } });
+  return disputeClient(withCust);
 }
 
 async function createTransaction(body, actor) {
@@ -1411,14 +1563,35 @@ async function lossReport(user, query) {
     where: { paymentNotReceived: true, txnDate: { gte: from, lte: to }, ...fleetWhere(user, 'fleetId', q.fleet) },
     include: { customer: { select: { name: true, code: true } } }, orderBy: [{ txnDate: 'desc' }, { createdAt: 'desc' }],
   }, 'loss-report');
-  const items = rows.map((r) => ({
-    id: r.id, txnDate: r.txnDate, amount: r.amount, status: r.status, voided: r.status === 'void',
+  const pnrItems = rows.map((r) => ({
+    id: r.id, source: 'pnr', transactionId: r.id, txnDate: r.txnDate, amount: r.amount, status: r.status, voided: r.status === 'void',
     customerId: r.customerId, customerName: r.customer ? r.customer.name : '', customerCode: r.customer ? r.customer.code : '',
     responsibleUserId: r.responsibleUserId || null, responsibleName: r.responsibleName || '',
     lossReason: r.lossReason || '', lossPhotoId: r.lossPhotoId || null, fleetId: r.fleetId || '',
     recordedByName: r.actorName || '', recordedByRole: r.actorRole || '', createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
     voidReason: r.voidReason || '', voidedByName: r.voidedByName || '',
   }));
+  // APPROVED, non-reversed tidak_diakui/kerugian disputes are the SAME loss records (no duplicates),
+  // linked back to their customer + transaction via `transactionId` (the "source" column).
+  const dispRows = await prisma.distTransactionDispute.findMany({
+    where: { status: { in: DEDUCTS }, reversedById: null, reversalOf: null, ...fleetWhere(user, 'fleetId', q.fleet) },
+    include: { customer: { select: { name: true, code: true } } }, orderBy: { createdAt: 'desc' },
+  });
+  const txIds = dispRows.map((d) => d.transactionId);
+  const txDate = {};
+  if (txIds.length) (await prisma.distTransaction.findMany({ where: { id: { in: txIds } }, select: { id: true, txnDate: true } })).forEach((t) => { txDate[t.id] = t.txnDate; });
+  const dispItems = dispRows.map((d) => ({
+    id: d.id, source: 'dispute', transactionId: d.transactionId, disputeStatus: d.status, resolution: d.resolution,
+    txnDate: txDate[d.transactionId] || (d.approvedAt ? new Date(d.approvedAt).toISOString().slice(0, 10) : ''),
+    amount: d.disputedAmount || 0, status: 'active', voided: false,
+    customerId: d.customerId, customerName: d.customer ? d.customer.name : '', customerCode: d.customer ? d.customer.code : '',
+    responsibleUserId: d.resolution === 'staf' ? (d.staffUserId || null) : null,
+    responsibleName: d.resolution === 'staf' ? (d.staffName || '') : '(Perusahaan)',
+    lossReason: d.reason || '', lossPhotoId: null, evidenceUrl: d.evidenceUrl || null, fleetId: d.fleetId || '',
+    recordedByName: d.raisedByName || '', recordedByRole: d.raisedByRole || '', approvedByName: d.approvedByName || '',
+    createdAt: d.createdAt ? new Date(d.createdAt).getTime() : null, voidReason: '', voidedByName: '',
+  })).filter((x) => x.txnDate >= from && x.txnDate <= to);
+  const items = [...pnrItems, ...dispItems].sort((a, b) => (a.txnDate < b.txnDate ? 1 : a.txnDate > b.txnDate ? -1 : (b.createdAt || 0) - (a.createdAt || 0)));
   // Voided adjustments stay listed (append-only, nothing is hidden) but never count toward totals.
   const live = items.filter((x) => !x.voided);
   const byStaff = {};
@@ -1697,8 +1870,9 @@ async function dashboardSummary(user, query) {
   // customer, identical to the Customers screen's sisaBon. A live balance, not a window figure. ──
   const allTxns = await prisma.distTransaction.findMany({ where: { ...fleetFilter, ...BON_TXN }, select: { id: true, customerId: true, amount: true, method: true } });   // receivable incl. legacy bon/pelunasan
   const rcvDelta = await activePriceDeltas({});
+  const rcvDed = await disputeDeductions(fleetFilter);   // exclude tidak_diakui/kerugian from receivables
   const bonByCust = {};
-  allTxns.forEach((t) => { const c = bonByCust[t.customerId] || (bonByCust[t.customerId] = { bon: 0, pel: 0 }); if (t.method === 'bon') c.bon += t.amount + (rcvDelta[t.id] || 0); else if (t.method === 'pelunasan') c.pel += t.amount; });
+  allTxns.forEach((t) => { const c = bonByCust[t.customerId] || (bonByCust[t.customerId] = { bon: 0, pel: 0 }); if (t.method === 'bon') c.bon += Math.max(0, t.amount + (rcvDelta[t.id] || 0) - (rcvDed[t.id] || 0)); else if (t.method === 'pelunasan') c.pel += t.amount; });
   const receivable = Object.values(bonByCust).reduce((s, c) => s + Math.max(0, c.bon - c.pel), 0);
 
   // Daily stacked series over the window (cash bucket = lunas + pelunasan, vs bon). For "today" it
@@ -2416,4 +2590,5 @@ module.exports = {
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,
   parseLegacyDate, expandLegacyRow,
   createAdjustment, listCustomerAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport, ADJ_REASONS,
+  raiseDispute, approveDispute, reverseDispute, DISPUTE_REASONS, DISPUTE_RESOLUTIONS,
 };

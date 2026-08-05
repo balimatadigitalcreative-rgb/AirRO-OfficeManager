@@ -495,6 +495,7 @@ model Customer {
   priceHistory PriceHistory[]
   deliveries   Delivery[]
   adjustments  DistAdjustment[]
+  disputes     DistTransactionDispute[]
 
   @@index([type])
 }
@@ -532,6 +533,48 @@ model DistAdjustment {
   @@index([status])
   @@index([fleetId])
   @@index([kind])
+}
+
+// Transaction DISPUTE / LOSS record. The transaction itself is NEVER mutated or deleted — a dispute
+// only changes its STATUS via this side table, so the on-screen history always matches the physical
+// nota the customer holds. status: disengketakan (raised, still counted) → tidak_diakui (approved,
+// removed from receivables, charged to staff) / kerugian (approved, company write-off) →
+// diakui_kembali (reversed, counted again). Only an APPROVED tidak_diakui/kerugian dispute that has
+// not been reversed deducts `disputedAmount` from the customer's sisa bon; it is also the SAME record
+// surfaced in the Kerugian / Uang Tidak Diterima report (no duplicate rows). Mirrors DistAdjustment's
+// raise→approve→reverse + reversalOf linking.
+model DistTransactionDispute {
+  id                  String   @id @default(cuid())
+  transactionId       String
+  customerId          String
+  fleetId             String   @default("")
+  status              String   // disengketakan | tidak_diakui | kerugian | diakui_kembali
+  resolution          String   @default("investigasi") // staf | perusahaan | investigasi
+  reason              String   // nota_fiktif | galon_tidak_diterima | nominal_beda | pembayaran_tidak_disetor | pelanggan_menyangkal | lainnya
+  disputedAmount      BigInt   @default(0)   // system − customerClaim: the portion removed from receivables
+  customerClaimAmount BigInt   @default(0)   // nominal the customer acknowledges (may be 0)
+  note                String                 // REQUIRED (why the transaction is disputed)
+  evidenceUrl         String?
+  staffUserId         String?  // staff linked to the ORIGINAL transaction (who handled it)
+  staffName           String?
+  lossId              String?  // link to the Kerugian record (self id when resolution=perusahaan)
+  staffLiabilityId    String?  // link to the staff-liability record (self id when resolution=staf)
+  reversalOf          String?  // id of the dispute THIS one reverses
+  reversedById        String?  // id of the dispute that reversed THIS one (set once reversed)
+  raisedById          String?
+  raisedByName        String?
+  raisedByRole        String?
+  approvedById        String?
+  approvedByName      String?
+  approvedAt          DateTime?
+  createdAt           DateTime @default(now())
+
+  customer            Customer @relation(fields: [customerId], references: [id])
+
+  @@index([transactionId])
+  @@index([customerId])
+  @@index([status])
+  @@index([fleetId])
 }
 
 // Append-only counter for customer codes (C-0001…). A dedicated table (like EmployeeNip) keeps

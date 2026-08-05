@@ -136,6 +136,18 @@ const pnrSchema = z.object({
   note: z.string().max(300).optional(),
 });
 const lossQuery = z.object({ period: z.enum(['today', 'week', 'month', 'range']).optional(), date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
+// TRANSACTION DISPUTE — raise a dispute on an existing transaction. `note` is mandatory; the
+// customer-acknowledged amount may be 0 (the whole nota is disputed). resolution picks the outcome.
+const disputeSchema = z.object({
+  reason: z.enum(['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya']),
+  resolution: z.enum(['staf', 'perusahaan', 'investigasi']).optional(),
+  customerClaimAmount: z.number().int().min(0).optional(),
+  note: z.string().trim().min(1, 'note is required').max(500),
+  evidenceUrl: z.string().max(500).optional(),
+  staffUserId: z.string().max(60).optional(),
+  staffName: z.string().trim().max(120).optional(),
+});
+const disputeApproveSchema = z.object({ resolution: z.enum(['staf', 'perusahaan']).optional() });
 const hardDeleteSchema = z.object({
   reason: z.string().trim().min(1, 'reason is required').max(1000),
   confirm: z.string().min(1).max(40),
@@ -279,6 +291,9 @@ const dashboardSummary = asyncHandler(async (req, res) => res.json({ data: await
 const deliveryReport = asyncHandler(async (req, res) => res.json({ data: await service.deliveryReport(req.user, req.query) }));
 const createPaymentNotReceived = asyncHandler(async (req, res) => { const t = await service.createPaymentNotReceived(req.body, req.user); bcast('txn', t.id); res.status(201).json({ data: t }); });
 const lossReport = asyncHandler(async (req, res) => res.json({ data: await service.lossReport(req.user, req.query) }));
+const raiseDispute = asyncHandler(async (req, res) => { const d = await service.raiseDispute(req.params.id, req.body, req.user); bcast('txn', d.customerId); res.status(201).json({ data: d }); });
+const approveDispute = asyncHandler(async (req, res) => { const d = await service.approveDispute(req.params.id, req.body, req.user); bcast('txn', d.customerId); res.json({ data: d }); });
+const reverseDispute = asyncHandler(async (req, res) => { const d = await service.reverseDispute(req.params.id, req.user); bcast('txn', d.customerId); res.json({ data: d }); });
 const billingReminders = asyncHandler(async (req, res) => res.json(await service.billingReminders(req.user, req.query.fleet, req.query.date)));
 const cashIntegration = asyncHandler(async (req, res) => res.json({ data: await service.cashIntegration(req.user, req.query) }));
 
@@ -330,6 +345,7 @@ module.exports = {
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
   createPaymentNotReceived, lossReport,
+  raiseDispute, approveDispute, reverseDispute,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

@@ -582,10 +582,24 @@ function txnCode(t) {
 // nothing). Mirrors the server's BON_TXN rule so a client-side running balance stays honest.
 function bonEffectOf(t) {
   if (t.voided || t.status === 'void' || !t.bonCounted) return 0;
-  if (t.method === 'bon') return (t.effectiveAmount != null ? t.effectiveAmount : t.amount);
+  if (t.method === 'bon') {
+    let e = (t.effectiveAmount != null ? t.effectiveAmount : t.amount);
+    if (disputeDeducts(t)) e -= (t.dispute.disputedAmount || 0);   // tidak_diakui/kerugian carve-out
+    return Math.max(0, e);
+  }
   if (t.method === 'pelunasan') return -t.amount;
   return 0;
 }
+// A transaction whose ACTIVE dispute removes its amount from the receivable (still shown, struck).
+function disputeDeducts(t) { return !!(t.dispute && t.dispute.deducts && (t.dispute.status === 'tidak_diakui' || t.dispute.status === 'kerugian')); }
+// Badge metadata per dispute status. Colours: amber (raised) · red-outline (tidak diakui) ·
+// red-solid (kerugian) · green-outline (re-acknowledged).
+const DISPUTE_META = {
+  disengketakan: { cls: 'disp-amber', label: 'cd.dispDisengketakan' },
+  tidak_diakui: { cls: 'disp-redout', label: 'cd.dispTidakDiakui' },
+  kerugian: { cls: 'disp-redsolid', label: 'cd.dispKerugian' },
+  diakui_kembali: { cls: 'disp-greenout', label: 'cd.dispDiakuiKembali' },
+};
 // Copy-to-clipboard chip/button. aria-labelled; shows a brief "✓" on success.
 function CopyBtn({ text, label, cls }) {
   const [ok, setOk] = uSx(false);
@@ -1734,13 +1748,14 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
     matchSearch(t)
   ));
   const effOf = (t) => (t.effectiveAmount != null ? t.effectiveAmount : t.amount);
-  let galon = 0, pembelian = 0, pembayaran = 0;
+  let galon = 0, pembelian = 0, pembayaran = 0, disputedTotal = 0;
   rows.forEach((t) => {
     if (t.voided) return;
     galon += t.legacy ? 0 : (t.qty || 0);
     if (t.method === 'lunas') { pembelian += effOf(t); pembayaran += effOf(t); }
     else if (t.method === 'bon') { pembelian += effOf(t); }
     else if (t.method === 'pelunasan') { pembayaran += t.amount; }
+    if (disputeDeducts(t)) disputedTotal += (t.dispute.disputedAmount || 0);   // tidak diakui / kerugian
   });
   const approvedAdj = (customer.adjustments || []).filter((a) => a.status === 'approved');
   const adjBonTotal = approvedAdj.filter((a) => a.kind === 'bon').reduce((s, a) => s + ((a.after || 0) - (a.before || 0)), 0);
@@ -1825,22 +1840,27 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
             </tr></thead>
             <tbody>{rows.length === 0
               ? <tr><td colSpan={isNota ? 6 : 7} style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('dist.noTxn')}</td></tr>
-              : rows.map((t) => (
-                <tr key={t.id} className={t.voided ? 'pc-voidrow' : ''}>
+              : rows.map((t) => {
+                const dOut = disputeDeducts(t);
+                const dm = t.dispute ? DISPUTE_META[t.dispute.status] : null;
+                return (
+                <tr key={t.id} className={(t.voided ? 'pc-voidrow' : '') + (dOut ? ' pc-disprow' : '')}>
                   <td className="tnum">{fmtDateShort(t.txnDate)}</td>
                   <td className="tnum">{txnCode(t)}</td>
                   <td>{methodLabel(t.method)}
                     {t.legacy ? <span className="pc-tag arsip">{trD('pc.tagArsip')}</span> : null}
                     {t.openingBon ? <span className="pc-tag">{trD('dist.obLabel')}</span> : null}
                     {t.voided ? <span className="pc-tag batal">{trD('pc.tagBatal')}</span> : null}
+                    {dm ? <span className={'pc-tag ' + (t.dispute.status === 'kerugian' || t.dispute.status === 'tidak_diakui' ? 'batal' : t.dispute.status === 'diakui_kembali' ? 'pnys' : 'arsip')}>{trD(dm.label)}</span> : null}
                     {t.note ? <span className="pc-note"> · {t.note}</span> : null}
                   </td>
                   <td className="r tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</td>
                   <td className="r tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</td>
-                  <td className="r tnum">{rpFull(effOf(t))}</td>
+                  <td className="r tnum">{dOut ? <><s>{rpFull(effOf(t))}</s> → {rpFull(t.dispute.customerClaimAmount || 0)}</> : rpFull(effOf(t))}</td>
                   {!isNota && <td className="r tnum">{rpFull(Math.max(0, runMap[t.id] || 0))}</td>}
                 </tr>
-              ))}</tbody>
+                );
+              })}</tbody>
           </table>
         </div>
         {/* Approved balance adjustments — their own section so the statement reconciles to sisa bon. */}
@@ -1862,6 +1882,7 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
           <div><span>{trD('pc.totPembelian')}</span><b className="tnum">{rpFull(pembelian)}</b></div>
           <div><span>{trD('pc.totPembayaran')}</span><b className="tnum">{rpFull(pembayaran)}</b></div>
           {!isNota && <div><span>{trD('pc.totPenyesuaian')}</span><b className="tnum">{rpFull(adjBonTotal)}</b></div>}
+          {!isNota && disputedTotal > 0 && <div><span>{trD('disp.totLine')}</span><b className="tnum" style={{ color: '#dc2626' }}>{rpFull(disputedTotal)}</b></div>}
           <div className="pc-sisa"><span>{trD('pc.sisaAkhir')}</span><b className="tnum" data-testid="pc-sisa" style={{ color: sisaAkhir > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{rpFull(sisaAkhir)}</b></div>
         </div>
         <div className="pc-sign">
@@ -2162,6 +2183,69 @@ const adjReasonLabel = (r) => trD('adj.reason.' + r) || r;
 // PENYESUAIAN (balance adjustment) — corrects the CURRENT gallons-held or outstanding bon. It affects
 // receivables/stock, so it's created as a PENDING record that a GM/owner must approve. before → after
 // is shown and confirmed before submit; reason + optional note/evidence are captured for the audit.
+// Mark a transaction disputed → Tidak Diakui / Kerugian. The transaction is NEVER changed; this only
+// raises a dispute record (server-side). Shows the system nominal, the customer-acknowledged amount,
+// the auto selisih, the settlement choice, and a before→after preview of the customer's Sisa Bon.
+function DisputeModal({ txn, customer, onClose, onSubmit }) {
+  const sys = Math.max(0, Math.round(txn.amount || 0));
+  const [claim, setClaim] = uSx('0');
+  const [reason, setReason] = uSx('nota_fiktif');
+  const [resolution, setResolution] = uSx('staf');
+  const [note, setNote] = uSx('');
+  const [evidence, setEvidence] = uSx('');
+  const [staffName, setStaffName] = uSx(txn.actorName || '');
+  const [busy, setBusy] = uSx(false);
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const claimN = Math.max(0, Math.min(sys, parseInt(String(claim).replace(/[^0-9]/g, ''), 10) || 0));
+  const selisih = sys - claimN;
+  const before = customer.sisaBon || 0;
+  const after = resolution === 'investigasi' ? before : Math.max(0, before - selisih);
+  const staffEdited = (staffName || '').trim() !== (txn.actorName || '');
+  const canSubmit = !!note.trim() && selisih > 0 && !busy;
+  const submit = () => {
+    if (!canSubmit) return; setBusy(true);
+    const body = { reason, resolution, customerClaimAmount: claimN, note: note.trim(), evidenceUrl: evidence.trim() || undefined,
+      staffUserId: staffEdited ? undefined : (txn.actorId || undefined), staffName: staffEdited ? staffName.trim() : undefined };
+    Promise.resolve(onSubmit(txn.id, body)).catch(() => {}).finally(() => setBusy(false));
+  };
+  const RES = [['staf', trD('disp.resStaf'), trD('disp.resStafSub')], ['perusahaan', trD('disp.resPerusahaan'), trD('disp.resPerusahaanSub')], ['investigasi', trD('disp.resInvestigasi'), trD('disp.resInvestigasiSub')]];
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 220 }}>
+      <div className="modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('disp.modalTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{txnCode(txn)} · {customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="disp-amtrow">
+            <div><label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.nomSistem')}</label><div className="disp-sys tnum">{rpFull(sys)} <IconLock s={12} /></div></div>
+            <div><label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.nomDiakui')}</label><div className="dist-priceinput"><input value={claim} inputMode="numeric" onChange={(e) => setClaim(e.target.value.replace(/[^0-9]/g, ''))} /></div></div>
+            <div><label className="fld-label" style={{ marginTop: 0 }}>{trD('disp.selisih')}</label><div className={'disp-selisih tnum ' + (selisih > 0 ? 'neg' : '')}>{rpFull(selisih)}</div></div>
+          </div>
+          <label className="fld-label">{trD('disp.alasan')}</label>
+          <select className="fld" value={reason} onChange={(e) => setReason(e.target.value)}>{['nota_fiktif', 'galon_tidak_diterima', 'nominal_beda', 'pembayaran_tidak_disetor', 'pelanggan_menyangkal', 'lainnya'].map((r) => <option key={r} value={r}>{trD('disp.reason.' + r)}</option>)}</select>
+          <label className="fld-label">{trD('disp.petugas')}</label>
+          <input className="fld" value={staffName} onChange={(e) => setStaffName(e.target.value)} placeholder={trD('disp.petugasPh')} />
+          <label className="fld-label">{trD('disp.catatan')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <textarea className="fld" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('disp.catatanPh')} />
+          <label className="fld-label">{trD('disp.buktiUrl')}</label>
+          <input className="fld" value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="https://…" />
+          <label className="fld-label">{trD('disp.penyelesaian')}</label>
+          <div className="disp-res">{RES.map(([k, l, s]) => (
+            <button key={k} type="button" className={'disp-res-opt ' + (resolution === k ? 'on' : '')} onClick={() => setResolution(k)}>
+              <span className="disp-res-radio">{resolution === k ? <IconCheck s={12} /> : null}</span>
+              <span className="disp-res-body"><b>{l}</b><span className="disp-res-sub">{s}</span></span>
+            </button>
+          ))}</div>
+          <div className="disp-preview">
+            <span>{trD('cd.kpiSisaBon')}</span>
+            <b className="tnum">{rpFull(before)} → <span className={after < before ? 'neg' : ''}>{rpFull(after)}</span></b>
+            <small>{resolution !== 'investigasi' && after < before ? trD('disp.previewApply') : trD('disp.previewInvestigasi')}</small>
+          </div>
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!canSubmit} onClick={submit}>{busy ? '…' : trD('disp.submitBtn')}</button></div>
+      </div>
+    </div>
+  );
+}
+
 function AdjustModal({ customer, kind, onClose, onSaved }) {
   const isBon = kind === 'bon';
   const before = isBon ? (customer.sisaBon || 0) : (customer.gallonsHeld || 0);
@@ -2237,7 +2321,7 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, userName }) {
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onOpenLoss, userName }) {
   const [view, setView] = uSx('list');
   const [custs, setCusts] = uSx(null);
   const clParam0 = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
@@ -2272,6 +2356,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [typesOpen, setTypesOpen] = uSx(false);
   const [obFor, setObFor] = uSx(null);   // customer whose opening/carry-over bon is being entered
   const [adjustFor, setAdjustFor] = uSx(null);   // { customer, kind } — balance adjustment modal
+  const [disputeFor, setDisputeFor] = uSx(null); // { txn } — transaction dispute / loss modal
+  const [cdDispute, setCdDispute] = uSx('all');  // transaksi-tab dispute filter: all | disengketakan | lossed
   // ── Customer-detail redesign (presentation-only) state ──
   const [cdTab, setCdTabState] = uSx(() => { try { return new URLSearchParams(window.location.search).get('tab') || 'ringkasan'; } catch (e) { return 'ringkasan'; } });
   const setCdTab = (t) => { setCdTabState(t); try { const u = new URL(window.location.href); u.searchParams.set('tab', t); window.history.replaceState(null, '', u); } catch (e) {} };
@@ -2288,6 +2374,17 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
   const reverseAdjustment = (adjId) => { if (!window.confirm(trD('adj.reverseConfirm'))) return; window.API.distribusi.customers.reverseAdjustment(adjId)
     .then(() => { flash(trD('adj.reversed')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
+    .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'))); };
+  // ── Transaction DISPUTES (raise / approve / reverse). Approve+reverse are GM/owner; all re-open the
+  // detail so sisa bon + badges refresh. `raiseDispute` is submitted by the DisputeModal below. ──
+  const submitDispute = (txnId, body) => window.API.distribusi.customers.raiseDispute(txnId, body)
+    .then(() => { setDisputeFor(null); flash(trD('disp.raised')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
+    .catch((e) => { const m = (e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'); flash(m); throw e; });
+  const approveDispute = (dId) => window.API.distribusi.customers.approveDispute(dId)
+    .then(() => { flash(trD('disp.approved')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
+    .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')));
+  const reverseDispute = (dId) => { if (!window.confirm(trD('disp.reverseConfirm'))) return; window.API.distribusi.customers.reverseDispute(dId)
+    .then(() => { flash(trD('disp.reversed')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
     .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'))); };
   // ── Detailed filter (server-side, AND logic). EMPTY_FILTER is the "nothing selected"
   // baseline; `fTotal` is the denominator for "Menampilkan X dari Y".
@@ -2674,6 +2771,10 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     const txAll = (d && d.transactions) || [];
     const adjustments = (d && d.adjustments) || [];
     const pendingAdj = adjustments.filter((a) => a.status === 'pending');
+    // Problem-transaction summary (from the server's disputeSummary) → Ringkasan card + KPI chip.
+    const dsum = (d && d.disputeSummary) || { disengketakan: { n: 0, amount: 0 }, tidak_diakui: { n: 0, amount: 0 }, kerugian: { n: 0, amount: 0 } };
+    const problemN = dsum.disengketakan.n + dsum.tidak_diakui.n + dsum.kerugian.n;
+    const problemAmt = dsum.disengketakan.amount + dsum.tidak_diakui.amount + dsum.kerugian.amount;
     const txOldNew = txAll.slice().sort((a, b) => (a.txnDate || '').localeCompare(b.txnDate || '') || (a.createdAt || 0) - (b.createdAt || 0));
     const runMap = {}; let runBal = 0; txOldNew.forEach((t) => { runBal += bonEffectOf(t); runMap[t.id] = runBal; });   // running receivable after each row
     const lastTx = txOldNew.length ? txOldNew[txOldNew.length - 1] : null;
@@ -2696,7 +2797,13 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     const inPeriod = (t) => !pb || ((t.txnDate || '') >= pb.from && (t.txnDate || '') <= pb.to);
     const q = cdSearch.trim().toLowerCase();
     const matchSearch = (t) => !q || [txnCode(t), t.note, String(t.amount), String(t.effectiveAmount != null ? t.effectiveAmount : '')].some((x) => String(x || '').toLowerCase().includes(q));
-    const base = txAll.filter((t) => (cdArchive || !t.legacy) && inPeriod(t) && matchSearch(t));
+    const dispStatusOf = (t) => (t.dispute ? t.dispute.status : null);
+    const isLossed = (t) => dispStatusOf(t) === 'tidak_diakui' || dispStatusOf(t) === 'kerugian';
+    const base0 = txAll.filter((t) => (cdArchive || !t.legacy) && inPeriod(t) && matchSearch(t));
+    // Dispute chip counts (over the period/search set, before the dispute chip itself narrows).
+    const dispCounts = { disengketakan: 0, lossed: 0 };
+    base0.forEach((t) => { const s = dispStatusOf(t); if (s === 'disengketakan') dispCounts.disengketakan++; else if (s === 'tidak_diakui' || s === 'kerugian') dispCounts.lossed++; });
+    const base = base0.filter((t) => cdDispute === 'all' || (cdDispute === 'disengketakan' ? dispStatusOf(t) === 'disengketakan' : isLossed(t)));
     const typeCounts = { all: base.length, lunas: 0, bon: 0, pelunasan: 0 };
     base.forEach((t) => { if (typeCounts[t.method] != null) typeCounts[t.method]++; });
     const rowsFiltered = base.filter((t) => cdType === 'all' || t.method === cdType).sort((a, b) => (b.txnDate || '').localeCompare(a.txnDate || '') || (b.createdAt || 0) - (a.createdAt || 0));
@@ -2729,16 +2836,20 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     const TxnRow = (t) => {
       const amt = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
       const src = srcOf(t); const open = cdExpanded === t.id;
+      const dsp = t.dispute;                    // effective (latest) dispute for this transaction, or null
+      const dm = dsp ? DISPUTE_META[dsp.status] : null;
+      const struck = disputeDeducts(t);         // strike-through Nominal + show acknowledged amount
+      const hasActive = dsp && dsp.status !== 'diakui_kembali';
       return (
-        <div key={t.id} className={'cd-txn' + (t.voided ? ' voided' : '') + (open ? ' open' : '')}>
+        <div key={t.id} className={'cd-txn' + (t.voided ? ' voided' : '') + (struck ? ' disputed-out' : '') + (open ? ' open' : '')}>
           <button type="button" className="cd-txn-main" aria-expanded={open} onClick={() => runExpand(t)}>
-            <span className="cd-txn-bar" style={{ background: barOf(t) }} />
+            <span className="cd-txn-bar" style={{ background: struck ? '#dc2626' : barOf(t) }} />
             <span className="cd-txn-date"><b>{fmtDateShort(t.txnDate)}</b><small>{hhmm(t.createdAt)}</small></span>
             <span className="cd-txn-code">{txnCode(t)}<CopyBtn text={txnCode(t)} label={trD('cd.colKode')} /></span>
-            <span className="cd-txn-type"><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span>{t.voided && <span className="dist-badge rev">{trD('dist.voided') || 'Batal'}</span>}{t.corrected && <span className="dist-badge corr"><IconPencil s={9} />{trD('dist.corrected')}</span>}</span>
+            <span className="cd-txn-type"><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span>{t.voided && <span className="dist-badge rev">{trD('dist.voided') || 'Batal'}</span>}{t.corrected && <span className="dist-badge corr"><IconPencil s={9} />{trD('dist.corrected')}</span>}{dm && <span className={'dist-badge ' + dm.cls}>{trD(dm.label)}</span>}</span>
             <span className="cd-txn-gal tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</span>
             <span className="cd-txn-price tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</span>
-            <span className="cd-txn-amt tnum">{rpFull(amt)}</span>
+            <span className="cd-txn-amt tnum">{struck ? <><s className="cd-amt-struck">{rpFull(amt)}</s> <span className="cd-amt-ack">→ {trD('disp.ack')} {rpFull(dsp.customerClaimAmount || 0)}</span></> : rpFull(amt)}</span>
             <span className="cd-txn-run tnum" title={trD('cd.runningTip')}>{rpFull(Math.max(0, runMap[t.id] || 0))}</span>
             <span className={'cd-txn-src ' + src.cls}>{src.lbl}</span>
             <span className="cd-txn-staff">{t.actorName || '—'}</span>
@@ -2751,7 +2862,36 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
               <div><span>{trD('cd.expandSrc')}</span><b>{src.lbl}{t.importBatchId ? ' · ' + t.importBatchId : ''}</b></div>
               {t.note ? <div><span>{trD('cd.expandNote')}</span><b>{t.note}</b></div> : null}
               {t.voided ? <div><span>{trD('cd.actVoid')}</span><b>{t.voidReason || '—'}{t.voidedByName ? ' · ' + t.voidedByName : ''}</b></div> : null}
-              <div className="cd-txn-detail-act"><button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(t)}><IconInvoice s={13} />{trD('cd.copyDetail')}</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrintFor({ mode: 'nota', txn: t })}><IconDownload s={13} />{trD('cd.printNota')}</button></div>
+              {/* DISPUTE TRAIL — who raised it, when, why, evidence, who approved, and the linked loss. */}
+              {(dsp && (dsp.trail || []).length > 0) && (
+                <div className="cd-disp-trail">
+                  <div className="cd-disp-t-head"><IconWarn s={13} />{trD('disp.trailTitle')}{dm && <span className={'dist-badge ' + dm.cls}>{trD(dm.label)}</span>}</div>
+                  {(dsp.trail || []).map((x) => (
+                    <div key={x.id} className="cd-disp-t-row">
+                      <div className="cd-disp-t-main">
+                        <b>{trD('disp.reason.' + x.reason) || x.reason}</b>{x.disputedAmount ? ' · ' + trD('disp.selisih') + ' ' + rpFull(x.disputedAmount) : ''}
+                        <div className="cd-disp-t-sub">{x.note}</div>
+                        <div className="cd-disp-t-meta">
+                          {trD('disp.raisedBy')}: <b>{x.raisedByName || '—'}</b> · {fmtDateShort(x.createdAt)}
+                          {x.staffName ? ' · ' + trD('disp.staff') + ': ' + x.staffName : ''}
+                          {x.approvedByName ? ' · ' + trD('disp.approvedBy') + ': ' + x.approvedByName : ''}
+                          {(onOpenLoss && (x.staffLiabilityId || x.lossId)) ? <> · <button type="button" className="dist-link" onClick={() => onOpenLoss()}>{trD('disp.lihatKerugian')}</button></> : null}
+                        </div>
+                        {x.evidenceUrl ? <a className="cd-disp-evi" href={x.evidenceUrl} target="_blank" rel="noopener noreferrer"><IconInvoice s={12} />{trD('disp.bukti')}</a> : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="cd-txn-detail-act">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(t)}><IconInvoice s={13} />{trD('cd.copyDetail')}</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrintFor({ mode: 'nota', txn: t })}><IconDownload s={13} />{trD('cd.printNota')}</button>
+                {/* Dispute action — capability-gated (hidden, not disabled). Only when the row isn't
+                    already under an active dispute and isn't voided/pelunasan-loss. */}
+                {canBonAdjust && !t.voided && !hasActive && t.method !== 'pelunasan' && <button type="button" className="btn btn-ghost btn-sm cd-disp-btn" onClick={() => setDisputeFor({ txn: t })}><IconWarn s={13} />{trD('disp.markBtn')}</button>}
+                {isGmOwner && dsp && dsp.status === 'disengketakan' && <button type="button" className="btn btn-primary btn-sm" onClick={() => approveDispute(dsp.id)}><IconCheck s={13} />{trD('disp.approveBtn')}</button>}
+                {isGmOwner && dsp && (dsp.status === 'tidak_diakui' || dsp.status === 'kerugian') && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => reverseDispute(dsp.id)}><IconRefresh s={13} />{trD('disp.reverseBtn')}</button>}
+              </div>
             </div>
           )}
         </div>
@@ -2809,6 +2949,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
             <KpiCard label={trD('cd.kpiHarga')} value={rpFull(d.masterPrice)} sub={trD('dist.hargaPerGalon')} />
             <KpiCard label={trD('cd.kpi30')} value={numX(tx30)} sub={lastTx ? trD('cd.subLast', { d: fmtDateShort(lastTx.txnDate) }) : trD('cd.subNone')} />
             <KpiCard label={trD('cd.kpiLast')} value={lastTx ? fmtDateShort(lastTx.txnDate) : '—'} sub={lastTx ? methodLabel(lastTx.method) : trD('cd.subNone')} />
+            {problemN > 0 && <KpiCard tone="bon" label={trD('disp.kpiProblem')} value={numX(problemN) + ' · ' + rpFull(problemAmt)} sub={<button type="button" className="dist-link" onClick={() => { setCdTab('transaksi'); setCdDispute(dsum.tidak_diakui.n + dsum.kerugian.n > 0 ? 'lossed' : 'disengketakan'); }}>{trD('disp.lihatTransaksi')} →</button>} />}
           </div>
           {/* ── TABS ── */}
           <div className="cd-tabs no-print" role="tablist">
@@ -2834,6 +2975,18 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   <div className="cd-kv"><span>{trD('cd.custSince')}</span><b>{d.createdAt ? fmtDateShort(d.createdAt) : '—'}</b></div>
                 </div>
               </div>
+              {/* TRANSAKSI BERMASALAH — disputed / not-acknowledged / loss, broken down. */}
+              {problemN > 0 && (
+                <div className="card cd-card cd-problem-card">
+                  <div className="dist-card-head"><div className="sec-title"><IconWarn s={14} style={{ color: '#dc2626', verticalAlign: '-2px', marginRight: 5 }} />{trD('disp.summaryTitle')}</div><button type="button" className="dist-link" onClick={() => { setCdTab('transaksi'); setCdDispute('all'); }}>{trD('cd.tab.transaksi')} →</button></div>
+                  <div className="cd-problem-total"><b className="tnum">{numX(problemN)} {trD('disp.txnWord')}</b><span className="tnum">{rpFull(problemAmt)}</span></div>
+                  <div className="cd-problem-break">
+                    <div className="cd-problem-seg"><span className="dist-badge disp-amber">{trD('cd.dispDisengketakan')}</span><b className="tnum">{numX(dsum.disengketakan.n)}</b><span className="tnum">{rpFull(dsum.disengketakan.amount)}</span></div>
+                    <div className="cd-problem-seg"><span className="dist-badge disp-redout">{trD('cd.dispTidakDiakui')}</span><b className="tnum">{numX(dsum.tidak_diakui.n)}</b><span className="tnum">{rpFull(dsum.tidak_diakui.amount)}</span></div>
+                    <div className="cd-problem-seg"><span className="dist-badge disp-redsolid">{trD('cd.dispKerugian')}</span><b className="tnum">{numX(dsum.kerugian.n)}</b><span className="tnum">{rpFull(dsum.kerugian.amount)}</span></div>
+                  </div>
+                </div>
+              )}
               <div className="card cd-card">
                 <div className="dist-card-head"><div className="sec-title">{trD('dist.riwayat')}</div><button type="button" className="dist-link" onClick={() => setCdTab('transaksi')}>{trD('cd.tab.transaksi')} →</button></div>
                 {txOldNew.length === 0 ? <ListState state="empty" emptyText={trD('dist.noTxn')} emptyAction={canInput ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button> : null} /> : <div className="cd-txns compact">{rowsFiltered.slice(0, 5).map((t) => TxnRow(t))}</div>}
@@ -2849,6 +3002,14 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                 <div className="cd-chiprow">{[['all', trD('dist.fAll')], ['30', trD('cd.per30')], ['month', trD('cd.perThisMonth')], ['lastMonth', trD('cd.perLastMonth')], ['year', trD('cd.perThisYear')], ['range', trD('cd.perCustom')]].map(([k, l]) => <button key={k} type="button" className={'dist-chip ' + (cdPeriod === k ? 'on' : '')} onClick={() => setCdPeriod(k)}>{l}</button>)}</div>
                 {cdPeriod === 'range' && <div className="dist-period-range"><DP.DateField value={cdFrom} onChange={setCdFrom} max={cdTo || today} /><span>–</span><DP.DateField value={cdTo} onChange={setCdTo} min={cdFrom || undefined} max={today} /></div>}
                 <div className="cd-chiprow">{[['all', trD('dist.fAll') || 'Semua'], ['lunas', methodLabel('lunas')], ['bon', methodLabel('bon')], ['pelunasan', methodLabel('pelunasan')]].map(([k, l]) => <button key={k} type="button" className={'dist-chip ' + (cdType === k ? 'on' : '')} onClick={() => setCdType(k)}>{l} <span className="dist-imp-chipn">{typeCounts[k]}</span></button>)}</div>
+                {/* DISPUTE filter chips — only shown once a transaction is disputed. */}
+                {(dispCounts.disengketakan + dispCounts.lossed) > 0 && (
+                  <div className="cd-chiprow">
+                    <button type="button" className={'dist-chip ' + (cdDispute === 'all' ? 'on' : '')} onClick={() => setCdDispute('all')}>{trD('dist.fAll')}</button>
+                    <button type="button" className={'dist-chip cd-chip-disp ' + (cdDispute === 'disengketakan' ? 'on' : '')} onClick={() => setCdDispute('disengketakan')}>{trD('cd.dispDisengketakan')} <span className="dist-imp-chipn">{dispCounts.disengketakan}</span></button>
+                    <button type="button" className={'dist-chip cd-chip-disp ' + (cdDispute === 'lossed' ? 'on' : '')} onClick={() => setCdDispute('lossed')}>{trD('disp.chipLossed')} <span className="dist-imp-chipn">{dispCounts.lossed}</span></button>
+                  </div>
+                )}
                 <label className="cd-toggle"><input type="checkbox" checked={cdArchive} onChange={(e) => setCdArchive(e.target.checked)} />{trD('cd.showArchive')}</label>
                 <div style={{ flex: 1 }} />
                 <button type="button" className="btn btn-ghost btn-sm" disabled={!rowsFiltered.length} onClick={exportCsv}><IconDownload s={13} style={{ transform: 'rotate(180deg)' }} />{trD('rep.csv')}</button>
@@ -2861,7 +3022,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   <span>{trD('cd.colTanggal')}</span><span>{trD('cd.colKode')}</span><span>{trD('cd.colTipe')}</span><span className="r">{trD('cd.colGalon')}</span><span className="r">{trD('cd.colHarga')}</span><span className="r">{trD('cd.colNominal')}</span><span className="r" title={trD('cd.runningTip')}>{trD('cd.colRunning')}</span><span>{trD('cd.colSumber')}</span><span>{trD('cd.colPetugas')}</span><span />
                 </div>
                 {txAll.length === 0 ? <ListState state="empty" emptyText={trD('dist.noTxn')} emptyAction={canInput ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button> : null} />
-                  : rowsFiltered.length === 0 ? <ListState state="nofilter" onClear={() => { setCdSearch(''); setCdType('all'); setCdPeriod('all'); setCdArchive(true); }} />
+                  : rowsFiltered.length === 0 ? <ListState state="nofilter" onClear={() => { setCdSearch(''); setCdType('all'); setCdPeriod('all'); setCdArchive(true); setCdDispute('all'); }} />
                   : monthOrder.map((mk) => (
                     <div key={mk} className="cd-month">
                       <div className="cd-month-head"><b>{fmtMonthYear(mk)}</b><span>{trD('cd.monthSub', { g: numX(monthMap[mk].galon), v: rpFull(monthMap[mk].nilai), b: (monthMap[mk].bon >= 0 ? '+' : '') + rpFull(monthMap[mk].bon) })}</span></div>
@@ -2955,6 +3116,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
         {pnrFor && <PaymentNotReceivedModal customer={pnrFor} today={new Date().toISOString().slice(0, 10)} onClose={() => setPnrFor(null)} onSaved={(res) => { setPnrFor(null); flash(trD('pnr.saved', { amt: rpFull(res.amount), who: res.responsibleName || '' })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {obFor && <OpeningBonModal customer={obFor} onClose={() => setObFor(null)} onSaved={(res) => { setObFor(null); flash(trD('dist.obSaved', { amt: rpFull(res.amount) })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {adjustFor && <AdjustModal customer={adjustFor.customer} kind={adjustFor.kind} onClose={() => setAdjustFor(null)} onSaved={() => { setAdjustFor(null); flash(trD('adj.submitted')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
+        {disputeFor && d && <DisputeModal txn={disputeFor.txn} customer={d} onClose={() => setDisputeFor(null)} onSubmit={submitDispute} />}
         {renderForm()}
         {typesModal()}
         {delFor && <DeleteCustomerModal customer={delFor} busy={delBusy} onDeactivate={doDeactivate} onDelete={doDeletePermanent} onClose={() => setDelFor(null)} />}
@@ -4421,17 +4583,20 @@ function DistLossReport({ refreshKey, today, fleetScope, fleet, distFleet, setDi
             <div className="dist-card-head"><div className="sec-title">{trD('loss.detail')}</div></div>
             <div className="run-table-wrap">
               <table className="run-table loss-table">
-                <thead><tr><th>{trD('dist.fDate')}</th><th>{trD('dist.fCust')}</th><th className="num">{trD('pnr.amount')}</th><th>{trD('pnr.staff')}</th><th>{trD('pnr.reason')}</th><th>{trD('loss.recordedBy')}</th><th /></tr></thead>
+                <thead><tr><th>{trD('dist.fDate')}</th><th>{trD('loss.colSource')}</th><th>{trD('dist.fCust')}</th><th className="num">{trD('pnr.amount')}</th><th>{trD('pnr.staff')}</th><th>{trD('pnr.reason')}</th><th>{trD('loss.recordedBy')}</th><th /></tr></thead>
                 <tbody>
                   {rep.items.map((x) => (
                     <tr key={x.id} className={x.voided ? 'loss-void' : ''}>
                       <td className="tnum">{x.txnDate}</td>
-                      <td>{x.customerName}{x.customerCode ? <small> · {x.customerCode}</small> : null}</td>
+                      <td>{x.source === 'dispute'
+                        ? <span className={'dist-badge ' + (x.disputeStatus === 'kerugian' ? 'disp-redsolid' : 'disp-redout')} title={'#' + String(x.transactionId || '').slice(-6).toUpperCase()}>{trD('loss.srcDispute')}</span>
+                        : <span className="dist-badge">{trD('loss.srcPnr')}</span>}</td>
+                      <td>{x.customerName}{x.customerCode ? <small> · {x.customerCode}</small> : null}{x.source === 'dispute' ? <small> · #{String(x.transactionId || '').slice(-6).toUpperCase()}</small> : null}</td>
                       <td className="num">{rpFull(x.amount)}{x.voided ? <span className="dist-badge void">{trD('loss.voided')}</span> : null}</td>
                       <td><b>{x.responsibleName || '—'}</b></td>
-                      <td className="loss-reason">{x.lossReason}{x.voided && x.voidReason ? <small> · {trD('loss.voidReason')}: {x.voidReason}</small> : null}</td>
+                      <td className="loss-reason">{x.source === 'dispute' ? (trD('disp.reason.' + x.lossReason) || x.lossReason) : x.lossReason}{x.voided && x.voidReason ? <small> · {trD('loss.voidReason')}: {x.voidReason}</small> : null}</td>
                       <td><small>{x.recordedByName || '—'}{x.createdAt ? ' · ' + fmtDT(x.createdAt) : ''}</small></td>
-                      <td>{x.lossPhotoId ? <button type="button" className="dist-link" onClick={() => viewProof(x.lossPhotoId)}>{trD('pnr.proofView')}</button> : null}</td>
+                      <td>{x.lossPhotoId ? <button type="button" className="dist-link" onClick={() => viewProof(x.lossPhotoId)}>{trD('pnr.proofView')}</button> : x.evidenceUrl ? <a className="dist-link" href={x.evidenceUrl} target="_blank" rel="noopener noreferrer">{trD('pnr.proofView')}</a> : null}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -29,6 +29,7 @@ async function resetDb() {
   await prisma.delivery.deleteMany();          // delivery-board stops (FK → customer)
   await prisma.distInvoice.deleteMany();       // invoices (FK → customer)
   await prisma.distAdjustment.deleteMany();    // balance adjustments (FK → customer, RESTRICT)
+  await prisma.distTransactionDispute.deleteMany();   // transaction disputes (FK → customer, RESTRICT)
   await prisma.customer.deleteMany();
   await prisma.customerCode.deleteMany();       // customer-code counter (append-only in prod)
   await prisma.customerType.deleteMany();

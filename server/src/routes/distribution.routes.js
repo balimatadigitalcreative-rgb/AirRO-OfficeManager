@@ -96,6 +96,13 @@ router.post('/transactions/:id/archive', requireCap('distribusiLegacyImport'), v
 // The same cap gates the internal loss report below; nothing here is ever customer-facing.
 router.post('/transactions/payment-not-received', requireCap('distribusiBonAdjust'), validate({ body: ctrl.schemas.pnrSchema }), ctrl.createPaymentNotReceived);
 router.get('/reports/loss', requireCap('distribusiBonAdjust'), validate({ query: ctrl.schemas.lossQuery }), ctrl.lossReport);
+// TRANSACTION DISPUTE / LOSS — mark a transaction disputed → tidak diakui / kerugian. The transaction
+// is never mutated; only a side-table STATUS changes. Same owner/GM-tier cap as the loss report;
+// approve/reverse are additionally GM/owner-only (enforced in the service). The staff linked to the
+// transaction can never raise or approve a dispute on their own transaction (server-enforced).
+router.post('/transactions/:id/dispute', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.disputeSchema }), ctrl.raiseDispute);
+router.post('/disputes/:id/approve', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.disputeApproveSchema }), ctrl.approveDispute);
+router.post('/disputes/:id/reverse', requireCap('distribusiBonAdjust'), validate({ params: ctrl.schemas.idParams }), ctrl.reverseDispute);
 // HARD DELETE (permanent) — OWNER-ONLY last resort. Cap: distribusiHardDelete (granted to no one
 // but owner by default). Typed ref/HAPUS + password + reason enforced in the service; an audit
 // entry is written BEFORE the row is removed, so a trace always survives. Fleet-scoped.
