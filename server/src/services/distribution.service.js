@@ -1893,6 +1893,9 @@ async function createInvoice(customerId, body, actor) {
   const scope = body.scope || 'unpaidBon';
   if (scope === 'period') { where.txnDate = {}; if (body.dateFrom) where.txnDate.gte = body.dateFrom; if (body.dateTo) where.txnDate.lte = body.dateTo; }
   let txns = await prisma.distTransaction.findMany({ where, orderBy: [{ txnDate: 'asc' }, { createdAt: 'asc' }], include: { corrections: true } });
+  // Disputed (tidak_diakui/kerugian) rows are NOT billed — the customer does not owe them.
+  const ded = await disputeDeductions({ customerId });
+  txns = txns.filter((t) => !ded[t.id]);
   if (Array.isArray(body.transactionIds) && body.transactionIds.length) {
     const set = new Set(body.transactionIds);
     txns = txns.filter((t) => set.has(t.id));
@@ -1904,17 +1907,26 @@ async function createInvoice(customerId, body, actor) {
   const total = items.reduce((s, it) => s + it.amount, 0);
   const sisaBon = await customerBonBalance(customerId);
   const issueDate = todayISO();
-  const prefix = 'INV-' + issueDate.replace(/-/g, '') + '-';
-  const cnt = await prisma.distInvoice.count({ where: { number: { startsWith: prefix } } });
-  const number = prefix + String(cnt + 1).padStart(4, '0');
+  // Sequential, unique invoice number INV-YYYYMM-#### (monthly). Race-safe: derive from the current
+  // MAX for the month (ignores deletion gaps) and retry on the @unique clash so two concurrent
+  // creates never collide (mirrors allocateCustomerCode). No count-based off-by-one, no P2002 500.
+  const prefix = 'INV-' + issueDate.slice(0, 7).replace('-', '') + '-';
   const snap = await actorSnap(actor);
-  const inv = await prisma.distInvoice.create({ data: {
-    number, customerId, fleetId: customer.armada || '', issueDate, dueDate: (body.dueDate || '').trim(),
-    items: JSON.stringify(items), total, sisaBon, note: (body.note || '').trim(),
-    createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
-  } });
-  await logAudit('pelanggan', `Invoice ${number}: ${customer.name}`, `${items.length} item · total ${total} · jatuh tempo ${body.dueDate || '-'}`, snap, customer.armada);
-  return invoiceClient(inv, customer);
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const rows = await prisma.distInvoice.findMany({ where: { number: { startsWith: prefix } }, select: { number: true } });
+    let maxSeq = 0; rows.forEach((r) => { const m = /-(\d+)$/.exec(r.number); if (m) { const n = parseInt(m[1], 10); if (n > maxSeq) maxSeq = n; } });
+    const number = prefix + String(maxSeq + 1).padStart(4, '0');
+    try {
+      const inv = await prisma.distInvoice.create({ data: {
+        number, customerId, fleetId: customer.armada || '', issueDate, dueDate: (body.dueDate || '').trim(),
+        items: JSON.stringify(items), total, sisaBon, note: (body.note || '').trim(),
+        createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
+      } });
+      await logAudit('pelanggan', `Invoice ${number}: ${customer.name}`, `${items.length} item · total ${total} · jatuh tempo ${body.dueDate || '-'}`, snap, customer.armada);
+      return invoiceClient(inv, customer);
+    } catch (e) { if (e && e.code === 'P2002') continue; throw e; }
+  }
+  throw ApiError.conflict('Gagal membuat nomor invoice (terlalu banyak bentrokan, coba lagi).');
 }
 async function listInvoices(customerId, user) {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });

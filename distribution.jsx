@@ -1599,7 +1599,10 @@ function InvoiceBuilder({ customer, onClose, onCreated }) {
   const [err, setErr] = uSx('');
   const today = (window.FIN && FIN.TODAY) || new Date().toISOString().slice(0, 10);
   uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  const txns = (customer.transactions || []).filter((t) => t.method !== 'pelunasan');
+  // Bill ONLY what the server will accept: live (non-legacy, non-void) lunas/bon sales, minus
+  // disputed (tidak_diakui/kerugian) rows. This keeps the button state honest — no more "enabled
+  // but the server returns 400 Tidak ada transaksi".
+  const txns = (customer.transactions || []).filter((t) => (t.method === 'lunas' || t.method === 'bon') && !t.legacy && !t.voided && !disputeDeducts(t));
   const preview = txns.filter((t) => {
     if (scope === 'unpaidBon') return t.method === 'bon';
     if (scope === 'period') return (!dateFrom || t.txnDate >= dateFrom) && (!dateTo || t.txnDate <= dateTo);
@@ -1635,6 +1638,7 @@ function InvoiceBuilder({ customer, onClose, onCreated }) {
           <label className="fld-label">{trD('dist.note')}</label>
           <input className="fld" value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.notePh')} />
           <div className="dist-lockrow" style={{ marginTop: 12 }}><span className="dist-lockrow-l"><IconInvoice s={14} />{trD('dist.invPreview', { n: preview.length })}</span><span className="dist-lockrow-r">{rpFull(total)}</span></div>
+          {preview.length === 0 && !err && <div className="dist-hint" style={{ marginTop: 8 }}><IconWarn s={12} />{trD('dist.invNoneBillable')}</div>}
           {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
         </div>
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!preview.length || saving} onClick={create}>{saving ? '…' : trD('dist.invCreate')}</button></div>
@@ -1654,34 +1658,49 @@ function InvoiceViewer({ invoice, onClose }) {
       iv.dueDate ? trD('dist.dueDate') + ': ' + iv.dueDate : ''].filter(Boolean);
     window.open('https://wa.me/' + waNumber(cust.phone) + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
   };
+  const ketOf = (it) => it.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
   return (
-    <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 210 }}>
-      <div className="invoice-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="inv-head">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><Logo s={34} /><div><div className="inv-biz">{BIZ_NAME}</div><div className="inv-biz-sub">{BIZ_SUB}</div></div></div>
-          <div className="inv-actions no-print">
-            <button className="btn btn-ghost" onClick={() => window.print()}><IconDownload s={16} />{trD('dist.print')}</button>
-            {cust.phone ? <button className="btn btn-ghost" onClick={share}><IconInvoice s={16} />WhatsApp</button> : null}
-            <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+    <div className="modal-scrim invoice-overlay pc-overlay" onClick={onClose} style={{ zIndex: 210 }}>
+      <div className="invoice-sheet pc-sheet pc-doc pc-a4 pc-customer pc-invoice" onClick={(e) => e.stopPropagation()}>
+        <div className="pc-toolbar no-print">
+          <span className="pc-audlabel">{trD('dist.makeInvoice')}</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn btn-primary" onClick={() => window.print()}><IconDownload s={16} />{trD('dist.print')}</button>
+          {cust.phone ? <button className="btn btn-ghost" onClick={share}><IconWhatsApp s={16} />WhatsApp</button> : null}
+          <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+        </div>
+        <div className="pc-dochead">
+          <div className="pc-biz"><Logo s={38} /><div><div className="pc-bizname">{BIZ_NAME}</div><div className="pc-bizsub">{BIZ_SUB}</div></div></div>
+          <div className="pc-doctitle">{trD('inv.title')}</div>
+        </div>
+        <div className="pc-docmeta">
+          <div className="pc-custblock">
+            <div className="pc-custname">{cust.name}</div>
+            <div className="pc-custsub">{[cust.code, cust.phone].filter(Boolean).join(' · ') || '—'}</div>
+          </div>
+          <div className="pc-metaright">
+            <div><span>{trD('inv.no')}:</span> <b>{iv.number}</b></div>
+            <div><span>{trD('dist.issueDate')}:</span> <b>{fmtDateShort(iv.issueDate)}</b></div>
+            {iv.dueDate ? <div><span>{trD('dist.dueDate')}:</span> <b>{fmtDateShort(iv.dueDate)}</b></div> : null}
           </div>
         </div>
-        <div className="inv-meta">
-          <div><div className="inv-title">INVOICE / NOTA</div><div className="inv-num">{iv.number}</div></div>
-          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{cust.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{cust.phone || ''}</div></div>
+        <table className="pc-table pc-doctable">
+          <thead><tr><th>{trD('pc.colDate')}</th><th>{trD('pc.colKet')}</th><th className="r">{trD('pc.colGalon')}</th><th className="r">{trD('pc.colUnit')}</th><th className="r">{trD('pc.colAmount')}</th></tr></thead>
+          <tbody>{iv.items.map((it, i) => (<tr key={i}><td className="tnum">{fmtDateShort(it.date)}</td><td className="pc-ket">{ketOf(it)}</td><td className="r tnum">{numX(it.qty)}</td><td className="r tnum">{rpFull(it.unitPrice)}</td><td className="r tnum">{rpFull(it.amount)}</td></tr>))}</tbody>
+        </table>
+        <div className="pc-totalbox">
+          <div className="pc-total-row"><span>{trD('inv.totalItems')}</span><b className="tnum">{rpFull(iv.total)}</b></div>
+          <div className="pc-total-row pc-sisa"><span>{trD('inv.amountDue')}</span><b className="tnum" data-testid="inv-due">{rpFull(iv.sisaBon)}</b></div>
         </div>
-        <div className="inv-dates"><span>{trD('dist.issueDate')}: <b>{iv.issueDate}</b></span>{iv.dueDate ? <span>{trD('dist.dueDate')}: <b>{iv.dueDate}</b></span> : null}</div>
-        <div className="inv-table-wrap">
-          <table className="inv-table">
-            <thead><tr><th>{trD('dist.date')}</th><th>{trD('dist.item')}</th><th className="r">Qty</th><th className="r">{trD('dist.hargaPerGalon')}</th><th className="r">Subtotal</th></tr></thead>
-            <tbody>{iv.items.map((it, i) => (<tr key={i}><td className="tnum">{it.date}</td><td>{trD('dist.galonUnit')} · {methodLabel(it.method)}</td><td className="r tnum">{numX(it.qty)}</td><td className="r tnum">{rpFull(it.unitPrice)}</td><td className="r tnum">{rpFull(it.amount)}</td></tr>))}</tbody>
-            <tfoot><tr><td colSpan="4" className="r"><b>{trD('dist.total')}</b></td><td className="r tnum"><b>{rpFull(iv.total)}</b></td></tr></tfoot>
-          </table>
+        <div className="pc-docfoot">
+          {iv.note ? <div className="pc-payinfo">{iv.note}</div> : null}
+          <div className="pc-payinfo"><b>{trD('pc.payLbl')}:</b> {trD('pc.payInfo')}</div>
+          <div className="pc-sign">
+            <div><div className="pc-sign-line" />{trD('pc.signCust')}</div>
+            <div><div className="pc-sign-line" />{trD('pc.signStaff')}</div>
+          </div>
+          <div className="pc-printedby no-print">{trD('dist.invBy')}: {iv.createdByName || '—'} · {fmtDateShort(iv.issueDate)}</div>
         </div>
-        <div className="inv-foot">
-          <div className="inv-sisa"><span>{trD('dist.sisaBon')}</span><b className="tnum">{rpFull(iv.sisaBon)}</b></div>
-          {iv.note ? <div className="inv-note">{iv.note}</div> : null}
-        </div>
-        <div className="inv-by no-print">{trD('dist.invBy')}: {iv.createdByName || '—'} · {iv.issueDate}</div>
       </div>
     </div>
   );
@@ -1721,6 +1740,8 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
   const [incAdj, setIncAdj] = uSx(() => pref.incAdj != null ? pref.incAdj : true);
   const [format, setFormat] = uSx(() => pref.format || 'a4');    // a4 | r58 | r80
   const [output, setOutput] = uSx(() => pref.output || 'print'); // print | pdf | wa
+  const [audience, setAudience] = uSx(() => pref.audience || 'customer'); // customer | internal
+  const internal = audience === 'internal';
   const isNota = mode === 'nota';
   const today = printToday();
   const now = new Date(); const p2 = (n) => String(n).padStart(2, '0');
@@ -1750,15 +1771,23 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
     matchSearch(t)
   ));
   const effOf = (t) => (t.effectiveAmount != null ? t.effectiveAmount : t.amount);
+  // CUSTOMER version EXCLUDES disputed (tidak_diakui/kerugian) rows — they are not being billed.
+  // Their effect is already out of Sisa Bon, so the totals still reconcile. INTERNAL keeps everything.
+  const docRows = internal ? rows : rows.filter((t) => !disputeDeducts(t));
   let galon = 0, pembelian = 0, pembayaran = 0, disputedTotal = 0;
-  rows.forEach((t) => {
+  docRows.forEach((t) => {
     if (t.voided) return;
     galon += t.legacy ? 0 : (t.qty || 0);
     if (t.method === 'lunas') { pembelian += effOf(t); pembayaran += effOf(t); }
     else if (t.method === 'bon') { pembelian += effOf(t); }
     else if (t.method === 'pelunasan') { pembayaran += t.amount; }
-    if (disputeDeducts(t)) disputedTotal += (t.dispute.disputedAmount || 0);   // tidak diakui / kerugian
+    if (disputeDeducts(t)) disputedTotal += (t.dispute.disputedAmount || 0);   // internal only (customer excludes them)
   });
+  // Group the document rows by month for a subtotal per month + a visible gap between groups.
+  const monthOrder = []; const monthMap = {};
+  docRows.forEach((t) => { const k = monthKeyOf(t) || '—'; if (!monthMap[k]) { monthMap[k] = { rows: [], galon: 0, jumlah: 0 }; monthOrder.push(k); } const g = monthMap[k]; g.rows.push(t); if (!t.voided) { g.galon += t.legacy ? 0 : (t.qty || 0); g.jumlah += (t.method === 'pelunasan' ? -t.amount : effOf(t)); } });
+  // Plain-language description for the customer version — no codes, no badges.
+  const ketOf = (t) => t.method === 'pelunasan' ? trD('pc.ketBayar') : t.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
   const approvedAdj = (customer.adjustments || []).filter((a) => a.status === 'approved');
   const adjBonTotal = approvedAdj.filter((a) => a.kind === 'bon').reduce((s, a) => s + ((a.after || 0) - (a.before || 0)), 0);
   const sisaAkhir = customer.sisaBon || 0;   // == the on-screen Sisa Bon KPI, by construction
@@ -1775,7 +1804,7 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
     window.open('https://wa.me/' + waNumber(customer.phone) + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
   };
   const commit = () => {
-    savePrintPrefs({ period, incArchive, incAdj, format, output });
+    savePrintPrefs({ period, incArchive, incAdj, format, output, audience });
     if (output === 'wa') { share(); onClose(); return; }
     setStep('doc');
   };
@@ -1791,8 +1820,14 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
         <div className="modal-card pc-optcard" onClick={(e) => e.stopPropagation()}>
           <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{isNota ? trD('pc.titleNota') : trD('pc.titleStatement')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.code ? customer.code + ' · ' : ''}{customer.name}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
           <div className="modal-body">
+            {/* Audience toggle — customer-facing (default, hides internal metadata) vs internal archive. */}
+            <label className="fld-label" style={{ marginTop: 0 }}>{trD('pc.audience')}</label>
+            <div className="cat-chips">
+              <button type="button" className={`cat-chip ${!internal ? 'on' : ''}`} onClick={() => setAudience('customer')}>{trD('pc.audCustomer')}</button>
+              <button type="button" className={`cat-chip ${internal ? 'on' : ''}`} onClick={() => setAudience('internal')}>{trD('pc.audInternal')}</button>
+            </div>
             {!isNota && (<>
-              <label className="fld-label" style={{ marginTop: 0 }}>{trD('pc.period')}</label>
+              <label className="fld-label">{trD('pc.period')}</label>
               <div className="cat-chips">{periodOpts.map(([k, l]) => <button key={k} type="button" className={`cat-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
               {period === 'range' && (
                 <div className="dist-form-row" style={{ marginTop: 10 }}>
@@ -1814,64 +1849,88 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
     );
   }
 
-  // ── PREVIEW / DOCUMENT STEP ──
-  const custLine2 = [customer.phone || '—', customer.type ? typeLabel(customer.type) : '', customer.armada || ''].filter(Boolean).join(' · ');
+  // ── PREVIEW / DOCUMENT STEP ── (readable A4 document; two audiences share one engine)
+  const periodPlain = isNota ? '' : (pb ? (fmtDateShort(pb.from) + ' – ' + fmtDateShort(pb.to)) : trD('dist.periodAll'));
+  const colCount = isNota ? 6 : (internal ? 7 : 6);
+  const docRow = (t) => {
+    const dOut = internal && disputeDeducts(t);
+    const dm = internal && t.dispute ? DISPUTE_META[t.dispute.status] : null;
+    return (
+      <tr key={t.id} className={(t.voided ? 'pc-voidrow' : '') + (dOut ? ' pc-disprow' : '')}>
+        <td className="tnum">{fmtDateShort(t.txnDate)}</td>
+        {(internal && !isNota) || isNota ? <td className="tnum pc-code">{txnCode(t)}</td> : null}
+        <td className="pc-ket">
+          {internal ? methodLabel(t.method) : ketOf(t)}
+          {internal && t.legacy ? <span className="pc-tag arsip">{trD('pc.tagArsip')}</span> : null}
+          {internal && t.openingBon ? <span className="pc-tag">{trD('dist.obLabel')}</span> : null}
+          {internal && t.voided ? <span className="pc-tag batal">{trD('pc.tagBatal')}</span> : null}
+          {dm ? <span className={'pc-tag ' + (t.dispute.status === 'kerugian' || t.dispute.status === 'tidak_diakui' ? 'batal' : t.dispute.status === 'diakui_kembali' ? 'pnys' : 'arsip')}>{trD(dm.label)}</span> : null}
+          {internal && t.note ? <span className="pc-note"> · {t.note}</span> : null}
+        </td>
+        <td className="r tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</td>
+        <td className="r tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</td>
+        <td className="r tnum">{dOut ? <><s>{rpFull(effOf(t))}</s> → {rpFull(t.dispute.customerClaimAmount || 0)}</> : rpFull(effOf(t))}</td>
+        {!isNota && <td className="r tnum">{rpFull(Math.max(0, runMap[t.id] || 0))}</td>}
+      </tr>
+    );
+  };
   return (
-    <div className="modal-scrim invoice-overlay" onClick={onClose} style={{ zIndex: 240 }}>
-      <div className={'invoice-sheet dist-hist-sheet pc-sheet pc-' + format} data-sisa-akhir={sisaAkhir} onClick={(e) => e.stopPropagation()}>
-        <div className="inv-head">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}><Logo s={34} /><div><div className="inv-biz">{BIZ_NAME}</div><div className="inv-biz-sub">{BIZ_SUB}</div></div></div>
-          <div className="inv-actions no-print">
-            <button className="btn btn-ghost" onClick={() => setStep('opt')}><IconCaret s={15} style={{ transform: 'rotate(90deg)' }} />{trD('pc.back')}</button>
-            <button className="btn btn-primary" onClick={doPrint}><IconDownload s={16} />{output === 'pdf' ? trD('pc.outPdf') : trD('dist.print')}</button>
-            {customer.phone ? <button className="btn btn-ghost" onClick={share}><IconWhatsApp s={16} />WhatsApp</button> : null}
-            <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+    <div className="modal-scrim invoice-overlay pc-overlay" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className={'invoice-sheet pc-sheet pc-doc pc-' + format + (internal ? ' pc-internal' : ' pc-customer')} data-sisa-akhir={sisaAkhir} data-audience={audience} onClick={(e) => e.stopPropagation()}>
+        <div className="pc-toolbar no-print">
+          <button className="btn btn-ghost" onClick={() => setStep('opt')}><IconCaret s={15} style={{ transform: 'rotate(90deg)' }} />{trD('pc.back')}</button>
+          <span className="pc-audlabel">{internal ? trD('pc.audInternal') : trD('pc.audCustomer')}</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn btn-primary" onClick={doPrint}><IconDownload s={16} />{output === 'pdf' ? trD('pc.outPdf') : trD('dist.print')}</button>
+          {customer.phone ? <button className="btn btn-ghost" onClick={share}><IconWhatsApp s={16} />WhatsApp</button> : null}
+          <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
+        </div>
+        {/* HEADER */}
+        <div className="pc-dochead">
+          <div className="pc-biz"><Logo s={38} /><div><div className="pc-bizname">{BIZ_NAME}</div><div className="pc-bizsub">{BIZ_SUB}</div></div></div>
+          <div className="pc-doctitle">{isNota ? trD('pc.docNota') : trD('pc.docStatement')}</div>
+        </div>
+        {/* CUSTOMER + META */}
+        <div className="pc-docmeta">
+          <div className="pc-custblock">
+            <div className="pc-custname">{customer.name}</div>
+            <div className="pc-custsub">{[customer.code, customer.phone].filter(Boolean).join(' · ') || '—'}</div>
+            {internal && customer.address ? <div className="pc-custsub">{customer.address}</div> : null}
+          </div>
+          <div className="pc-metaright">
+            <div><span>{trD('pc.docNoLbl')}:</span> <b>{docNo}</b></div>
+            <div><span>{trD('pc.printDate')}:</span> <b>{fmtDateShort(stamp)}</b></div>
+            {!isNota ? <div><span>{trD('dist.period')}:</span> <b>{periodPlain}</b></div> : (txn ? <div><span>{trD('pc.colCode')}:</span> <b>{txnCode(txn)}</b></div> : null)}
           </div>
         </div>
-        <div className="inv-meta">
-          <div><div className="inv-title">{isNota ? trD('pc.docNota') : trD('pc.docStatement')}</div><div className="inv-num">{docNo}</div></div>
-          <div className="inv-to"><div className="inv-lbl">{trD('dist.invTo')}</div><b>{customer.code ? customer.code + ' · ' : ''}{customer.name}</b><div style={{ color: 'var(--text-mut)', fontSize: 12.5 }}>{custLine2}</div>{customer.address ? <div style={{ color: 'var(--text-mut)', fontSize: 12 }}>{customer.address}</div> : null}</div>
-        </div>
-        <div className="inv-dates"><span>{trD('pc.printDate')}: <b>{stamp}</b></span>{!isNota && <span>{trD('dist.period')}: <b>{periodLabel}</b></span>}</div>
-        <div className="inv-table-wrap">
-          <table className="inv-table dist-hist-table pc-table">
-            <thead><tr>
-              <th>{trD('pc.colDate')}</th><th>{trD('pc.colCode')}</th><th>{trD('pc.colType')}</th>
-              <th className="r">{trD('pc.colGalon')}</th><th className="r">{trD('pc.colUnit')}</th><th className="r">{trD('pc.colAmount')}</th>
-              {!isNota && <th className="r">{trD('pc.colRunning')}</th>}
-            </tr></thead>
-            <tbody>{rows.length === 0
-              ? <tr><td colSpan={isNota ? 6 : 7} style={{ textAlign: 'center', color: 'var(--text-mut)', padding: 18 }}>{trD('dist.noTxn')}</td></tr>
-              : rows.map((t) => {
-                const dOut = disputeDeducts(t);
-                const dm = t.dispute ? DISPUTE_META[t.dispute.status] : null;
-                return (
-                <tr key={t.id} className={(t.voided ? 'pc-voidrow' : '') + (dOut ? ' pc-disprow' : '')}>
-                  <td className="tnum">{fmtDateShort(t.txnDate)}</td>
-                  <td className="tnum">{txnCode(t)}</td>
-                  <td>{methodLabel(t.method)}
-                    {t.legacy ? <span className="pc-tag arsip">{trD('pc.tagArsip')}</span> : null}
-                    {t.openingBon ? <span className="pc-tag">{trD('dist.obLabel')}</span> : null}
-                    {t.voided ? <span className="pc-tag batal">{trD('pc.tagBatal')}</span> : null}
-                    {dm ? <span className={'pc-tag ' + (t.dispute.status === 'kerugian' || t.dispute.status === 'tidak_diakui' ? 'batal' : t.dispute.status === 'diakui_kembali' ? 'pnys' : 'arsip')}>{trD(dm.label)}</span> : null}
-                    {t.note ? <span className="pc-note"> · {t.note}</span> : null}
-                  </td>
-                  <td className="r tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</td>
-                  <td className="r tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</td>
-                  <td className="r tnum">{dOut ? <><s>{rpFull(effOf(t))}</s> → {rpFull(t.dispute.customerClaimAmount || 0)}</> : rpFull(effOf(t))}</td>
-                  {!isNota && <td className="r tnum">{rpFull(Math.max(0, runMap[t.id] || 0))}</td>}
-                </tr>
-                );
-              })}</tbody>
-          </table>
-        </div>
-        {/* Approved balance adjustments — their own section so the statement reconciles to sisa bon. */}
-        {!isNota && incAdj && approvedAdj.length > 0 && (
+        {/* TABLE */}
+        <table className="pc-table pc-doctable">
+          <thead><tr>
+            <th>{trD('pc.colDate')}</th>
+            {(internal && !isNota) || isNota ? <th>{trD('pc.colCode')}</th> : null}
+            <th>{internal ? trD('pc.colType') : trD('pc.colKet')}</th>
+            <th className="r">{trD('pc.colGalon')}</th><th className="r">{trD('pc.colUnit')}</th><th className="r">{trD('pc.colAmount')}</th>
+            {!isNota && <th className="r">{trD('pc.colRunning')}</th>}
+          </tr></thead>
+          {docRows.length === 0
+            ? <tbody><tr><td colSpan={colCount} style={{ textAlign: 'center', padding: 18 }}>{trD('dist.noTxn')}</td></tr></tbody>
+            : isNota
+              ? <tbody>{docRows.map((t) => docRow(t))}</tbody>
+              : monthOrder.map((mk) => (
+                <tbody key={mk} className="pc-monthgrp">
+                  <tr className="pc-month-head"><td colSpan={colCount}>{fmtMonthYear(mk)}</td></tr>
+                  {monthMap[mk].rows.map((t) => docRow(t))}
+                  <tr className="pc-month-sub"><td colSpan={colCount - 3} className="r">{trD('pc.monthSubtotal')}</td><td className="r tnum">{numX(monthMap[mk].galon)}</td><td /><td className="r tnum">{rpFull(monthMap[mk].jumlah)}</td>{!isNota ? <td /> : null}</tr>
+                </tbody>
+              ))}
+        </table>
+        {/* INTERNAL only: detailed adjustments table with reason codes. */}
+        {internal && !isNota && incAdj && approvedAdj.length > 0 && (
           <div style={{ marginTop: 12 }}>
-            <div className="sec-title" style={{ marginBottom: 6 }}>{trD('adj.tableTitle')} <span className="pc-tag pnys">{trD('pc.tagPenyesuaian')}</span></div>
-            <table className="dist-hist-table pc-table"><thead><tr><th>{trD('adj.colDate')}</th><th>{trD('adj.colKind')}</th><th className="r">{trD('adj.colChange')}</th><th>{trD('adj.colReason')}</th></tr></thead>
+            <div className="pc-sectitle">{trD('adj.tableTitle')}</div>
+            <table className="pc-table pc-doctable"><thead><tr><th>{trD('adj.colDate')}</th><th>{trD('adj.colKind')}</th><th className="r">{trD('adj.colChange')}</th><th>{trD('adj.colReason')}</th></tr></thead>
               <tbody>{approvedAdj.map((a) => (
-                <tr key={a.id}><td>{fmtDT(a.createdAt)}</td><td>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}{a.reversalOf ? ' · ' + trD('adj.reversalBadge') : ''}</td><td className="r tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → {(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</td><td>{adjReasonLabel(a.reason)}</td></tr>
+                <tr key={a.id}><td>{fmtDateShort(a.createdAt)}</td><td>{a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon')}{a.reversalOf ? ' · ' + trD('adj.reversalBadge') : ''}</td><td className="r tnum">{(a.kind === 'bon' ? rpFull(a.before) : numX(a.before))} → {(a.kind === 'bon' ? rpFull(a.after) : numX(a.after))}</td><td>{adjReasonLabel(a.reason)}</td></tr>
               ))}</tbody>
             </table>
           </div>
@@ -1879,19 +1938,24 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
         {isNota && txn && txn.method === 'bon' && (
           <div className="pc-notasisa"><span>{trD('pc.notaSisaAfter')}</span><b className="tnum">{rpFull(Math.max(0, runMap[txn.id] || 0))}</b></div>
         )}
-        <div className="dist-hist-summary pc-totals">
-          <div><span>{trD('dist.totalGalon')}</span><b className="tnum">{numX(galon)}</b></div>
-          <div><span>{trD('pc.totPembelian')}</span><b className="tnum">{rpFull(pembelian)}</b></div>
-          <div><span>{trD('pc.totPembayaran')}</span><b className="tnum">{rpFull(pembayaran)}</b></div>
-          {!isNota && <div><span>{trD('pc.totPenyesuaian')}</span><b className="tnum">{rpFull(adjBonTotal)}</b></div>}
-          {!isNota && disputedTotal > 0 && <div><span>{trD('disp.totLine')}</span><b className="tnum" style={{ color: '#dc2626' }}>{rpFull(disputedTotal)}</b></div>}
-          <div className="pc-sisa"><span>{trD('pc.sisaAkhir')}</span><b className="tnum" data-testid="pc-sisa" style={{ color: sisaAkhir > 0 ? 'var(--warn)' : 'var(--green-700)' }}>{rpFull(sisaAkhir)}</b></div>
+        {/* TOTALS BOX — right-aligned, boxed, clear hierarchy, SISA BON largest. */}
+        <div className="pc-totalbox">
+          <div className="pc-total-row"><span>{trD('dist.totalGalon')}</span><b className="tnum">{numX(galon)}</b></div>
+          <div className="pc-total-row"><span>{trD('pc.totPembelian')}</span><b className="tnum">{rpFull(pembelian)}</b></div>
+          <div className="pc-total-row"><span>{trD('pc.totPembayaran')}</span><b className="tnum">{rpFull(pembayaran)}</b></div>
+          {!isNota && <div className="pc-total-row"><span>{trD('pc.totPenyesuaian')}</span><b className="tnum">{rpFull(adjBonTotal)}</b></div>}
+          {internal && !isNota && disputedTotal > 0 && <div className="pc-total-row"><span>{trD('disp.totLine')}</span><b className="tnum">{rpFull(disputedTotal)}</b></div>}
+          <div className="pc-total-row pc-sisa"><span>{trD('pc.sisaAkhir')}</span><b className="tnum" data-testid="pc-sisa">{rpFull(sisaAkhir)}</b></div>
         </div>
-        <div className="pc-sign">
-          <div><div className="pc-sign-line" />{trD('pc.signCust')}</div>
-          <div><div className="pc-sign-line" />{trD('pc.signStaff')}</div>
+        {/* FOOTER — payment method, signatures; printed-by only in the internal version. */}
+        <div className="pc-docfoot">
+          <div className="pc-payinfo"><b>{trD('pc.payLbl')}:</b> {trD('pc.payInfo')}</div>
+          <div className="pc-sign">
+            <div><div className="pc-sign-line" />{trD('pc.signCust')}</div>
+            <div><div className="pc-sign-line" />{trD('pc.signStaff')}</div>
+          </div>
+          {internal && <div className="pc-printedby">{trD('dist.printedBy', { u: userName || '—', t: stamp + ' ' + stampTime })} · {trD('dist.txnCount', { n: docRows.length })}</div>}
         </div>
-        <div className="inv-by">{trD('dist.printedBy', { u: userName || '—', t: stamp + ' ' + stampTime })}{!isNota ? ' · ' + trD('dist.txnCount', { n: rows.length }) : ''}</div>
       </div>
     </div>
   );
@@ -3043,6 +3107,27 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   </div>
                 </div>
               )}
+              {/* INVOICE list — issued invoices reprint identically from the stored record. */}
+              <div className="card cd-card">
+                <div className="dist-card-head"><div className="sec-title"><IconInvoice s={14} style={{ verticalAlign: '-2px', marginRight: 5 }} />{trD('inv.listTitle')}</div>{(canInput || canCustomers) && <button type="button" className="dist-link" onClick={() => setInvBuilder(true)}><IconPlus s={13} />{trD('dist.makeInvoice')}</button>}</div>
+                {invoices.length === 0 ? <div className="cd-muted" style={{ padding: '8px 2px' }}>{trD('inv.none')}</div> : (
+                  <div className="inv-list">
+                    <div className="inv-list-head"><span>{trD('inv.no')}</span><span>{trD('inv.date')}</span><span className="r">{trD('inv.total')}</span><span>{trD('inv.status')}</span><span /></div>
+                    {invoices.map((iv) => {
+                      const lunas = (d.sisaBon || 0) <= 0;
+                      return (
+                        <div key={iv.id} className="inv-list-row">
+                          <span className="inv-list-no">{iv.number}</span>
+                          <span>{fmtDateShort(iv.issueDate)}</span>
+                          <span className="r tnum">{rpFull(iv.sisaBon != null ? iv.sisaBon : iv.total)}</span>
+                          <span><span className={'dist-badge ' + (lunas ? 'ok' : '')}>{lunas ? trD('inv.stLunas') : trD('inv.stSent')}</span></span>
+                          <span className="r"><button type="button" className="dist-link" onClick={() => setInvView(iv)}><IconDownload s={12} />{trD('inv.reprint')}</button></span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               <div className="card cd-card">
                 <div className="dist-card-head"><div className="sec-title">{trD('dist.riwayat')}</div><button type="button" className="dist-link" onClick={() => setCdTab('transaksi')}>{trD('cd.tab.transaksi')} →</button></div>
                 {txOldNew.length === 0 ? <ListState state="empty" emptyText={trD('dist.noTxn')} emptyAction={canInput ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setInvBuilder(true)}>{trD('dist.makeInvoice')}</button> : null} /> : <div className="cd-txns compact">{rowsFiltered.slice(0, 5).map((t) => TxnRow(t))}</div>}
