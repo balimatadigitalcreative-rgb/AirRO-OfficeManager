@@ -967,10 +967,22 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [presets, setPresets] = uSx(() => { try { return JSON.parse(localStorage.getItem('tx_presets') || '[]'); } catch (e) { return []; } });
   const [bulkVoid, setBulkVoid] = uSx(null);                     // { items } → bulk-cancel preview
   const [printFor2, setPrintFor2] = uSx(null);                   // { txn, custObj? } → Cetak Nota via PrintCenter
-  const [isNarrow, setIsNarrow] = uSx(() => { try { return window.matchMedia('(max-width: 720px)').matches; } catch (e) { return false; } });
+  const [isNarrow, setIsNarrow] = uSx(() => { try { return window.matchMedia('(max-width: 900px)').matches; } catch (e) { return false; } });
+  const [density, setDensity] = uSx(() => { try { return localStorage.getItem('tx_density') === 'compact' ? 'compact' : 'comfortable'; } catch (e) { return 'comfortable'; } });
+  const [moreMenu, setMoreMenu] = uSx(false);          // ⋯ overflow menu (secondary actions)
+  const [infoOpen, setInfoOpen] = uSx(false);          // permanence-note info popover (replaces the banner)
+  const [cursor, setCursor] = uSx(-1);                 // keyboard row cursor into txSorted (↑/↓ move, Enter opens)
+  const [availW, setAvailW] = uSx(() => { try { return window.innerWidth; } catch (e) { return 1280; } });
   const txSentinel = React.useRef(null);
+  const rootRef = React.useRef(null);                  // measured to auto-drop columns by available width
+  const toolRef = React.useRef(null);                  // sticky-toolbar height → the header sticks just beneath it
+  const [toolH, setToolH] = uSx(0);
   uEx(() => { const t = setTimeout(() => setQDeb(q), 300); return () => clearTimeout(t); }, [q]);   // debounce search
-  uEx(() => { let mq; try { mq = window.matchMedia('(max-width: 720px)'); } catch (e) { return; } const on = () => setIsNarrow(mq.matches); on(); mq.addEventListener ? mq.addEventListener('change', on) : mq.addListener(on); return () => { mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on); }; }, []);
+  uEx(() => { let mq; try { mq = window.matchMedia('(max-width: 900px)'); } catch (e) { return; } const on = () => setIsNarrow(mq.matches); on(); mq.addEventListener ? mq.addEventListener('change', on) : mq.addListener(on); return () => { mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on); }; }, []);
+  uEx(() => { try { localStorage.setItem('tx_density', density); } catch (e) {} }, [density]);
+  // Measure the real content width so columns drop to fit (never wrap, never horizontal-scroll ≥900px).
+  uEx(() => { const el = rootRef.current; if (!el) return; const set = () => setAvailW(el.clientWidth || window.innerWidth); set(); if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', set); return () => window.removeEventListener('resize', set); } const ro = new ResizeObserver(set); ro.observe(el); return () => ro.disconnect(); }, []);
+  uEx(() => { const el = toolRef.current; const set = () => setToolH(el ? el.offsetHeight : 0); set(); if (!el || typeof ResizeObserver === 'undefined') return; const ro = new ResizeObserver(set); ro.observe(el); return () => ro.disconnect(); });
 
   const doArchive = () => {
     if (!archTxn || !archReason.trim() || archSaving) return;
@@ -1016,7 +1028,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       window.history.replaceState(null, '', u);
     } catch (e) {}
   }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir, txView]);
-  uEx(() => { setTxVisible(120); }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir]);   // reset window on filter change
+  uEx(() => { setTxVisible(120); setCursor(-1); }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir]);   // reset window + cursor on filter change
   uEx(() => { localStorage.setItem('tx_cols_hidden', JSON.stringify([...colHidden])); }, [colHidden]);
   uEx(() => { if (openFormTick) { setView('form'); setFErr(''); } }, [openFormTick]);
 
@@ -1180,12 +1192,26 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const moveDetail = (d) => setDetailIdx((i) => { const n = i + d; return n >= 0 && n < txSorted.length ? n : i; });
   // Infinite scroll: reveal +120 rows as the sentinel nears the bottom of the single page scroller.
   uEx(() => { const el = txSentinel.current; if (!el || typeof IntersectionObserver === 'undefined') return; const root = document.querySelector('.content') || null; const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setTxVisible((n) => n + 120); }, { root, rootMargin: '700px' }); io.observe(el); return () => io.disconnect(); }, [txns, effView]);
-  // j/k moves through rows in the slide-over without closing it; Esc closes.
+  // Keyboard: with the slide-over CLOSED, ↑/↓ move a row cursor and Enter opens it; with it OPEN,
+  // j/k move through rows without closing and Esc closes. All ignore typing in fields.
   uEx(() => {
-    if (detailIdx < 0) return;
-    const on = (e) => { const tg = e.target; if (tg && /input|textarea|select/i.test(tg.tagName || '')) return; if (e.key === 'j') { e.preventDefault(); moveDetail(1); } else if (e.key === 'k') { e.preventDefault(); moveDetail(-1); } else if (e.key === 'Escape') setDetailIdx(-1); };
+    const on = (e) => {
+      const tg = e.target; if (tg && /input|textarea|select/i.test(tg.tagName || '')) return;
+      if (detailIdx >= 0) {
+        if (e.key === 'j') { e.preventDefault(); moveDetail(1); }
+        else if (e.key === 'k') { e.preventDefault(); moveDetail(-1); }
+        else if (e.key === 'Escape') { e.preventDefault(); setDetailIdx(-1); }
+        return;
+      }
+      const len = Math.min(txSorted.length, txVisible);
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCursor((i) => Math.min(len - 1, (i < 0 ? -1 : i) + 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor((i) => Math.max(0, (i < 0 ? 0 : i) - 1)); }
+      else if (e.key === 'Enter' && cursor >= 0 && cursor < txSorted.length) { e.preventDefault(); setDetailIdx(cursor); }
+      else if (e.key === 'Escape' && cursor >= 0) { setCursor(-1); }
+    };
     window.addEventListener('keydown', on); return () => window.removeEventListener('keydown', on);
-  }, [detailIdx, txSorted.length]);
+  }, [detailIdx, cursor, txSorted.length, txVisible]);
+  uEx(() => { if (cursor < 0) return; try { const el = document.querySelector('.txt-row.cursor'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); } catch (e) {} }, [cursor]);
   const exportCsv = () => {
     const head = [trD('tx.colDate'), trD('tx.colTime'), trD('tx.colCode'), trD('dist.fCust'), trD('cl.colCode'), trD('tx.colType'), trD('tx.colGalon'), trD('tx.colPrice'), trD('tx.colAmount'), trD('tx.colStatus'), trD('cl.colArmada'), trD('tx.colStaff'), trD('cd.expandNote')];
     const src = selRows.length ? selRows : txFiltered;
@@ -1350,37 +1376,81 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 
   // ── LIST ──
   const isExp = filter === 'pengeluaran';
-  // Status badge for a row (reuses the dispute + method colors; strikethrough handled in the amount cell).
+  // Status cell — dispute/void/arsip/pending stay full badges; a plain "locked" (permanent) row is
+  // reduced to a small lock icon+tooltip so the column isn't a wall of identical "Terkunci" chips.
   const statusBadgeOf = (t) => {
     if (t.status === 'void') return <span className="dist-badge void"><IconClose s={10} />{trD('tx.st.dibatalkan')}</span>;
     if (t.dispute) { const dm = DISPUTE_META[t.dispute.status]; if (dm) return <span className={'dist-badge ' + dm.cls}>{trD(dm.label)}</span>; }
     if (t.pendingRequest) return <span className="dist-badge pending"><IconClock s={10} />{trD('dist.pendingBadge')}</span>;
     if (t.legacy) return <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span>;
-    return <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>;
+    return <span className="tx-lockicon" title={trD('dist.txLocked')}><IconLock s={12} /></span>;
   };
   const isMuted = (t) => t.status === 'void' || disputeDeducts(t);
-  const colOn = (k) => !colHidden.has(k);
-  const colCount = 5 + ['code', 'type', 'galon', 'price', 'status', 'armada', 'staff'].filter(colOn).length;
-  const sortTh = (key, label, extra) => <th className={(extra ? extra + ' ' : '') + 'tx-sortable' + (sortKey === key ? ' sorted' : '')} onClick={() => { if (sortKey === key) setSortDir((d) => d === 'desc' ? 'asc' : 'desc'); else { setSortKey(key); setSortDir('desc'); } }} aria-sort={sortKey === key ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}>{label}<span className="tx-sortarrow">{sortKey === key ? (sortDir === 'desc' ? '↓' : '↑') : ''}</span></th>;
+  const colOn = (k) => !colHidden.has(k);   // manual Kolom toggle
+  // ── ONE column system — a single COLUMNS list drives the <colgroup>, the <thead>, AND every <tr>,
+  // so header and body share identical geometry and can never drift apart. Fixed px widths + one
+  // flexible column (Pelanggan). `num` columns are right-aligned tabular-nums and never truncate. ──
+  const CUSTMIN = 200;
+  const COLUMNS = [
+    { k: 'check', w: 40, cls: 'tx-ck no-print', always: 1 },
+    { k: 'date', w: 108, sort: 'date', label: 'tx.colDate' },
+    { k: 'code', w: 148, cls: 'tx-code', label: 'tx.colCode', drop: 4 },
+    { k: 'cust', flex: 1, min: CUSTMIN, sort: 'customer', label: 'dist.fCust', always: 1 },
+    { k: 'type', w: 108, label: 'tx.colType' },
+    { k: 'galon', w: 72, num: 1, sort: 'qty', label: 'tx.colGalon' },
+    { k: 'price', w: 104, num: 1, label: 'tx.colPrice', drop: 3 },
+    { k: 'amount', w: 144, num: 1, sort: 'amount', label: 'tx.colAmount', always: 1 },
+    { k: 'status', w: 116, label: 'tx.colStatus', drop: 5 },
+    { k: 'armada', w: 90, label: 'cl.colArmada', drop: 2 },
+    { k: 'staff', w: 112, cls: 'tx-staff', sort: 'petugas', label: 'tx.colStaff', drop: 1 },
+    { k: 'aksi', w: 44, cls: 'tx-r no-print', always: 1 },
+  ];
+  // Manual Kolom hiding first, then auto-drop to fit the measured width (Petugas → Armada → Harga →
+  // Kode → Status). Dropped fields still show in the slide-over. Never wrap, never h-scroll ≥900px.
+  const manualCols = COLUMNS.filter((c) => c.always || colOn(c.k) || c.k === 'aksi');
+  const dropSeq = ['staff', 'armada', 'price', 'code', 'status'];
+  const autoDropped = new Set();
+  const fixedSum = () => manualCols.filter((c) => !autoDropped.has(c.k)).reduce((s, c) => s + (c.flex ? CUSTMIN : c.w), 0);
+  for (const dk of dropSeq) { if (fixedSum() <= availW) break; if (manualCols.some((c) => c.k === dk)) autoDropped.add(dk); }
+  const cols = manualCols.filter((c) => !autoDropped.has(c.k));
+  const tableMin = fixedSum();
+  const cursorTxn = cursor >= 0 && cursor < txSorted.length ? txSorted[cursor] : null;
+  const cellOf = (t, k, muted) => {
+    switch (k) {
+      case 'check': return <input type="checkbox" aria-label="pilih transaksi" checked={!!sel[t.id]} onChange={() => setSel((p) => ({ ...p, [t.id]: !p[t.id] }))} />;
+      case 'date': return <><b className="tx-dated">{fmtDateShort(t.txnDate)}</b><span className="tx-time">{hhmm(t.createdAt)}</span></>;
+      case 'code': return <span className="tx-codetxt">{txnCode(t)}</span>;
+      case 'cust': return <><div className="tx-custname">{nameOf(t) || '—'}</div>{codeOf(t) ? <div className="tx-custcode">{codeOf(t)}</div> : null}</>;
+      case 'type': return <span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span>;
+      case 'galon': return t.method === 'pelunasan' ? '—' : numX(t.qty);
+      case 'price': return t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked);
+      case 'amount': return <span className={'tx-amt' + (muted ? ' muted' : '')}>{muted ? <s>{rpFull(amtOf(t))}</s> : rpFull(amtOf(t))}{disputeDeducts(t) ? <span className="tx-ack"> → {rpFull(t.dispute.customerClaimAmount || 0)}</span> : null}</span>;
+      case 'status': return statusBadgeOf(t);
+      case 'armada': return <span className="tx-ellip">{t.fleetId || '—'}</span>;
+      case 'staff': return <span className="tx-ellip">{t.actorName || '—'}</span>;
+      case 'aksi': return <IconCaret s={14} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)' }} />;
+      default: return null;
+    }
+  };
+  const cellCls = (c) => 'tx-td tx-td-' + c.k + (c.num ? ' tx-r tnum' : '') + (c.cls ? ' ' + c.cls : '');
   const txTableRow = (t) => {
     const muted = isMuted(t);
+    const cls = 'txt-row' + (muted ? ' is-muted' : '') + (detailTxn && detailTxn.id === t.id ? ' active' : '') + (cursorTxn && cursorTxn.id === t.id ? ' cursor' : '');
     return (
-      <tr key={t.id} className={'cl-trow tx-row' + (muted ? ' is-muted' : '') + (detailTxn && detailTxn.id === t.id ? ' active' : '')} onClick={() => openDetail(t)}>
-        <td className="tx-check no-print" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label="pilih transaksi" checked={!!sel[t.id]} onChange={() => setSel((p) => ({ ...p, [t.id]: !p[t.id] }))} /></td>
-        <td className="tnum"><b>{fmtDateShort(t.txnDate)}</b>{colOn('time') && <div className="tx-time">{hhmm(t.createdAt)}</div>}</td>
-        {colOn('code') && <td className="tnum tx-code">{txnCode(t)}</td>}
-        <td className="tx-cust"><div className="tx-custname">{nameOf(t) || '—'}</div>{codeOf(t) && <div className="tx-custcode">{codeOf(t)}</div>}</td>
-        {colOn('type') && <td><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span></td>}
-        {colOn('galon') && <td className="num tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</td>}
-        {colOn('price') && <td className="num tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</td>}
-        <td className="num tnum tx-amt">{muted ? <s>{rpFull(amtOf(t))}</s> : rpFull(amtOf(t))}{disputeDeducts(t) ? <span className="tx-ack"> → {rpFull(t.dispute.customerClaimAmount || 0)}</span> : null}</td>
-        {colOn('status') && <td>{statusBadgeOf(t)}</td>}
-        {colOn('armada') && <td className="tx-armada">{t.fleetId || '—'}</td>}
-        {colOn('staff') && <td className="tx-staff">{t.actorName || '—'}</td>}
-        <td className="no-print num"><IconCaret s={14} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)' }} /></td>
+      <tr key={t.id} className={cls} onClick={() => openDetail(t)}>
+        {cols.map((c) => <td key={c.k} className={cellCls(c)} onClick={c.k === 'check' ? (e) => e.stopPropagation() : undefined}>{cellOf(t, c.k, muted)}</td>)}
       </tr>
     );
   };
+  const headTh = (c) => {
+    if (c.k === 'check') return <th key="check" className="tx-th tx-ck no-print"><input type="checkbox" aria-label="pilih semua" checked={txShown.length > 0 && txShown.every((t) => sel[t.id])} onChange={(e) => { const on = e.target.checked; setSel((p) => { const n = { ...p }; txShown.forEach((t) => { if (on) n[t.id] = true; else delete n[t.id]; }); return n; }); }} /></th>;
+    if (c.k === 'aksi') return <th key="aksi" className="tx-th no-print" aria-hidden="true" />;
+    const sortable = !!c.sort, on = sortable && sortKey === c.sort;
+    return <th key={c.k} className={'tx-th tx-th-' + c.k + (c.num ? ' tx-r' : '') + (sortable ? ' tx-sortable' : '') + (on ? ' sorted' : '')}
+      onClick={sortable ? () => { if (sortKey === c.sort) setSortDir((d) => d === 'desc' ? 'asc' : 'desc'); else { setSortKey(c.sort); setSortDir('desc'); } } : undefined}
+      aria-sort={on ? (sortDir === 'desc' ? 'descending' : 'ascending') : undefined}>{trD(c.label)}{on ? <span className="tx-sortarrow">{sortDir === 'desc' ? '↓' : '↑'}</span> : null}</th>;
+  };
+  const txColGroup = <colgroup>{cols.map((c) => <col key={c.k} style={c.flex ? undefined : { width: c.w + 'px' }} />)}</colgroup>;
   const txCardRow = (t) => {
     const muted = isMuted(t);
     return (
@@ -1394,24 +1464,38 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     );
   };
   return (
-    <div className="dist-dash screen-enter">
+    <div className="dist-dash screen-enter" ref={rootRef}>
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
-      {/* STICKY toolbar — row 1 (search + period + actions), row 2 (filter chips with counts). */}
-      {!isExp && (<div className="tx-toolbar">
+      {/* STICKY toolbar — row 1 (search grows · period · one primary + ⋯ overflow), row 2 (filter chips). */}
+      {!isExp && (<div className="tx-toolbar" ref={toolRef}>
         <div className="tx-toolrow tx-toolrow-1">
+          <div className="tx-infowrap"><button type="button" className="tx-infobtn" aria-label={trD('dist.permBanner')} title={trD('dist.permBanner')} onClick={() => { setMoreMenu(false); setColMenu(false); setInfoOpen((v) => !v); }}><IconWarn s={16} /></button>
+            {infoOpen && <><div className="cd-menu-scrim" onClick={() => setInfoOpen(false)} /><div className="tx-infopop" role="tooltip"><IconLock s={14} />{trD('dist.permBanner')}</div></>}
+          </div>
           <div className="dist-search tx-search"><IconSearch s={16} /><input value={q} placeholder={trD('tx.searchPh')} aria-label={trD('tx.searchPh')} onChange={(e) => setQ(e.target.value)} />{q && <button type="button" aria-label="clear" onClick={() => setQ('')}><IconClose s={13} /></button>}</div>
-          <div className="dist-chips tx-periodchips">{[['all', trD('dist.fAll')], ['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['lastMonth', trD('pc.pLastMonth')], ['range', trD('dist.perRange')]].map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+          <div className="dist-chips tx-periodchips tx-segmented">{[['all', trD('dist.fAll')], ['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['lastMonth', trD('pc.pLastMonth')], ['range', trD('dist.perRange')]].map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
           {period === 'range' && <div className="dist-period-range"><DP.DateField value={rFrom} onChange={setRFrom} max={rTo || today} /><span>–</span><DP.DateField value={rTo} onChange={setRTo} min={rFrom || undefined} max={today} /></div>}
           <div style={{ flex: 1 }} />
-          <button type="button" className={`btn btn-ghost btn-sm ${advOpen ? 'on' : ''}`} onClick={() => setAdvOpen(true)}><IconFilter s={15} />{trD('tx.advanced')}</button>
-          <div className="tx-colwrap"><button type="button" className="btn btn-ghost btn-sm" onClick={() => setColMenu((v) => !v)} aria-haspopup="true" aria-expanded={colMenu}><IconSettings s={15} />{trD('tx.columns')}</button>
+          <button type="button" className={`btn btn-ghost btn-sm ${anyFilter ? 'on' : ''}`} onClick={() => setAdvOpen(true)}><IconFilter s={15} />{trD('tx.advanced')}</button>
+          {canInput && <button type="button" className="btn btn-primary btn-sm dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
+          <div className="tx-morewrap">
+            <button type="button" className={`btn btn-ghost btn-sm tx-morebtn ${moreMenu ? 'on' : ''}`} aria-haspopup="true" aria-expanded={moreMenu} aria-label={trD('cd.more')} onClick={() => setMoreMenu((v) => !v)}><IconDots s={18} /></button>
+            {moreMenu && <><div className="cd-menu-scrim" onClick={() => setMoreMenu(false)} /><div className="cd-menu tx-moremenu" role="menu">
+              <button type="button" className="cd-menu-item" disabled={!txFiltered.length} onClick={() => { setMoreMenu(false); exportCsv(); }}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
+              <button type="button" className="cd-menu-item" disabled={!txFiltered.length} onClick={() => { setMoreMenu(false); doListPrint(); }}><IconDownload s={15} />{trD('dist.print')}</button>
+              {(canInput || canExpense) && <div className="cd-menu-div" />}
+              {canInput && <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); setPayOpen(true); }}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
+              {canExpense && <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); openExpenseForm(); }}><IconCoinOut s={15} />{trD('exp.btn')}</button>}
+              <div className="cd-menu-div" />
+              <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); setColMenu(true); }}><IconSettings s={15} />{trD('tx.columns')}</button>
+              <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); setAdvOpen(true); }}><IconFilter s={15} />{trD('tx.advanced')}</button>
+              <div className="cd-menu-div" />
+              <div className="tx-menu-density"><span>{trD('tx.density')}</span><div className="tx-denseg">{[['comfortable', trD('tx.densNyaman')], ['compact', trD('tx.densPadat')]].map(([k, l]) => <button key={k} type="button" className={density === k ? 'on' : ''} onClick={() => setDensity(k)}>{l}</button>)}</div></div>
+            </div></>}
+          </div>
+          <div className="tx-colwrap">
             {colMenu && <><div className="cd-menu-scrim" onClick={() => setColMenu(false)} /><div className="cd-menu tx-colmenu" role="menu">{TX_COLS.map((c) => <label key={c.k} className="tx-colitem"><input type="checkbox" checked={!colHidden.has(c.k)} onChange={() => setColHidden((p) => { const n = new Set(p); n.has(c.k) ? n.delete(c.k) : n.add(c.k); return n; })} />{trD(c.l)}</label>)}</div></>}
           </div>
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!txFiltered.length} onClick={exportCsv}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!txFiltered.length} onClick={doListPrint}><IconDownload s={15} />{trD('dist.print')}</button>
-          {canInput && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayOpen(true)}><IconInvoice s={14} />{trD('dist.payBon')}</button>}
-          {canExpense && <button type="button" className="btn btn-ghost btn-sm dist-expbtn" title={trD('exp.outflowHint')} onClick={openExpenseForm}><IconCoinOut s={14} />{trD('exp.btn')}</button>}
-          {canInput && <button type="button" className="btn btn-primary btn-sm dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
         </div>
         <div className="tx-toolrow tx-toolrow-2">
           {[['lunas', trD('dist.lunas'), methodCounts.lunas], ['bon', trD('dist.bon'), methodCounts.bon], ['pelunasan', trD('dist.pelunasan'), methodCounts.pelunasan], ['penyesuaian', trD('adj.kindBon'), methodCounts.penyesuaian]].map(([k, l, n]) => <button key={k} type="button" className={`dist-chip ${methodSel.has(k) ? 'on' : ''}`} onClick={() => toggleIn(setMethodSel)(k)}>{l} <span className="dist-imp-chipn">{n}</span></button>)}
@@ -1427,7 +1511,6 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           {anyFilter && <button type="button" className="dist-link tx-clearall" onClick={clearAll}>{trD('tx.clearAll')}</button>}
         </div>
       </div>)}
-      {!isExp && <div className="dist-permbanner"><IconLock s={15} />{trD('dist.permBanner')}</div>}
 
       {/* PENGELUARAN LIST — DistExpense rows for the chosen day/fleet: outflow-styled amount, category,
           note, who logged it, lazy photo thumbnail, plus the day's total on top. These are NEVER
@@ -1476,7 +1559,13 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumCount')}</span><span className="cl-sumval">{numX(sCount)}</span></div>
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumGalon')}</span><span className="cl-sumval">{numX(sGalon)}</span></div>
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumNominal')}</span><span className="cl-sumval tnum">{rpFull(sNominal)}</span></div>
-            <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumSplit')}</span><span className="cl-sumval tx-split"><b className="tnum">{rpFull(sLunas)}</b><small>{trD('dist.lunas')}</small><b className="tnum b">{rpFull(sBon)}</b><small>{trD('dist.bon')}</small></span></div>
+            <div className="cl-sumcard tx-splitcard"><span className="cl-sumlbl">{trD('tx.sumSplit')}</span>
+              <div className="tx-splitlines">
+                <div className="tx-splitline"><b className="tnum">{rpFull(sLunas)}</b><small>{trD('dist.lunas')}</small></div>
+                <div className="tx-splitline b"><b className="tnum">{rpFull(sBon)}</b><small>{trD('dist.bon')}</small></div>
+              </div>
+              <div className="tx-splitbar" role="presentation"><span className="l" style={{ width: (sLunas + sBon > 0 ? Math.round(sLunas / (sLunas + sBon) * 100) : 0) + '%' }} /><span className="b" style={{ width: (sLunas + sBon > 0 ? Math.round(sBon / (sLunas + sBon) * 100) : 0) + '%' }} /></div>
+            </div>
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumAvg')}</span><span className="cl-sumval tnum">{rpFull(sAvg)}</span></div>
           </div>
         )}
@@ -1495,32 +1584,20 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
         )}
 
         {txns === null ? (
-          <div className="card dist-card cl-listcard"><div className="cl-skel">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="cl-skel-row"><span className="cl-skel-av" /><span className="cl-skel-lines"><span /><span /></span><span className="cl-skel-amt" /></div>)}</div></div>
+          <div className="card dist-card cl-listcard tx-skelwrap"><div className={'tx-skel tx-dense-' + density}>{Array.from({ length: 14 }).map((_, i) => <div key={i} className="tx-skel-row"><span className="tx-skel-ck" /><span className="tx-skel-l1" /><span className="tx-skel-l2" /><span className="tx-skel-amt" /></div>)}</div></div>
         ) : (txns.length === 0 && !anyFilter) ? (
           <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconTx s={26} /><div className="cl-empty-t">{trD('dist.noTxn')}</div>{canInput && <button type="button" className="btn btn-primary" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}</div></div>
         ) : txFiltered.length === 0 ? (
           <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconSearch s={26} /><div className="cl-empty-t">{trD('dist.noResultFilter')}</div><button type="button" className="dist-link" onClick={clearAll}>{trD('tx.clearAll')}</button></div></div>
         ) : effView === 'table' ? (
-          <div className="card dist-card cl-listcard cl-tablewrap tx-tablewrap">
-            <table className="cl-table tx-table">
-              <thead><tr>
-                <th className="tx-check no-print"><input type="checkbox" aria-label="pilih semua" checked={txShown.length > 0 && txShown.every((t) => sel[t.id])} onChange={(e) => { const on = e.target.checked; setSel((p) => { const n = { ...p }; txShown.forEach((t) => { if (on) n[t.id] = true; else delete n[t.id]; }); return n; }); }} /></th>
-                {sortTh('date', trD('tx.colDate'))}
-                {colOn('code') && <th>{trD('tx.colCode')}</th>}
-                {sortTh('customer', trD('dist.fCust'))}
-                {colOn('type') && <th>{trD('tx.colType')}</th>}
-                {colOn('galon') && sortTh('qty', trD('tx.colGalon'), 'num')}
-                {colOn('price') && <th className="num">{trD('tx.colPrice')}</th>}
-                {sortTh('amount', trD('tx.colAmount'), 'num')}
-                {colOn('status') && <th>{trD('tx.colStatus')}</th>}
-                {colOn('armada') && <th>{trD('cl.colArmada')}</th>}
-                {colOn('staff') && sortTh('petugas', trD('tx.colStaff'))}
-                <th className="no-print" />
-              </tr></thead>
+          <div className="tx-tablewrap" style={{ '--tx-toolh': toolH + 'px' }}>
+            <table className={'tx-table tx-dense-' + density} style={{ minWidth: tableMin + 'px' }}>
+              {txColGroup}
+              <thead><tr className="tx-headrow">{cols.map((c) => headTh(c))}</tr></thead>
               {grouped
                 ? dayGroups.map((g) => (
                   <tbody key={g.date} className="tx-grp">
-                    <tr className="tx-grphead"><td colSpan={colCount}>{groupDateLabel(g.date)} — {numX(g.nota)} {trD('dist.notaWord')} · {numX(g.galon)} {trD('dist.galonUnit')} · {rpFull(g.nominal)}</td></tr>
+                    <tr className="tx-grphead"><td colSpan={cols.length}><div className="tx-grphead-in"><span className="tx-grphead-d">{groupDateLabel(g.date)}</span><span className="tx-grphead-sub">{numX(g.nota)} {trD('dist.notaWord')} · {numX(g.galon)} {trD('dist.galonUnit')} · <b className="tnum">{rpFull(g.nominal)}</b></span></div></td></tr>
                     {g.rows.map((t) => txTableRow(t))}
                   </tbody>
                 ))
@@ -2042,7 +2119,7 @@ const txPeriodBounds = (period, from, to) => {
 };
 // Toggleable columns for the Transaksi table (Tanggal · Pelanggan · Nominal · [✓] · [⋯] are fixed).
 const TX_COLS = [
-  { k: 'time', l: 'tx.colTime' }, { k: 'code', l: 'tx.colCode' }, { k: 'type', l: 'tx.colType' },
+  { k: 'code', l: 'tx.colCode' }, { k: 'type', l: 'tx.colType' },
   { k: 'galon', l: 'tx.colGalon' }, { k: 'price', l: 'tx.colPrice' }, { k: 'status', l: 'tx.colStatus' },
   { k: 'armada', l: 'cl.colArmada' }, { k: 'staff', l: 'tx.colStaff' },
 ];

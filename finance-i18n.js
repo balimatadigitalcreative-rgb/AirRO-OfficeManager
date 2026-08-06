@@ -89,7 +89,7 @@
       'rep.closeout': 'Day closeout', 'rep.combined': 'Combined (all fleets)', 'rep.none': 'No delivery activity for this period.', 'rep.csv': 'CSV', 'rep.csvTitle': 'Delivery Report', 'rep.exported': 'CSV downloaded.',
       // PELUNASAN TIDAK DITERIMA — the customer paid, the money never reached the company. INTERNAL
       // wording only: none of these strings is ever rendered on a customer statement or nota.
-      'nav.distLossReport': 'Loss / Money Not Received',
+      'nav.distLossReport': 'Losses', 'nav.distLossReportFull': 'Loss / Money Not Received',
       'pnr.btn': 'Payment not received', 'pnr.title': 'Payment not received',
       'pnr.sideCustT': 'The customer is settled', 'pnr.sideCustD': 'Their outstanding bon goes down and their statement shows this as a received payment. They are never asked to pay twice.',
       'pnr.sideCoT': 'The company records a loss', 'pnr.sideCoD': 'It counts as ZERO cash — excluded from money in, cash/transfer and net cash — and is reported against the responsible staff.',
@@ -273,6 +273,7 @@
       'cl.sumCount': 'Customers', 'cl.sumBon': 'Total outstanding bon', 'cl.sumGalon': 'Gallons at customers',
       'cl.idle30': 'Idle 30 days', 'cl.never': 'No transaction', 'cl.emptyTitle': 'No customers yet', 'cl.showingWindow': 'Showing {n} of {total}',
       'tx.searchPh': 'Search code, customer, phone, amount, note…', 'tx.advanced': 'Advanced filters', 'tx.columns': 'Columns', 'tx.clearAll': 'Clear all filters', 'tx.savePreset': 'Save preset', 'tx.applyPreset': 'Apply preset', 'tx.presetNamePrompt': 'Preset name:',
+      'tx.density': 'Density', 'tx.densNyaman': 'Comfortable', 'tx.densPadat': 'Compact',
       'tx.colDate': 'Date', 'tx.colTime': 'Time', 'tx.colCode': 'Code', 'tx.colType': 'Type', 'tx.colGalon': 'Gallons', 'tx.colPrice': 'Price', 'tx.colAmount': 'Amount', 'tx.colStatus': 'Status', 'tx.colStaff': 'Staff',
       'tx.st.normal': 'Normal', 'tx.st.terkunci': 'Locked (pending)', 'tx.st.dibatalkan': 'Cancelled',
       'tx.sumCount': 'Transactions', 'tx.sumGalon': 'Total gallons', 'tx.sumNominal': 'Total amount', 'tx.sumSplit': 'Paid vs credit', 'tx.sumAvg': 'Avg / nota', 'tx.filterNote': 'Following the active filter', 'tx.matched': 'matched: {f}',
@@ -735,7 +736,7 @@
       'rep.closeout': 'Tutup hari', 'rep.combined': 'Gabungan (semua armada)', 'rep.none': 'Tidak ada aktivitas pengiriman pada periode ini.', 'rep.csv': 'CSV', 'rep.csvTitle': 'Laporan Pengiriman', 'rep.exported': 'CSV terunduh.',
       // PELUNASAN TIDAK DITERIMA — pelanggan benar-benar membayar, tetapi uangnya tidak sampai ke
       // perusahaan. Semua teks di sini INTERNAL — tidak pernah muncul di riwayat/nota pelanggan.
-      'nav.distLossReport': 'Kerugian / Uang Tidak Diterima',
+      'nav.distLossReport': 'Kerugian', 'nav.distLossReportFull': 'Kerugian / Uang Tidak Diterima',
       'pnr.btn': 'Pelunasan tidak diterima', 'pnr.title': 'Pelunasan Tidak Diterima',
       'pnr.sideCustT': 'Pelanggan dianggap lunas', 'pnr.sideCustD': 'Sisa bon pelanggan berkurang dan di riwayat/cetakan tercatat sebagai pembayaran diterima. Pelanggan tidak akan ditagih dua kali.',
       'pnr.sideCoT': 'Perusahaan mencatat kerugian', 'pnr.sideCoD': 'Tidak dihitung sebagai uang masuk — tidak masuk tunai/transfer maupun kas bersih — dan dicatat atas nama staf yang bertanggung jawab.',
@@ -919,6 +920,7 @@
       'cl.sumCount': 'Jumlah Pelanggan', 'cl.sumBon': 'Total Sisa Bon', 'cl.sumGalon': 'Total Galon di Pelanggan',
       'cl.idle30': 'Tidak aktif 30 hari', 'cl.never': 'Belum ada transaksi', 'cl.emptyTitle': 'Belum ada pelanggan', 'cl.showingWindow': 'Menampilkan {n} dari {total}',
       'tx.searchPh': 'Cari kode, pelanggan, HP, nominal, catatan…', 'tx.advanced': 'Filter lanjutan', 'tx.columns': 'Kolom', 'tx.clearAll': 'Hapus semua filter', 'tx.savePreset': 'Simpan preset', 'tx.applyPreset': 'Terapkan preset', 'tx.presetNamePrompt': 'Nama preset:',
+      'tx.density': 'Kepadatan', 'tx.densNyaman': 'Nyaman', 'tx.densPadat': 'Padat',
       'tx.colDate': 'Tanggal', 'tx.colTime': 'Jam', 'tx.colCode': 'Kode', 'tx.colType': 'Tipe', 'tx.colGalon': 'Galon', 'tx.colPrice': 'Harga', 'tx.colAmount': 'Nominal', 'tx.colStatus': 'Status', 'tx.colStaff': 'Petugas',
       'tx.st.normal': 'Normal', 'tx.st.terkunci': 'Terkunci (menunggu)', 'tx.st.dibatalkan': 'Dibatalkan',
       'tx.sumCount': 'Jumlah transaksi', 'tx.sumGalon': 'Total galon', 'tx.sumNominal': 'Total nominal', 'tx.sumSplit': 'Lunas vs Bon', 'tx.sumAvg': 'Rata-rata / nota', 'tx.filterNote': 'Sesuai filter aktif', 'tx.matched': 'cocok: {f}',

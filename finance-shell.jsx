@@ -49,7 +49,7 @@ function navForRole(p, role) {
     { id: 'dist-delivery-report', label: tr('nav.distDeliveryReport'), icon: 'IconShield', caps: ['distribusiPengirimanReport'] },
     // INTERNAL loss report (Kerugian / Uang Tidak Diterima). Same owner/GM-tier cap as the action
     // that creates the rows; never customer-facing.
-    { id: 'dist-loss-report', label: tr('nav.distLossReport'), icon: 'IconWarn', caps: ['distribusiBonAdjust'] },
+    { id: 'dist-loss-report', label: tr('nav.distLossReport'), title: tr('nav.distLossReportFull'), icon: 'IconWarn', caps: ['distribusiBonAdjust'] },
     { id: 'dist-adjust-report', label: tr('nav.distAdjustReport'), icon: 'IconPencil', caps: ['distribusiPenyesuaian'] },
     // Setoran lives under DISTRIBUSI (it is field-delivery paperwork) but is otherwise UNCHANGED:
     // same screen id 'setoran' (so navigate('setoran'), the isDerivedEntry jump-back, #setoran
@@ -1413,7 +1413,7 @@ function FApp() {
               <span>{tr('navgrp.' + g)}</span><IconCaret s={13} />
             </button>
             {!collapsed && items.map((n) => (
-              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>
+              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''}`} title={n.title || n.label} onClick={() => go(n.id)}>
                 {Ish(n.icon, { s: 20 })}<span>{n.label}</span>
               </button>
             ))}
