@@ -1745,6 +1745,7 @@ select.fld::-ms-expand { display: none; }
 .dist-akind.koreksi { background: var(--warn-bg); color: var(--warn); }
 .dist-akind.harga { background: #E7F1F5; color: #0B7EB1; }
 .dist-akind.input { background: var(--pos-bg); color: var(--green-800); }
+.dist-akind.akses { background: #fdecec; color: #dc2626; }
 .dist-audit-title { font-size: 13.5px; font-weight: 700; color: var(--ink); }
 .dist-audit-staff { font-size: 9.5px; font-weight: 800; letter-spacing: .3px; color: var(--warn); background: var(--warn-bg); padding: 2px 8px; border-radius: 6px; }
 .dist-audit-detail { font-size: 12.5px; color: var(--text-mut); margin-top: 5px; line-height: 1.45; }
@@ -3278,6 +3279,8 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .tx-splitbar .l { background: var(--green-500, #22a06b); }
 .tx-splitbar .b { background: #f0a92e; }
 .tx-filternote { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-mut); margin: 8px 2px 0; }
+.tx-winnotice { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #b45309; background: #fff7e6; border: 1px solid #fde3b0; border-radius: 10px; padding: 9px 13px; margin: 12px 0 0; }
+.tx-winnotice svg { flex-shrink: 0; color: #d08a12; }
 
 /* THE TABLE — table-layout:fixed + <colgroup> so header and body share exact geometry. Never wraps,
    never nests a scroll (the app's .content is the single scroller). */

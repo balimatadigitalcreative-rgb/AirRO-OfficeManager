@@ -10,7 +10,7 @@ const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/ApiError');
 const { normalizePhone } = require('../utils/phone');
-const { resolvePerms } = require('../config/permissions');
+const { resolvePerms, viewWindowFrom, VIEW_CAPS } = require('../config/permissions');
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
 const { resolveUnitId } = require('./businessUnit.service');   // business-unit label (defaults to 'air')
 const { resilientFindMany } = require('../lib/resilientFind');   // one bad row must not blank a whole list
@@ -203,6 +203,63 @@ async function logAudit(kind, title, detail, snap, fleetId) {
   return prisma.distAuditLog.create({ data: { kind, title, detail: detail || '', fleetId: fleetId || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, actorStaff: !!snap.actorStaff } });
 }
 
+// ── VIEW-WINDOW ENFORCEMENT (security-critical) ─────────────────────────────
+// A restricted user may only READ distribusi data inside an allowed date window. This is enforced
+// on the SERVER for EVERY read/aggregate (list, dashboard, customer history, reports, exports,
+// search) — the UI merely hides what these forbid. Wider requests are CLAMPED (never silently
+// emptied) and the response carries { effectiveFrom, effectiveTo, clamped } so the UI can explain.
+//
+// Permissions are read LIVE from the DB here (never from the JWT), exactly like actorSnap — so a
+// grant or revoke takes effect on the caller's NEXT request, with no re-login / token refresh.
+async function resolveViewWindow(user) {
+  const today = todayISO();
+  let perms = {};
+  if (user && user.id) {
+    const u = await prisma.user.findUnique({ where: { id: user.id }, select: { role: true, permissions: true } });
+    perms = resolvePerms(u ? u.role : (user && user.role), u ? u.permissions : (user && user.permissions));
+  } else {
+    perms = resolvePerms(user && user.role, user && user.permissions);
+  }
+  return viewWindowFrom(perms, today);
+}
+// Clamp a requested [from,to] (YYYY-MM-DD or null) to the window. For an unlimited caller the
+// request passes through untouched. Returns the effective bounds to query + whether the caller's
+// ask was NARROWED (clamped) so the endpoint can flag it and audit the attempt.
+function clampRange(win, reqFrom, reqTo) {
+  if (win.unlimited) return { from: reqFrom || null, to: reqTo || null, clamped: false, effFrom: reqFrom || null, effTo: reqTo || win.to };
+  const clip = (d, dflt) => { if (!d) return dflt; if (d < win.from) return win.from; if (d > win.to) return win.to; return d; };
+  const from = clip(reqFrom, win.from);
+  const to = clip(reqTo, win.to);
+  const clamped = !!((reqFrom && reqFrom < win.from) || (reqTo && reqTo > win.to));
+  return { from, to, clamped, effFrom: from, effTo: to };
+}
+// A single-day request (?date=) clamped to the window: returns the effective date (or null if the
+// requested day is inside the window) + whether it was outside.
+function clampDay(win, reqDate) {
+  if (win.unlimited || !reqDate) return { date: reqDate || null, clamped: false, effFrom: reqDate || null, effTo: reqDate || win.to };
+  if (reqDate >= win.from && reqDate <= win.to) return { date: reqDate, clamped: false, effFrom: reqDate, effTo: reqDate };
+  // Outside the window → clamp to the nearest allowed day (today) and flag it.
+  return { date: win.to, clamped: true, effFrom: win.to, effTo: win.to };
+}
+// Log an out-of-window READ attempt so a probing user is visible in Log Audit. Fire-and-forget:
+// auditing must never break or slow a read (best-effort, swallow errors).
+async function auditWindowBlock(user, endpoint, req, eff, fleetId) {
+  try {
+    const snap = await actorSnap(user);
+    await logAudit('akses', 'Percobaan akses di luar batas',
+      JSON.stringify({ endpoint, diminta: req, diberi: { from: eff.effFrom || null, to: eff.effTo || null } }),
+      snap, fleetId || '');
+  } catch (e) { /* best-effort */ }
+}
+// One-call clamp for a report/aggregate given an already-derived [from,to]: resolves the caller's
+// window, clamps, audits an out-of-window ask, and returns the effective bounds + window.
+async function windowFor(user, from, to, endpoint, fleet) {
+  const win = await resolveViewWindow(user);
+  const c = clampRange(win, from, to);
+  if (c.clamped) await auditWindowBlock(user, endpoint, { from, to }, c, fleet);
+  return { from: c.from, to: c.to, clamped: c.clamped, win, effectiveFrom: win.unlimited ? null : c.from, effectiveTo: win.unlimited ? null : c.to };
+}
+
 // ── Customers ──────────────────────────────────────────────────────────────
 // Expose deliveryDays as a parsed array (stored as a JSON string). Old rows without
 // the column default to [] / '' → they render as "—" on the client.
@@ -316,21 +373,26 @@ async function listCustomers(user, qFleet, status, filters) {
   const txns = await prisma.distTransaction.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet), ...NOT_VOID }, select: { id: true, customerId: true, qty: true, amount: true, method: true, txnDate: true, legacy: true, bonCounted: true } });
   const deltaMap = await activePriceDeltas({});   // effective bon includes active price adjustments
   const dedMap = await disputeDeductions(fleetWhere(user, 'fleetId', qFleet));   // tidak_diakui/kerugian carve-outs
+  // View window: Sisa Bon (a debt total) is computed ALL-TIME and gated by `sisa_bon`; the operational
+  // stats (gallons sold / spend / last activity / count) are aggregates that respect the window.
+  const win = await resolveViewWindow(user);
   const agg = {};
   txns.forEach((t) => {
     const a = agg[t.customerId] || (agg[t.customerId] = { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0, spend: 0 });
     const eff = t.amount + (deltaMap[t.id] || 0);
-    if (t.bonCounted) { if (t.method === 'bon') a.bon += Math.max(0, eff - (dedMap[t.id] || 0)); else if (t.method === 'pelunasan') a.pelunasan += t.amount; }   // receivable excl. disputed portion
-    if (t.method === 'lunas' || t.method === 'bon') a.spend += eff;   // read-only: lifetime purchase total (for the list "total belanja" sort)
-    if (!t.legacy) { a.totalGalon += t.qty; a.txnCount++; if (t.txnDate > a.lastDate) a.lastDate = t.txnDate; }   // stats exclude archive
+    if (t.bonCounted) { if (t.method === 'bon') a.bon += Math.max(0, eff - (dedMap[t.id] || 0)); else if (t.method === 'pelunasan') a.pelunasan += t.amount; }   // receivable (all-time) excl. disputed portion
+    const inWin = win.unlimited || (t.txnDate >= win.from && t.txnDate <= win.to);
+    if (inWin && (t.method === 'lunas' || t.method === 'bon')) a.spend += eff;   // purchase total within the window
+    if (inWin && !t.legacy) { a.totalGalon += t.qty; a.txnCount++; if (t.txnDate > a.lastDate) a.lastDate = t.txnDate; }   // window stats exclude archive
   });
   const heldMap = await gallonBalances(user, qFleet);   // gallons each customer holds (incl. approved 'penyesuaian' movements)
   // Σ approved BON adjustment deltas per customer → folded into sisa bon (galon deltas are in heldMap).
   const adjBonRows = await prisma.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved', ...fleetWhere(user, 'fleetId', qFleet) }, select: { customerId: true, delta: true } });
   const adjBonMap = {}; adjBonRows.forEach((r) => { adjBonMap[r.customerId] = (adjBonMap[r.customerId] || 0) + r.delta; });
+  const showSisa = win.unlimited || win.canSisaBon;
   let data = rows.map((c) => {
     const a = agg[c.id] || { totalGalon: 0, bon: 0, pelunasan: 0, lastDate: '', txnCount: 0, spend: 0 };
-    return { ...custClient(c), totalGalon: a.totalGalon, sisaBon: Math.max(0, a.bon - a.pelunasan + (adjBonMap[c.id] || 0)), lastDate: a.lastDate || null, txnCount: a.txnCount, spend: a.spend, gallonsHeld: heldMap[c.id] || 0 };
+    return { ...custClient(c), totalGalon: a.totalGalon, sisaBon: showSisa ? Math.max(0, a.bon - a.pelunasan + (adjBonMap[c.id] || 0)) : null, lastDate: a.lastDate || null, txnCount: a.txnCount, spend: a.spend, gallonsHeld: heldMap[c.id] || 0 };
   });
   // `bon` is the one criterion that can't be a DB predicate — sisaBon is derived from the
   // transaction ledger (+ active price adjustments), so it's applied to the computed rows.
@@ -398,7 +460,26 @@ async function getCustomer(id, user) {
   // (before the ≥0 floor and adjustments). Exposed so the UI + a test can assert it never drifts.
   const reconcile = { totalBon: rawBon, dibayar: pelunasan, tidakDiakui: tidakDiakuiTotal, kerugian: kerugianTotal, adjBonDelta, sisaBon };
   const disputes = dispRows.map((r) => disputeClient({ ...r, customer: { name: c.name, code: c.code } }));
-  return { ...custClient(c), transactions, imports, totalGalon, sisaBon, txnCount: txns.filter((t) => !t.legacy).length, priceAdjustments, gallonsHeld, adjustments, disputes, disputeSummary, reconcile };
+  // ── VIEW-WINDOW ENFORCEMENT ──
+  // Sisa Bon is a BALANCE (money owed now), not a transaction row — so it is computed over ALL
+  // history above and stays visible to a restricted caller that holds `distribusi.lihat.sisa_bon`
+  // (a collector must chase the debt regardless of how old the bon is). What the window hides is the
+  // historical ROWS that compose it: the returned `transactions` array (and the import/adjustment/
+  // dispute breakdowns) are clamped to the window. Without `sisa_bon`, the balance is hidden too.
+  const win = await resolveViewWindow(user);
+  const showSisa = win.unlimited || win.canSisaBon;
+  let outTxns = transactions, outImports = imports, outPriceAdj = priceAdjustments, outAdjustments = adjustments, outDisputes = disputes;
+  if (!win.unlimited) {
+    outTxns = transactions.filter((t) => t.txnDate >= win.from && t.txnDate <= win.to);
+    outDisputes = disputes.filter((d) => d.txnDate && d.txnDate >= win.from && d.txnDate <= win.to);
+    outImports = []; outPriceAdj = []; outAdjustments = [];   // historical composition — hidden outside the window
+  }
+  return { ...custClient(c), transactions: outTxns, imports: outImports,
+    totalGalon: showSisa ? totalGalon : null, sisaBon: showSisa ? sisaBon : null,
+    txnCount: txns.filter((t) => !t.legacy).length, priceAdjustments: outPriceAdj, gallonsHeld,
+    adjustments: outAdjustments, disputes: outDisputes,
+    disputeSummary: showSisa ? disputeSummary : null, reconcile: showSisa ? reconcile : null,
+    viewWindow: { unlimited: win.unlimited, from: win.from, to: win.to, canSisaBon: win.canSisaBon, effectiveFrom: win.unlimited ? null : win.from, effectiveTo: win.to } };
 }
 // Sync write columns (type is resolved separately — it needs a DB lookup).
 function customerCols(body) {
@@ -793,9 +874,19 @@ async function cancelPriceAdjustment(batchId, actor) {
 
 // ── Transactions ── (immutable; price locked server-side)
 async function listTransactions(q, user) {
+  // SERVER-ENFORCED view window: clamp the requested date range to what the caller may see. A
+  // restricted user is ALWAYS bound to the window even when they send no date params, so search
+  // (which runs client-side over these rows) can never surface older rows.
+  const win = await resolveViewWindow(user);
   const where = { ...fleetWhere(user, 'fleetId', q.fleet) };
-  if (q.date) where.txnDate = q.date;
-  if (q.dateFrom || q.dateTo) { where.txnDate = {}; if (q.dateFrom) where.txnDate.gte = q.dateFrom; if (q.dateTo) where.txnDate.lte = q.dateTo; }
+  let clampInfo = null;
+  if (q.date) { clampInfo = clampDay(win, q.date); where.txnDate = clampInfo.date; }
+  else {
+    clampInfo = clampRange(win, q.dateFrom || null, q.dateTo || null);
+    if (win.unlimited) { if (clampInfo.from || clampInfo.to) { where.txnDate = {}; if (clampInfo.from) where.txnDate.gte = clampInfo.from; if (clampInfo.to) where.txnDate.lte = clampInfo.to; } }
+    else where.txnDate = { gte: clampInfo.from, lte: clampInfo.to };   // restricted: always window-bounded
+  }
+  if (clampInfo && clampInfo.clamped) await auditWindowBlock(user, 'GET /distribusi/transactions', { date: q.date || null, from: q.dateFrom || null, to: q.dateTo || null }, clampInfo, q.fleet);
   if (q.customerId) where.customerId = q.customerId;
   if (q.method && METHODS.includes(q.method)) where.method = q.method;
   const rows = await resilientFindMany(prisma.distTransaction, {
@@ -820,7 +911,7 @@ async function listTransactions(q, user) {
   // the Transactions screen can show them with an "Arsip" badge/filter — the `legacy` flag on each
   // row lets Cash Integration (and any aggregate) drop them.
   const data = rows.map((r) => { const adj = priceDelta(r.corrections); const g = galBy[r.id] || { gallonOut: 0, gallonIn: 0 }; return { ...r, legacy: !!r.legacy, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections), pendingRequest: pendBy[r.id] || null, gallonOut: g.gallonOut, gallonIn: g.gallonIn, dispute: dispEff[r.id] || null }; });
-  return { data, now: new Date().toISOString() };
+  return { data, now: new Date().toISOString(), effectiveFrom: clampInfo ? clampInfo.effFrom : (win.unlimited ? null : win.from), effectiveTo: clampInfo ? (clampInfo.effTo || win.to) : win.to, clamped: !!(clampInfo && clampInfo.clamped), window: { unlimited: win.unlimited, from: win.from, to: win.to, canSisaBon: win.canSisaBon } };
 }
 // ═══════════════════ CUSTOMER BALANCE ADJUSTMENTS (penyesuaian) ═══════════════════
 // Reasons — note REQUIRED for `lainnya` and `penghapusan_piutang`.
@@ -967,7 +1058,9 @@ async function adjustmentReport(user, q) {
   if (q && q.kind && (q.kind === 'galon' || q.kind === 'bon')) where.kind = q.kind;
   if (q && q.status && ['pending', 'approved', 'reversed'].includes(q.status)) where.status = q.status;
   if (q && q.userId) where.createdById = String(q.userId);
-  const { dateFrom, dateTo } = q || {};
+  // Clamp the requested createdAt range to the caller's window (defense-in-depth; owner-tier report).
+  const cw = await windowFor(user, (q && q.dateFrom) || null, (q && q.dateTo) || null, 'GET /distribusi/reports/adjustments', q && q.fleet);
+  const dateFrom = cw.from, dateTo = cw.to;
   if (dateFrom || dateTo) { where.createdAt = {}; if (dateFrom) where.createdAt.gte = new Date(dateFrom + 'T00:00:00'); if (dateTo) where.createdAt.lte = new Date(dateTo + 'T23:59:59'); }
   const rows = await prisma.distAdjustment.findMany({ where, include: { customer: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 5000 });
   const data = rows.map(adjustmentClient);
@@ -1571,7 +1664,9 @@ async function createPaymentNotReceived(body, actor) {
 // recorded it, plus totals per responsible staff and for the period.
 async function lossReport(user, query) {
   const q = query || {};
-  const { from, to, period } = dayRange(q, todayISO());
+  const dr = dayRange(q, todayISO());
+  const cw = await windowFor(user, dr.from, dr.to, 'GET /distribusi/reports/loss', q.fleet);   // defense-in-depth clamp
+  const from = cw.from, to = cw.to, period = dr.period;
   const rows = await resilientFindMany(prisma.distTransaction, {
     where: { paymentNotReceived: true, txnDate: { gte: from, lte: to }, ...fleetWhere(user, 'fleetId', q.fleet) },
     include: { customer: { select: { name: true, code: true } } }, orderBy: [{ txnDate: 'desc' }, { createdAt: 'desc' }],
@@ -1897,6 +1992,19 @@ async function createInvoice(customerId, body, actor) {
   const where = { customerId, ...LIVE_TXN, method: { in: ['lunas', 'bon'] } };   // legacy archive rows are never billable
   const scope = body.scope || 'unpaidBon';
   if (scope === 'period') { where.txnDate = {}; if (body.dateFrom) where.txnDate.gte = body.dateFrom; if (body.dateTo) where.txnDate.lte = body.dateTo; }
+  // SERVER-ENFORCED view window: a restricted user must not snapshot historical rows into an invoice
+  // DOCUMENT (createInvoice is reachable with distribusiInput). Clamp the billed rows to the window;
+  // an unlimited caller (GM/owner) bills the true outstanding debt unchanged.
+  const invWin = await resolveViewWindow(actor);
+  if (!invWin.unlimited) {
+    const cur = where.txnDate && typeof where.txnDate === 'object' ? where.txnDate : {};
+    const gte = cur.gte && cur.gte > invWin.from ? cur.gte : invWin.from;
+    const lte = cur.lte && cur.lte < invWin.to ? cur.lte : invWin.to;
+    where.txnDate = { gte, lte };
+    if ((scope === 'period' && ((body.dateFrom && body.dateFrom < invWin.from) || (body.dateTo && body.dateTo > invWin.to))) || scope === 'unpaidBon') {
+      await auditWindowBlock(actor, 'POST /distribusi/customers/:id/invoices', { scope, from: body.dateFrom || null, to: body.dateTo || null }, { effFrom: gte, effTo: lte }, customer.armada);
+    }
+  }
   let txns = await prisma.distTransaction.findMany({ where, orderBy: [{ txnDate: 'asc' }, { createdAt: 'asc' }], include: { corrections: true } });
   // Disputed (tidak_diakui/kerugian) rows are NOT billed — the customer does not owe them.
   const ded = await disputeDeductions({ customerId });
@@ -2004,11 +2112,12 @@ async function billingReminders(user, qFleet, dateStr) {
 // Resolve the dashboard/report window [from,to] from a period request, and ENFORCE the history cap
 // server-side: without `distribusiDashHistory` a user may ONLY see today — any other window is 403,
 // so a normal user can't craft a request for last month. Returns { from, to, period, canHistory }.
-function resolveDashWindow(user, query) {
+// Resolve the dashboard's requested window, then CLAMP it to the caller's allowed view window
+// (server-enforced). Never 403 — a wider ask is narrowed and flagged `clamped` so the UI explains.
+async function resolveDashWindow(user, query) {
   const q = query || {};
   const today = todayISO();
-  const perms = resolvePerms(user.role, user.permissions);
-  const canHistory = !!perms.distribusiDashHistory;
+  const win = await resolveViewWindow(user);
   let from = today, to = today, period = 'today';
   const p = q.period || (q.date ? 'range' : (q.dateFrom || q.dateTo ? 'range' : 'today'));
   if (q.date && !q.period && !q.dateFrom && !q.dateTo) { from = to = q.date; period = (q.date === today ? 'today' : 'range'); }
@@ -2019,15 +2128,16 @@ function resolveDashWindow(user, query) {
     from = q.dateFrom || q.date || today; to = q.dateTo || q.date || today; period = 'range';
     if (from > to) { const t = from; from = to; to = t; }
   }
-  if (!(from === today && to === today) && !canHistory) {
-    throw ApiError.forbidden('Perlu izin "Lihat Periode Sebelumnya" untuk melihat periode selain hari ini.');
-  }
-  return { from, to, period, canHistory };
+  const c = clampRange(win, from, to);
+  const canHistory = win.unlimited || win.from < today;   // "may see earlier than today"
+  return { from: c.from, to: c.to, period, canHistory, clamped: c.clamped, win, reqFrom: from, reqTo: to };
 }
 
 async function dashboardSummary(user, query) {
   const q = query || {};
-  const { from, to, period, canHistory } = resolveDashWindow(user, q);
+  const dw = await resolveDashWindow(user, q);
+  const { from, to, period, canHistory, clamped, win } = dw;
+  if (clamped) await auditWindowBlock(user, 'GET /distribusi/dashboard/summary', { from: dw.reqFrom, to: dw.reqTo, period: (query || {}).period || null }, { effFrom: from, effTo: to }, query && query.fleet);
   const qFleet = q.fleet;
   const fleetFilter = fleetWhere(user, 'fleetId', qFleet);
   const rows = await prisma.distTransaction.findMany({
@@ -2110,12 +2220,17 @@ async function dashboardSummary(user, query) {
   const topCustomers = Object.values(byCust).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
   const customers = await prisma.customer.count({ where: fleetWhere(user, 'armada', qFleet) });
-  const reminders = (await billingReminders(user, qFleet, to)).data;   // "Perlu ditagih" list
+  // "Total Piutang (sepanjang waktu)" is an ALL-TIME figure — it requires `distribusi.lihat.semua`;
+  // otherwise it (and the all-time billing-reminders list) is withheld so the UI hides the card
+  // rather than showing a truncated number. The window KPIs above stay visible.
+  const reminders = (win.canAll || win.canSisaBon) ? (await billingReminders(user, qFleet, to)).data : [];
   return {
     date: to, from, to, period, canHistory, periodDays: series.length,
+    effectiveFrom: win.unlimited ? null : win.from, effectiveTo: win.unlimited ? null : win.to, clamped: !!clamped,
+    viewWindow: { unlimited: win.unlimited, from: win.from, to: win.to, canSisaBon: win.canSisaBon, canAll: win.canAll },
     periodQty, periodIn,            // headline KPIs over the window (same source as chart/recent/top)
     periodInCash, periodInTransfer, // …split: cash driver deposits vs bank transfers (sum = periodIn)
-    receivable,                     // all-time outstanding bon (running balance)
+    receivable: win.canAll ? receivable : null,   // all-time outstanding bon — hidden unless `semua`
     count: rows.length, amount, byMethod, uangMasuk, piutang,   // window txns + money-in
     todayCash, todayTransfer, todayCashByFleet,   // money-in split + per-fleet cash to reconcile
     todayExpense, todayNetCash,   // field expenses in the window + net cash to deposit (cash − expenses)
@@ -2648,8 +2763,13 @@ function expenseClient(e) {
 async function listExpenses(user, query) {
   const q = query || {};
   const where = { ...fleetWhere(user, 'fleetId', q.fleet) };
-  if (q.date) where.date = q.date;
-  if (q.dateFrom || q.dateTo) where.date = { ...(q.dateFrom ? { gte: q.dateFrom } : {}), ...(q.dateTo ? { lte: q.dateTo } : {}) };
+  // SERVER-ENFORCED view window (DistExpense uses column `date`, not `txnDate`).
+  const win = await resolveViewWindow(user);
+  if (q.date) { const c = clampDay(win, q.date); where.date = c.date; if (c.clamped) await auditWindowBlock(user, 'GET /distribusi/expenses', { date: q.date }, c, q.fleet); }
+  else { const c = clampRange(win, q.dateFrom || null, q.dateTo || null);
+    if (win.unlimited) { if (c.from || c.to) where.date = { ...(c.from ? { gte: c.from } : {}), ...(c.to ? { lte: c.to } : {}) }; }
+    else where.date = { gte: c.from, lte: c.to };
+    if (c.clamped) await auditWindowBlock(user, 'GET /distribusi/expenses', { from: q.dateFrom || null, to: q.dateTo || null }, c, q.fleet); }
   if (q.status === 'active' || q.status === 'void') where.status = q.status;
   const rows = await resilientFindMany(prisma.distExpense, { where, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500 }, 'expenses');
   return { data: rows.map(expenseClient) };
@@ -2735,7 +2855,9 @@ const dayRange = (query, today) => {
   return { from: today, to: today, period: 'today' };
 };
 async function deliveryReport(user, query) {
-  const { from, to, period } = dayRange(query, todayISO());
+  const dr = dayRange(query, todayISO());
+  const cw = await windowFor(user, dr.from, dr.to, 'GET /distribusi/reports/delivery', query && query.fleet);   // defense-in-depth clamp
+  const from = cw.from, to = cw.to, period = dr.period;
   const qFleet = query.fleet;
   const inRange = { gte: from, lte: to };
   // 1) RUNS (rits) with effective figures + reconciliation

@@ -1524,6 +1524,7 @@ function FApp() {
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canHardDelete={!!p.distribusiHardDelete} canArchive={!!p.distribusiLegacyImport} canExpense={!!p.distribusiExpense} canPrice={!!p.distribusiHargaMaster} userName={user && user.name}
+              canViewAll={!!p['distribusi.lihat.semua']} canView7={!!p['distribusi.lihat.7hari']} canViewMonth={!!p['distribusi.lihat.bulan_ini']} canViewSisaBon={!!(p['distribusi.lihat.semua'] || p['distribusi.lihat.sisa_bon'])} maxLookback={+p.maxLookbackDays || 0}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}

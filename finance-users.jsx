@@ -44,6 +44,13 @@ const CAP_GROUPS = [
     ['dataWipe', '⚠ Hapus Data (berbahaya)'],
   ] },
   { title: 'Distribusi', caps: [
+    // ── Batas waktu lihat data (server-enforced) — pilih SATU jangkauan terluas; tanpa ini, default
+    // "hanya hari ini". "Semua" juga membuka pemilih Rentang. "Sisa Bon" boleh dimatikan terpisah.
+    ['distribusi.lihat.hari_ini', '🕒 Lihat data: Hanya hari ini (default)'],
+    ['distribusi.lihat.7hari', '🕒 Lihat data: 7 hari terakhir'],
+    ['distribusi.lihat.bulan_ini', '🕒 Lihat data: Bulan ini'],
+    ['distribusi.lihat.semua', '🕒 Lihat data: Semua riwayat + Rentang custom'],
+    ['distribusi.lihat.sisa_bon', '💳 Lihat Sisa Bon (total tunggakan, walau riwayat dibatasi)'],
     ['distribusiInput', 'Input Transaksi Distribusi'],
     ['distribusiKoreksi', 'Koreksi Transaksi Distribusi'],
     ['distribusiCustomers', 'Kelola Pelanggan (tambah/ubah)'],
@@ -167,6 +174,16 @@ function UserModal({ row, users, onSave, onClose, busy, fleet, businessUnits }) 
               )}
             </div>
           ))}
+
+          {/* ---- Batas mundur khusus (fine-grained view-window override, in days) ---- */}
+          {!eff['distribusi.lihat.semua'] && (
+            <div style={{ marginTop: 4, marginBottom: 10 }}>
+              <label className="fld-label" style={{ margin: 0 }}>Batas mundur khusus (hari) — opsional</label>
+              <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '2px 0 6px' }}>Kosongkan untuk memakai jangkauan cap "Lihat data" di atas. Isi mis. <b>3</b> agar user boleh melihat 3 hari terakhir. Jangkauan terluas antara ini dan cap yang menang.</div>
+              <input type="number" min="0" max="366" className="fld" style={{ maxWidth: 140 }} value={eff.maxLookbackDays != null ? eff.maxLookbackDays : ''} placeholder="—"
+                onChange={(e) => { const v = String(e.target.value).trim(); const n = v === '' ? undefined : Math.max(0, Math.min(366, parseInt(v, 10) || 0)); const next = { ...eff }; if (n === undefined) delete next.maxLookbackDays; else next.maxLookbackDays = n; set({ permissions: next }); }} />
+            </div>
+          )}
 
           {/* ---- Distribusi fleet access (data scope) ---- */}
           {(() => {

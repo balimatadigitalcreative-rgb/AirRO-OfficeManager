@@ -23,24 +23,28 @@ beforeAll(async () => {
 afterAll(() => prisma.$disconnect());
 
 describe('A — dashboard today-only default + history capability', () => {
-  it('a helper WITHOUT distribusiDashHistory: today works, any other period/date is 403', async () => {
-    const u = await reg({ name: 'Helper', username: 'help_hr', password: 'secret123', role: 'gm' });
-    await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(owner)).send({ permissions: { distribusi: true, distribusiDashboard: true, distribusiDashHistory: false } });
+  it('a today-only user (no lihat.* widening): today works, any wider period/date is CLAMPED to today (not 403)', async () => {
+    // A non-owner/GM user with distribusi + dashboard but NO view-window widening → the derive layer
+    // defaults them to hari_ini (today only). Wider asks are clamped server-side, never rejected.
+    const u = await reg({ name: 'Helper', username: 'help_hr', password: 'secret123', role: 'finance' });
+    await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(owner)).send({ permissions: { distribusi: true, distribusiDashboard: true } });
     const h = await login('help_hr', 'secret123');
-    // today (default) is allowed
+    // today (default) is allowed and NOT clamped
     const t = await request(app).get('/api/v1/distribusi/dashboard/summary').set(auth(h));
     expect(t.status).toBe(200);
     expect(t.body.data.period).toBe('today');
     expect(t.body.data.canHistory).toBe(false);
+    expect(t.body.data.clamped).toBe(false);
     expect(t.body.data.from).toBe(TODAY);
     expect(t.body.data.to).toBe(TODAY);
-    // explicit period=today is allowed
+    // explicit period=today is allowed, unclamped
     expect((await request(app).get('/api/v1/distribusi/dashboard/summary?period=today').set(auth(h))).status).toBe(200);
-    // any earlier period / date / range is REJECTED server-side (not just hidden)
-    expect((await request(app).get('/api/v1/distribusi/dashboard/summary?period=week').set(auth(h))).status).toBe(403);
-    expect((await request(app).get('/api/v1/distribusi/dashboard/summary?period=month').set(auth(h))).status).toBe(403);
-    expect((await request(app).get(`/api/v1/distribusi/dashboard/summary?date=${YESTERDAY}`).set(auth(h))).status).toBe(403);
-    expect((await request(app).get(`/api/v1/distribusi/dashboard/summary?period=range&dateFrom=${YESTERDAY}&dateTo=${TODAY}`).set(auth(h))).status).toBe(403);
+    // any wider period / date / range is CLAMPED to today (200 + clamped:true), never a 403
+    const chk = async (qs) => { const r = await request(app).get('/api/v1/distribusi/dashboard/summary?' + qs).set(auth(h)); expect(r.status).toBe(200); expect(r.body.data.clamped).toBe(true); expect(r.body.data.effectiveTo).toBe(TODAY); expect(r.body.data.effectiveFrom).toBe(TODAY); return r; };
+    await chk('period=week');
+    await chk('period=month');
+    await chk('date=' + YESTERDAY);
+    await chk('period=range&dateFrom=' + YESTERDAY + '&dateTo=' + TODAY);
   });
 
   it('an owner (has the cap) switches periods freely; the window drives the KPIs', async () => {

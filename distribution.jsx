@@ -157,7 +157,7 @@ const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((
 // Missing-field labels for the "Data belum lengkap" chips (keys match server completeness output).
 const MISSING_KEYS = { phone: 'dist.mPhone', location: 'dist.mLoc', armada: 'dist.mArmada', deliveryDays: 'dist.mDays', price: 'dist.mPrice' };
 const missChips = (missing) => (missing || []).map((k) => <span key={k} className="dist-miss-chip">{trD(MISSING_KEYS[k] || k)}</span>);
-const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' }, batal: { cls: 'koreksi', k: 'dist.akBatal' }, hapus: { cls: 'harga', k: 'dist.akHapus' } };
+const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' }, batal: { cls: 'koreksi', k: 'dist.akBatal' }, hapus: { cls: 'harga', k: 'dist.akHapus' }, akses: { cls: 'akses', k: 'dist.akAkses' } };
 // Indonesian phone normalisation — MIRRORS server/src/utils/phone.js exactly (that one is
 // authoritative; this is for live preview/dedupe in the browser). Excel silently drops the
 // leading 0 from a phone column and people paste "+62 …", so every number is repaired to the
@@ -878,7 +878,15 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName, canViewAll, canView7, canViewMonth, canViewSisaBon, maxLookback }) {
+  // ── VIEW-WINDOW (time restriction) — the UI HIDES presets outside what the server allows; the
+  // server still enforces (this is convenience, not the guard). Mirror viewWindowFrom() client-side.
+  const vwAddDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const vwFrom = canViewAll ? null : (() => { let f = today; const earlier = (d) => { if (d && d < f) f = d; }; if (canView7) earlier(vwAddDays(today, -6)); if (canViewMonth) earlier(today.slice(0, 8) + '01'); if (maxLookback > 0) earlier(vwAddDays(today, -maxLookback)); return f; })();
+  const periodStart = { all: '0000-00-00', today: today, week: vwAddDays(today, -6), month: today.slice(0, 8) + '01', lastMonth: '0000-00-00', range: '0000-00-00' };
+  // A preset is offered only if its whole range fits inside the allowed window. 'all'/'lastMonth'/
+  // 'range' reach beyond a fixed window → they require full-history (semua).
+  const periodAllowed = (k) => canViewAll || (k !== 'all' && k !== 'lastMonth' && k !== 'range' && vwFrom != null && periodStart[k] >= vwFrom);
   const [view, setView] = uSx('list');
   const [txns, setTxns] = uSx(null);
   const [customers, setCustomers] = uSx([]);
@@ -942,7 +950,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const toSet = (s) => new Set(String(s || '').split(',').filter(Boolean));
   const [q, setQ] = uSx(() => txp('q', ''));
   const [qDeb, setQDeb] = uSx(q);
-  const [period, setPeriod] = uSx(() => txp('period', 'all'));   // all | today | week | month | lastMonth | range
+  const [period, setPeriod] = uSx(() => { const p = txp('period', canViewAll ? 'all' : 'today'); return periodAllowed(p) ? p : 'today'; });   // all | today | week | month | lastMonth | range
   const [rFrom, setRFrom] = uSx(() => txp('from', ''));
   const [rTo, setRTo] = uSx(() => txp('to', ''));
   const [methodSel, setMethodSel] = uSx(() => toSet(txp('m', '')));
@@ -971,6 +979,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [density, setDensity] = uSx(() => { try { return localStorage.getItem('tx_density') === 'compact' ? 'compact' : 'comfortable'; } catch (e) { return 'comfortable'; } });
   const [moreMenu, setMoreMenu] = uSx(false);          // ⋯ overflow menu (secondary actions)
   const [infoOpen, setInfoOpen] = uSx(false);          // permanence-note info popover (replaces the banner)
+  const [txWin, setTxWin] = uSx({ clamped: false, from: null, to: null, unlimited: !!canViewAll });   // server view-window meta (drives the clamp notice)
   const [cursor, setCursor] = uSx(-1);                 // keyboard row cursor into txSorted (↑/↓ move, Enter opens)
   const [availW, setAvailW] = uSx(() => { try { return window.innerWidth; } catch (e) { return 1280; } });
   const txSentinel = React.useRef(null);
@@ -1012,10 +1021,11 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   // The PERIOD narrows the fetch server-side (dateFrom/dateTo) so a huge ledger never loads whole.
   const listQs = () => { const p = []; if (ef && ef !== 'all') p.push('fleet=' + encodeURIComponent(ef)); if (pb) { p.push('dateFrom=' + pb.from); p.push('dateTo=' + pb.to); } return p.join('&'); };
   const reload = () => Promise.all([
-    window.API.distribusi.transactions.list(listQs()).then((r) => setTxns(r.data || [])).catch(() => setTxns([])),
+    window.API.distribusi.transactions.list(listQs()).then((r) => { setTxns(r.data || []); setTxWin({ clamped: !!r.clamped, from: r.effectiveFrom || null, to: r.effectiveTo || null, unlimited: !!(r.window && r.window.unlimited) }); }).catch(() => setTxns([])),
     window.API.distribusi.customers.list(ef).then((r) => setCustomers(r.data || [])).catch(() => {}),
   ]);
   uEx(() => { if (window.API && window.API.distribusi) { setTxns(null); reload(); } }, [refreshKey, ef, period, rFrom, rTo]);
+  uEx(() => { if (!periodAllowed(period)) setPeriod('today'); }, [period, canViewAll, canView7, canViewMonth, maxLookback]);   // keep the selected period inside the allowed window
   // Mirror filters + sort to the URL (replaceState — shareable, survives refresh).
   uEx(() => {
     try {
@@ -1473,8 +1483,8 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
             {infoOpen && <><div className="cd-menu-scrim" onClick={() => setInfoOpen(false)} /><div className="tx-infopop" role="tooltip"><IconLock s={14} />{trD('dist.permBanner')}</div></>}
           </div>
           <div className="dist-search tx-search"><IconSearch s={16} /><input value={q} placeholder={trD('tx.searchPh')} aria-label={trD('tx.searchPh')} onChange={(e) => setQ(e.target.value)} />{q && <button type="button" aria-label="clear" onClick={() => setQ('')}><IconClose s={13} /></button>}</div>
-          <div className="dist-chips tx-periodchips tx-segmented">{[['all', trD('dist.fAll')], ['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['lastMonth', trD('pc.pLastMonth')], ['range', trD('dist.perRange')]].map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
-          {period === 'range' && <div className="dist-period-range"><DP.DateField value={rFrom} onChange={setRFrom} max={rTo || today} /><span>–</span><DP.DateField value={rTo} onChange={setRTo} min={rFrom || undefined} max={today} /></div>}
+          <div className="dist-chips tx-periodchips tx-segmented">{[['all', trD('dist.fAll')], ['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['lastMonth', trD('pc.pLastMonth')], ['range', trD('dist.perRange')]].filter(([k]) => periodAllowed(k)).map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+          {period === 'range' && canViewAll && <div className="dist-period-range"><DP.DateField value={rFrom} onChange={setRFrom} max={rTo || today} /><span>–</span><DP.DateField value={rTo} onChange={setRTo} min={rFrom || undefined} max={today} /></div>}
           <div style={{ flex: 1 }} />
           <button type="button" className={`btn btn-ghost btn-sm ${anyFilter ? 'on' : ''}`} onClick={() => setAdvOpen(true)}><IconFilter s={15} />{trD('tx.advanced')}</button>
           {canInput && <button type="button" className="btn btn-primary btn-sm dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
@@ -1511,6 +1521,11 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           {anyFilter && <button type="button" className="dist-link tx-clearall" onClick={clearAll}>{trD('tx.clearAll')}</button>}
         </div>
       </div>)}
+      {/* VIEW-WINDOW notice — the server clamped this request to the caller's allowed window. Never an
+          empty/misleading table with no explanation. */}
+      {!isExp && txWin.clamped && txWin.from && (
+        <div className="tx-winnotice no-print"><IconLock s={14} />{trD('tx.windowNote', { range: txWin.from === txWin.to ? fmtDateShort(txWin.from) : (fmtDateShort(txWin.from) + ' – ' + fmtDateShort(txWin.to)) })}</div>
+      )}
 
       {/* PENGELUARAN LIST — DistExpense rows for the chosen day/fleet: outflow-styled amount, category,
           note, who logged it, lazy photo thumbnail, plus the day's total on top. These are NEVER
@@ -4113,7 +4128,7 @@ function DistAudit({ canAudit, refreshKey }) {
   uEx(() => { if (canAudit && window.API && window.API.distribusi) reload(); }, [refreshKey, canAudit]);
   if (!canAudit) return <DistLocked />;
 
-  const kindChips = [['all', trD('dist.fAll')], ['koreksi', trD('dist.akKoreksi')], ['harga', trD('dist.akHarga')], ['input', trD('dist.akInput')], ['impor', trD('dist.akImpor')], ['pelanggan', trD('dist.akPelanggan')]];
+  const kindChips = [['all', trD('dist.fAll')], ['koreksi', trD('dist.akKoreksi')], ['harga', trD('dist.akHarga')], ['input', trD('dist.akInput')], ['impor', trD('dist.akImpor')], ['pelanggan', trD('dist.akPelanggan')], ['akses', trD('dist.akAkses')]];
   const filtered = (rows || []).filter((a) => {
     if (kind !== 'all' && a.kind !== kind) return false;
     if (q && !((a.title || '') + (a.detail || '') + (a.actorName || '')).toLowerCase().includes(q.toLowerCase())) return false;

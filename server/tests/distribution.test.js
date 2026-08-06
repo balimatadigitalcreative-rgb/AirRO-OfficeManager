@@ -337,8 +337,12 @@ describe('Distribusi — per-fleet data separation (server-enforced)', () => {
     const sScopedB = await request(app).get('/api/v1/distribusi/dashboard/summary').set(auth(staffBiru));
     expect(sScopedB.status).toBe(200);
     expect(sScopedB.body.data.customers).toBe(1);   // scoped Biru staff sees only its fleet
-    // …but a non-today date is REJECTED server-side (history requires the cap the staff lacks).
-    expect((await request(app).get('/api/v1/distribusi/dashboard/summary?date=2026-08-01').set(auth(staffBiru))).status).toBe(403);
+    // …and a non-today date is CLAMPED to today server-side (view-window feature: wider history
+    // requires a lihat.* cap the staff lacks). The request is NOT rejected — it is narrowed + flagged.
+    const sPast = await request(app).get('/api/v1/distribusi/dashboard/summary?date=2026-08-01').set(auth(staffBiru));
+    expect(sPast.status).toBe(200);
+    expect(sPast.body.data.clamped).toBe(true);
+    expect(sPast.body.data.effectiveTo).toBe(new Date().toISOString().slice(0, 10));
   });
 });
 

@@ -70,18 +70,23 @@ describe('dashboard — Bon Baru (period+fleet) vs all-time Total Piutang', () =
     expect(merah.piutang + biru.piutang).toBe(s.piutang);   // 50.000 + 7.000
   });
 
-  it('history gating: a today-locked user gets today\'s bon baru; a crafted stale period is refused (403)', async () => {
+  it('history gating: a today-locked user gets today\'s bon baru; a crafted stale period is CLAMPED to today (no leak)', async () => {
     const u = await reg({ name: 'Staff', username: 'stf_bb', password: 'secret123', role: 'finance' });
-    // distribusi + dashboard, but NO distribusiDashHistory → locked to today
-    await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(gm)).send({ permissions: { distribusi: true, distribusiDashboard: true, distribusiDashHistory: false } });
+    // distribusi + dashboard, but NO view-window widening → derive defaults them to hari_ini (today)
+    await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(gm)).send({ permissions: { distribusi: true, distribusiDashboard: true } });
     const t = (await request(app).post('/api/v1/auth/login').send({ username: 'stf_bb', password: 'secret123' })).body.token;
-    // the FRONTEND clamps to today for a non-history user (per = canHistory ? period : 'today'), so it
-    // only ever sends "today" — which returns today's bon baru and never bricks the card.
+    // the FRONTEND clamps to today for a today-only user, so it only ever sends "today".
     const s = await dash(t, '?period=today&fleet=all');
     expect(s.canHistory).toBe(false);
     expect(s.piutang).toBe(37000);       // today's new bon only
-    // and the server is the backstop: a hand-crafted non-today range from this user is refused.
+    expect(s.receivable).toBeNull();     // all-time Total Piutang hidden (no semua)
+    // and the server is the backstop: a hand-crafted stale range is CLAMPED to today (not rejected),
+    // so it can never surface older bon.
     const crafted = await request(app).get('/api/v1/distribusi/dashboard/summary?period=range&dateFrom=2000-01-01&dateTo=2999-12-31').set(auth(t));
-    expect(crafted.status).toBe(403);
+    expect(crafted.status).toBe(200);
+    expect(crafted.body.data.clamped).toBe(true);
+    expect(crafted.body.data.effectiveTo).toBe(new Date().toISOString().slice(0, 10));
+    expect(crafted.body.data.piutang).toBe(37000);   // still only today's bon — no leak
+    expect(crafted.body.data.receivable).toBeNull();
   });
 });

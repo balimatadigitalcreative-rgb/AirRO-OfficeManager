@@ -15,6 +15,8 @@ const ROLE_PERMS = {
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
+    // View-window (time-restriction): Pemilik sees all history + Sisa Bon.
+    'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
@@ -28,6 +30,7 @@ const ROLE_PERMS = {
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
+    'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -214,6 +217,18 @@ function deriveDistribusiCaps(perms, role) {
   // Approving correction/void requests: a plain input/koreksi user may REQUEST a change but must never
   // gain approval by derivation (least-privilege) — yet owner/GM get it by default.
   if (p.distribusiApprove === undefined) p.distribusiApprove = isOwnerGm;
+  // ── VIEW-WINDOW (time-restriction) caps — govern how far back a user may READ distribusi data
+  // (list, dashboard, customer history, reports, exports, search). SERVER-ENFORCED in
+  // resolveViewWindow(); the UI only hides what these forbid. Owner/GM see all history (`semua`).
+  // Everyone else defaults to TODAY ONLY (`hari_ini`), plus `sisa_bon` so collectors still see the
+  // outstanding balance to chase — an admin then WIDENS them (7hari / bulan_ini / semua) explicitly.
+  // Widening is NEVER derived from the legacy `distribusi` flag (that would silently grant history);
+  // only the safe baseline (hari_ini + sisa_bon) and owner/GM `semua` are defaulted here.
+  if (p['distribusi.lihat.semua'] === undefined) p['distribusi.lihat.semua'] = isOwnerGm;
+  if (p['distribusi.lihat.bulan_ini'] === undefined) p['distribusi.lihat.bulan_ini'] = false;
+  if (p['distribusi.lihat.7hari'] === undefined) p['distribusi.lihat.7hari'] = false;
+  if (p['distribusi.lihat.hari_ini'] === undefined) p['distribusi.lihat.hari_ini'] = true;
+  if (p['distribusi.lihat.sisa_bon'] === undefined) p['distribusi.lihat.sisa_bon'] = true;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
     || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport || p.distribusiBonAdjust || p.distribusiPenyesuaian || p.distribusiApprove);
@@ -264,4 +279,25 @@ function resolvePerms(role, permsStrOrObj) {
   return deriveManageUsers(resolved, role);
 }
 
-module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, deriveDistribusiCaps, deriveGudangCaps, refreshRoleCache, seedBuiltinRoles };
+// ── VIEW-WINDOW math (pure; no DB) ───────────────────────────────────────────
+// The assignable view-window capability keys, widest → narrowest.
+const VIEW_CAPS = { all: 'distribusi.lihat.semua', month: 'distribusi.lihat.bulan_ini', week: 'distribusi.lihat.7hari', today: 'distribusi.lihat.hari_ini', sisaBon: 'distribusi.lihat.sisa_bon' };
+function addDaysISO(iso, n) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+// Resolve a caller's allowed READ window from a RESOLVED perms object + today (YYYY-MM-DD).
+// Returns { unlimited, from (earliest allowed date, null if unlimited), to (today), canSisaBon,
+// canAll }. `maxLookbackDays` (an integer stored inside the permissions blob) widens a restricted
+// user by an exact number of days — whichever source grants the EARLIEST start wins.
+function viewWindowFrom(perms, today) {
+  const p = perms || {};
+  const unlimited = !!p[VIEW_CAPS.all];
+  if (unlimited) return { unlimited: true, from: null, to: today, canSisaBon: true, canAll: true };
+  let from = today;                       // hari_ini baseline
+  const earlier = (d) => { if (d && d < from) from = d; };
+  if (p[VIEW_CAPS.week]) earlier(addDaysISO(today, -6));
+  if (p[VIEW_CAPS.month]) earlier(today.slice(0, 8) + '01');
+  const mlb = parseInt(p.maxLookbackDays, 10);
+  if (Number.isFinite(mlb) && mlb > 0) earlier(addDaysISO(today, -mlb));
+  return { unlimited: false, from, to: today, canSisaBon: !!p[VIEW_CAPS.sisaBon], canAll: false };
+}
+
+module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, deriveDistribusiCaps, deriveGudangCaps, refreshRoleCache, seedBuiltinRoles, VIEW_CAPS, viewWindowFrom, addDaysISO };

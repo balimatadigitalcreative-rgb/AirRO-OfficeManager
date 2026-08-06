@@ -166,7 +166,7 @@ const listTxnQuery = z.object({
   customerId: z.string().optional(), method: z.enum(['lunas', 'bon', 'pelunasan']).optional(),
   fleet: z.string().max(60).optional(),
 });
-const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan']).optional(), limit: z.coerce.number().int().positive().max(2000).optional(), fleet: z.string().max(60).optional() });
+const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan', 'akses']).optional(), limit: z.coerce.number().int().positive().max(2000).optional(), fleet: z.string().max(60).optional() });
 const summaryQuery = z.object({ date: DATE.optional(), period: z.enum(['today', 'week', 'month', 'range']).optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
 // Delivery report (Laporan Pengiriman) — a date or range + fleet. Read-only, server-cap-gated.
 const deliveryReportQuery = z.object({ period: z.enum(['today', 'week', 'month', 'range']).optional(), date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
