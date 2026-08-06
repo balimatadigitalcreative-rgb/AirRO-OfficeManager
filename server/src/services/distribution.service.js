@@ -810,11 +810,16 @@ async function listTransactions(q, user) {
   const pendBy = {}; pendings.forEach((p) => { pendBy[p.transactionId] = { kind: p.kind, requestedByName: p.requestedByName || null, createdAt: p.createdAt ? new Date(p.createdAt).getTime() : null }; });
   const movs = ids.length ? await prisma.gallonMovement.findMany({ where: { transactionId: { in: ids }, active: true, type: { in: ['delivery_out', 'return_in'] } }, select: { transactionId: true, type: true, qty: true } }) : [];
   const galBy = {}; movs.forEach((m) => { const g = galBy[m.transactionId] || (galBy[m.transactionId] = { gallonOut: 0, gallonIn: 0 }); if (m.type === 'delivery_out') g.gallonOut += m.qty; else g.gallonIn += m.qty; });
+  // READ-ONLY dispute status per row (same shape as getCustomer) so the list can show the
+  // Disengketakan/Tidak Diakui/Kerugian badges + status filter — no calculation change.
+  const dispRows = ids.length ? await prisma.distTransactionDispute.findMany({ where: { transactionId: { in: ids } }, orderBy: { createdAt: 'asc' } }) : [];
+  const dispByTxn = {}; dispRows.forEach((d) => { (dispByTxn[d.transactionId] || (dispByTxn[d.transactionId] = [])).push(disputeClient(d)); });
+  const dispEff = {}; Object.keys(dispByTxn).forEach((tid) => { const ed = effectiveDispute(dispByTxn[tid]); if (ed) dispEff[tid] = { ...ed.latest, deducts: ed.deducts, trail: ed.trail }; });
   // Expose the effective (adjusted) amount + flags so reports/Cash Integration follow the
   // new price while the original `amount` stays intact. Legacy (archive) rows are INCLUDED here so
   // the Transactions screen can show them with an "Arsip" badge/filter — the `legacy` flag on each
   // row lets Cash Integration (and any aggregate) drop them.
-  const data = rows.map((r) => { const adj = priceDelta(r.corrections); const g = galBy[r.id] || { gallonOut: 0, gallonIn: 0 }; return { ...r, legacy: !!r.legacy, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections), pendingRequest: pendBy[r.id] || null, gallonOut: g.gallonOut, gallonIn: g.gallonIn }; });
+  const data = rows.map((r) => { const adj = priceDelta(r.corrections); const g = galBy[r.id] || { gallonOut: 0, gallonIn: 0 }; return { ...r, legacy: !!r.legacy, adjustAmount: adj, effectiveAmount: r.amount + adj, adjusted: adj !== 0, correctedManual: hasManualCorrection(r.corrections), pendingRequest: pendBy[r.id] || null, gallonOut: g.gallonOut, gallonIn: g.gallonIn, dispute: dispEff[r.id] || null }; });
   return { data, now: new Date().toISOString() };
 }
 // ═══════════════════ CUSTOMER BALANCE ADJUSTMENTS (penyesuaian) ═══════════════════

@@ -935,6 +935,42 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [eErr, setEErr] = uSx('');
   const [eVoidRow, setEVoidRow] = uSx(null);        // the expense being voided (recorded, reason required)
   const [eVoidReason, setEVoidReason] = uSx('');
+  // ── REDESIGNED LIST (presentation) — search / period / multi-filters / sort / windowing / slide-over.
+  // All filters + sort mirror to the URL so a view is shareable and survives a refresh. Search, status,
+  // sort and windowing run CLIENT-side (the endpoint has no such params); the PERIOD narrows the fetch.
+  const txp = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
+  const toSet = (s) => new Set(String(s || '').split(',').filter(Boolean));
+  const [q, setQ] = uSx(() => txp('q', ''));
+  const [qDeb, setQDeb] = uSx(q);
+  const [period, setPeriod] = uSx(() => txp('period', 'all'));   // all | today | week | month | lastMonth | range
+  const [rFrom, setRFrom] = uSx(() => txp('from', ''));
+  const [rTo, setRTo] = uSx(() => txp('to', ''));
+  const [methodSel, setMethodSel] = uSx(() => toSet(txp('m', '')));
+  const [statusSel, setStatusSel] = uSx(() => toSet(txp('st', '')));
+  const [sourceSel, setSourceSel] = uSx(() => toSet(txp('src', '')));
+  const [armadaSel, setArmadaSel] = uSx(() => toSet(txp('arm', '')));
+  const [petugasSel, setPetugasSel] = uSx(() => toSet(txp('pt', '')));
+  const [custFilter, setCustFilter] = uSx(() => txp('cust', ''));
+  const [minAmt, setMinAmt] = uSx(() => txp('min', ''));
+  const [maxAmt, setMaxAmt] = uSx(() => txp('max', ''));
+  const [flagNote, setFlagNote] = uSx(() => txp('note', '') === '1');
+  const [flagCorr, setFlagCorr] = uSx(() => txp('corr', '') === '1');
+  const [sortKey, setSortKey] = uSx(() => txp('sort', 'date'));  // date | amount | qty | customer | petugas
+  const [sortDir, setSortDir] = uSx(() => txp('dir', 'desc'));
+  const [txView, setTxView] = uSx(() => txp('v', 'table'));      // table | kartu
+  const [txVisible, setTxVisible] = uSx(120);                    // windowed render (rows shown)
+  const [detailIdx, setDetailIdx] = uSx(-1);                     // slide-over detail: index into the filtered rows
+  const [sel, setSel] = uSx({});                                 // bulk selection { id: true }
+  const [advOpen, setAdvOpen] = uSx(false);
+  const [colMenu, setColMenu] = uSx(false);
+  const [colHidden, setColHidden] = uSx(() => { try { return new Set(JSON.parse(localStorage.getItem('tx_cols_hidden') || '[]')); } catch (e) { return new Set(); } });
+  const [presets, setPresets] = uSx(() => { try { return JSON.parse(localStorage.getItem('tx_presets') || '[]'); } catch (e) { return []; } });
+  const [bulkVoid, setBulkVoid] = uSx(null);                     // { items } → bulk-cancel preview
+  const [printFor2, setPrintFor2] = uSx(null);                   // { txn, custObj? } → Cetak Nota via PrintCenter
+  const [isNarrow, setIsNarrow] = uSx(() => { try { return window.matchMedia('(max-width: 720px)').matches; } catch (e) { return false; } });
+  const txSentinel = React.useRef(null);
+  uEx(() => { const t = setTimeout(() => setQDeb(q), 300); return () => clearTimeout(t); }, [q]);   // debounce search
+  uEx(() => { let mq; try { mq = window.matchMedia('(max-width: 720px)'); } catch (e) { return; } const on = () => setIsNarrow(mq.matches); on(); mq.addEventListener ? mq.addEventListener('change', on) : mq.addListener(on); return () => { mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on); }; }, []);
 
   const doArchive = () => {
     if (!archTxn || !archReason.trim() || archSaving) return;
@@ -960,12 +996,28 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   };
 
   const ef = effFleet(fleetScope, distFleet);
-  const fleetQs = (ef && ef !== 'all') ? 'fleet=' + encodeURIComponent(ef) : '';
+  const pb = txPeriodBounds(period, rFrom, rTo);
+  // The PERIOD narrows the fetch server-side (dateFrom/dateTo) so a huge ledger never loads whole.
+  const listQs = () => { const p = []; if (ef && ef !== 'all') p.push('fleet=' + encodeURIComponent(ef)); if (pb) { p.push('dateFrom=' + pb.from); p.push('dateTo=' + pb.to); } return p.join('&'); };
   const reload = () => Promise.all([
-    window.API.distribusi.transactions.list(fleetQs).then((r) => setTxns(r.data || [])).catch(() => setTxns([])),
+    window.API.distribusi.transactions.list(listQs()).then((r) => setTxns(r.data || [])).catch(() => setTxns([])),
     window.API.distribusi.customers.list(ef).then((r) => setCustomers(r.data || [])).catch(() => {}),
   ]);
-  uEx(() => { let live = true; if (window.API && window.API.distribusi) reload(); return () => { live = false; }; }, [refreshKey, ef]);
+  uEx(() => { if (window.API && window.API.distribusi) { setTxns(null); reload(); } }, [refreshKey, ef, period, rFrom, rTo]);
+  // Mirror filters + sort to the URL (replaceState — shareable, survives refresh).
+  uEx(() => {
+    try {
+      const u = new URL(window.location.href); const s = u.searchParams;
+      const setp = (k, v, dflt) => { if (v && v !== dflt) s.set(k, v); else s.delete(k); };
+      setp('q', qDeb, ''); setp('period', period, 'all'); setp('from', period === 'range' ? rFrom : '', ''); setp('to', period === 'range' ? rTo : '', '');
+      setp('m', [...methodSel].join(','), ''); setp('st', [...statusSel].join(','), ''); setp('src', [...sourceSel].join(','), ''); setp('arm', [...armadaSel].join(','), ''); setp('pt', [...petugasSel].join(','), '');
+      setp('cust', custFilter, ''); setp('min', minAmt, ''); setp('max', maxAmt, ''); setp('note', flagNote ? '1' : '', ''); setp('corr', flagCorr ? '1' : '', '');
+      setp('sort', sortKey, 'date'); setp('dir', sortDir, 'desc'); setp('v', txView, 'table');
+      window.history.replaceState(null, '', u);
+    } catch (e) {}
+  }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir, txView]);
+  uEx(() => { setTxVisible(120); }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir]);   // reset window on filter change
+  uEx(() => { localStorage.setItem('tx_cols_hidden', JSON.stringify([...colHidden])); }, [colHidden]);
   uEx(() => { if (openFormTick) { setView('form'); setFErr(''); } }, [openFormTick]);
 
   // Expenses load independently (they are date-scoped, the txn list is not). The chip reads this.
@@ -1055,13 +1107,99 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       .catch((e) => { setESaving(false); setEErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
 
-  const rows = (txns || []).filter((t) => {
-    const corrected = (t.corrections || []).length > 0;
-    const voided = t.status === 'void';
-    return filter === 'all' ? true : filter === 'void' ? voided : filter === 'corrected' ? corrected : filter === 'arsip' ? t.legacy : t.method === filter;
-  });
-  const voidN = (txns || []).filter((t) => t.status === 'void').length;
   const custOpts = customers.map((c) => ({ value: c.id, label: custOptLabel(c), search: custSearchStr(c) }));
+  // ── Derived list (client-side filter → sort → window → group). All money via rpFull; dates fmtDateShort. ──
+  const custById = {}; customers.forEach((c) => { custById[c.id] = c; });
+  const nameOf = (t) => (t.customer && t.customer.name) || (custById[t.customerId] && custById[t.customerId].name) || '';
+  const codeOf = (t) => (t.customer && t.customer.code) || (custById[t.customerId] && custById[t.customerId].code) || '';
+  const phoneOf = (t) => (custById[t.customerId] && custById[t.customerId].phone) || '';
+  const amtOf = (t) => (t.effectiveAmount != null ? t.effectiveAmount : t.amount);
+  const statusKey = (t) => t.status === 'void' ? 'dibatalkan'
+    : (t.dispute && t.dispute.status === 'tidak_diakui') ? 'tidak_diakui'
+      : (t.dispute && t.dispute.status === 'kerugian') ? 'kerugian'
+        : (t.dispute && t.dispute.status === 'disengketakan') ? 'disengketakan'
+          : t.pendingRequest ? 'terkunci' : 'normal';
+  const smatch = (t) => { if (!qDeb) return true; const s = qDeb.toLowerCase(); return [txnCode(t), nameOf(t), codeOf(t), phoneOf(t), String(amtOf(t)), t.note].some((v) => String(v || '').toLowerCase().includes(s)); };
+  const minN = minAmt ? (parseInt(String(minAmt).replace(/\D/g, ''), 10) || 0) : null;
+  const maxN = maxAmt ? (parseInt(String(maxAmt).replace(/\D/g, ''), 10) || 0) : null;
+  const passFilters = (t) => {
+    if (!smatch(t)) return false;
+    if (methodSel.size && !(methodSel.has(t.method) || (t.adjusted && methodSel.has('penyesuaian')))) return false;
+    if (statusSel.size && !statusSel.has(statusKey(t))) return false;
+    if (sourceSel.size && !sourceSel.has(t.legacy ? 'impor' : 'manual')) return false;
+    if (armadaSel.size && !armadaSel.has(t.fleetId || '')) return false;
+    if (petugasSel.size && !petugasSel.has(t.actorName || '')) return false;
+    if (custFilter && t.customerId !== custFilter) return false;
+    if (minN != null && amtOf(t) < minN) return false;
+    if (maxN != null && amtOf(t) > maxN) return false;
+    if (flagNote && !(t.note && String(t.note).trim())) return false;
+    if (flagCorr && !((t.corrections || []).length)) return false;
+    return true;
+  };
+  const txFiltered = (txns || []).filter(passFilters);
+  const cmp = {
+    date: (a, b) => (b.createdAt || 0) - (a.createdAt || 0) || String(b.txnDate || '').localeCompare(String(a.txnDate || '')),
+    amount: (a, b) => amtOf(b) - amtOf(a), qty: (a, b) => (b.qty || 0) - (a.qty || 0),
+    customer: (a, b) => nameOf(a).localeCompare(nameOf(b), 'id'), petugas: (a, b) => String(a.actorName || '').localeCompare(String(b.actorName || ''), 'id'),
+  };
+  const baseCmp = cmp[sortKey] || cmp.date;
+  const txSorted = txFiltered.slice().sort((a, b) => { const r = baseCmp(a, b); return sortDir === 'asc' ? -r : r; });
+  const txShown = txSorted.slice(0, txVisible);
+  const effView = isNarrow ? 'kartu' : txView;
+  const grouped = sortKey === 'date';
+  // Date groups (only when sorted by date) — each with a subtotal header.
+  const dayGroups = [];
+  if (grouped) { const gm = {}; txShown.forEach((t) => { const k = t.txnDate || '—'; if (!gm[k]) { gm[k] = { date: k, rows: [], nota: 0, galon: 0, nominal: 0 }; dayGroups.push(gm[k]); } const g = gm[k]; g.rows.push(t); if (t.status !== 'void') { g.nota++; if (t.method !== 'pelunasan' && !t.legacy) g.galon += t.qty || 0; g.nominal += (t.method === 'pelunasan' ? 0 : (t.effectiveAmount != null ? t.effectiveAmount : t.amount)); } }); }
+  const groupDateLabel = (d) => { try { const dt = new Date(d + 'T00:00:00'); return DW_ID[dt.getDay()] + ', ' + fmtDateShort(d); } catch (e) { return d; } };
+  // Summary over the WHOLE filtered set (not the render window).
+  let sGalon = 0, sNominal = 0, sLunas = 0, sBon = 0, sCount = 0;
+  txFiltered.forEach((t) => { if (t.status === 'void') return; sCount++; if (t.method !== 'pelunasan' && !t.legacy) sGalon += t.qty || 0; const a = amtOf(t); if (t.method === 'lunas') { sNominal += a; sLunas += a; } else if (t.method === 'bon') { sNominal += a; sBon += a; } });
+  const sAvg = sCount ? Math.round(sNominal / sCount) : 0;
+  // Chip counts over the search+period set (stable while toggling category chips).
+  const searchSet = (txns || []).filter(smatch);
+  const methodCounts = { lunas: 0, bon: 0, pelunasan: 0, penyesuaian: 0 };
+  const statusCounts = { normal: 0, terkunci: 0, disengketakan: 0, tidak_diakui: 0, kerugian: 0, dibatalkan: 0 };
+  const sourceCounts = { manual: 0, impor: 0 };
+  searchSet.forEach((t) => { if (methodCounts[t.method] != null) methodCounts[t.method]++; if (t.adjusted) methodCounts.penyesuaian++; statusCounts[statusKey(t)]++; sourceCounts[t.legacy ? 'impor' : 'manual']++; });
+  const armadaList = [...new Set(searchSet.map((t) => t.fleetId || '').filter(Boolean))];
+  const petugasList = [...new Set(searchSet.map((t) => t.actorName || '').filter(Boolean))].slice(0, 40);
+  const matchedFields = [];
+  if (qDeb) { const s = qDeb.toLowerCase(); [['kode transaksi', txnCode], ['nama pelanggan', nameOf], ['kode pelanggan', codeOf], ['HP', phoneOf], ['nominal', (t) => String(amtOf(t))], ['catatan', (t) => t.note]].forEach(([lbl, fn]) => { if (txFiltered.some((t) => String(fn(t) || '').toLowerCase().includes(s))) matchedFields.push(lbl); }); }
+  const anyFilter = !!qDeb || period !== 'all' || methodSel.size || statusSel.size || sourceSel.size || armadaSel.size || petugasSel.size || custFilter || minAmt || maxAmt || flagNote || flagCorr;
+  const clearAll = () => { setQ(''); setPeriod('all'); setMethodSel(new Set()); setStatusSel(new Set()); setSourceSel(new Set()); setArmadaSel(new Set()); setPetugasSel(new Set()); setCustFilter(''); setMinAmt(''); setMaxAmt(''); setFlagNote(false); setFlagCorr(false); };
+  const toggleIn = (setter) => (v) => setter((prev) => { const n = new Set(prev); n.has(v) ? n.delete(v) : n.add(v); return n; });
+  // Saved filter presets (localStorage), pinned in the toolbar.
+  const savePreset = () => { const name = window.prompt(trD('tx.presetNamePrompt')); if (!name || !name.trim()) return; const ps = { name: name.trim().slice(0, 40), q: qDeb, period, from: rFrom, to: rTo, m: [...methodSel], st: [...statusSel], src: [...sourceSel], arm: [...armadaSel], pt: [...petugasSel], cust: custFilter, min: minAmt, max: maxAmt, note: flagNote, corr: flagCorr }; const next = [...presets, ps].slice(-8); setPresets(next); try { localStorage.setItem('tx_presets', JSON.stringify(next)); } catch (e) {} };
+  const removePreset = (i) => { const next = presets.filter((_, j) => j !== i); setPresets(next); try { localStorage.setItem('tx_presets', JSON.stringify(next)); } catch (e) {} };
+  const applyPreset = (ps) => { setQ(ps.q || ''); setPeriod(ps.period || 'all'); setRFrom(ps.from || ''); setRTo(ps.to || ''); setMethodSel(new Set(ps.m || [])); setStatusSel(new Set(ps.st || [])); setSourceSel(new Set(ps.src || [])); setArmadaSel(new Set(ps.arm || [])); setPetugasSel(new Set(ps.pt || [])); setCustFilter(ps.cust || ''); setMinAmt(ps.min || ''); setMaxAmt(ps.max || ''); setFlagNote(!!ps.note); setFlagCorr(!!ps.corr); };
+  const selIds = Object.keys(sel).filter((k) => sel[k]);
+  const selRows = txFiltered.filter((t) => sel[t.id]);
+  // Slide-over detail row + j/k navigation over the FILTERED list.
+  const detailTxn = detailIdx >= 0 && detailIdx < txSorted.length ? txSorted[detailIdx] : null;
+  const openDetail = (t) => { const i = txSorted.findIndex((x) => x.id === t.id); setDetailIdx(i); };
+  const moveDetail = (d) => setDetailIdx((i) => { const n = i + d; return n >= 0 && n < txSorted.length ? n : i; });
+  // Infinite scroll: reveal +120 rows as the sentinel nears the bottom of the single page scroller.
+  uEx(() => { const el = txSentinel.current; if (!el || typeof IntersectionObserver === 'undefined') return; const root = document.querySelector('.content') || null; const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setTxVisible((n) => n + 120); }, { root, rootMargin: '700px' }); io.observe(el); return () => io.disconnect(); }, [txns, effView]);
+  // j/k moves through rows in the slide-over without closing it; Esc closes.
+  uEx(() => {
+    if (detailIdx < 0) return;
+    const on = (e) => { const tg = e.target; if (tg && /input|textarea|select/i.test(tg.tagName || '')) return; if (e.key === 'j') { e.preventDefault(); moveDetail(1); } else if (e.key === 'k') { e.preventDefault(); moveDetail(-1); } else if (e.key === 'Escape') setDetailIdx(-1); };
+    window.addEventListener('keydown', on); return () => window.removeEventListener('keydown', on);
+  }, [detailIdx, txSorted.length]);
+  const exportCsv = () => {
+    const head = [trD('tx.colDate'), trD('tx.colTime'), trD('tx.colCode'), trD('dist.fCust'), trD('cl.colCode'), trD('tx.colType'), trD('tx.colGalon'), trD('tx.colPrice'), trD('tx.colAmount'), trD('tx.colStatus'), trD('cl.colArmada'), trD('tx.colStaff'), trD('cd.expandNote')];
+    const src = selRows.length ? selRows : txFiltered;
+    const body = src.map((t) => [t.txnDate, hhmm(t.createdAt), txnCode(t), nameOf(t), codeOf(t), methodLabel(t.method), t.method === 'pelunasan' ? '' : t.qty, t.method === 'pelunasan' ? '' : t.unitPriceLocked, amtOf(t), trD('tx.st.' + statusKey(t)), t.fleetId || '', t.actorName || '', t.note || '']);
+    const csv = [head, ...body].map((r) => r.map((c) => (/[",\n]/.test(String(c)) ? '"' + String(c).replace(/"/g, '""') + '"' : c)).join(',')).join('\r\n');
+    const bl = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(bl); a.download = 'transaksi.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const doListPrint = () => { setTxVisible(Math.max(txVisible, txFiltered.length)); document.body.classList.add('txlist-printing'); setTimeout(() => { window.print(); setTimeout(() => document.body.classList.remove('txlist-printing'), 100); }, 120); };
+  // Bulk cancel (GM/owner, max 50) — loops the void-request endpoint (approval-gated) per row.
+  const runBulkVoid = (reason, done) => {
+    const items = (bulkVoid && bulkVoid.items) || [];
+    Promise.all(items.map((t) => window.API.distribusi.transactions.void(t.id, { reason }).then(() => ({ ok: true })).catch(() => ({ ok: false }))))
+      .then((rs) => { const ok = rs.filter((r) => r.ok).length; setBulkVoid(null); setSel({}); flash(trD('tx.bulkVoidDone', { n: ok })); reload(); if (onChanged) onChanged(); if (done) done(); });
+  };
 
   // ── FORM ──
   if (view === 'form') {
@@ -1212,28 +1350,83 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 
   // ── LIST ──
   const isExp = filter === 'pengeluaran';
-  const chips = [['all', trD('dist.fAll')], ['lunas', trD('dist.lunas')], ['bon', trD('dist.bon')], ['pelunasan', trD('dist.pelunasan')], ['corrected', trD('dist.corrected')], ...(voidN ? [['void', trD('dist.voidFilter') + ' (' + voidN + ')']] : []), ['arsip', trD('dist.arsip')], ...(canExpense ? [['pengeluaran', trD('exp.chip')]] : [])];
+  // Status badge for a row (reuses the dispute + method colors; strikethrough handled in the amount cell).
+  const statusBadgeOf = (t) => {
+    if (t.status === 'void') return <span className="dist-badge void"><IconClose s={10} />{trD('tx.st.dibatalkan')}</span>;
+    if (t.dispute) { const dm = DISPUTE_META[t.dispute.status]; if (dm) return <span className={'dist-badge ' + dm.cls}>{trD(dm.label)}</span>; }
+    if (t.pendingRequest) return <span className="dist-badge pending"><IconClock s={10} />{trD('dist.pendingBadge')}</span>;
+    if (t.legacy) return <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span>;
+    return <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>;
+  };
+  const isMuted = (t) => t.status === 'void' || disputeDeducts(t);
+  const colOn = (k) => !colHidden.has(k);
+  const colCount = 5 + ['code', 'type', 'galon', 'price', 'status', 'armada', 'staff'].filter(colOn).length;
+  const sortTh = (key, label, extra) => <th className={(extra ? extra + ' ' : '') + 'tx-sortable' + (sortKey === key ? ' sorted' : '')} onClick={() => { if (sortKey === key) setSortDir((d) => d === 'desc' ? 'asc' : 'desc'); else { setSortKey(key); setSortDir('desc'); } }} aria-sort={sortKey === key ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}>{label}<span className="tx-sortarrow">{sortKey === key ? (sortDir === 'desc' ? '↓' : '↑') : ''}</span></th>;
+  const txTableRow = (t) => {
+    const muted = isMuted(t);
+    return (
+      <tr key={t.id} className={'cl-trow tx-row' + (muted ? ' is-muted' : '') + (detailTxn && detailTxn.id === t.id ? ' active' : '')} onClick={() => openDetail(t)}>
+        <td className="tx-check no-print" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label="pilih transaksi" checked={!!sel[t.id]} onChange={() => setSel((p) => ({ ...p, [t.id]: !p[t.id] }))} /></td>
+        <td className="tnum"><b>{fmtDateShort(t.txnDate)}</b>{colOn('time') && <div className="tx-time">{hhmm(t.createdAt)}</div>}</td>
+        {colOn('code') && <td className="tnum tx-code">{txnCode(t)}</td>}
+        <td className="tx-cust"><div className="tx-custname">{nameOf(t) || '—'}</div>{codeOf(t) && <div className="tx-custcode">{codeOf(t)}</div>}</td>
+        {colOn('type') && <td><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span></td>}
+        {colOn('galon') && <td className="num tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</td>}
+        {colOn('price') && <td className="num tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</td>}
+        <td className="num tnum tx-amt">{muted ? <s>{rpFull(amtOf(t))}</s> : rpFull(amtOf(t))}{disputeDeducts(t) ? <span className="tx-ack"> → {rpFull(t.dispute.customerClaimAmount || 0)}</span> : null}</td>
+        {colOn('status') && <td>{statusBadgeOf(t)}</td>}
+        {colOn('armada') && <td className="tx-armada">{t.fleetId || '—'}</td>}
+        {colOn('staff') && <td className="tx-staff">{t.actorName || '—'}</td>}
+        <td className="no-print num"><IconCaret s={14} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)' }} /></td>
+      </tr>
+    );
+  };
+  const txCardRow = (t) => {
+    const muted = isMuted(t);
+    return (
+      <div key={t.id} className={'cl-card tx-card' + (muted ? ' is-muted' : '')} onClick={() => openDetail(t)}>
+        <div className="tx-card-top">
+          <div className="tx-card-id"><div className="tx-card-cust">{nameOf(t) || '—'}</div><div className="tx-card-tags"><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span>{statusBadgeOf(t)}</div></div>
+          <div className={'tx-card-amt tnum' + (muted ? ' muted' : '')}>{muted ? <s>{rpFull(amtOf(t))}</s> : rpFull(amtOf(t))}</div>
+        </div>
+        <div className="tx-card-meta"><span>{fmtDateShort(t.txnDate)} {hhmm(t.createdAt)}</span><span>{txnCode(t)}</span>{t.actorName ? <span>{t.actorName}</span> : null}</div>
+      </div>
+    );
+  };
   return (
     <div className="dist-dash screen-enter">
       <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />
-      <div className="dist-tx-toolbar">
-        <div className="dist-chips">{chips.map(([k, l]) => <button key={k} type="button" className={`dist-chip ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}</button>)}</div>
-        {/* Two DISTINCT groups: non-sale outflow actions (Bayar Bon + Pengeluaran) are kept apart
-            from the PRIMARY sale action (Transaksi Baru) by a gap + divider, so an outflow is never
-            mistaken for a sale. */}
-        <div className="dist-tx-actions">
-          <div className="dist-tx-grp dist-tx-grp-out">
-            {canInput && <button type="button" className="btn btn-ghost dist-paybtn" onClick={() => setPayOpen(true)}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
-            {canExpense && <button type="button" className="btn dist-expbtn" title={trD('exp.outflowHint')} onClick={openExpenseForm}><IconCoinOut s={15} />{trD('exp.btn')}</button>}
+      {/* STICKY toolbar — row 1 (search + period + actions), row 2 (filter chips with counts). */}
+      {!isExp && (<div className="tx-toolbar">
+        <div className="tx-toolrow tx-toolrow-1">
+          <div className="dist-search tx-search"><IconSearch s={16} /><input value={q} placeholder={trD('tx.searchPh')} aria-label={trD('tx.searchPh')} onChange={(e) => setQ(e.target.value)} />{q && <button type="button" aria-label="clear" onClick={() => setQ('')}><IconClose s={13} /></button>}</div>
+          <div className="dist-chips tx-periodchips">{[['all', trD('dist.fAll')], ['today', trD('dist.perToday')], ['week', trD('dist.per7d')], ['month', trD('dist.perMonth')], ['lastMonth', trD('pc.pLastMonth')], ['range', trD('dist.perRange')]].map(([k, l]) => <button key={k} type="button" className={`dist-chip ${period === k ? 'on' : ''}`} onClick={() => setPeriod(k)}>{l}</button>)}</div>
+          {period === 'range' && <div className="dist-period-range"><DP.DateField value={rFrom} onChange={setRFrom} max={rTo || today} /><span>–</span><DP.DateField value={rTo} onChange={setRTo} min={rFrom || undefined} max={today} /></div>}
+          <div style={{ flex: 1 }} />
+          <button type="button" className={`btn btn-ghost btn-sm ${advOpen ? 'on' : ''}`} onClick={() => setAdvOpen(true)}><IconFilter s={15} />{trD('tx.advanced')}</button>
+          <div className="tx-colwrap"><button type="button" className="btn btn-ghost btn-sm" onClick={() => setColMenu((v) => !v)} aria-haspopup="true" aria-expanded={colMenu}><IconSettings s={15} />{trD('tx.columns')}</button>
+            {colMenu && <><div className="cd-menu-scrim" onClick={() => setColMenu(false)} /><div className="cd-menu tx-colmenu" role="menu">{TX_COLS.map((c) => <label key={c.k} className="tx-colitem"><input type="checkbox" checked={!colHidden.has(c.k)} onChange={() => setColHidden((p) => { const n = new Set(p); n.has(c.k) ? n.delete(c.k) : n.add(c.k); return n; })} />{trD(c.l)}</label>)}</div></>}
           </div>
-          {canInput && (
-            <div className="dist-tx-grp dist-tx-grp-primary">
-              <span className="dist-tx-div" aria-hidden="true" />
-              <button type="button" className="btn btn-primary dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>
-            </div>
-          )}
+          <button type="button" className="btn btn-ghost btn-sm" disabled={!txFiltered.length} onClick={exportCsv}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={!txFiltered.length} onClick={doListPrint}><IconDownload s={15} />{trD('dist.print')}</button>
+          {canInput && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPayOpen(true)}><IconInvoice s={14} />{trD('dist.payBon')}</button>}
+          {canExpense && <button type="button" className="btn btn-ghost btn-sm dist-expbtn" title={trD('exp.outflowHint')} onClick={openExpenseForm}><IconCoinOut s={14} />{trD('exp.btn')}</button>}
+          {canInput && <button type="button" className="btn btn-primary btn-sm dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
         </div>
-      </div>
+        <div className="tx-toolrow tx-toolrow-2">
+          {[['lunas', trD('dist.lunas'), methodCounts.lunas], ['bon', trD('dist.bon'), methodCounts.bon], ['pelunasan', trD('dist.pelunasan'), methodCounts.pelunasan], ['penyesuaian', trD('adj.kindBon'), methodCounts.penyesuaian]].map(([k, l, n]) => <button key={k} type="button" className={`dist-chip ${methodSel.has(k) ? 'on' : ''}`} onClick={() => toggleIn(setMethodSel)(k)}>{l} <span className="dist-imp-chipn">{n}</span></button>)}
+          <span className="tx-chipdiv" />
+          {[['normal', trD('tx.st.normal'), statusCounts.normal], ['terkunci', trD('tx.st.terkunci'), statusCounts.terkunci], ['disengketakan', trD('cd.dispDisengketakan'), statusCounts.disengketakan], ['tidak_diakui', trD('cd.dispTidakDiakui'), statusCounts.tidak_diakui], ['kerugian', trD('cd.dispKerugian'), statusCounts.kerugian], ['dibatalkan', trD('tx.st.dibatalkan'), statusCounts.dibatalkan]].filter(([k, l, n]) => n > 0 || statusSel.has(k)).map(([k, l, n]) => <button key={k} type="button" className={`dist-chip tx-stchip st-${k} ${statusSel.has(k) ? 'on' : ''}`} onClick={() => toggleIn(setStatusSel)(k)}>{l} <span className="dist-imp-chipn">{n}</span></button>)}
+          <span className="tx-chipdiv" />
+          {[['manual', trD('cd.srcManual'), sourceCounts.manual], ['impor', trD('cd.srcImpor'), sourceCounts.impor]].map(([k, l, n]) => <button key={k} type="button" className={`dist-chip ${sourceSel.has(k) ? 'on' : ''}`} onClick={() => toggleIn(setSourceSel)(k)}>{l} <span className="dist-imp-chipn">{n}</span></button>)}
+          {armadaList.length > 1 && <select className="tx-minisel" value={[...armadaSel][0] || ''} onChange={(e) => setArmadaSel(e.target.value ? new Set([e.target.value]) : new Set())}><option value="">{trD('cl.colArmada')}</option>{armadaList.map((a) => <option key={a} value={a}>{a}</option>)}</select>}
+          {petugasList.length > 1 && <select className="tx-minisel" value={[...petugasSel][0] || ''} onChange={(e) => setPetugasSel(e.target.value ? new Set([e.target.value]) : new Set())}><option value="">{trD('tx.colStaff')}</option>{petugasList.map((a) => <option key={a} value={a}>{a}</option>)}</select>}
+          <div style={{ flex: 1 }} />
+          {presets.length > 0 && presets.map((ps, i) => <button key={i} type="button" className="dist-chip tx-preset" onClick={() => applyPreset(ps)} title={trD('tx.applyPreset')}>{ps.name}<span className="tx-preset-x" onClick={(e) => { e.stopPropagation(); removePreset(i); }}><IconClose s={10} /></span></button>)}
+          {anyFilter && <button type="button" className="dist-chip tx-savepreset" onClick={savePreset}><IconPlus s={11} />{trD('tx.savePreset')}</button>}
+          {anyFilter && <button type="button" className="dist-link tx-clearall" onClick={clearAll}>{trD('tx.clearAll')}</button>}
+        </div>
+      </div>)}
       {!isExp && <div className="dist-permbanner"><IconLock s={15} />{trD('dist.permBanner')}</div>}
 
       {/* PENGELUARAN LIST — DistExpense rows for the chosen day/fleet: outflow-styled amount, category,
@@ -1276,65 +1469,77 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
         </div>
       )}
 
-      {!isExp && (
-      <div className="card dist-card" style={{ padding: '6px 18px' }}>
-        {txns === null && <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
-        {txns !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.noTxn')}</div>}
-        {rows.map((t) => {
-          const corrected = t.correctedManual != null ? t.correctedManual : (t.corrections || []).some((x) => x.kind !== 'price');
-          const isNew = newIds.includes(t.id);
-          const voided = t.status === 'void';
-          const pending = !voided && t.pendingRequest;   // a correction/void awaiting approval
-          // A voided txn can't be corrected/voided again; only a hard-delete holder can still act. A row
-          // with a pending request is locked from a second correction/void until it is decided.
-          const showKoreksi = canKoreksi && !voided && !t.legacy && !pending;
-          const showVoid = canVoid && !voided && !t.legacy && !pending;
-          const showDelete = canHardDelete;
-          const showArchive = canArchive && !voided && !pending;   // active → arsip, arsip → active (both directions)
-          const hasMenu = showVoid || showDelete || showArchive;
-          return (
-            <div key={t.id} className={`dist-txn dist-txn-full ${voided ? 'is-void' : ''}`}>
-              <span className="dist-txn-av">{(t.customer && t.customer.name || '?').slice(0, 1).toUpperCase()}</span>
-              <div className="dist-txn-mid">
-                <div className="dist-txn-line1">
-                  {t.customer && t.customer.code && <span className="dist-code">{t.customer.code}</span>}
-                  <span className="dist-txn-name">{t.customer ? t.customer.name : '—'}</span>
-                  {voided ? <span className="dist-badge void"><IconClose s={10} />{trD('dist.voidBadge')}</span>
-                    : t.legacy ? <span className="dist-badge arsip"><IconInvoice s={10} />{trD('dist.arsip')}</span> : <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>}
-                  {isNew && !voided ? <span className="dist-badge new">{trD('dist.baru')}</span> : null}
-                  {pending ? <span className="dist-badge pending"><IconClock s={10} />{trD('dist.pendingBadge')}</span> : null}
-                  {corrected && !voided ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
-                  {t.adjusted && !voided ? <span className="dist-badge adj"><IconInvoice s={10} />{trD('dist.adjusted')}</span> : null}
-                </div>
-                <div className="dist-txn-sub">{shortRef(t.id)} · {t.txnDate} {hhmm(t.createdAt)} · {t.method === 'pelunasan' ? trD('dist.payLine') : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked))}{t.actorName ? ' · ' + t.actorName : ''}{t.note ? ' · ' + t.note : ''}{t.adjusted && !voided ? ' · ' + (t.adjustAmount >= 0 ? '+' : '') + rpFull(t.adjustAmount) : ''}</div>
-                {voided && <div className="dist-txn-voidline">{trD('dist.voidBy', { who: t.voidedByName || '—' })}{t.voidReason ? ' · ' + t.voidReason : ''}</div>}
-                {pending && <div className="dist-txn-pendline"><IconClock s={11} />{trD(t.pendingRequest.kind === 'void' ? 'dist.pendVoidLine' : 'dist.pendCorrLine', { who: t.pendingRequest.requestedByName || '—' })}</div>}
-              </div>
-              <div className="dist-txn-right">
-                <div className="tnum dist-txn-amt">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</div>
-                <span className={`dist-status ${METHOD_META[t.method] ? METHOD_META[t.method].cls : ''}`}>{methodLabel(t.method)}</span>
-              </div>
-              {showKoreksi && <button type="button" className="dist-corr-btn" onClick={() => openCorrect(t)}><IconPencil s={13} />{trD('dist.korek')}</button>}
-              {hasMenu && (
-                <div className="dist-txn-menu">
-                  <button type="button" className="icon-btn" title={trD('dist.moreActions')} onClick={() => setMenuFor(menuFor === t.id ? null : t.id)}><IconDots s={16} /></button>
-                  {menuFor === t.id && (
-                    <>
-                      <div className="dist-menu-scrim" onClick={() => setMenuFor(null)} />
-                      <div className="dist-menu-pop">
-                        {showArchive && <button type="button" className="dist-menu-item" onClick={() => { setMenuFor(null); setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }}><IconInvoice s={14} />{trD(t.legacy ? 'dist.makeActive' : 'dist.makeArchive')}</button>}
-                        {showVoid && <button type="button" className="dist-menu-item" onClick={() => { setMenuFor(null); setVoidTxn(t); setVoidReason(''); }}><IconClose s={14} />{trD('dist.voidBtn')}</button>}
-                        {showDelete && <button type="button" className="dist-menu-item danger" onClick={() => { setMenuFor(null); setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }}><IconTrash s={14} />{trD('dist.hardDelBtn')}</button>}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      )}
+      {!isExp && (<>
+        {/* SUMMARY BAR — follows the ACTIVE filter. */}
+        {txns !== null && txFiltered.length > 0 && (
+          <div className="cl-summary tx-summary">
+            <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumCount')}</span><span className="cl-sumval">{numX(sCount)}</span></div>
+            <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumGalon')}</span><span className="cl-sumval">{numX(sGalon)}</span></div>
+            <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumNominal')}</span><span className="cl-sumval tnum">{rpFull(sNominal)}</span></div>
+            <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumSplit')}</span><span className="cl-sumval tx-split"><b className="tnum">{rpFull(sLunas)}</b><small>{trD('dist.lunas')}</small><b className="tnum b">{rpFull(sBon)}</b><small>{trD('dist.bon')}</small></span></div>
+            <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumAvg')}</span><span className="cl-sumval tnum">{rpFull(sAvg)}</span></div>
+          </div>
+        )}
+        {txns !== null && <div className="tx-filternote no-print"><IconFilter s={12} />{trD('tx.filterNote')}{qDeb && matchedFields.length ? ' · ' + trD('tx.matched', { f: matchedFields.join(', ') }) : ''}</div>}
+
+        {/* BULK actions bar. */}
+        {selRows.length > 0 && (
+          <div className="kv-bulkbar no-print">
+            <span><b>{selRows.length}</b> {trD('kv.selected')}</span>
+            <div style={{ flex: 1 }} />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={doListPrint}><IconDownload s={13} />{trD('dist.print')}</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={exportCsv}><IconDownload s={13} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
+            {canVoid && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => setBulkVoid({ items: selRows.filter((t) => t.status !== 'void' && !t.legacy && !t.pendingRequest).slice(0, 50) })}><IconClose s={13} />{trD('dist.voidBtn')}</button>}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSel({})}><IconClose s={13} />{trD('dist.cancel')}</button>
+          </div>
+        )}
+
+        {txns === null ? (
+          <div className="card dist-card cl-listcard"><div className="cl-skel">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="cl-skel-row"><span className="cl-skel-av" /><span className="cl-skel-lines"><span /><span /></span><span className="cl-skel-amt" /></div>)}</div></div>
+        ) : (txns.length === 0 && !anyFilter) ? (
+          <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconTx s={26} /><div className="cl-empty-t">{trD('dist.noTxn')}</div>{canInput && <button type="button" className="btn btn-primary" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}</div></div>
+        ) : txFiltered.length === 0 ? (
+          <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconSearch s={26} /><div className="cl-empty-t">{trD('dist.noResultFilter')}</div><button type="button" className="dist-link" onClick={clearAll}>{trD('tx.clearAll')}</button></div></div>
+        ) : effView === 'table' ? (
+          <div className="card dist-card cl-listcard cl-tablewrap tx-tablewrap">
+            <table className="cl-table tx-table">
+              <thead><tr>
+                <th className="tx-check no-print"><input type="checkbox" aria-label="pilih semua" checked={txShown.length > 0 && txShown.every((t) => sel[t.id])} onChange={(e) => { const on = e.target.checked; setSel((p) => { const n = { ...p }; txShown.forEach((t) => { if (on) n[t.id] = true; else delete n[t.id]; }); return n; }); }} /></th>
+                {sortTh('date', trD('tx.colDate'))}
+                {colOn('code') && <th>{trD('tx.colCode')}</th>}
+                {sortTh('customer', trD('dist.fCust'))}
+                {colOn('type') && <th>{trD('tx.colType')}</th>}
+                {colOn('galon') && sortTh('qty', trD('tx.colGalon'), 'num')}
+                {colOn('price') && <th className="num">{trD('tx.colPrice')}</th>}
+                {sortTh('amount', trD('tx.colAmount'), 'num')}
+                {colOn('status') && <th>{trD('tx.colStatus')}</th>}
+                {colOn('armada') && <th>{trD('cl.colArmada')}</th>}
+                {colOn('staff') && sortTh('petugas', trD('tx.colStaff'))}
+                <th className="no-print" />
+              </tr></thead>
+              {grouped
+                ? dayGroups.map((g) => (
+                  <tbody key={g.date} className="tx-grp">
+                    <tr className="tx-grphead"><td colSpan={colCount}>{groupDateLabel(g.date)} — {numX(g.nota)} {trD('dist.notaWord')} · {numX(g.galon)} {trD('dist.galonUnit')} · {rpFull(g.nominal)}</td></tr>
+                    {g.rows.map((t) => txTableRow(t))}
+                  </tbody>
+                ))
+                : <tbody>{txShown.map((t) => txTableRow(t))}</tbody>}
+            </table>
+            <div ref={txSentinel} className="cl-sentinel" />
+            {txVisible < txFiltered.length && <div className="cl-more">{trD('cl.showingWindow', { n: txShown.length, total: txFiltered.length })}</div>}
+          </div>
+        ) : (
+          <div className="tx-cards">{txShown.map((t) => txCardRow(t))}<div ref={txSentinel} className="cl-sentinel" />{txVisible < txFiltered.length && <div className="cl-more">{trD('cl.showingWindow', { n: txShown.length, total: txFiltered.length })}</div>}</div>
+        )}
+      </>)}
+
+      {/* SLIDE-OVER detail panel + advanced filters + bulk-cancel — rendered outside the flow. */}
+      {detailTxn && <TxDetailPanel txn={detailTxn} custById={custById} idx={detailIdx} total={txSorted.length} canKoreksi={canKoreksi} canVoid={canVoid} canArchive={canArchive} canHardDelete={canHardDelete} userName={userName}
+        onClose={() => setDetailIdx(-1)} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => openCorrect(t)} onVoid={(t) => { setVoidTxn(t); setVoidReason(''); }} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
+      {advOpen && <TxAdvancedPanel onClose={() => setAdvOpen(false)} minAmt={minAmt} setMinAmt={setMinAmt} maxAmt={maxAmt} setMaxAmt={setMaxAmt} flagNote={flagNote} setFlagNote={setFlagNote} flagCorr={flagCorr} setFlagCorr={setFlagCorr} custFilter={custFilter} setCustFilter={setCustFilter} custOpts={custOpts} onClear={clearAll} anyFilter={anyFilter} />}
+      {bulkVoid && <TxBulkVoidModal items={bulkVoid.items} onClose={() => setBulkVoid(null)} onRun={runBulkVoid} />}
+      {printFor2 && <PrintCenter customer={printFor2.custObj || (custById[printFor2.txn.customerId] || { id: printFor2.txn.customerId, name: nameOf(printFor2.txn), code: codeOf(printFor2.txn), phone: phoneOf(printFor2.txn), transactions: [printFor2.txn], sisaBon: 0 })} userName={userName} mode="nota" txn={printFor2.txn} onClose={() => setPrintFor2(null)} />}
 
       {corrTxn && corrForm && (
         <div className="modal-scrim" onClick={() => setCorrTxn(null)} style={{ zIndex: 200 }}>
@@ -1460,6 +1665,111 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
         </div>
       )}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+// Slide-over transaction detail — full row info, correction/dispute trail, actions. j/k moves rows.
+function TxDetailPanel({ txn, custById, idx, total, canKoreksi, canVoid, canArchive, canHardDelete, userName, onClose, onMove, onPrint, onKoreksi, onVoid, onArchive, onDelete, flash }) {
+  const t = txn;
+  const voided = t.status === 'void';
+  const pending = !voided && t.pendingRequest;
+  const cust = custById[t.customerId] || t.customer || {};
+  const cname = (t.customer && t.customer.name) || cust.name || '—';
+  const ccode = (t.customer && t.customer.code) || cust.code || '';
+  const amt = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
+  const corrections = (t.corrections || []).filter((x) => x.kind !== 'price');
+  const showKoreksi = canKoreksi && !voided && !t.legacy && !pending;
+  const showVoid = canVoid && !voided && !t.legacy && !pending;
+  const copy = () => copyText([txnCode(t), fmtDateShort(t.txnDate) + ' ' + hhmm(t.createdAt), cname, methodLabel(t.method), t.method === 'pelunasan' ? rpFull(amt) : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked) + ' = ' + rpFull(amt)), t.actorName || '', t.note || ''].join(' · '), () => flash(trD('cd.copied')));
+  const kv = (k, v) => <div className="tx-dp-kv"><span>{k}</span><b>{v}</b></div>;
+  return (
+    <div className="tx-slideover" role="dialog" aria-label={trD('tx.detailTitle')}>
+      <div className="tx-slide-scrim no-print" onClick={onClose} />
+      <div className="tx-slide-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="tx-slide-head">
+          <div><div className="tx-slide-title">{txnCode(t)}</div><div className="tx-slide-sub">{fmtDateShort(t.txnDate)} · {hhmm(t.createdAt)}</div></div>
+          <div className="tx-slide-nav no-print">
+            <button type="button" className="jp-icon" aria-label={trD('tx.prevRow')} onClick={() => onMove(-1)} disabled={idx <= 0}><IconCaret s={16} style={{ transform: 'rotate(180deg)' }} /></button>
+            <span className="tx-slide-pos">{idx + 1}/{total}</span>
+            <button type="button" className="jp-icon" aria-label={trD('tx.nextRow')} onClick={() => onMove(1)} disabled={idx >= total - 1}><IconCaret s={16} /></button>
+            <button type="button" className="jp-icon" aria-label={trD('common.close') || 'Tutup'} onClick={onClose}><IconClose s={18} /></button>
+          </div>
+        </div>
+        <div className="tx-slide-body">
+          <div className="tx-dp-badges">
+            {voided ? <span className="dist-badge void">{trD('tx.st.dibatalkan')}</span> : t.legacy ? <span className="dist-badge arsip">{trD('dist.arsip')}</span> : <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>}
+            {pending ? <span className="dist-badge pending"><IconClock s={10} />{trD('dist.pendingBadge')}</span> : null}
+            {t.dispute && DISPUTE_META[t.dispute.status] ? <span className={'dist-badge ' + DISPUTE_META[t.dispute.status].cls}>{trD(DISPUTE_META[t.dispute.status].label)}</span> : null}
+            {corrections.length ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
+          </div>
+          <div className="tx-dp-amt tnum">{voided ? <s>{rpFull(amt)}</s> : rpFull(amt)}</div>
+          {kv(trD('dist.fCust'), cname + (ccode ? ' · ' + ccode : ''))}
+          {kv(trD('tx.colType'), methodLabel(t.method))}
+          {t.method !== 'pelunasan' ? kv(trD('tx.rincian'), numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked) + ' = ' + rpFull(amt)) : null}
+          {kv(trD('tx.colStaff'), t.actorName || '—')}
+          {t.fleetId ? kv(trD('cl.colArmada'), t.fleetId) : null}
+          {kv(trD('cd.expandSrc'), t.legacy ? trD('cd.srcImpor') + (t.importBatchId ? ' · ' + t.importBatchId : '') : trD('cd.srcManual'))}
+          {t.note ? kv(trD('cd.expandNote'), t.note) : null}
+          {voided ? kv(trD('tx.st.dibatalkan'), (t.voidReason || '—') + (t.voidedByName ? ' · ' + t.voidedByName : '')) : null}
+          {pending ? <div className="dist-infobox" style={{ marginTop: 8 }}><IconClock s={15} /><span>{trD(t.pendingRequest.kind === 'void' ? 'dist.pendVoidLine' : 'dist.pendCorrLine', { who: t.pendingRequest.requestedByName || '—' })}</span></div> : null}
+          {corrections.length > 0 && <div className="tx-dp-trail"><div className="tx-dp-trail-h"><IconPencil s={12} />{trD('tx.corrTrail')}</div>{corrections.map((c, i) => <div key={i} className="tx-dp-trail-row"><b>{c.reason || '—'}</b><div className="tx-dp-trail-meta">{c.actorName || '—'} · {fmtDateShort(c.createdAt)}</div></div>)}</div>}
+          {t.dispute && (t.dispute.trail || []).length > 0 && <div className="tx-dp-trail"><div className="tx-dp-trail-h"><IconWarn s={12} />{trD('disp.trailTitle')}</div>{(t.dispute.trail || []).map((x) => <div key={x.id} className="tx-dp-trail-row"><b>{dispReasonLabel(x.reason)}</b><div className="tx-dp-trail-meta">{x.raisedByName || '—'} · {fmtDateShort(x.createdAt)}{x.note ? ' · ' + x.note : ''}</div></div>)}</div>}
+        </div>
+        <div className="tx-slide-foot no-print">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPrint(t)}><IconDownload s={13} />{trD('cd.printNota')}</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={copy}><IconInvoice s={13} />{trD('cd.copyDetail')}</button>
+          {showKoreksi && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onKoreksi(t)}><IconPencil s={13} />{trD('dist.korek')}</button>}
+          {showVoid && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => onVoid(t)}><IconClose s={13} />{trD('dist.voidBtn')}</button>}
+          {canArchive && !voided && !pending && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onArchive(t)}><IconInvoice s={13} />{trD(t.legacy ? 'dist.makeActive' : 'dist.makeArchive')}</button>}
+          {canHardDelete && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => onDelete(t)}><IconTrash s={13} />{trD('dist.hardDelBtn')}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Advanced-filter slide-over: nominal range · customer picker · "hanya punya catatan" · "hanya pernah dikoreksi".
+function TxAdvancedPanel({ onClose, minAmt, setMinAmt, maxAmt, setMaxAmt, flagNote, setFlagNote, flagCorr, setFlagCorr, custFilter, setCustFilter, custOpts, onClear, anyFilter }) {
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const fmt = (v) => v ? (parseInt(String(v).replace(/\D/g, ''), 10) || 0).toLocaleString('id-ID') : '';
+  return (
+    <div className="tx-slideover" role="dialog" aria-label={trD('tx.advanced')}>
+      <div className="tx-slide-scrim" onClick={onClose} />
+      <div className="tx-slide-panel tx-adv" onClick={(e) => e.stopPropagation()}>
+        <div className="tx-slide-head"><div className="tx-slide-title">{trD('tx.advanced')}</div><button type="button" className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="tx-slide-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fCust')}</label>
+          <UI.Dropdown value={custFilter} options={[{ value: '', label: trD('dist.fAll') }].concat(custOpts)} placeholder={trD('dist.fCust')} onChange={setCustFilter} fluid />
+          <label className="fld-label">{trD('tx.amtRange')}</label>
+          <div className="dist-form-row"><div className="dist-priceinput" style={{ flex: 1 }}><input inputMode="numeric" placeholder={trD('tx.min')} value={fmt(minAmt)} onChange={(e) => setMinAmt(e.target.value.replace(/\D/g, ''))} /></div><span style={{ alignSelf: 'center' }}>–</span><div className="dist-priceinput" style={{ flex: 1 }}><input inputMode="numeric" placeholder={trD('tx.max')} value={fmt(maxAmt)} onChange={(e) => setMaxAmt(e.target.value.replace(/\D/g, ''))} /></div></div>
+          <label className="pc-check"><input type="checkbox" checked={flagNote} onChange={(e) => setFlagNote(e.target.checked)} /><span>{trD('tx.onlyNote')}</span></label>
+          <label className="pc-check"><input type="checkbox" checked={flagCorr} onChange={(e) => setFlagCorr(e.target.checked)} /><span>{trD('tx.onlyCorr')}</span></label>
+        </div>
+        <div className="tx-slide-foot">{anyFilter && <button type="button" className="btn btn-ghost btn-sm" onClick={onClear}>{trD('tx.clearAll')}</button>}<div style={{ flex: 1 }} /><button type="button" className="btn btn-primary btn-sm" onClick={onClose}>{trD('common.close') || 'Tutup'}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// Bulk-cancel — a preview list + one shared reason; loops the void-REQUEST endpoint (approval-gated).
+function TxBulkVoidModal({ items, onClose, onRun }) {
+  const [reason, setReason] = uSx('');
+  const [busy, setBusy] = uSx(false);
+  React.useEffect(() => { const o = (e) => { if (e.key === 'Escape' && !busy) onClose(); }; window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, [busy]);
+  const run = () => { if (!reason.trim() || busy || !items.length) return; setBusy(true); onRun(reason.trim(), () => {}); };
+  return (
+    <div className="modal-scrim" onClick={() => !busy && onClose()} style={{ zIndex: 240 }}>
+      <div className="modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.voidBtn')} · {items.length}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('tx.bulkVoidSub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-infobox" style={{ marginBottom: 10 }}><IconClock s={15} /><span>{trD('dist.korekApprovalInfo')}</span></div>
+          <div className="kv-preview-list">{items.map((t) => <div key={t.id} className="kv-preview-row"><span>{(t.customer && t.customer.name) || '—'}{t.customer && t.customer.code ? ' · ' + t.customer.code : ''} · {txnCode(t)}</span><b className="tnum">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</b></div>)}</div>
+          <label className="fld-label">{trD('tx.voidReasonLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <textarea className="fld" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={trD('tx.voidReasonPh')} />
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose} disabled={busy}>{trD('dist.cancel')}</button><button className="btn dist-btn-danger" disabled={!reason.trim() || busy || !items.length} onClick={run}>{busy ? '…' : trD('tx.bulkVoidBtn', { n: items.length })}</button></div>
+      </div>
     </div>
   );
 }
@@ -1720,6 +2030,22 @@ const PRINT_PREF_KEY = 'airro_print_prefs_v1';
 const loadPrintPrefs = () => { try { return JSON.parse(localStorage.getItem(PRINT_PREF_KEY)) || {}; } catch (e) { return {}; } };
 const savePrintPrefs = (p) => { try { localStorage.setItem(PRINT_PREF_KEY, JSON.stringify(p)); } catch (e) {} };
 const printToday = () => (window.FIN && FIN.TODAY) || new Date().toISOString().slice(0, 10);
+// Transaksi-list period presets → {from,to} bounds (null = all). Used to narrow the SERVER load.
+const txPeriodBounds = (period, from, to) => {
+  const today = printToday();
+  if (period === 'today') return { from: today, to: today };
+  if (period === 'week') return { from: isoAddDays(today, -6), to: today };
+  if (period === 'month') return { from: today.slice(0, 8) + '01', to: today };
+  if (period === 'lastMonth') { const dt = new Date(today + 'T00:00:00'); const lm = new Date(dt.getFullYear(), dt.getMonth() - 1, 1); const end = new Date(dt.getFullYear(), dt.getMonth(), 0); const p2 = (n) => String(n).padStart(2, '0'); const iso = (x) => x.getFullYear() + '-' + p2(x.getMonth() + 1) + '-' + p2(x.getDate()); return { from: iso(lm), to: iso(end) }; }
+  if (period === 'range') return (from && to) ? { from, to } : null;
+  return null;   // 'all'
+};
+// Toggleable columns for the Transaksi table (Tanggal · Pelanggan · Nominal · [✓] · [⋯] are fixed).
+const TX_COLS = [
+  { k: 'time', l: 'tx.colTime' }, { k: 'code', l: 'tx.colCode' }, { k: 'type', l: 'tx.colType' },
+  { k: 'galon', l: 'tx.colGalon' }, { k: 'price', l: 'tx.colPrice' }, { k: 'status', l: 'tx.colStatus' },
+  { k: 'armada', l: 'cl.colArmada' }, { k: 'staff', l: 'tx.colStaff' },
+];
 const printPeriodBounds = (period, from, to) => {
   const today = printToday();
   if (period === '30') return { from: isoAddDays(today, -29), to: today };
