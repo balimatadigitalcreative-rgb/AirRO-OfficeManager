@@ -186,7 +186,7 @@ const runCorrectionSchema = z.object({ out: z.number().int().nonnegative().optio
 const runQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['open', 'closed']).optional() });
 // Field expenses (pengeluaran lapangan). Amount + category required; a receipt photoId (Attachment
 // ref) is optional. Void takes a mandatory reason (append-only correction, never a silent delete).
-const expenseSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), amount: z.number().int().positive(), category: z.string().min(1).max(40), note: z.string().max(300).optional(), photoId: z.string().max(60).optional(), businessUnitId: z.string().max(60).optional() });
+const expenseSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), amount: z.number().int().positive(), category: z.string().min(1).max(40), method: z.enum(['tunai', 'transfer']).optional(), recipient: z.string().max(120).optional(), note: z.string().max(300).optional(), photoId: z.string().max(60).optional(), businessUnitId: z.string().max(60).optional() });
 const expenseVoidSchema = z.object({ reason: z.string().min(1).max(300) });
 const expenseQuery = z.object({ date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional(), status: z.enum(['active', 'void']).optional() });
 // Customer list + detailed multi-criteria filter. Every criterion is optional and they

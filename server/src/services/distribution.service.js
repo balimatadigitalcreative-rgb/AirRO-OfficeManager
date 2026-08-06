@@ -2753,6 +2753,7 @@ const DEFAULT_EXP_CATS = ['bensin', 'makan', 'parkir', 'lainnya'];
 function expenseClient(e) {
   return {
     id: e.id, date: e.date, fleetId: e.fleetId, amount: e.amount, category: e.category, note: e.note || '',
+    method: e.method || 'tunai', recipient: e.recipient || '',
     photoId: e.photoId || null, businessUnitId: e.businessUnitId || 'air', status: e.status,
     voidedByName: e.voidedByName || null, voidedAt: e.voidedAt ? new Date(e.voidedAt).getTime() : null, voidReason: e.voidReason || '',
     createdByName: e.createdByName || null, createdAt: e.createdAt ? new Date(e.createdAt).getTime() : null,
@@ -2785,8 +2786,10 @@ async function createExpense(body, actor) {
   const category = String(body.category || 'lainnya').trim().slice(0, 40) || 'lainnya';
   const businessUnitId = await resolveUnitId(body.businessUnitId);
   const snap = await actorSnap(actor);
+  const method = body.method === 'transfer' ? 'transfer' : 'tunai';
   const e = await prisma.distExpense.create({ data: {
     date, fleetId, amount, category, note: String(body.note || '').slice(0, 300),
+    method, recipient: String(body.recipient || '').slice(0, 120),
     photoId: body.photoId ? String(body.photoId).slice(0, 60) : null, businessUnitId,
     createdById: snap.actorId, createdByName: snap.actorName,
   } });

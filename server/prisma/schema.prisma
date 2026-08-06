@@ -751,6 +751,8 @@ model DistExpense {
   fleetId        String   @default("")           // fleet scope (the driver's armada)
   amount         BigInt                             // IDR, > 0
   category       String   @default("lainnya")    // bensin | makan | parkir | lainnya | <custom>
+  method         String   @default("tunai")      // tunai | transfer (how the expense was paid — informational; never changes the net-cash math)
+  recipient      String   @default("")           // penerima / keterangan (who received / short description)
   note           String   @default("")
   photoId        String?                         // Attachment.id of the receipt photo (optional)
   businessUnitId String   @default("air")        // STAGE 1 label; 'air' by default

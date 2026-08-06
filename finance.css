@@ -3232,6 +3232,25 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
   body.invoice-open .pc-disprow s { color: #666 !important; }
 }
 
+/* ============ Unified "Transaksi Baru" entry (segmented control + expense-in-list) ============ */
+.tx-entry-tabs { display: inline-flex; gap: 4px; background: var(--surface-2, #f6f8f9); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin: 4px 0 14px; }
+.tx-entry-tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; border-radius: 9px; padding: 8px 14px; font-size: 13.5px; font-weight: 700; color: var(--text-mut); cursor: pointer; transition: background .12s, color .12s; }
+.tx-entry-tab:hover { color: var(--text); }
+.tx-entry-tab.on { background: var(--surface); color: var(--green-700, #0e7a5f); box-shadow: var(--shadow-sm, 0 1px 3px rgba(15,30,45,.1)); }
+.tx-entry-kbd { font-size: 9.5px; font-weight: 700; color: var(--text-faint); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; margin-left: 2px; }
+.tx-entry-actions { display: flex; gap: 10px; margin-top: 18px; }
+.tx-entry-actions .btn { flex: 1; }
+.tx-entry-actions .btn-primary { flex: 1.4; }
+/* Merged Pengeluaran rows in the transaction list — own red/neutral badge + negative nominal. */
+.tx-exp-badge { background: #fdecec !important; color: #dc2626 !important; display: inline-flex; align-items: center; gap: 4px; }
+.tx-exp-amt { color: #dc2626 !important; font-weight: 700; }
+.tx-exp-amt.muted, .tx-exp-amt.muted s { color: var(--text-faint) !important; }
+.txt-row.tx-exp-row .tx-custname { color: #b3261e; }
+.txt-row.tx-exp-row:hover { background: #fdf4f4; }
+.tx-chip-exp.on { background: #fdecec; color: #dc2626; }
+.tx-expcard .cl-sumlbl { display: inline-flex; align-items: center; gap: 5px; }
+.tx-expcard .cl-sumval { color: #dc2626; }
+
 /* ============ Transaksi list redesign (tx-*) — ONE fixed-layout column system ============ */
 .tx-toolbar { position: sticky; top: -1px; z-index: 12; background: var(--surface); display: flex; flex-direction: column; gap: 9px; padding: 8px 0 10px; border-bottom: 1px solid var(--border-soft); }
 .tx-toolrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -3268,6 +3287,7 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 
 /* KPI strip — 5 equal cards; the LUNAS/BON card is two stacked lines + a proportional bar. */
 .tx-summary { grid-template-columns: repeat(5, 1fr); margin-top: 12px; align-items: stretch; }
+.tx-summary.tx-summary-6 { grid-template-columns: repeat(6, 1fr); }
 .tx-summary .cl-sumcard { display: flex; flex-direction: column; justify-content: center; }
 .tx-splitcard { }
 .tx-splitlines { display: flex; flex-direction: column; gap: 0; margin-top: 3px; }

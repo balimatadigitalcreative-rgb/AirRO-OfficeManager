@@ -902,6 +902,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [fDate, setFDate] = uSx(today);
   const [fNote, setFNote] = uSx('');
   const [confirmOpen, setConfirmOpen] = uSx(false);
+  const [confirmAddAgain, setConfirmAddAgain] = uSx(false);   // sale confirm → route to "Simpan & tambah lagi"
   const [saving, setSaving] = uSx(false);
   const [fErr, setFErr] = uSx('');
   const [payOpen, setPayOpen] = uSx(false);   // standalone Pelunasan Bon
@@ -943,6 +944,21 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [eErr, setEErr] = uSx('');
   const [eVoidRow, setEVoidRow] = uSx(null);        // the expense being voided (recorded, reason required)
   const [eVoidReason, setEVoidReason] = uSx('');
+  const [eDetail, setEDetail] = uSx(null);          // expense row clicked in the list → detail + void panel
+  const [eMethod, setEMethod] = uSx('tunai');       // pengeluaran: tunai | transfer (informational)
+  const [eRecipient, setERecipient] = uSx('');      // pengeluaran: penerima / keterangan
+  // ── UNIFIED "Transaksi Baru" ENTRY — one screen, a segmented control switches the TYPE:
+  // penjualan (sale) · pelunasan (bon payment) · pengeluaran (field expense). Remembered per session.
+  const [formType, setFormType] = uSx(() => { try { return sessionStorage.getItem('dist_form_type') || 'penjualan'; } catch (e) { return 'penjualan'; } });
+  const [entryToast, setEntryToast] = uSx('');      // "Simpan & tambah lagi" success ping inside the form
+  // Pelunasan (bon payment) fields — inlined from the old PaymentModal so it becomes a tab.
+  const [pCust, setPCust] = uSx('');
+  const [pAmount, setPAmount] = uSx(0);
+  const [pMethod, setPMethod] = uSx('cash');
+  const [pDate, setPDate] = uSx(today);
+  const [pNote, setPNote] = uSx('');
+  const [pSaving, setPSaving] = uSx(false);
+  const [pErr, setPErr] = uSx('');
   // ── REDESIGNED LIST (presentation) — search / period / multi-filters / sort / windowing / slide-over.
   // All filters + sort mirror to the URL so a view is shareable and survives a refresh. Search, status,
   // sort and windowing run CLIENT-side (the endpoint has no such params); the PERIOD narrows the fetch.
@@ -980,6 +996,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [moreMenu, setMoreMenu] = uSx(false);          // ⋯ overflow menu (secondary actions)
   const [infoOpen, setInfoOpen] = uSx(false);          // permanence-note info popover (replaces the banner)
   const [txWin, setTxWin] = uSx({ clamped: false, from: null, to: null, unlimited: !!canViewAll });   // server view-window meta (drives the clamp notice)
+  const [periodExp, setPeriodExp] = uSx([]);   // DistExpense rows for the current period → merged into the list
   const [cursor, setCursor] = uSx(-1);                 // keyboard row cursor into txSorted (↑/↓ move, Enter opens)
   const [availW, setAvailW] = uSx(() => { try { return window.innerWidth; } catch (e) { return 1280; } });
   const txSentinel = React.useRef(null);
@@ -1020,9 +1037,13 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const pb = txPeriodBounds(period, rFrom, rTo);
   // The PERIOD narrows the fetch server-side (dateFrom/dateTo) so a huge ledger never loads whole.
   const listQs = () => { const p = []; if (ef && ef !== 'all') p.push('fleet=' + encodeURIComponent(ef)); if (pb) { p.push('dateFrom=' + pb.from); p.push('dateTo=' + pb.to); } return p.join('&'); };
+  // Field expenses over the SAME period as the txn fetch — merged into the list as "Pengeluaran" rows
+  // (own badge, negative nominal, own KPI) so staff see money-out inline without a separate screen.
+  const expQs = () => { const o = { status: 'active' }; if (ef && ef !== 'all') o.fleet = ef; if (pb) { o.dateFrom = pb.from; o.dateTo = pb.to; } return o; };
   const reload = () => Promise.all([
     window.API.distribusi.transactions.list(listQs()).then((r) => { setTxns(r.data || []); setTxWin({ clamped: !!r.clamped, from: r.effectiveFrom || null, to: r.effectiveTo || null, unlimited: !!(r.window && r.window.unlimited) }); }).catch(() => setTxns([])),
     window.API.distribusi.customers.list(ef).then((r) => setCustomers(r.data || [])).catch(() => {}),
+    (canExpense ? window.API.distribusi.expenses.list(expQs()).then((r) => setPeriodExp(r.data || [])).catch(() => setPeriodExp([])) : Promise.resolve(setPeriodExp([]))),
   ]);
   uEx(() => { if (window.API && window.API.distribusi) { setTxns(null); reload(); } }, [refreshKey, ef, period, rFrom, rTo]);
   uEx(() => { if (!periodAllowed(period)) setPeriod('today'); }, [period, canViewAll, canView7, canViewMonth, maxLookback]);   // keep the selected period inside the allowed window
@@ -1040,7 +1061,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir, txView]);
   uEx(() => { setTxVisible(120); setCursor(-1); }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir]);   // reset window + cursor on filter change
   uEx(() => { localStorage.setItem('tx_cols_hidden', JSON.stringify([...colHidden])); }, [colHidden]);
-  uEx(() => { if (openFormTick) { setView('form'); setFErr(''); } }, [openFormTick]);
+  uEx(() => { if (openFormTick) { if (canInput) setType('penjualan'); setFErr(''); setView('form'); } }, [openFormTick]);
 
   // Expenses load independently (they are date-scoped, the txn list is not). The chip reads this.
   const scoped = isScoped(fleetScope);
@@ -1051,8 +1072,8 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   };
   uEx(() => { if (canExpense) reloadExpenses(); }, [refreshKey, ef, eDate, canExpense]);
   uEx(() => { if (canExpense && window.API && window.API.distribusi && window.API.distribusi.expenses) window.API.distribusi.expenses.categories().then((r) => { if (r.data && r.data.length) setECats(r.data); }).catch(() => {}); }, [canExpense]);
-  // An expense-only user (no input/koreksi) lands straight on the Pengeluaran view.
-  uEx(() => { if (!canInput && !canKoreksi && canExpense) setFilter('pengeluaran'); }, []);
+  // An expense-only user (no input/koreksi) lands on the list pre-filtered to Pengeluaran rows.
+  uEx(() => { if (!canInput && !canKoreksi && canExpense) setMethodSel(new Set(['pengeluaran'])); }, []);
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   const selCust = customers.find((c) => c.id === fCust) || null;
@@ -1060,11 +1081,16 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const total = price * Math.max(0, fQty || 0);
 
   const setQty = (q) => { const n = Math.max(1, q | 0); setFQty(n); setFGalOut(n); };   // gallon out tracks qty until edited
-  const commitTxn = () => {
+  const resetSaleFields = () => { setFCust(''); setFQty(1); setFGalOut(1); setFGalIn(0); setFMethod('lunas'); setFNote(''); };
+  // `addAgain` keeps the TYPE + date and clears the rest, staying on the entry screen (rapid entry).
+  const commitTxn = (addAgain) => {
     if (!selCust || saving) return;
     setSaving(true); setFErr('');
     window.API.distribusi.transactions.create({ customerId: fCust, qty: Math.max(1, fQty | 0), method: fMethod, note: fNote.trim(), txnDate: staffMode ? today : (fDate || today), gallonOut: Math.max(0, fGalOut | 0), gallonIn: Math.max(0, fGalIn | 0) })
-      .then((r) => { setSaving(false); setConfirmOpen(false); setNewIds((p) => [r.data.id, ...p]); setView('list'); setFilter('all'); setFCust(''); setFQty(1); setFGalOut(1); setFGalIn(0); setFMethod('lunas'); setFNote(''); flash(trD('dist.txnGalonSaved', { out: r.data.gallonOut, in: r.data.gallonIn, held: r.data.gallonsHeld })); reload(); if (onChanged) onChanged(); })
+      .then((r) => { setSaving(false); setConfirmOpen(false); setNewIds((p) => [r.data.id, ...p]); resetSaleFields();
+        const msg = trD('dist.txnGalonSaved', { out: r.data.gallonOut, in: r.data.gallonIn, held: r.data.gallonsHeld });
+        if (addAgain) { pingEntry(msg); } else { setView('list'); setFilter('all'); flash(msg); }
+        reload(); if (onChanged) onChanged(); })
       .catch((e) => { setSaving(false); setConfirmOpen(false); setFErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
   // A real gallon SALE is corrected via qty/unitPrice/gallonOut/gallonIn (the total recomputes);
@@ -1107,8 +1133,27 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const eCatCustom = !eCats.includes(eCat);
   const expActive = (expenses || []).filter((r) => r.status === 'active');
   const expTotal = expActive.reduce((s, r) => s + r.amount, 0);
-  const openExpenseForm = () => { setEErr(''); setECat('bensin'); setEAmount(''); setEAmtFocus(false); setENote(''); setEPhoto(null); setEBigOk(false); setEFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || ''))); setView('expense'); };
-  const commitExpense = () => {
+  // ── UNIFIED ENTRY (Transaksi Baru) — one screen, a segmented control switches the type. ──
+  // A short success ping shown INSIDE the entry screen after "Simpan & tambah lagi".
+  const pingEntry = (m) => { setEntryToast(m); setTimeout(() => setEntryToast(''), 2400); };
+  // The types the user may create — hidden if the cap is missing; if only one remains the control hides.
+  const entryTabs = [
+    canInput ? { k: 'penjualan', l: trD('dist.tabPenjualan'), ic: IconDrop } : null,
+    canInput ? { k: 'pelunasan', l: trD('dist.tabPelunasan'), ic: IconInvoice } : null,
+    canExpense ? { k: 'pengeluaran', l: trD('dist.tabPengeluaran'), ic: IconCoinOut } : null,
+  ].filter(Boolean);
+  const setType = (t) => { setFormType(t); try { sessionStorage.setItem('dist_form_type', t); } catch (e) {} setFErr(''); setEErr(''); setPErr(''); };
+  // Open the unified entry screen at a type (or last-used), coerced to a tab the user actually has.
+  const openEntry = (t) => {
+    const allowed = entryTabs.map((x) => x.k);
+    const type = allowed.includes(t) ? t : (allowed.includes(formType) ? formType : allowed[0]);
+    if (!type) return;
+    setType(type); setFErr(''); setEErr(''); setPErr('');
+    setEFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || '')));   // prime expense fleet
+    setView('form');
+  };
+  const resetExpFields = () => { setEAmount(''); setEAmtFocus(false); setENote(''); setERecipient(''); setEPhoto(null); setEBigOk(false); };   // keeps kategori/tanggal/armada/metode
+  const commitExpense = (addAgain) => {
     if (eSaving) return;
     if (!(eAmt > 0)) { setEErr(trD('exp.amtReq')); return; }
     if (!scoped && !eFleet) { setEErr(trD('run.errFleet')); return; }
@@ -1116,22 +1161,64 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     if (eAmt > WARN_AMOUNT && !eBigOk) { setEBigOk(true); return; }
     setESaving(true); setEErr('');
     const photoId = ePhoto && ePhoto.ref ? ePhoto.ref : undefined;
-    window.API.distribusi.expenses.create({ date: eDate, fleet: eFleet || undefined, amount: eAmt, category: (eCat || '').trim() || 'lainnya', note: (eNote || '').trim() || undefined, photoId })
-      .then(() => { setESaving(false); setView('list'); setFilter('pengeluaran'); flash(trD('exp.saved')); reloadExpenses(); if (onChanged) onChanged(); })
+    // SAME storage path as the old Pengeluaran flow — one DistExpense record; never a duplicate.
+    window.API.distribusi.expenses.create({ date: eDate, fleet: eFleet || undefined, amount: eAmt, category: (eCat || '').trim() || 'lainnya', method: eMethod, recipient: (eRecipient || '').trim() || undefined, note: (eNote || '').trim() || undefined, photoId })
+      .then(() => { setESaving(false); resetExpFields();
+        if (addAgain) { pingEntry(trD('exp.saved')); } else { setView('list'); flash(trD('exp.saved')); }
+        reload(); reloadExpenses(); if (onChanged) onChanged(); })
       .catch((e) => { setESaving(false); setEErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
+  // Pelunasan (bon payment) — inlined from the old PaymentModal so it is a tab. Same create endpoint.
+  const paySel = customers.find((c) => c.id === pCust) || null;
+  const paySisa = paySel ? (paySel.sisaBon || 0) : 0;
+  const payValid = !!(paySel && paySisa > 0 && pAmount > 0 && pAmount <= paySisa);
+  const commitPay = (addAgain) => {
+    if (!payValid || pSaving) return;
+    setPSaving(true); setPErr('');
+    window.API.distribusi.transactions.create({ customerId: pCust, method: 'pelunasan', payAmount: pAmount, payMethod: pMethod, note: pNote.trim(), txnDate: staffMode ? today : (pDate || today) })
+      .then((r) => { setPSaving(false); setNewIds((p) => [r.data.id, ...p]); setPCust(''); setPAmount(0); setPNote('');
+        const msg = trD('dist.paySaved', { amt: rpFull(r.data.amount), sisa: rpFull(r.data.sisaBon || 0) });
+        if (addAgain) { pingEntry(msg); } else { setView('list'); setFilter('all'); flash(msg); }
+        reload(); if (onChanged) onChanged(); })
+      .catch((e) => { setPSaving(false); setPErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  // Unified save dispatch + dirty/validity across the three types (drives the buttons + keyboard).
+  const entrySaving = saving || eSaving || pSaving;
+  const entryCanSave = (formType === 'penjualan' && !!selCust) || (formType === 'pengeluaran' && eAmt > 0) || (formType === 'pelunasan' && payValid);
+  const entryDirty = (formType === 'penjualan' && (!!fCust || !!fNote || fQty !== 1)) || (formType === 'pengeluaran' && (eAmt > 0 || !!eNote || !!eRecipient || !!ePhoto)) || (formType === 'pelunasan' && (!!pCust || pAmount > 0 || !!pNote));
+  const doEntrySave = (addAgain) => {
+    if (!entryCanSave || entrySaving) return;
+    if (formType === 'penjualan') { setConfirmAddAgain(!!addAgain); setConfirmOpen(true); }   // sale keeps its confirm step
+    else if (formType === 'pengeluaran') commitExpense(addAgain);
+    else if (formType === 'pelunasan') commitPay(addAgain);
+  };
+  const closeEntry = () => { if (!entryDirty || window.confirm(trD('dist.entryDiscard'))) { setView('list'); setConfirmOpen(false); } };
+  // Keyboard-first: Alt+1/2/3 switch type · Enter saves · Esc closes (confirm if dirty).
+  uEx(() => {
+    if (view !== 'form') return;
+    const on = (e) => {
+      if (e.altKey && (e.key === '1' || e.key === '2' || e.key === '3')) { const t = entryTabs[(+e.key) - 1]; if (t) { e.preventDefault(); setType(t.k); } return; }
+      const tg = e.target, typing = tg && /^(TEXTAREA|SELECT)$/.test(tg.tagName || '');
+      if (e.key === 'Enter' && !typing && !confirmOpen) { if (entryCanSave && !entrySaving) { e.preventDefault(); doEntrySave(false); } }
+      else if (e.key === 'Escape' && !confirmOpen) { e.preventDefault(); closeEntry(); }
+    };
+    window.addEventListener('keydown', on); return () => window.removeEventListener('keydown', on);
+  }, [view, formType, entryCanSave, entrySaving, entryDirty, confirmOpen, entryTabs.length]);
   const commitExpenseVoid = () => {
     if (!eVoidRow || eSaving) return;
     if (!(eVoidReason || '').trim()) { setEErr(trD('exp.reasonReq')); return; }
     setESaving(true); setEErr('');
     window.API.distribusi.expenses.void(eVoidRow.id, { reason: eVoidReason.trim() })
-      .then(() => { setESaving(false); setEVoidRow(null); setEVoidReason(''); flash(trD('exp.voided')); reloadExpenses(); if (onChanged) onChanged(); })
+      .then(() => { setESaving(false); setEVoidRow(null); setEVoidReason(''); flash(trD('exp.voided')); reload(); reloadExpenses(); if (onChanged) onChanged(); })
       .catch((e) => { setESaving(false); setEErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
 
   const custOpts = customers.map((c) => ({ value: c.id, label: custOptLabel(c), search: custSearchStr(c) }));
   // ── Derived list (client-side filter → sort → window → group). All money via rpFull; dates fmtDateShort. ──
   const custById = {}; customers.forEach((c) => { custById[c.id] = c; });
+  // Field-expense rows, shaped like a transaction so the ONE list pipeline (filter/sort/group/render)
+  // can carry them. `_exp` marks them so KPIs exclude them from sales and the row shows a red badge.
+  const expRows = (periodExp || []).map((e) => ({ _exp: true, expId: e.id, id: 'exp_' + e.id, method: 'pengeluaran', txnDate: e.date, amount: e.amount, effectiveAmount: e.amount, category: e.category, note: e.note || '', recipient: e.recipient || '', expMethod: e.method || 'tunai', fleetId: e.fleetId || '', actorName: e.createdByName || '', createdAt: e.createdAt || 0, status: e.status, photoId: e.photoId || null, legacy: false, corrections: [] }));
   const nameOf = (t) => (t.customer && t.customer.name) || (custById[t.customerId] && custById[t.customerId].name) || '';
   const codeOf = (t) => (t.customer && t.customer.code) || (custById[t.customerId] && custById[t.customerId].code) || '';
   const phoneOf = (t) => (custById[t.customerId] && custById[t.customerId].phone) || '';
@@ -1141,11 +1228,24 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       : (t.dispute && t.dispute.status === 'kerugian') ? 'kerugian'
         : (t.dispute && t.dispute.status === 'disengketakan') ? 'disengketakan'
           : t.pendingRequest ? 'terkunci' : 'normal';
-  const smatch = (t) => { if (!qDeb) return true; const s = qDeb.toLowerCase(); return [txnCode(t), nameOf(t), codeOf(t), phoneOf(t), String(amtOf(t)), t.note].some((v) => String(v || '').toLowerCase().includes(s)); };
+  const smatch = (t) => { if (!qDeb) return true; const s = qDeb.toLowerCase(); const fields = t._exp ? [expCatLabel(t.category), t.category, t.recipient, t.note, String(t.amount)] : [txnCode(t), nameOf(t), codeOf(t), phoneOf(t), String(amtOf(t)), t.note]; return fields.some((v) => String(v || '').toLowerCase().includes(s)); };
   const minN = minAmt ? (parseInt(String(minAmt).replace(/\D/g, ''), 10) || 0) : null;
   const maxN = maxAmt ? (parseInt(String(maxAmt).replace(/\D/g, ''), 10) || 0) : null;
   const passFilters = (t) => {
     if (!smatch(t)) return false;
+    if (t._exp) {   // expenses join only the method('pengeluaran')/status/armada/petugas/amount/date/note filters
+      if (methodSel.size && !methodSel.has('pengeluaran')) return false;
+      if (statusSel.size && !statusSel.has(t.status === 'void' ? 'dibatalkan' : 'normal')) return false;
+      if (sourceSel.size && !sourceSel.has('manual')) return false;
+      if (armadaSel.size && !armadaSel.has(t.fleetId || '')) return false;
+      if (petugasSel.size && !petugasSel.has(t.actorName || '')) return false;
+      if (custFilter) return false;   // an expense has no customer
+      if (minN != null && t.amount < minN) return false;
+      if (maxN != null && t.amount > maxN) return false;
+      if (flagNote && !(t.note && String(t.note).trim())) return false;
+      if (flagCorr) return false;
+      return true;
+    }
     if (methodSel.size && !(methodSel.has(t.method) || (t.adjusted && methodSel.has('penyesuaian')))) return false;
     if (statusSel.size && !statusSel.has(statusKey(t))) return false;
     if (sourceSel.size && !sourceSel.has(t.legacy ? 'impor' : 'manual')) return false;
@@ -1158,7 +1258,8 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     if (flagCorr && !((t.corrections || []).length)) return false;
     return true;
   };
-  const txFiltered = (txns || []).filter(passFilters);
+  const baseRows = txns === null ? [] : [...txns, ...expRows];   // transactions + merged expense rows
+  const txFiltered = baseRows.filter(passFilters);
   const cmp = {
     date: (a, b) => (b.createdAt || 0) - (a.createdAt || 0) || String(b.txnDate || '').localeCompare(String(a.txnDate || '')),
     amount: (a, b) => amtOf(b) - amtOf(a), qty: (a, b) => (b.qty || 0) - (a.qty || 0),
@@ -1171,15 +1272,16 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const grouped = sortKey === 'date';
   // Date groups (only when sorted by date) — each with a subtotal header.
   const dayGroups = [];
-  if (grouped) { const gm = {}; txShown.forEach((t) => { const k = t.txnDate || '—'; if (!gm[k]) { gm[k] = { date: k, rows: [], nota: 0, galon: 0, nominal: 0 }; dayGroups.push(gm[k]); } const g = gm[k]; g.rows.push(t); if (t.status !== 'void') { g.nota++; if (t.method !== 'pelunasan' && !t.legacy) g.galon += t.qty || 0; g.nominal += (t.method === 'pelunasan' ? 0 : (t.effectiveAmount != null ? t.effectiveAmount : t.amount)); } }); }
+  if (grouped) { const gm = {}; txShown.forEach((t) => { const k = t.txnDate || '—'; if (!gm[k]) { gm[k] = { date: k, rows: [], nota: 0, galon: 0, nominal: 0, expense: 0 }; dayGroups.push(gm[k]); } const g = gm[k]; g.rows.push(t); if (t._exp) { if (t.status !== 'void') g.expense += t.amount; } else if (t.status !== 'void') { g.nota++; if (t.method !== 'pelunasan' && !t.legacy) g.galon += t.qty || 0; g.nominal += (t.method === 'pelunasan' ? 0 : (t.effectiveAmount != null ? t.effectiveAmount : t.amount)); } }); }
   const groupDateLabel = (d) => { try { const dt = new Date(d + 'T00:00:00'); return DW_ID[dt.getDay()] + ', ' + fmtDateShort(d); } catch (e) { return d; } };
-  // Summary over the WHOLE filtered set (not the render window).
-  let sGalon = 0, sNominal = 0, sLunas = 0, sBon = 0, sCount = 0;
-  txFiltered.forEach((t) => { if (t.status === 'void') return; sCount++; if (t.method !== 'pelunasan' && !t.legacy) sGalon += t.qty || 0; const a = amtOf(t); if (t.method === 'lunas') { sNominal += a; sLunas += a; } else if (t.method === 'bon') { sNominal += a; sBon += a; } });
+  // Summary over the WHOLE filtered set (not the render window). Expenses NEVER pollute the sales
+  // figures — they are counted only into their OWN "Pengeluaran" KPI.
+  let sGalon = 0, sNominal = 0, sLunas = 0, sBon = 0, sCount = 0, sExpense = 0;
+  txFiltered.forEach((t) => { if (t._exp) { if (t.status !== 'void') sExpense += t.amount; return; } if (t.status === 'void') return; sCount++; if (t.method !== 'pelunasan' && !t.legacy) sGalon += t.qty || 0; const a = amtOf(t); if (t.method === 'lunas') { sNominal += a; sLunas += a; } else if (t.method === 'bon') { sNominal += a; sBon += a; } });
   const sAvg = sCount ? Math.round(sNominal / sCount) : 0;
   // Chip counts over the search+period set (stable while toggling category chips).
   const searchSet = (txns || []).filter(smatch);
-  const methodCounts = { lunas: 0, bon: 0, pelunasan: 0, penyesuaian: 0 };
+  const methodCounts = { lunas: 0, bon: 0, pelunasan: 0, penyesuaian: 0, pengeluaran: expRows.filter((e) => e.status !== 'void' && smatch(e)).length };
   const statusCounts = { normal: 0, terkunci: 0, disengketakan: 0, tidak_diakui: 0, kerugian: 0, dibatalkan: 0 };
   const sourceCounts = { manual: 0, impor: 0 };
   searchSet.forEach((t) => { if (methodCounts[t.method] != null) methodCounts[t.method]++; if (t.adjusted) methodCounts.penyesuaian++; statusCounts[statusKey(t)]++; sourceCounts[t.legacy ? 'impor' : 'manual']++; });
@@ -1198,7 +1300,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const selRows = txFiltered.filter((t) => sel[t.id]);
   // Slide-over detail row + j/k navigation over the FILTERED list.
   const detailTxn = detailIdx >= 0 && detailIdx < txSorted.length ? txSorted[detailIdx] : null;
-  const openDetail = (t) => { const i = txSorted.findIndex((x) => x.id === t.id); setDetailIdx(i); };
+  const openDetail = (t) => { if (t._exp) { setEDetail({ id: t.expId, category: t.category, amount: t.amount, recipient: t.recipient, note: t.note, method: t.expMethod, fleetId: t.fleetId, createdByName: t.actorName, createdAt: t.createdAt, status: t.status, photoId: t.photoId }); setEVoidReason(''); setEErr(''); return; } const i = txSorted.findIndex((x) => x.id === t.id); setDetailIdx(i); };
   const moveDetail = (d) => setDetailIdx((i) => { const n = i + d; return n >= 0 && n < txSorted.length ? n : i; });
   // Infinite scroll: reveal +120 rows as the sentinel nears the bottom of the single page scroller.
   uEx(() => { const el = txSentinel.current; if (!el || typeof IntersectionObserver === 'undefined') return; const root = document.querySelector('.content') || null; const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setTxVisible((n) => n + 120); }, { root, rootMargin: '700px' }); io.observe(el); return () => io.disconnect(); }, [txns, effView]);
@@ -1239,72 +1341,139 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 
   // ── FORM ──
   if (view === 'form') {
+    const activeType = entryTabs.some((x) => x.k === formType) ? formType : (entryTabs[0] && entryTabs[0].k);
+    const payAfter = Math.max(0, paySisa - pAmount);
+    const saveLabel = entrySaving ? '…' : (activeType === 'pengeluaran' && eAmt > WARN_AMOUNT && eBigOk) ? trD('dist.amtConfirmYes') : trD('dist.fSave');
     return (
       <div className="dist-dash screen-enter">
-        <button type="button" className="dist-back" onClick={() => setView('list')}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backList')}</button>
+        <button type="button" className="dist-back" onClick={closeEntry}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backList')}</button>
+        {/* ONE entry point — a segmented control switches the type. Hidden when only one type is allowed. */}
+        {entryTabs.length > 1 && (
+          <div className="tx-entry-tabs" role="tablist">
+            {entryTabs.map((t, i) => { const TabIc = t.ic; return <button key={t.k} type="button" role="tab" aria-selected={activeType === t.k} className={`tx-entry-tab ${activeType === t.k ? 'on' : ''}`} onClick={() => setType(t.k)}><TabIc s={15} /><span>{t.l}</span><kbd className="tx-entry-kbd">Alt+{i + 1}</kbd></button>; })}
+          </div>
+        )}
         <div className="dist-form-wrap">
           <div className="card dist-form">
-            <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fCust')}</label>
-            {customers.length === 0
-              ? <div className="dist-note">{trD('dist.noCustYet')}</div>
-              : <UI.Dropdown value={fCust} options={custOpts} placeholder={trD('dist.fCustPh')} onChange={(v) => setFCust(v)} fluid />}
-            <div className="dist-lockrow"><span className="dist-lockrow-l"><IconLock s={14} />{trD('dist.priceLocked')}</span><span className="dist-lockrow-r">{selCust ? rpFull(price) : '—'}<small> /{trD('dist.galonUnit')}</small></span></div>
-
-            <div className="dist-form-row">
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('dist.fQty')}</label>
-                <div className="dist-stepper">
-                  <button type="button" onClick={() => setQty(fQty - 1)}>−</button>
-                  <input className="tnum" inputMode="numeric" value={fQty} aria-label={trD('dist.fQty')}
-                    onChange={(e) => setQty(parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0)}
-                    onFocus={(e) => e.target.select()} />
-                  <button type="button" onClick={() => setQty(fQty + 1)}>+</button>
+            {activeType === 'penjualan' && (<>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fCust')}</label>
+              {customers.length === 0
+                ? <div className="dist-note">{trD('dist.noCustYet')}</div>
+                : <UI.Dropdown value={fCust} options={custOpts} placeholder={trD('dist.fCustPh')} onChange={(v) => setFCust(v)} fluid />}
+              <div className="dist-lockrow"><span className="dist-lockrow-l"><IconLock s={14} />{trD('dist.priceLocked')}</span><span className="dist-lockrow-r">{selCust ? rpFull(price) : '—'}<small> /{trD('dist.galonUnit')}</small></span></div>
+              <div className="dist-form-row">
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <label className="fld-label">{trD('dist.fQty')}</label>
+                  <div className="dist-stepper">
+                    <button type="button" onClick={() => setQty(fQty - 1)}>−</button>
+                    <input className="tnum" inputMode="numeric" value={fQty} aria-label={trD('dist.fQty')} onChange={(e) => setQty(parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0)} onFocus={(e) => e.target.select()} />
+                    <button type="button" onClick={() => setQty(fQty + 1)}>+</button>
+                  </div>
+                </div>
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <label className="fld-label">{trD('dist.fDate')}</label>
+                  {staffMode ? <div className="dist-datelocked"><span><IconCalendar s={15} />{trD('dist.todayWord')} · {today}</span><IconLock s={13} /></div> : <DP.DateField value={fDate} onChange={setFDate} max={today} />}
+                  {staffMode && <div className="dist-hint">{trD('dist.staffDateNote')}</div>}
                 </div>
               </div>
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('dist.fDate')}</label>
-                {staffMode
-                  ? <div className="dist-datelocked"><span><IconCalendar s={15} />{trD('dist.todayWord')} · {today}</span><IconLock s={13} /></div>
-                  : <DP.DateField value={fDate} onChange={setFDate} max={today} />}
-                {staffMode && <div className="dist-hint">{trD('dist.staffDateNote')}</div>}
+              <div className="dist-gal-legend"><IconRefresh s={13} />{trD('dist.galLegend')}</div>
+              <div className="dist-form-row">
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <label className="fld-label">{trD('dist.fGalOut')}</label>
+                  <input className="fld tnum" inputMode="numeric" value={fGalOut} onChange={(e) => setFGalOut(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+                  <div className="dist-fieldhint">{trD('dist.fGalOutHelp')}</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <label className="fld-label">{trD('dist.fGalIn')}</label>
+                  <input className="fld tnum" inputMode="numeric" value={fGalIn} onChange={(e) => setFGalIn(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
+                  <div className="dist-fieldhint">{trD('dist.fGalInHelp')}</div>
+                </div>
               </div>
-            </div>
-
-            {/* Gallon flow (loan/exchange): full gallons out (default = qty) + empties in.
-                A one-line legend + per-field help so staff can't confuse the two directions. */}
-            <div className="dist-gal-legend"><IconRefresh s={13} />{trD('dist.galLegend')}</div>
-            <div className="dist-form-row">
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('dist.fGalOut')}</label>
-                <input className="fld tnum" inputMode="numeric" value={fGalOut} onChange={(e) => setFGalOut(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
-                <div className="dist-fieldhint">{trD('dist.fGalOutHelp')}</div>
+              <label className="fld-label">{trD('dist.fMethod')}</label>
+              <div className="dist-method">
+                <button type="button" className={`dist-method-btn lunas ${fMethod === 'lunas' ? 'on' : ''}`} onClick={() => setFMethod('lunas')}><IconCheck s={17} /><div><b>{trD('dist.lunas')}</b><span>{trD('dist.lunasHint')}</span></div></button>
+                <button type="button" className={`dist-method-btn bon ${fMethod === 'bon' ? 'on' : ''}`} onClick={() => setFMethod('bon')}><IconInvoice s={17} /><div><b>{trD('dist.bon')}</b><span>{trD('dist.bonHint')}</span></div></button>
               </div>
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('dist.fGalIn')}</label>
-                <input className="fld tnum" inputMode="numeric" value={fGalIn} onChange={(e) => setFGalIn(Math.max(0, parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0))} />
-                <div className="dist-fieldhint">{trD('dist.fGalInHelp')}</div>
+              <label className="fld-label">{trD('dist.fNote')}</label>
+              <input className="fld" value={fNote} maxLength={300} placeholder={trD('dist.fNotePh')} onChange={(e) => setFNote(e.target.value)} />
+              {selCust && total > WARN_AMOUNT && <div className="dist-amt-warn"><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(total) })}</div>}
+              {fErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{fErr}</div>}
+            </>)}
+
+            {activeType === 'pelunasan' && (<>
+              <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fCust')}</label>
+              {customers.filter((c) => (c.sisaBon || 0) > 0).length === 0
+                ? <div className="dist-note">{trD('dist.noBonCust')}</div>
+                : <UI.Dropdown value={pCust} options={customers.filter((c) => (c.sisaBon || 0) > 0).map((c) => ({ value: c.id, label: (c.code ? c.code + ' · ' : '') + c.name + ' · ' + trD('dist.sisaBon') + ' ' + rpFull(c.sisaBon), search: custSearchStr(c) }))} placeholder={trD('dist.fCustPh')} onChange={(v) => { setPCust(v); setPAmount(0); }} fluid />}
+              {paySel && <div className="dist-lockrow" style={{ marginTop: 10 }}><span className="dist-lockrow-l"><IconInvoice s={14} />{trD('dist.sisaBon')}</span><span className="dist-lockrow-r">{rpFull(paySisa)}</span></div>}
+              <label className="fld-label">{trD('dist.payAmount')}</label>
+              <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={pAmount ? pAmount.toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setPAmount(Math.min(paySisa, +e.target.value.replace(/\D/g, '') || 0))} /></div>
+              <div className="dist-hint" style={{ marginTop: 6 }}>{trD('dist.payHint')}{paySel ? ' · ' + trD('dist.payAfter', { sisa: rpFull(payAfter) }) : ''}</div>
+              <label className="fld-label">{trD('dist.payMethod')}</label>
+              <div className="cat-chips">{['cash', 'transfer'].map((m) => <button key={m} type="button" className={`cat-chip ${pMethod === m ? 'on' : ''}`} onClick={() => setPMethod(m)}>{trD('dist.pay_' + m)}</button>)}</div>
+              {!staffMode && (<><label className="fld-label">{trD('dist.fDate')}</label><DP.DateField value={pDate} onChange={setPDate} max={today} /></>)}
+              <label className="fld-label">{trD('dist.note')}</label>
+              <input className="fld" value={pNote} onChange={(e) => setPNote(e.target.value)} placeholder={trD('dist.notePh')} />
+              {pErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{pErr}</div>}
+            </>)}
+
+            {activeType === 'pengeluaran' && (<>
+              {!scoped && (<>
+                <label className="fld-label" style={{ marginTop: 0 }}>{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <select className="fld" value={eFleet} onChange={(e) => setEFleet(e.target.value)}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
+              </>)}
+              <label className="fld-label" style={scoped ? { marginTop: 0 } : undefined}>{trD('exp.category')}</label>
+              <div className="exp-cat-chips">
+                {eCats.map((c) => <button key={c} type="button" className={`cat-chip ${eCat === c ? 'on' : ''}`} onClick={() => setECat(c)}>{expCatLabel(c)}</button>)}
+                <button type="button" className={`cat-chip ${eCatCustom ? 'on' : ''}`} onClick={() => setECat(eCatCustom ? 'bensin' : '')}>{trD('exp.catCustom')}</button>
               </div>
-            </div>
+              {eCatCustom && <input className="fld" style={{ marginTop: 8 }} value={eCat} placeholder={trD('exp.catOther')} onChange={(e) => setECat(e.target.value)} />}
+              <div className="dist-form-row">
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                  <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={eAmtFocus ? eAmount : (eAmt ? eAmt.toLocaleString('id-ID') : '')} placeholder="0" onFocus={() => setEAmtFocus(true)} onBlur={() => setEAmtFocus(false)} onChange={(e) => { setEAmount(e.target.value.replace(/[^0-9]/g, '')); setEBigOk(false); }} /></div>
+                </div>
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <label className="fld-label">{trD('dist.fDate')}</label>
+                  <DP.DateField value={eDate} onChange={setEDate} max={today} />
+                </div>
+              </div>
+              <label className="fld-label">{trD('dist.payMethod')}</label>
+              <div className="cat-chips">{['tunai', 'transfer'].map((m) => <button key={m} type="button" className={`cat-chip ${eMethod === m ? 'on' : ''}`} onClick={() => setEMethod(m)}>{trD('exp.pay_' + m)}</button>)}</div>
+              <label className="fld-label">{trD('exp.recipient')}</label>
+              <input className="fld" value={eRecipient} maxLength={120} placeholder={trD('exp.recipientPh')} onChange={(e) => setERecipient(e.target.value)} />
+              <label className="fld-label">{trD('exp.note')}</label>
+              <input className="fld" value={eNote} maxLength={300} placeholder={trD('exp.notePh')} onChange={(e) => setENote(e.target.value)} />
+              <label className="fld-label">{trD('exp.photo')}</label>
+              <UI.FileAttach value={ePhoto} onChange={setEPhoto} camera accept="image/*" label={trD('exp.photoAdd')} />
+              {eAmt > WARN_AMOUNT && <div className={`dist-amt-warn${eBigOk ? ' on' : ''}`}><IconInvoice s={14} />{eBigOk ? trD('dist.amtConfirm', { amt: rpFull(eAmt) }) : trD('dist.amtWarn', { amt: rpFull(eAmt) })}</div>}
+              {eErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{eErr}</div>}
+            </>)}
 
-            <label className="fld-label">{trD('dist.fMethod')}</label>
-            <div className="dist-method">
-              <button type="button" className={`dist-method-btn lunas ${fMethod === 'lunas' ? 'on' : ''}`} onClick={() => setFMethod('lunas')}><IconCheck s={17} /><div><b>{trD('dist.lunas')}</b><span>{trD('dist.lunasHint')}</span></div></button>
-              <button type="button" className={`dist-method-btn bon ${fMethod === 'bon' ? 'on' : ''}`} onClick={() => setFMethod('bon')}><IconInvoice s={17} /><div><b>{trD('dist.bon')}</b><span>{trD('dist.bonHint')}</span></div></button>
+            <div className="tx-entry-actions">
+              <button type="button" className="btn btn-ghost" disabled={!entryCanSave || entrySaving} onClick={() => doEntrySave(true)}>{trD('dist.saveAgain')}</button>
+              <button type="button" className="btn btn-primary" disabled={!entryCanSave || entrySaving} onClick={() => doEntrySave(false)}>{saveLabel}</button>
             </div>
-
-            <label className="fld-label">{trD('dist.fNote')}</label>
-            <input className="fld" value={fNote} maxLength={300} placeholder={trD('dist.fNotePh')} onChange={(e) => setFNote(e.target.value)} />
-            {selCust && total > WARN_AMOUNT && <div className="dist-amt-warn"><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(total) })}</div>}
-            {fErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{fErr}</div>}
-            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={!selCust} onClick={() => setConfirmOpen(true)}>{trD('dist.fSave')}</button>
-            <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('dist.permanentNote')}</div>
+            <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{activeType === 'pengeluaran' ? trD('exp.formNote') : trD('dist.permanentNote')}</div>
           </div>
 
           <div className="card dist-form-sum">
             <div className="dist-fs-t">{trD('dist.summary')}</div>
-            <div className="dist-fs-line"><span>{fQty} {trD('dist.galonUnit')} × {rpFull(price)}</span><b>{rpFull(total)}</b></div>
-            <div className="dist-fs-total"><span>{trD('dist.total')}</span><b className="tnum">{rpFull(total)}</b></div>
-            <div className="dist-fs-note">{fMethod === 'lunas' ? <><IconCheck s={13} />{trD('dist.lunasNote')}</> : <><IconInvoice s={13} />{trD('dist.bonNote')}</>}</div>
+            {activeType === 'penjualan' && (<>
+              <div className="dist-fs-line"><span>{fQty} {trD('dist.galonUnit')} × {rpFull(price)}</span><b>{rpFull(total)}</b></div>
+              <div className="dist-fs-total"><span>{trD('dist.total')}</span><b className="tnum">{rpFull(total)}</b></div>
+              <div className="dist-fs-note">{fMethod === 'lunas' ? <><IconCheck s={13} />{trD('dist.lunasNote')}</> : <><IconInvoice s={13} />{trD('dist.bonNote')}</>}</div>
+            </>)}
+            {activeType === 'pelunasan' && (<>
+              <div className="dist-fs-line"><span>{trD('dist.payAmount')}</span><b>{rpFull(pAmount)}</b></div>
+              <div className="dist-fs-total"><span>{trD('dist.sisaBon')}</span><b className="tnum">{rpFull(payAfter)}</b></div>
+              <div className="dist-fs-note"><IconInvoice s={13} />{trD('dist.payHint')}</div>
+            </>)}
+            {activeType === 'pengeluaran' && (<>
+              <div className="dist-fs-line"><span>{expCatLabel(eCat || 'lainnya')}</span><b>−{rpFull(eAmt)}</b></div>
+              <div className="dist-fs-total"><span>{trD('dist.total')}</span><b className="tnum">−{rpFull(eAmt)}</b></div>
+              <div className="dist-fs-note"><IconCoinOut s={13} />{trD('exp.sumNote')}</div>
+            </>)}
           </div>
         </div>
 
@@ -1317,75 +1486,19 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               {total > WARN_AMOUNT && <div className="dist-amt-warn" style={{ margin: '0 auto 4px', maxWidth: 340 }}><IconInvoice s={14} />{trD('dist.amtWarn', { amt: rpFull(total) })}</div>}
               <div className="dist-confirm-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setConfirmOpen(false)}>{trD('dist.cancel')}</button>
-                <button type="button" className="btn btn-primary" disabled={saving} onClick={commitTxn}>{saving ? '…' : trD('dist.confirmYes')}</button>
+                <button type="button" className="btn btn-primary" disabled={saving} onClick={() => commitTxn(confirmAddAgain)}>{saving ? '…' : trD('dist.confirmYes')}</button>
               </div>
             </div>
           </div>
         )}
-        {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
-      </div>
-    );
-  }
-
-  // ── EXPENSE FORM — identical shell/flow to the new-transaction form (card + summary, chips,
-  // rupiah amount, DateField, note, attachment, full-width submit + footer hint). Back → the list
-  // with the Pengeluaran chip active, exactly like the transaction form returns to the list. ──
-  if (view === 'expense') {
-    return (
-      <div className="dist-dash screen-enter">
-        <button type="button" className="dist-back" onClick={() => { setView('list'); setFilter('pengeluaran'); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backList')}</button>
-        <div className="dist-form-wrap">
-          <div className="card dist-form">
-            {!scoped && (<>
-              <label className="fld-label" style={{ marginTop: 0 }}>{trD('run.armada')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <select className="fld" value={eFleet} onChange={(e) => setEFleet(e.target.value)}><option value="">{trD('run.pickFleet')}</option>{fleetOpts.map((f) => <option key={f} value={f}>{f}</option>)}</select>
-            </>)}
-
-            {/* Category — chips like the payment-method chips, not a dropdown */}
-            <label className="fld-label" style={scoped ? { marginTop: 0 } : undefined}>{trD('exp.category')}</label>
-            <div className="exp-cat-chips">
-              {eCats.map((c) => <button key={c} type="button" className={`cat-chip ${eCat === c ? 'on' : ''}`} onClick={() => setECat(c)}>{expCatLabel(c)}</button>)}
-              <button type="button" className={`cat-chip ${eCatCustom ? 'on' : ''}`} onClick={() => setECat(eCatCustom ? 'bensin' : '')}>{trD('exp.catCustom')}</button>
-            </div>
-            {eCatCustom && <input className="fld" style={{ marginTop: 8 }} value={eCat} placeholder={trD('exp.catOther')} onChange={(e) => setECat(e.target.value)} />}
-
-            <div className="dist-form-row">
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('exp.amount')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={eAmtFocus ? eAmount : (eAmt ? eAmt.toLocaleString('id-ID') : '')} placeholder="0" onFocus={() => setEAmtFocus(true)} onBlur={() => setEAmtFocus(false)} onChange={(e) => { setEAmount(e.target.value.replace(/[^0-9]/g, '')); setEBigOk(false); }} /></div>
-              </div>
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="fld-label">{trD('dist.fDate')}</label>
-                <DP.DateField value={eDate} onChange={setEDate} max={today} />
-              </div>
-            </div>
-
-            <label className="fld-label">{trD('exp.note')}</label>
-            <input className="fld" value={eNote} maxLength={300} placeholder={trD('exp.notePh')} onChange={(e) => setENote(e.target.value)} />
-
-            <label className="fld-label">{trD('exp.photo')}</label>
-            <UI.FileAttach value={ePhoto} onChange={setEPhoto} camera accept="image/*" label={trD('exp.photoAdd')} />
-
-            {eAmt > WARN_AMOUNT && <div className={`dist-amt-warn${eBigOk ? ' on' : ''}`}><IconInvoice s={14} />{eBigOk ? trD('dist.amtConfirm', { amt: rpFull(eAmt) }) : trD('dist.amtWarn', { amt: rpFull(eAmt) })}</div>}
-            {eErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{eErr}</div>}
-            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={eSaving || !(eAmt > 0)} onClick={commitExpense}>{eSaving ? '…' : (eAmt > WARN_AMOUNT && eBigOk) ? trD('dist.amtConfirmYes') : trD('exp.save')}</button>
-            <div className="dist-hint" style={{ textAlign: 'center', marginTop: 10 }}>{trD('exp.formNote')}</div>
-          </div>
-
-          <div className="card dist-form-sum">
-            <div className="dist-fs-t">{trD('dist.summary')}</div>
-            <div className="dist-fs-line"><span>{expCatLabel(eCat || 'lainnya')}</span><b>{rpFull(eAmt)}</b></div>
-            <div className="dist-fs-total"><span>{trD('dist.total')}</span><b className="tnum">{rpFull(eAmt)}</b></div>
-            <div className="dist-fs-note"><IconCoinOut s={13} />{trD('exp.sumNote')}</div>
-          </div>
-        </div>
+        {entryToast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{entryToast}</div>}
         {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
       </div>
     );
   }
 
   // ── LIST ──
-  const isExp = filter === 'pengeluaran';
+  const isExp = false;   // Pengeluaran is now merged INTO the list (a filter chip + own KPI) — no separate view.
   // Status cell — dispute/void/arsip/pending stay full badges; a plain "locked" (permanent) row is
   // reduced to a small lock icon+tooltip so the column isn't a wall of identical "Terkunci" chips.
   const statusBadgeOf = (t) => {
@@ -1425,7 +1538,26 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const cols = manualCols.filter((c) => !autoDropped.has(c.k));
   const tableMin = fixedSum();
   const cursorTxn = cursor >= 0 && cursor < txSorted.length ? txSorted[cursor] : null;
+  // A merged expense row's cells: own "Pengeluaran" badge, negative red nominal, no galon/harga.
+  const expCellOf = (t, k) => {
+    switch (k) {
+      case 'check': return <input type="checkbox" aria-label="pilih pengeluaran" checked={!!sel[t.id]} onChange={() => setSel((p) => ({ ...p, [t.id]: !p[t.id] }))} />;
+      case 'date': return <><b className="tx-dated">{fmtDateShort(t.txnDate)}</b><span className="tx-time">{hhmm(t.createdAt)}</span></>;
+      case 'code': return <span className="tx-codetxt">{trD('exp.pay_' + t.expMethod)}</span>;
+      case 'cust': return <><div className="tx-custname">{expCatLabel(t.category)}</div>{(t.recipient || t.note) ? <div className="tx-custcode">{t.recipient || t.note}</div> : null}</>;
+      case 'type': return <span className="dist-status tx-exp-badge"><IconCoinOut s={11} />{trD('dist.tabPengeluaran')}</span>;
+      case 'galon': return '—';
+      case 'price': return '—';
+      case 'amount': return <span className={'tx-amt tx-exp-amt' + (t.status === 'void' ? ' muted' : '')}>{t.status === 'void' ? <s>−{rpFull(t.amount)}</s> : '−' + rpFull(t.amount)}</span>;
+      case 'status': return t.status === 'void' ? <span className="dist-badge void"><IconClose s={10} />{trD('tx.st.dibatalkan')}</span> : <span className="tx-lockicon" title={trD('exp.btn')}><IconCoinOut s={12} /></span>;
+      case 'armada': return <span className="tx-ellip">{t.fleetId || '—'}</span>;
+      case 'staff': return <span className="tx-ellip">{t.actorName || '—'}</span>;
+      case 'aksi': return <IconCaret s={14} style={{ transform: 'rotate(-90deg)', color: 'var(--text-faint)' }} />;
+      default: return null;
+    }
+  };
   const cellOf = (t, k, muted) => {
+    if (t._exp) return expCellOf(t, k);
     switch (k) {
       case 'check': return <input type="checkbox" aria-label="pilih transaksi" checked={!!sel[t.id]} onChange={() => setSel((p) => ({ ...p, [t.id]: !p[t.id] }))} />;
       case 'date': return <><b className="tx-dated">{fmtDateShort(t.txnDate)}</b><span className="tx-time">{hhmm(t.createdAt)}</span></>;
@@ -1445,7 +1577,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const cellCls = (c) => 'tx-td tx-td-' + c.k + (c.num ? ' tx-r tnum' : '') + (c.cls ? ' ' + c.cls : '');
   const txTableRow = (t) => {
     const muted = isMuted(t);
-    const cls = 'txt-row' + (muted ? ' is-muted' : '') + (detailTxn && detailTxn.id === t.id ? ' active' : '') + (cursorTxn && cursorTxn.id === t.id ? ' cursor' : '');
+    const cls = 'txt-row' + (t._exp ? ' tx-exp-row' : '') + (muted ? ' is-muted' : '') + (detailTxn && detailTxn.id === t.id ? ' active' : '') + (cursorTxn && cursorTxn.id === t.id ? ' cursor' : '');
     return (
       <tr key={t.id} className={cls} onClick={() => openDetail(t)}>
         {cols.map((c) => <td key={c.k} className={cellCls(c)} onClick={c.k === 'check' ? (e) => e.stopPropagation() : undefined}>{cellOf(t, c.k, muted)}</td>)}
@@ -1463,6 +1595,15 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const txColGroup = <colgroup>{cols.map((c) => <col key={c.k} style={c.flex ? undefined : { width: c.w + 'px' }} />)}</colgroup>;
   const txCardRow = (t) => {
     const muted = isMuted(t);
+    if (t._exp) return (
+      <div key={t.id} className={'cl-card tx-card tx-exp-row' + (muted ? ' is-muted' : '')} onClick={() => openDetail(t)}>
+        <div className="tx-card-top">
+          <div className="tx-card-id"><div className="tx-card-cust">{expCatLabel(t.category)}</div><div className="tx-card-tags"><span className="dist-status tx-exp-badge"><IconCoinOut s={11} />{trD('dist.tabPengeluaran')}</span>{t.status === 'void' ? <span className="dist-badge void"><IconClose s={10} />{trD('tx.st.dibatalkan')}</span> : null}</div></div>
+          <div className={'tx-card-amt tnum tx-exp-amt' + (muted ? ' muted' : '')}>−{rpFull(t.amount)}</div>
+        </div>
+        <div className="tx-card-meta"><span>{fmtDateShort(t.txnDate)} {hhmm(t.createdAt)}</span>{t.recipient ? <span>{t.recipient}</span> : null}{t.actorName ? <span>{t.actorName}</span> : null}</div>
+      </div>
+    );
     return (
       <div key={t.id} className={'cl-card tx-card' + (muted ? ' is-muted' : '')} onClick={() => openDetail(t)}>
         <div className="tx-card-top">
@@ -1487,15 +1628,15 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           {period === 'range' && canViewAll && <div className="dist-period-range"><DP.DateField value={rFrom} onChange={setRFrom} max={rTo || today} /><span>–</span><DP.DateField value={rTo} onChange={setRTo} min={rFrom || undefined} max={today} /></div>}
           <div style={{ flex: 1 }} />
           <button type="button" className={`btn btn-ghost btn-sm ${anyFilter ? 'on' : ''}`} onClick={() => setAdvOpen(true)}><IconFilter s={15} />{trD('tx.advanced')}</button>
-          {canInput && <button type="button" className="btn btn-primary btn-sm dist-newbtn" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
+          {(canInput || canExpense) && <button type="button" className="btn btn-primary btn-sm dist-newbtn" onClick={() => openEntry(formType)}><IconPlus s={16} />{trD('dist.newTxn')}</button>}
           <div className="tx-morewrap">
             <button type="button" className={`btn btn-ghost btn-sm tx-morebtn ${moreMenu ? 'on' : ''}`} aria-haspopup="true" aria-expanded={moreMenu} aria-label={trD('cd.more')} onClick={() => setMoreMenu((v) => !v)}><IconDots s={18} /></button>
             {moreMenu && <><div className="cd-menu-scrim" onClick={() => setMoreMenu(false)} /><div className="cd-menu tx-moremenu" role="menu">
               <button type="button" className="cd-menu-item" disabled={!txFiltered.length} onClick={() => { setMoreMenu(false); exportCsv(); }}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
               <button type="button" className="cd-menu-item" disabled={!txFiltered.length} onClick={() => { setMoreMenu(false); doListPrint(); }}><IconDownload s={15} />{trD('dist.print')}</button>
               {(canInput || canExpense) && <div className="cd-menu-div" />}
-              {canInput && <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); setPayOpen(true); }}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
-              {canExpense && <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); openExpenseForm(); }}><IconCoinOut s={15} />{trD('exp.btn')}</button>}
+              {canInput && <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); openEntry('pelunasan'); }}><IconInvoice s={15} />{trD('dist.payBon')}</button>}
+              {canExpense && <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); openEntry('pengeluaran'); }}><IconCoinOut s={15} />{trD('exp.btn')}</button>}
               <div className="cd-menu-div" />
               <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); setColMenu(true); }}><IconSettings s={15} />{trD('tx.columns')}</button>
               <button type="button" className="cd-menu-item" onClick={() => { setMoreMenu(false); setAdvOpen(true); }}><IconFilter s={15} />{trD('tx.advanced')}</button>
@@ -1508,7 +1649,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           </div>
         </div>
         <div className="tx-toolrow tx-toolrow-2">
-          {[['lunas', trD('dist.lunas'), methodCounts.lunas], ['bon', trD('dist.bon'), methodCounts.bon], ['pelunasan', trD('dist.pelunasan'), methodCounts.pelunasan], ['penyesuaian', trD('adj.kindBon'), methodCounts.penyesuaian]].map(([k, l, n]) => <button key={k} type="button" className={`dist-chip ${methodSel.has(k) ? 'on' : ''}`} onClick={() => toggleIn(setMethodSel)(k)}>{l} <span className="dist-imp-chipn">{n}</span></button>)}
+          {[['lunas', trD('dist.lunas'), methodCounts.lunas], ['bon', trD('dist.bon'), methodCounts.bon], ['pelunasan', trD('dist.pelunasan'), methodCounts.pelunasan], ['penyesuaian', trD('adj.kindBon'), methodCounts.penyesuaian], ['pengeluaran', trD('dist.tabPengeluaran'), methodCounts.pengeluaran]].filter(([k, l, n]) => k !== 'pengeluaran' || n > 0 || methodSel.has('pengeluaran')).map(([k, l, n]) => <button key={k} type="button" className={`dist-chip ${k === 'pengeluaran' ? 'tx-chip-exp ' : ''}${methodSel.has(k) ? 'on' : ''}`} onClick={() => toggleIn(setMethodSel)(k)}>{l} <span className="dist-imp-chipn">{n}</span></button>)}
           <span className="tx-chipdiv" />
           {[['normal', trD('tx.st.normal'), statusCounts.normal], ['terkunci', trD('tx.st.terkunci'), statusCounts.terkunci], ['disengketakan', trD('cd.dispDisengketakan'), statusCounts.disengketakan], ['tidak_diakui', trD('cd.dispTidakDiakui'), statusCounts.tidak_diakui], ['kerugian', trD('cd.dispKerugian'), statusCounts.kerugian], ['dibatalkan', trD('tx.st.dibatalkan'), statusCounts.dibatalkan]].filter(([k, l, n]) => n > 0 || statusSel.has(k)).map(([k, l, n]) => <button key={k} type="button" className={`dist-chip tx-stchip st-${k} ${statusSel.has(k) ? 'on' : ''}`} onClick={() => toggleIn(setStatusSel)(k)}>{l} <span className="dist-imp-chipn">{n}</span></button>)}
           <span className="tx-chipdiv" />
@@ -1570,7 +1711,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       {!isExp && (<>
         {/* SUMMARY BAR — follows the ACTIVE filter. */}
         {txns !== null && txFiltered.length > 0 && (
-          <div className="cl-summary tx-summary">
+          <div className={'cl-summary tx-summary' + (sExpense > 0 ? ' tx-summary-6' : '')}>
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumCount')}</span><span className="cl-sumval">{numX(sCount)}</span></div>
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumGalon')}</span><span className="cl-sumval">{numX(sGalon)}</span></div>
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumNominal')}</span><span className="cl-sumval tnum">{rpFull(sNominal)}</span></div>
@@ -1582,6 +1723,8 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               <div className="tx-splitbar" role="presentation"><span className="l" style={{ width: (sLunas + sBon > 0 ? Math.round(sLunas / (sLunas + sBon) * 100) : 0) + '%' }} /><span className="b" style={{ width: (sLunas + sBon > 0 ? Math.round(sBon / (sLunas + sBon) * 100) : 0) + '%' }} /></div>
             </div>
             <div className="cl-sumcard"><span className="cl-sumlbl">{trD('tx.sumAvg')}</span><span className="cl-sumval tnum">{rpFull(sAvg)}</span></div>
+            {/* Pengeluaran is its OWN KPI — never mixed into Total Nominal / Rata-rata (sales figures). */}
+            {sExpense > 0 && <div className="cl-sumcard tx-expcard"><span className="cl-sumlbl"><IconCoinOut s={12} />{trD('dist.tabPengeluaran')}</span><span className="cl-sumval tnum tx-exp-amt">−{rpFull(sExpense)}</span></div>}
           </div>
         )}
         {txns !== null && <div className="tx-filternote no-print"><IconFilter s={12} />{trD('tx.filterNote')}{qDeb && matchedFields.length ? ' · ' + trD('tx.matched', { f: matchedFields.join(', ') }) : ''}</div>}
@@ -1601,7 +1744,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
         {txns === null ? (
           <div className="card dist-card cl-listcard tx-skelwrap"><div className={'tx-skel tx-dense-' + density}>{Array.from({ length: 14 }).map((_, i) => <div key={i} className="tx-skel-row"><span className="tx-skel-ck" /><span className="tx-skel-l1" /><span className="tx-skel-l2" /><span className="tx-skel-amt" /></div>)}</div></div>
         ) : (txns.length === 0 && !anyFilter) ? (
-          <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconTx s={26} /><div className="cl-empty-t">{trD('dist.noTxn')}</div>{canInput && <button type="button" className="btn btn-primary" onClick={() => { setView('form'); setFErr(''); }}><IconPlus s={16} />{trD('dist.newTxn')}</button>}</div></div>
+          <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconTx s={26} /><div className="cl-empty-t">{trD('dist.noTxn')}</div>{(canInput || canExpense) && <button type="button" className="btn btn-primary" onClick={() => openEntry(formType)}><IconPlus s={16} />{trD('dist.newTxn')}</button>}</div></div>
         ) : txFiltered.length === 0 ? (
           <div className="card dist-card cl-listcard"><div className="cl-emptybox"><IconSearch s={26} /><div className="cl-empty-t">{trD('dist.noResultFilter')}</div><button type="button" className="dist-link" onClick={clearAll}>{trD('tx.clearAll')}</button></div></div>
         ) : effView === 'table' ? (
@@ -1627,7 +1770,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       </>)}
 
       {/* SLIDE-OVER detail panel + advanced filters + bulk-cancel — rendered outside the flow. */}
-      {detailTxn && <TxDetailPanel txn={detailTxn} custById={custById} idx={detailIdx} total={txSorted.length} canKoreksi={canKoreksi} canVoid={canVoid} canArchive={canArchive} canHardDelete={canHardDelete} userName={userName}
+      {detailTxn && !detailTxn._exp && <TxDetailPanel txn={detailTxn} custById={custById} idx={detailIdx} total={txSorted.length} canKoreksi={canKoreksi} canVoid={canVoid} canArchive={canArchive} canHardDelete={canHardDelete} userName={userName}
         onClose={() => setDetailIdx(-1)} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => openCorrect(t)} onVoid={(t) => { setVoidTxn(t); setVoidReason(''); }} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
       {advOpen && <TxAdvancedPanel onClose={() => setAdvOpen(false)} minAmt={minAmt} setMinAmt={setMinAmt} maxAmt={maxAmt} setMaxAmt={setMaxAmt} flagNote={flagNote} setFlagNote={setFlagNote} flagCorr={flagCorr} setFlagCorr={setFlagCorr} custFilter={custFilter} setCustFilter={setCustFilter} custOpts={custOpts} onClear={clearAll} anyFilter={anyFilter} />}
       {bulkVoid && <TxBulkVoidModal items={bulkVoid.items} onClose={() => setBulkVoid(null)} onRun={runBulkVoid} />}
@@ -1738,8 +1881,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
           </div>
         </div>
       )}
-      {payOpen && <PaymentModal customers={customers} staffMode={staffMode} today={today} onClose={() => setPayOpen(false)}
-        onSaved={(d) => { setPayOpen(false); setNewIds((p) => [d.id, ...p]); flash(trD('dist.paySaved', { amt: rpFull(d.amount), sisa: rpFull(d.sisaBon || 0) })); reload(); if (onChanged) onChanged(); }} />}
+      {/* Pembayaran Bon is now a TAB in the unified entry (openEntry('pelunasan')) — no separate modal. */}
       {/* EXPENSE VOID — recorded cancellation (reason required); expenses are never silently deleted. */}
       {eVoidRow && (
         <div className="modal-scrim" onClick={() => setEVoidRow(null)} style={{ zIndex: 200 }}>
@@ -1753,6 +1895,28 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               {eErr && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{eErr}</div>}
             </div>
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEVoidRow(null)}>{trD('dist.cancel')}</button><button className="btn btn-danger" disabled={eSaving} onClick={commitExpenseVoid}>{eSaving ? '…' : trD('exp.void')}</button></div>
+          </div>
+        </div>
+      )}
+      {/* EXPENSE DETAIL — opened by clicking a Pengeluaran row in the list. Read-only fields + void. */}
+      {eDetail && (
+        <div className="modal-scrim" onClick={() => setEDetail(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}><IconCoinOut s={16} /> {trD('dist.tabPengeluaran')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{expCatLabel(eDetail.category)} · {eDetail.date || fmtDateShort(eDetail.txnDate)}</div></div><button className="jp-icon" onClick={() => setEDetail(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="tx-dp-amt tx-exp-amt">−{rpFull(eDetail.amount)}{eDetail.status === 'void' && <span className="dist-badge void" style={{ marginLeft: 8 }}><IconClose s={10} />{trD('tx.st.dibatalkan')}</span>}</div>
+              <div className="tx-dp-kv"><span>{trD('exp.category')}</span><b>{expCatLabel(eDetail.category)}</b></div>
+              <div className="tx-dp-kv"><span>{trD('dist.payMethod')}</span><b>{trD('exp.pay_' + (eDetail.method || 'tunai'))}</b></div>
+              {eDetail.recipient ? <div className="tx-dp-kv"><span>{trD('exp.recipient')}</span><b>{eDetail.recipient}</b></div> : null}
+              {eDetail.note ? <div className="tx-dp-kv"><span>{trD('exp.note')}</span><b>{eDetail.note}</b></div> : null}
+              {eDetail.fleetId ? <div className="tx-dp-kv"><span>{trD('cl.colArmada')}</span><b>{eDetail.fleetId}</b></div> : null}
+              <div className="tx-dp-kv"><span>{trD('cd.expandBy')}</span><b>{eDetail.createdByName || '—'}{eDetail.createdAt ? ' · ' + fmtDT(eDetail.createdAt) : ''}</b></div>
+              {eDetail.photoId && <button type="button" className="dist-link" style={{ marginTop: 8 }} onClick={() => viewExpPhoto(eDetail.photoId)}><IconInvoice s={13} />{trD('exp.photo')}</button>}
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-ghost" onClick={() => setEDetail(null)}>{trD('dist.cancel')}</button>
+              {canExpense && eDetail.status !== 'void' && <button type="button" className="btn btn-danger" onClick={() => { setEVoidRow(eDetail); setEDetail(null); setEVoidReason(''); setEErr(''); }}><IconClose s={13} />{trD('exp.void')}</button>}
+            </div>
           </div>
         </div>
       )}
