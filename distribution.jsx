@@ -878,7 +878,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName, canViewAll, canView7, canViewMonth, canViewSisaBon, maxLookback }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName, canViewAll, canView7, canViewMonth, canViewSisaBon, maxLookback, nav, histTick }) {
   // ── VIEW-WINDOW (time restriction) — the UI HIDES presets outside what the server allows; the
   // server still enforces (this is convenience, not the guard). Mirror viewWindowFrom() client-side.
   const vwAddDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -1056,12 +1056,34 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       setp('m', [...methodSel].join(','), ''); setp('st', [...statusSel].join(','), ''); setp('src', [...sourceSel].join(','), ''); setp('arm', [...armadaSel].join(','), ''); setp('pt', [...petugasSel].join(','), '');
       setp('cust', custFilter, ''); setp('min', minAmt, ''); setp('max', maxAmt, ''); setp('note', flagNote ? '1' : '', ''); setp('corr', flagCorr ? '1' : '', '');
       setp('sort', sortKey, 'date'); setp('dir', sortDir, 'desc'); setp('v', txView, 'table');
-      window.history.replaceState(null, '', u);
+      window.history.replaceState(window.history.state, '', u);   // keep the shell's {screen} marker (was null → wiped it)
     } catch (e) {}
   }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir, txView]);
+  // Filter/sort mirroring stays replaceState (incidental — would spam history). EXCEPTION: the first
+  // character of a SEARCH pushes ONE checkpoint so a single Back clears the whole search in one step.
+  const qWasEmpty = React.useRef(!q);
+  uEx(() => {
+    const nowEmpty = !q;
+    if (qWasEmpty.current && !nowEmpty && nav && nav.pushSub) { const sp = new URLSearchParams(window.location.search); sp.delete('q'); nav.pushSub(sp.toString()); }
+    qWasEmpty.current = nowEmpty;
+  }, [q]);
+  // Re-read the URL-mirrored filters when the shell reports a pop (histTick) — so Back through the
+  // search checkpoint clears it, and a shared link / refresh lands on the right filters. The initial
+  // state already came from the URL, so skip the first run.
+  const txFirstSync = React.useRef(true);
+  uEx(() => {
+    if (txFirstSync.current) { txFirstSync.current = false; return; }
+    const nq = txp('q', ''); setQ(nq); setQDeb(nq);
+    const pp = txp('period', canViewAll ? 'all' : 'today'); setPeriod(periodAllowed(pp) ? pp : 'today');
+    setRFrom(txp('from', '')); setRTo(txp('to', ''));
+    setMethodSel(toSet(txp('m', ''))); setStatusSel(toSet(txp('st', ''))); setSourceSel(toSet(txp('src', ''))); setArmadaSel(toSet(txp('arm', ''))); setPetugasSel(toSet(txp('pt', '')));
+    setCustFilter(txp('cust', '')); setMinAmt(txp('min', '')); setMaxAmt(txp('max', '')); setFlagNote(txp('note', '') === '1'); setFlagCorr(txp('corr', '') === '1');
+    setSortKey(txp('sort', 'date')); setSortDir(txp('dir', 'desc')); setTxView(txp('v', 'table'));
+    qWasEmpty.current = !nq;
+  }, [histTick]);
   uEx(() => { setTxVisible(120); setCursor(-1); }, [qDeb, period, rFrom, rTo, methodSel, statusSel, sourceSel, armadaSel, petugasSel, custFilter, minAmt, maxAmt, flagNote, flagCorr, sortKey, sortDir]);   // reset window + cursor on filter change
   uEx(() => { localStorage.setItem('tx_cols_hidden', JSON.stringify([...colHidden])); }, [colHidden]);
-  uEx(() => { if (openFormTick) { if (canInput) setType('penjualan'); setFErr(''); setView('form'); } }, [openFormTick]);
+  uEx(() => { if (openFormTick) openEntry(canInput ? 'penjualan' : 'pengeluaran'); }, [openFormTick]);
 
   // Expenses load independently (they are date-scoped, the txn list is not). The chip reads this.
   const scoped = isScoped(fleetScope);
@@ -1089,7 +1111,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     window.API.distribusi.transactions.create({ customerId: fCust, qty: Math.max(1, fQty | 0), method: fMethod, note: fNote.trim(), txnDate: staffMode ? today : (fDate || today), gallonOut: Math.max(0, fGalOut | 0), gallonIn: Math.max(0, fGalIn | 0) })
       .then((r) => { setSaving(false); setConfirmOpen(false); setNewIds((p) => [r.data.id, ...p]); resetSaleFields();
         const msg = trD('dist.txnGalonSaved', { out: r.data.gallonOut, in: r.data.gallonIn, held: r.data.gallonsHeld });
-        if (addAgain) { pingEntry(msg); } else { setView('list'); setFilter('all'); flash(msg); }
+        if (addAgain) { pingEntry(msg); } else { setFilter('all'); flash(msg); finishEntry(); }
         reload(); if (onChanged) onChanged(); })
       .catch((e) => { setSaving(false); setConfirmOpen(false); setFErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
@@ -1151,6 +1173,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     setType(type); setFErr(''); setEErr(''); setPErr('');
     setEFleet((distFleet && distFleet !== 'all') ? distFleet : (scoped ? '' : (fleetOpts[0] || '')));   // prime expense fleet
     setView('form');
+    if (view !== 'form' && nav && nav.openOverlay) nav.openOverlay(entryOverlayClose);   // one history entry per open
   };
   const resetExpFields = () => { setEAmount(''); setEAmtFocus(false); setENote(''); setERecipient(''); setEPhoto(null); setEBigOk(false); };   // keeps kategori/tanggal/armada/metode
   const commitExpense = (addAgain) => {
@@ -1164,7 +1187,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     // SAME storage path as the old Pengeluaran flow — one DistExpense record; never a duplicate.
     window.API.distribusi.expenses.create({ date: eDate, fleet: eFleet || undefined, amount: eAmt, category: (eCat || '').trim() || 'lainnya', method: eMethod, recipient: (eRecipient || '').trim() || undefined, note: (eNote || '').trim() || undefined, photoId })
       .then(() => { setESaving(false); resetExpFields();
-        if (addAgain) { pingEntry(trD('exp.saved')); } else { setView('list'); flash(trD('exp.saved')); }
+        if (addAgain) { pingEntry(trD('exp.saved')); } else { flash(trD('exp.saved')); finishEntry(); }
         reload(); reloadExpenses(); if (onChanged) onChanged(); })
       .catch((e) => { setESaving(false); setEErr((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
   };
@@ -1178,7 +1201,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     window.API.distribusi.transactions.create({ customerId: pCust, method: 'pelunasan', payAmount: pAmount, payMethod: pMethod, note: pNote.trim(), txnDate: staffMode ? today : (pDate || today) })
       .then((r) => { setPSaving(false); setNewIds((p) => [r.data.id, ...p]); setPCust(''); setPAmount(0); setPNote('');
         const msg = trD('dist.paySaved', { amt: rpFull(r.data.amount), sisa: rpFull(r.data.sisaBon || 0) });
-        if (addAgain) { pingEntry(msg); } else { setView('list'); setFilter('all'); flash(msg); }
+        if (addAgain) { pingEntry(msg); } else { setFilter('all'); flash(msg); finishEntry(); }
         reload(); if (onChanged) onChanged(); })
       .catch((e) => { setPSaving(false); setPErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
@@ -1192,7 +1215,17 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     else if (formType === 'pengeluaran') commitExpense(addAgain);
     else if (formType === 'pelunasan') commitPay(addAgain);
   };
-  const closeEntry = () => { if (!entryDirty || window.confirm(trD('dist.entryDiscard'))) { setView('list'); setConfirmOpen(false); } };
+  // ── The entry screen is an OVERLAY history entry (opened via openEntry → one push) so browser Back
+  // closes it — identically to Esc. entryOverlayClose runs on Back/dismiss: it confirms a dirty
+  // discard and, if cancelled, re-registers the overlay (undoes the Back). A clean save clears the
+  // dirty flag first so the dismiss just closes.
+  const entryDirtyRef = React.useRef(false); entryDirtyRef.current = entryDirty;
+  const entryOverlayClose = () => {
+    if (entryDirtyRef.current && !window.confirm(trD('dist.entryDiscard'))) { if (nav && nav.openOverlay) nav.openOverlay(entryOverlayClose); return; }
+    entryDirtyRef.current = false; setView('list'); setConfirmOpen(false);
+  };
+  const finishEntry = () => { entryDirtyRef.current = false; setConfirmOpen(false); if (nav && nav.dismissOverlay) nav.dismissOverlay(); else setView('list'); };   // save success / Kembali / Esc
+  const closeEntry = () => { if (nav && nav.dismissOverlay) nav.dismissOverlay(); else if (!entryDirty || window.confirm(trD('dist.entryDiscard'))) { setView('list'); setConfirmOpen(false); } };
   // Keyboard-first: Alt+1/2/3 switch type · Enter saves · Esc closes (confirm if dirty).
   uEx(() => {
     if (view !== 'form') return;
@@ -1300,7 +1333,14 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const selRows = txFiltered.filter((t) => sel[t.id]);
   // Slide-over detail row + j/k navigation over the FILTERED list.
   const detailTxn = detailIdx >= 0 && detailIdx < txSorted.length ? txSorted[detailIdx] : null;
-  const openDetail = (t) => { if (t._exp) { setEDetail({ id: t.expId, category: t.category, amount: t.amount, recipient: t.recipient, note: t.note, method: t.expMethod, fleetId: t.fleetId, createdByName: t.actorName, createdAt: t.createdAt, status: t.status, photoId: t.photoId }); setEVoidReason(''); setEErr(''); return; } const i = txSorted.findIndex((x) => x.id === t.id); setDetailIdx(i); };
+  // The slide-over (and the expense-detail modal) is an OVERLAY history entry — Back closes it, Esc
+  // closes it, both via the shell's overlay stack. j/k just move detailIdx WITHIN the one entry.
+  const closeSlide = () => { if (nav && nav.dismissOverlay) nav.dismissOverlay(); else { setDetailIdx(-1); setEDetail(null); } };
+  const openDetail = (t) => {
+    if (t._exp) { setEDetail({ id: t.expId, category: t.category, amount: t.amount, recipient: t.recipient, note: t.note, method: t.expMethod, fleetId: t.fleetId, createdByName: t.actorName, createdAt: t.createdAt, status: t.status, photoId: t.photoId }); setEVoidReason(''); setEErr(''); if (nav && nav.openOverlay) nav.openOverlay(() => setEDetail(null)); return; }
+    const i = txSorted.findIndex((x) => x.id === t.id); setDetailIdx(i);
+    if (i >= 0 && nav && nav.openOverlay) nav.openOverlay(() => setDetailIdx(-1));
+  };
   const moveDetail = (d) => setDetailIdx((i) => { const n = i + d; return n >= 0 && n < txSorted.length ? n : i; });
   // Infinite scroll: reveal +120 rows as the sentinel nears the bottom of the single page scroller.
   uEx(() => { const el = txSentinel.current; if (!el || typeof IntersectionObserver === 'undefined') return; const root = document.querySelector('.content') || null; const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setTxVisible((n) => n + 120); }, { root, rootMargin: '700px' }); io.observe(el); return () => io.disconnect(); }, [txns, effView]);
@@ -1312,13 +1352,13 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       if (detailIdx >= 0) {
         if (e.key === 'j') { e.preventDefault(); moveDetail(1); }
         else if (e.key === 'k') { e.preventDefault(); moveDetail(-1); }
-        else if (e.key === 'Escape') { e.preventDefault(); setDetailIdx(-1); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeSlide(); }
         return;
       }
       const len = Math.min(txSorted.length, txVisible);
       if (e.key === 'ArrowDown') { e.preventDefault(); setCursor((i) => Math.min(len - 1, (i < 0 ? -1 : i) + 1)); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor((i) => Math.max(0, (i < 0 ? 0 : i) - 1)); }
-      else if (e.key === 'Enter' && cursor >= 0 && cursor < txSorted.length) { e.preventDefault(); setDetailIdx(cursor); }
+      else if (e.key === 'Enter' && cursor >= 0 && cursor < txSorted.length) { e.preventDefault(); openDetail(txSorted[cursor]); }
       else if (e.key === 'Escape' && cursor >= 0) { setCursor(-1); }
     };
     window.addEventListener('keydown', on); return () => window.removeEventListener('keydown', on);
@@ -1771,7 +1811,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 
       {/* SLIDE-OVER detail panel + advanced filters + bulk-cancel — rendered outside the flow. */}
       {detailTxn && !detailTxn._exp && <TxDetailPanel txn={detailTxn} custById={custById} idx={detailIdx} total={txSorted.length} canKoreksi={canKoreksi} canVoid={canVoid} canArchive={canArchive} canHardDelete={canHardDelete} userName={userName}
-        onClose={() => setDetailIdx(-1)} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => openCorrect(t)} onVoid={(t) => { setVoidTxn(t); setVoidReason(''); }} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
+        onClose={closeSlide} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => openCorrect(t)} onVoid={(t) => { setVoidTxn(t); setVoidReason(''); }} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
       {advOpen && <TxAdvancedPanel onClose={() => setAdvOpen(false)} minAmt={minAmt} setMinAmt={setMinAmt} maxAmt={maxAmt} setMaxAmt={setMaxAmt} flagNote={flagNote} setFlagNote={setFlagNote} flagCorr={flagCorr} setFlagCorr={setFlagCorr} custFilter={custFilter} setCustFilter={setCustFilter} custOpts={custOpts} onClear={clearAll} anyFilter={anyFilter} />}
       {bulkVoid && <TxBulkVoidModal items={bulkVoid.items} onClose={() => setBulkVoid(null)} onRun={runBulkVoid} />}
       {printFor2 && <PrintCenter customer={printFor2.custObj || (custById[printFor2.txn.customerId] || { id: printFor2.txn.customerId, name: nameOf(printFor2.txn), code: codeOf(printFor2.txn), phone: phoneOf(printFor2.txn), transactions: [printFor2.txn], sisaBon: 0 })} userName={userName} mode="nota" txn={printFor2.txn} onClose={() => setPrintFor2(null)} />}
@@ -1900,9 +1940,9 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       )}
       {/* EXPENSE DETAIL — opened by clicking a Pengeluaran row in the list. Read-only fields + void. */}
       {eDetail && (
-        <div className="modal-scrim" onClick={() => setEDetail(null)} style={{ zIndex: 200 }}>
+        <div className="modal-scrim" onClick={closeSlide} style={{ zIndex: 200 }}>
           <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}><IconCoinOut s={16} /> {trD('dist.tabPengeluaran')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{expCatLabel(eDetail.category)} · {eDetail.date || fmtDateShort(eDetail.txnDate)}</div></div><button className="jp-icon" onClick={() => setEDetail(null)}><IconClose s={18} /></button></div>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}><IconCoinOut s={16} /> {trD('dist.tabPengeluaran')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{expCatLabel(eDetail.category)} · {eDetail.date || fmtDateShort(eDetail.txnDate)}</div></div><button className="jp-icon" onClick={closeSlide}><IconClose s={18} /></button></div>
             <div className="modal-body">
               <div className="tx-dp-amt tx-exp-amt">−{rpFull(eDetail.amount)}{eDetail.status === 'void' && <span className="dist-badge void" style={{ marginLeft: 8 }}><IconClose s={10} />{trD('tx.st.dibatalkan')}</span>}</div>
               <div className="tx-dp-kv"><span>{trD('exp.category')}</span><b>{expCatLabel(eDetail.category)}</b></div>
@@ -1914,8 +1954,8 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               {eDetail.photoId && <button type="button" className="dist-link" style={{ marginTop: 8 }} onClick={() => viewExpPhoto(eDetail.photoId)}><IconInvoice s={13} />{trD('exp.photo')}</button>}
             </div>
             <div className="modal-foot">
-              <button className="btn btn-ghost" onClick={() => setEDetail(null)}>{trD('dist.cancel')}</button>
-              {canExpense && eDetail.status !== 'void' && <button type="button" className="btn btn-danger" onClick={() => { setEVoidRow(eDetail); setEDetail(null); setEVoidReason(''); setEErr(''); }}><IconClose s={13} />{trD('exp.void')}</button>}
+              <button className="btn btn-ghost" onClick={closeSlide}>{trD('dist.cancel')}</button>
+              {canExpense && eDetail.status !== 'void' && <button type="button" className="btn btn-danger" onClick={() => { const ed = eDetail; closeSlide(); setEVoidRow(ed); setEVoidReason(''); setEErr(''); }}><IconClose s={13} />{trD('exp.void')}</button>}
             </div>
           </div>
         </div>
@@ -3021,10 +3061,11 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onOpenLoss, userName }) {
-  const [view, setView] = uSx('list');
-  const [custs, setCusts] = uSx(null);
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onOpenLoss, userName, nav, histTick }) {
   const clParam0 = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
+  const [view, setView] = uSx(() => (clParam0('c', '') ? 'detail' : 'list'));   // ?c=<id> in the URL → open that detail (deep-link / refresh)
+  const [custs, setCusts] = uSx(null);
+  const [flashId, setFlashId] = uSx(null);   // row briefly highlighted after returning from its detail
   const [statusFilter, setStatusFilter] = uSx(() => clParam0('st', 'active'));   // 'active' (default) | 'inactive' — Nonaktif view (cap holders only)
   const [delFor, setDelFor] = uSx(null);                   // customer being removed → opens the 2-option DeleteCustomerModal
   const [delBusy, setDelBusy] = uSx(false);
@@ -3059,8 +3100,14 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [disputeFor, setDisputeFor] = uSx(null); // { txn } — transaction dispute / loss modal
   const [cdDispute, setCdDispute] = uSx('all');  // transaksi-tab dispute filter: all | disengketakan | lossed
   // ── Customer-detail redesign (presentation-only) state ──
-  const [cdTab, setCdTabState] = uSx(() => { try { return new URLSearchParams(window.location.search).get('tab') || 'ringkasan'; } catch (e) { return 'ringkasan'; } });
-  const setCdTab = (t) => { setCdTabState(t); try { const u = new URL(window.location.href); u.searchParams.set('tab', t); window.history.replaceState(null, '', u); } catch (e) {} };
+  const [cdTab, setCdTabState] = uSx(() => clParam0('tab', 'ringkasan'));
+  // The customer screen's sub-state lives in the query string (c=<detail id> · tab · list filters).
+  // These push REAL history entries via the shell so Back walks tabs → detail → list and refresh
+  // restores the exact view. `flashRow` briefly highlights the row you came back to.
+  const curSearch = () => { try { return new URLSearchParams(window.location.search); } catch (e) { return new URLSearchParams(); } };
+  const pushSub = (mut) => { const sp = curSearch(); mut(sp); if (nav && nav.pushSub) nav.pushSub(sp.toString()); };
+  const flashRow = (id) => { if (!id) return; setFlashId(id); setTimeout(() => setFlashId((f) => (f === id ? null : f)), 1600); };
+  const setCdTab = (t) => { if (t === cdTab) return; setCdTabState(t); pushSub((sp) => sp.set('tab', t)); };   // Back walks tabs; unchanged tab pushes nothing
   const [cdSearch, setCdSearch] = uSx('');
   const [cdPeriod, setCdPeriod] = uSx('all');        // all | 30 | month | lastMonth | year | range
   const [cdFrom, setCdFrom] = uSx(''); const [cdTo, setCdTo] = uSx('');
@@ -3116,7 +3163,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
       const u = new URL(window.location.href);
       const setp = (k, v, dflt) => { if (v && v !== dflt) u.searchParams.set(k, v); else u.searchParams.delete(k); };
       setp('q', q, ''); setp('chip', filter, 'all'); setp('sort', clSort, 'nama'); setp('cv', clView, 'table'); setp('st', statusFilter, 'active');
-      window.history.replaceState(null, '', u);
+      window.history.replaceState(window.history.state, '', u);   // keep the shell's {screen} marker
     } catch (e) {}
   }, [q, filter, clSort, clView, statusFilter]);
   // A changed filter/sort resets the render window; view changes (detail round-trip) do NOT, so the
@@ -3136,8 +3183,13 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     const y = clScroll.current;
     requestAnimationFrame(() => { c.scrollTop = y; requestAnimationFrame(() => { c.scrollTop = y; }); });
   }, [view]);
-  // Open a customer's detail, first remembering where the list was scrolled to.
-  const openDetailKeepScroll = (id) => { try { const c = document.querySelector('.content'); clScroll.current = c ? c.scrollTop : 0; } catch (e) {} openDetail(id); };
+  // Open a customer's detail: remember the list scroll, push a history entry (Back → list at the same
+  // scroll, its filters intact), and reset the detail to the Ringkasan tab.
+  const openDetailKeepScroll = (id) => {
+    try { const c = document.querySelector('.content'); clScroll.current = c ? c.scrollTop : 0; } catch (e) {}
+    setCdTabState('ringkasan'); openDetail(id);
+    pushSub((sp) => { sp.set('c', id); sp.set('tab', 'ringkasan'); });
+  };
   // Export the CURRENT filter (all matching rows, not just the rendered window) to CSV.
   const exportCustCsv = () => {
     const head = [trD('cl.colCode'), trD('cl.colName'), trD('cl.colPhone'), trD('cl.colType'), trD('cl.colArmada'), trD('cl.colDays'), trD('cl.colBon'), trD('cl.colGalon'), trD('cl.colLast'), trD('cl.colSpend')];
@@ -3208,6 +3260,21 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
 
   const loadInvoices = (id) => window.API.distribusi.invoices.list(id).then((r) => setInvoices(r.data || [])).catch(() => setInvoices([]));
   const openDetail = (id) => { setView('detail'); setDetail(null); setInvoices([]); window.API.distribusi.customers.get(id).then((r) => setDetail(r.data)).catch(() => setView('list')); loadInvoices(id); };
+  // Re-derive the open customer + active tab from the URL when the shell reports a pop (histTick) or
+  // on mount (deep-link / refresh). This is the SINGLE sync point — the shell owns the one popstate
+  // handler; we never add a competing one. openDetail is async; the list data persists so the scroll
+  // restore lands on the right row.
+  uEx(() => {
+    const sp = curSearch();
+    const c = sp.get('c') || '';
+    const tab = sp.get('tab') || 'ringkasan';
+    if (c) {
+      if (view !== 'detail' || !detail || detail.id !== c) openDetail(c);
+      if (tab !== cdTab) setCdTabState(tab);
+    } else if (view === 'detail') {
+      const was = detail && detail.id; setView('list'); setDetail(null); flashRow(was);   // Back to list → highlight + scroll restore
+    } else if (tab !== cdTab) { setCdTabState(tab); }
+  }, [histTick]);
   const cancelAdj = (batchId) => {
     if (!confirm(trD('dist.pcCancelConfirm'))) return;
     window.API.distribusi.customers.cancelPriceAdjustment(batchId)
@@ -3618,7 +3685,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     activity.sort((a, b) => (b.at || 0) - (a.at || 0));
     return (
       <div className="dist-dash screen-enter cd-page">
-        <button type="button" className="dist-back no-print" onClick={() => { setView('list'); setDetail(null); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backCust')}</button>
+        <button type="button" className="dist-back no-print" onClick={() => { const was = detail && detail.id; pushSub((sp) => { sp.delete('c'); sp.delete('tab'); }); setView('list'); setDetail(null); flashRow(was); }}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trD('dist.backCust')}</button>
         {!d ? <div className="card cd-skeleton"><div className="dist-skel" style={{ height: 60 }} /><div className="dist-skel" /><div className="dist-skel" /></div> : (<>
           {/* ── STICKY HEADER ── */}
           <div className="card cd-head">
@@ -3967,7 +4034,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
             </tr></thead>
             <tbody>
               {rows.map((c) => (
-                <tr key={c.id} className={`cl-trow ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetailKeepScroll(c.id)}>
+                <tr key={c.id} className={`cl-trow ${c.active === false ? 'is-inactive' : ''}${flashId === c.id ? ' cl-flash' : ''}`} onClick={() => openDetailKeepScroll(c.id)}>
                   <td className="cl-td-code">{c.code ? <span className="dist-code">{c.code}</span> : '—'}</td>
                   <td className="cl-td-name">
                     <div className="cl-name">{c.name}{c.active === false && <span className="dist-inactive-badge"><IconClose s={10} />{trD('dist.inactive')}</span>}</div>
@@ -3996,7 +4063,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
       {listState === 'ready' && effView === 'kartu' && (
         <div className="cl-cards">
           {rows.map((c) => (
-            <div key={c.id} className={`cl-card ${c.active === false ? 'is-inactive' : ''}`} onClick={() => openDetailKeepScroll(c.id)}>
+            <div key={c.id} className={`cl-card ${c.active === false ? 'is-inactive' : ''}${flashId === c.id ? ' cl-flash' : ''}`} onClick={() => openDetailKeepScroll(c.id)}>
               <div className="cl-card-top">
                 <span className="dist-txn-av">{initialsOf(c.name)}</span>
                 <div className="cl-card-id">

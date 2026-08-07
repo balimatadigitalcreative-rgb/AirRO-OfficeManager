@@ -3232,6 +3232,11 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
   body.invoice-open .pc-disprow s { color: #666 !important; }
 }
 
+/* Row you just came back to (from its detail) briefly pulses so you don't lose your place. */
+@keyframes clFlashPulse { 0% { background: var(--mint-100, #e6f6f1); } 100% { background: transparent; } }
+.cl-trow.cl-flash, .cl-card.cl-flash { animation: clFlashPulse 1.5s ease-out; }
+.cl-card.cl-flash { border-radius: 12px; }
+
 /* ============ Unified "Transaksi Baru" entry (segmented control + expense-in-list) ============ */
 .tx-entry-tabs { display: inline-flex; gap: 4px; background: var(--surface-2, #f6f8f9); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin: 4px 0 14px; }
 .tx-entry-tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; border-radius: 9px; padding: 8px 14px; font-size: 13.5px; font-weight: 700; color: var(--text-mut); cursor: pointer; transition: background .12s, color .12s; }

@@ -373,6 +373,11 @@ function FApp() {
   const screenRef = uRf(screen); screenRef.current = screen;
   const navIdsRef = uRf([]);
   navIdsRef.current = user ? navForRole(p, user.role).map((n) => n.id) : [];
+  // Bumped on every screen/sub-route popstate so a sub-routed child (distribution: customer detail,
+  // tabs) re-derives its state from the URL. The screen id lives in the hash; a child's sub-state
+  // (open customer, active tab, filters) lives in the query string.
+  const [histTick, setHistTick] = uSh(0);
+  const scrUrl = (id) => location.pathname + '#' + id;   // screen URL WITHOUT any stale query
 
   // Change screen + record it in history. Only ids in NAV (mirrors go()); pushing the same
   // screen is skipped so Back never lands on a duplicate. `replace` (login / perm-correction)
@@ -382,12 +387,13 @@ function FApp() {
     const replace = !!(opts && opts.replace);
     if (!navIdsRef.current.includes(id)) return;
     setDrawer(false);
-    if (id === screenRef.current) { if (replace) history.replaceState({ screen: id }, '', '#' + id); return; }
+    if (id === screenRef.current) { if (replace) history.replaceState({ screen: id }, '', scrUrl(id)); return; }
     setScreen(id);
     if (isPopping.current) return;                 // popstate already moved the history pointer
     const st = { screen: id };
-    if (replace) history.replaceState(st, '', '#' + id);
-    else history.pushState(st, '', '#' + id);
+    // A screen change clears the previous screen's query sub-state (each screen owns its own).
+    if (replace) history.replaceState(st, '', scrUrl(id));
+    else history.pushState(st, '', scrUrl(id));
   };
 
   // Overlays own one history entry each. openOverlay() sets state open + pushes a marker;
@@ -405,8 +411,23 @@ function FApp() {
     if (overlayStack.current.length) { const close = overlayStack.current.pop(); isPopping.current = true; try { close(); } finally { isPopping.current = false; } }
     if (!navIdsRef.current.includes(id)) return;
     setDrawer(false); setScreen(id);
-    history.replaceState({ screen: id }, '', '#' + id);   // overwrite the overlay entry
+    history.replaceState({ screen: id }, '', scrUrl(id));   // overwrite the overlay entry
   };
+  // Sub-route history helper handed to distribution screens so their internal navigations (opening a
+  // customer, switching a detail tab, opening the slide-over / entry modal) create REAL history
+  // entries — routed through the SAME mechanism (isPopping guard + overlay stack), never a competing
+  // handler. pushSub/replaceSub write the query string while keeping the current screen in the hash.
+  const distNavRef = uRf(null);
+  if (!distNavRef.current) {
+    const subUrl = (search) => location.pathname + (search ? (search[0] === '?' ? search : '?' + search) : '') + '#' + screenRef.current;
+    distNavRef.current = {
+      pushSub: (search) => { if (isPopping.current) return; history.pushState({ screen: screenRef.current, sub: 1 }, '', subUrl(search)); },
+      replaceSub: (search) => { history.replaceState({ screen: screenRef.current, sub: history.state && history.state.sub ? 1 : 0 }, '', subUrl(search)); },
+      openOverlay: (close) => openOverlay(close),
+      dismissOverlay: () => dismissOverlay(),
+      isPopping: () => isPopping.current,
+    };
+  }
   // Overlay open helpers — set the state AND own a history entry in one call.
   const openEditing = (e) => { setEditing(e); openOverlay(() => setEditing(null)); };
   const openPw = () => { setPwModal(true); openOverlay(() => setPwModal(false)); };
@@ -432,6 +453,8 @@ function FApp() {
       if (!id) return;
       isPopping.current = true;
       try { setScreen(id); } finally { isPopping.current = false; }
+      // Let a sub-routed screen (distribution) re-sync from the (now-restored) URL — same screen or not.
+      setHistTick((t) => t + 1);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -450,7 +473,10 @@ function FApp() {
     const fromHash = normId(location.hash.slice(1));
     const target = ids.includes(fromHash) ? fromHash : (ids.includes(screenRef.current) ? screenRef.current : ids[0]);
     if (target !== screenRef.current) setScreen(target);
-    history.replaceState({ screen: target }, '', '#' + target);
+    // Preserve the query sub-state (open customer, active tab, filters) on refresh IFF we landed on
+    // the same screen the URL named — so a refresh on a customer detail restores that exact view.
+    const keepSearch = target === fromHash ? location.search : '';
+    history.replaceState({ screen: target }, '', location.pathname + keepSearch + '#' + target);
     overlayStack.current = [];
   }, [user]);
 
@@ -1526,6 +1552,7 @@ function FApp() {
               canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canHardDelete={!!p.distribusiHardDelete} canArchive={!!p.distribusiLegacyImport} canExpense={!!p.distribusiExpense} canPrice={!!p.distribusiHargaMaster} userName={user && user.name}
               canViewAll={!!p['distribusi.lihat.semua']} canView7={!!p['distribusi.lihat.7hari']} canViewMonth={!!p['distribusi.lihat.bulan_ini']} canViewSisaBon={!!(p['distribusi.lihat.semua'] || p['distribusi.lihat.sisa_bon'])} maxLookback={+p.maxLookbackDays || 0}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
+              nav={distNavRef.current} histTick={histTick}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
@@ -1533,6 +1560,7 @@ function FApp() {
               canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} canPenyesuaian={!!p.distribusiPenyesuaian} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
+              nav={distNavRef.current} histTick={histTick}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)}
               onOpenLoss={p.distribusiBonAdjust ? () => go('dist-loss-report', false) : null} />
           )}
