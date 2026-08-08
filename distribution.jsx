@@ -2396,18 +2396,25 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
   // CUSTOMER version EXCLUDES disputed (tidak_diakui/kerugian) rows — they are not being billed.
   // Their effect is already out of Sisa Bon, so the totals still reconcile. INTERNAL keeps everything.
   const docRows = internal ? rows : rows.filter((t) => !disputeDeducts(t));
-  let galon = 0, pembelian = 0, pembayaran = 0, disputedTotal = 0;
+  // TOTALS ladder inputs. `galon` counts EVERY delivered gallon (imported/archive rows included — a
+  // statement reports what the customer received, unlike the app's internal stats). `lunasTotal` and
+  // `bonMasuk` split the purchases; `pembayaranBon` is only real bon payments (pelunasan) — a lunas
+  // sale is NOT a "payment", so it never inflates the payments figure (D5).
+  let galon = 0, lunasTotal = 0, bonMasuk = 0, pembayaranBon = 0, disputedTotal = 0;
   docRows.forEach((t) => {
     if (t.voided) return;
-    galon += t.legacy ? 0 : (t.qty || 0);
-    if (t.method === 'lunas') { pembelian += effOf(t); pembayaran += effOf(t); }
-    else if (t.method === 'bon') { pembelian += effOf(t); }
-    else if (t.method === 'pelunasan') { pembayaran += t.amount; }
+    galon += (t.qty || 0);
+    if (t.method === 'lunas') lunasTotal += effOf(t);
+    else if (t.method === 'bon') bonMasuk += effOf(t);
+    else if (t.method === 'pelunasan') pembayaranBon += t.amount;
     if (disputeDeducts(t)) disputedTotal += (t.dispute.disputedAmount || 0);   // internal only (customer excludes them)
   });
-  // Group the document rows by month for a subtotal per month + a visible gap between groups.
+  const pembelian = lunasTotal + bonMasuk;   // total purchases (lunas + bon)
+  // Group the document rows by month. Each month carries its OWN pembelian / pembayaran and the sisa
+  // bon at the end of that month (the true running balance) — never a single net that hides the sign (D4).
   const monthOrder = []; const monthMap = {};
-  docRows.forEach((t) => { const k = monthKeyOf(t) || '—'; if (!monthMap[k]) { monthMap[k] = { rows: [], galon: 0, jumlah: 0 }; monthOrder.push(k); } const g = monthMap[k]; g.rows.push(t); if (!t.voided) { g.galon += t.legacy ? 0 : (t.qty || 0); g.jumlah += (t.method === 'pelunasan' ? -t.amount : effOf(t)); } });
+  docRows.forEach((t) => { const k = monthKeyOf(t) || '—'; if (!monthMap[k]) { monthMap[k] = { rows: [], galon: 0, pembelian: 0, pembayaran: 0, sisaBulan: 0 }; monthOrder.push(k); } const g = monthMap[k]; g.rows.push(t); if (!t.voided) { g.galon += (t.qty || 0); if (t.method === 'lunas' || t.method === 'bon') g.pembelian += effOf(t); else if (t.method === 'pelunasan') g.pembayaran += t.amount; } });
+  monthOrder.forEach((k) => { const g = monthMap[k]; const last = g.rows[g.rows.length - 1]; g.sisaBulan = last ? Math.max(0, runMap[last.id] || 0) : 0; });
   // Plain-language description for the customer version — no codes, no badges.
   const ketOf = (t) => t.method === 'pelunasan' ? trD('pc.ketBayar') : t.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
   const approvedAdj = (customer.adjustments || []).filter((a) => a.status === 'approved');
@@ -2422,7 +2429,7 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
           txnCode(txn) + ' · ' + txn.txnDate, methodLabel(txn.method) + ' · ' + numX(txn.qty) + ' ' + trD('dist.galonUnit') + ' × ' + rpFull(txn.unitPriceLocked), trD('dist.amount') + ': ' + rpFull(effOf(txn)),
           txn.method === 'bon' ? trD('dist.sisaBon') + ': ' + rpFull(Math.max(0, runMap[txn.id] || 0)) : '', '', docNo].filter(Boolean)
       : ['*' + trD('dist.histTitle') + '*', BIZ_NAME, trD('dist.invTo') + ': ' + (customer.code ? customer.code + ' · ' : '') + customer.name, trD('dist.period') + ': ' + periodLabel, '',
-          trD('dist.totalGalon') + ': ' + numX(galon), trD('pc.totPembelian') + ': ' + rpFull(pembelian), trD('pc.totPembayaran') + ': ' + rpFull(pembayaran), trD('pc.sisaAkhir') + ': ' + rpFull(sisaAkhir), '', trD('dist.txnCount', { n: rows.length }) + ' · ' + docNo];
+          trD('pc.totGalonDikirim') + ': ' + numX(galon), trD('pc.totPembelian') + ': ' + rpFull(pembelian), trD('pc.totPembayaranBon') + ': ' + rpFull(pembayaranBon), trD('pc.sisaAkhir') + ': ' + rpFull(sisaAkhir), '', trD('dist.txnCount', { n: rows.length }) + ' · ' + docNo];
     window.open('https://wa.me/' + waNumber(customer.phone) + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
   };
   const commit = () => {
@@ -2430,7 +2437,9 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
     if (output === 'wa') { share(); onClose(); return; }
     setStep('doc');
   };
-  const doPrint = () => window.print();
+  // Give the print a clean document title (many browsers stamp the title into their own header; we
+  // want the statement name + our doc number, never "AirRO Manager" + the app URL) — restored after.
+  const doPrint = () => { const prev = document.title; document.title = (isNota ? trD('pc.docNota') : trD('pc.docStatement')) + ' · ' + docNo; const restore = () => { document.title = prev; window.removeEventListener('afterprint', restore); }; window.addEventListener('afterprint', restore); setTimeout(restore, 4000); window.print(); };
 
   // ── OPTIONS STEP ──
   if (step === 'opt') {
@@ -2538,13 +2547,25 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
             ? <tbody><tr><td colSpan={colCount} style={{ textAlign: 'center', padding: 18 }}>{trD('dist.noTxn')}</td></tr></tbody>
             : isNota
               ? <tbody>{docRows.map((t) => docRow(t))}</tbody>
-              : monthOrder.map((mk) => (
+              : monthOrder.map((mk) => {
+                const g = monthMap[mk]; const galonLead = (internal || isNota) ? 3 : 2; const tailCols = colCount - galonLead - 1;
+                return (
                 <tbody key={mk} className="pc-monthgrp">
                   <tr className="pc-month-head"><td colSpan={colCount}>{fmtMonthYear(mk)}</td></tr>
-                  {monthMap[mk].rows.map((t) => docRow(t))}
-                  <tr className="pc-month-sub"><td colSpan={colCount - 3} className="r">{trD('pc.monthSubtotal')}</td><td className="r tnum">{numX(monthMap[mk].galon)}</td><td /><td className="r tnum">{rpFull(monthMap[mk].jumlah)}</td>{!isNota ? <td /> : null}</tr>
+                  {g.rows.map((t) => docRow(t))}
+                  {/* Three LABELLED figures per month — never a single unsigned net (D4). */}
+                  <tr className="pc-month-sub">
+                    <td colSpan={galonLead} className="r">{trD('pc.monthSubtotal')}</td>
+                    <td className="r tnum" data-testid="msub-galon">{numX(g.galon)}</td>
+                    <td colSpan={tailCols} className="pc-msub-figs">
+                      <span className="pc-msub-fig">{trD('pc.mPembelian')} <b className="tnum">{rpFull(g.pembelian)}</b></span>
+                      <span className="pc-msub-fig">{trD('pc.mPembayaran')} <b className="tnum">{rpFull(g.pembayaran)}</b></span>
+                      <span className="pc-msub-fig">{trD('pc.mSisaBulan')} <b className="tnum">{rpFull(g.sisaBulan)}</b></span>
+                    </td>
+                  </tr>
                 </tbody>
-              ))}
+                );
+              })}
         </table>
         {/* INTERNAL only: detailed adjustments table with reason codes. */}
         {internal && !isNota && incAdj && approvedAdj.length > 0 && (
@@ -2560,12 +2581,15 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
         {isNota && txn && txn.method === 'bon' && (
           <div className="pc-notasisa"><span>{trD('pc.notaSisaAfter')}</span><b className="tnum">{rpFull(Math.max(0, runMap[txn.id] || 0))}</b></div>
         )}
-        {/* TOTALS BOX — right-aligned, boxed, clear hierarchy, SISA BON largest. */}
-        <div className="pc-totalbox">
-          <div className="pc-total-row"><span>{trD('dist.totalGalon')}</span><b className="tnum">{numX(galon)}</b></div>
-          <div className="pc-total-row"><span>{trD('pc.totPembelian')}</span><b className="tnum">{rpFull(pembelian)}</b></div>
-          <div className="pc-total-row"><span>{trD('pc.totPembayaran')}</span><b className="tnum">{rpFull(pembayaran)}</b></div>
-          {!isNota && <div className="pc-total-row"><span>{trD('pc.totPenyesuaian')}</span><b className="tnum">{rpFull(adjBonTotal)}</b></div>}
+        {/* TOTALS LADDER — unambiguous, boxed, never a misleading combined "payment". SISA BON largest.
+            Reconciles: pembelian − lunas − pembayaran bon + penyesuaian === SISA BON AKHIR. */}
+        <div className="pc-totalbox" data-testid="pc-totals" data-galon={galon} data-pembelian={pembelian} data-lunas={lunasTotal} data-bon={bonMasuk} data-pembayaran={pembayaranBon} data-penyesuaian={adjBonTotal} data-sisa={sisaAkhir}>
+          <div className="pc-total-row"><span>{trD('pc.totGalonDikirim')}</span><b className="tnum" data-testid="tot-galon">{numX(galon)}</b></div>
+          <div className="pc-total-row"><span>{trD('pc.totPembelian')}</span><b className="tnum" data-testid="tot-pembelian">{rpFull(pembelian)}</b></div>
+          <div className="pc-total-row pc-sub"><span>{trD('pc.totDibayarTunai')}</span><b className="tnum" data-testid="tot-lunas">{rpFull(lunasTotal)}</b></div>
+          <div className="pc-total-row pc-sub"><span>{trD('pc.totMasukBon')}</span><b className="tnum" data-testid="tot-bon">{rpFull(bonMasuk)}</b></div>
+          <div className="pc-total-row"><span>{trD('pc.totPembayaranBon')}</span><b className="tnum" data-testid="tot-pembayaran">{rpFull(pembayaranBon)}</b></div>
+          {!isNota && <div className="pc-total-row"><span>{trD('pc.totPenyesuaian')}</span><b className="tnum" data-testid="tot-penyesuaian">{rpFull(adjBonTotal)}</b></div>}
           {internal && !isNota && disputedTotal > 0 && <div className="pc-total-row"><span>{trD('disp.totLine')}</span><b className="tnum">{rpFull(disputedTotal)}</b></div>}
           <div className="pc-total-row pc-sisa"><span>{trD('pc.sisaAkhir')}</span><b className="tnum" data-testid="pc-sisa">{rpFull(sisaAkhir)}</b></div>
         </div>
@@ -2578,6 +2602,9 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
           </div>
           {internal && <div className="pc-printedby">{trD('dist.printedBy', { u: userName || '—', t: stamp + ' ' + stampTime })} · {trD('dist.txnCount', { n: docRows.length })}</div>}
         </div>
+        {/* OUR OWN print footer — repeats on every printed page (replaces the browser's date/URL chrome,
+            which we also drop via @page). Page numbers fill where the engine supports CSS counters. */}
+        <div className="pc-print-footer" aria-hidden="true"><span className="pc-pf-biz">{BIZ_NAME} · {BIZ_SUB}</span><span className="pc-pf-page" data-doc={docNo}>{docNo}</span></div>
       </div>
     </div>
   );

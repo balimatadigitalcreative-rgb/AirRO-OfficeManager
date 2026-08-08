@@ -2206,13 +2206,17 @@ select.fld::-ms-expand { display: none; }
 .dist-remind-sub { font-size: 12px; color: var(--text-mut); margin-top: 2px; }
 .dist-remind-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 @media print {
+  /* Nothing may clip the flowing document to one viewport (that + position:fixed is what made the
+     whole sheet REPEAT on pages 2–3). Release every scroll/height constraint up the chain. */
+  html, body.invoice-open, body.invoice-open .main, body.invoice-open .content { overflow: visible !important; height: auto !important; max-height: none !important; }
   body.invoice-open * { visibility: hidden !important; }
   body.invoice-open .invoice-overlay, body.invoice-open .invoice-overlay * { visibility: visible !important; }
-  body.invoice-open .invoice-overlay { position: fixed !important; inset: 0 !important; z-index: 99999 !important; display: block !important; background: #fff !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
-  body.invoice-open .invoice-sheet { box-shadow: none !important; max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  /* ABSOLUTE (not fixed): the document is laid out ONCE and paginates naturally — fixed repeats it. */
+  body.invoice-open .invoice-overlay { position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; z-index: 99999 !important; display: block !important; background: #fff !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+  body.invoice-open .invoice-sheet { position: static !important; box-shadow: none !important; max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
   body.invoice-open .no-print { display: none !important; }
   body.invoice-open * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  @page { margin: 14mm; }
+  @page { size: A4; margin: 15mm; }
 }
 
 .print-only { display: none; }
@@ -3028,17 +3032,26 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 
 /* ---- Print stylesheet: statement/receipt must print cleanly regardless of app chrome ---- */
 @media print {
-  @page { margin: 15mm; }
+  @page { size: A4; margin: 15mm; }
   body.invoice-open .pc-table { width: 100%; min-width: 0 !important; }
   body.invoice-open .pc-table thead { display: table-header-group; }   /* repeat header across pages */
-  body.invoice-open .pc-table tr, body.invoice-open .pc-totals, body.invoice-open .pc-sign, body.invoice-open .pc-notasisa { break-inside: avoid; }
+  /* Keep atomic blocks whole across the page break. */
+  body.invoice-open .pc-table tr, body.invoice-open .pc-monthgrp, body.invoice-open .pc-totalbox,
+  body.invoice-open .pc-sign, body.invoice-open .pc-docfoot, body.invoice-open .pc-notasisa { break-inside: avoid; }
+  /* The totals block must never be orphaned onto a page of its own — pull the preceding content with it. */
+  body.invoice-open .pc-totalbox { break-before: avoid; }
   body.invoice-open .pc-tag { border: 1px solid #cbd5e1; background: #fff !important; color: #000 !important; }
   body.invoice-open .pc-voidrow td { color: #666 !important; }
   body.invoice-open .pc-sign-line { border-bottom: 1px solid #000; }
+  /* OUR footer repeats on every printed page (fixed); the doc gets bottom padding to clear it. */
+  body.invoice-open .pc-print-footer { display: flex !important; visibility: visible !important; position: fixed; left: 0; right: 0; bottom: 0; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 8.5px; color: #555; border-top: 1px solid #cfcfcf; padding: 3px 2px 0; background: #fff; }
+  body.invoice-open .pc-print-footer * { visibility: visible !important; }
+  body.invoice-open .pc-doc { padding-bottom: 10mm !important; }
   /* Thermal widths — narrow content; the printer/driver selects the paper roll. */
   body.invoice-open .pc-r58 { font-size: 10px; }
   body.invoice-open .pc-r80 { font-size: 11px; }
   body.invoice-open .pc-r58 .pc-sign, body.invoice-open .pc-r80 .pc-sign { grid-template-columns: 1fr; gap: 16px; }
+  body.invoice-open .pc-r58 .pc-print-footer, body.invoice-open .pc-r80 .pc-print-footer { position: static; margin-top: 10px; }
 }
 
 /* ============ Transaction DISPUTE / LOSS (disp-*) ============ */
@@ -3193,6 +3206,17 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .pc-total-row.pc-sisa { margin-top: 7px; padding-top: 9px; border-top: 2px solid #141414; }
 .pc-total-row.pc-sisa span { font-size: 14px; font-weight: 800; color: #141414; }
 .pc-total-row.pc-sisa b { font-size: 20px; font-weight: 800; }
+/* Ladder sub-lines (dibayar tunai / masuk bon) — indented, lighter than their parent. */
+.pc-total-row.pc-sub { padding: 1px 0 1px 14px; font-size: 11.5px; }
+.pc-total-row.pc-sub span { color: #666; }
+.pc-total-row.pc-sub b { font-weight: 600; color: #444; }
+/* Monthly subtotal — three labelled figures (Pembelian · Pembayaran · Sisa bon akhir), never a net. */
+.pc-msub-figs { text-align: right; font-size: 11px; }
+.pc-msub-fig { display: inline-block; margin-left: 12px; white-space: nowrap; color: #333; }
+.pc-msub-fig b { margin-left: 3px; font-weight: 800; }
+.pc-month-sub td { font-weight: 700; }
+/* Our own print footer — hidden on screen, repeats on every printed page (see @media print). */
+.pc-print-footer { display: none; }
 
 .pc-docfoot { margin-top: 24px; }
 .pc-payinfo { font-size: 12px; color: #333; margin-bottom: 8px; }
