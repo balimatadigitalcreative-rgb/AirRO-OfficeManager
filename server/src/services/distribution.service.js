@@ -1972,6 +1972,164 @@ async function hardDeleteTransaction(txnId, body, actor) {
   return { deleted: true, id: txnId, ref: shortRefServer(txnId), sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
 }
 
+// ═══════════════════ BULK TRANSACTION REMOVAL (batal · arsip · hapus) ═══════════════════
+// Three levels, one engine. Mirrors the Kerugian bulk pattern: per-row try/catch (one bad row never
+// aborts the batch), a server-recomputed impact preview, all eligibility RE-checked server-side per
+// row (a user who cannot SEE a row — view window / fleet — cannot act on it), and an audit batch that
+// carries a JSON snapshot so batal/arsip can be undone and a hard delete can be restored by the owner.
+const BULK_CAP = 200;
+const BULK_ACTIONS = ['batal', 'arsip', 'hapus'];
+const bonEffect = (t) => (t.method === 'bon' ? (t.amount + priceDelta(t.corrections || [])) : t.method === 'pelunasan' ? -t.amount : 0);
+// Map txnId → issued-invoice number by scanning DistInvoice.items JSON (no FK exists).
+async function invoiceNumbersForTxns(idSet) {
+  const invs = await prisma.distInvoice.findMany({ select: { number: true, items: true } });
+  const map = {};
+  invs.forEach((inv) => { let items = []; try { items = JSON.parse(inv.items || '[]'); } catch (e) {} items.forEach((it) => { if (it && it.txnId && idSet.has(it.txnId)) map[it.txnId] = inv.number; }); });
+  return map;
+}
+// Per-row eligibility for an action. `win` = caller's view window; `invMap` = txnId→invoice number.
+async function bulkRowEligible(t, action, win, invMap) {
+  if (!win.unlimited && !(t.txnDate >= win.from && t.txnDate <= win.to)) return { ok: false, reason: 'out_of_window' };
+  if (action === 'arsip') { if (t.status === 'void') return { ok: false, reason: 'already_voided' }; if (t.legacy) return { ok: false, reason: 'already_archived' }; return { ok: true }; }
+  if (action === 'batal') { if (t.status === 'void') return { ok: false, reason: 'already_voided' }; if (t.legacy) return { ok: false, reason: 'archived_row' }; return { ok: true }; }
+  // hapus — the hardest: block issued invoice / approved dispute / kerugian / liability repayments.
+  if (invMap[t.id]) return { ok: false, reason: 'in_invoice', invoice: invMap[t.id] };
+  if (t.paymentNotReceived) return { ok: false, reason: 'kerugian' };
+  const disp = await prisma.distTransactionDispute.count({ where: { transactionId: t.id, status: { in: DEDUCTS }, reversedById: null, reversalOf: null } });
+  if (disp > 0) return { ok: false, reason: 'dispute_approved' };
+  const rep = await liabilityRepayments(t.id); if (rep && rep.length) return { ok: false, reason: 'liability_repayments' };
+  return { ok: true };
+}
+function normBulkIds(ids) { return [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean).map(String))].slice(0, BULK_CAP); }
+// SERVER-COMPUTED impact preview: eligible vs blocked (per-row reason), per-customer Sisa Bon change,
+// gallon + invoice impact. Never trusts the client; recomputed from the DB.
+async function bulkTxnPreview(ids, action, actor) {
+  if (!BULK_ACTIONS.includes(action)) throw ApiError.badRequest('Aksi tidak dikenal.');
+  const list = normBulkIds(ids);
+  const win = await resolveViewWindow(actor);
+  const rows = await prisma.distTransaction.findMany({ where: { id: { in: list } }, include: { corrections: true, customer: { select: { id: true, code: true, name: true } } } });
+  const byId = {}; rows.forEach((r) => { byId[r.id] = r; });
+  const invMap = action === 'hapus' ? await invoiceNumbersForTxns(new Set(list)) : {};
+  const eligible = [], blocked = []; const perCust = {}; let gallonDelta = 0;
+  for (const id of list) {
+    const t = byId[id];
+    if (!t) { blocked.push({ id, ref: shortRefServer(id), reason: 'not_found' }); continue; }
+    const base = { id, ref: shortRefServer(id), customerId: t.customerId, customerName: t.customer ? t.customer.name : '', customerCode: t.customer ? t.customer.code : '', method: t.method, amount: t.amount, txnDate: t.txnDate };
+    if (!fleetAllows(actor, t.fleetId)) { blocked.push({ ...base, reason: 'out_of_scope' }); continue; }
+    const el = await bulkRowEligible(t, action, win, invMap);
+    if (!el.ok) { blocked.push({ ...base, reason: el.reason, invoice: el.invoice || null }); continue; }
+    eligible.push(base);
+    if (action !== 'arsip') {   // arsip alone changes NO balance
+      const pc = perCust[t.customerId] || (perCust[t.customerId] = { customerId: t.customerId, code: base.customerCode, name: base.customerName, delta: 0 });
+      pc.delta += -bonEffect(t);
+      if (!t.legacy && t.method !== 'pelunasan') gallonDelta -= (t.qty || 0);
+    }
+  }
+  const sisaChanges = [];
+  for (const cid of Object.keys(perCust)) { const before = await customerBonBalance(cid); const pc = perCust[cid]; sisaChanges.push({ customerId: cid, code: pc.code, name: pc.name, before, after: Math.max(0, before + pc.delta) }); }
+  return { action, cap: BULK_CAP, requested: list.length, eligible, blocked, sisaChanges, gallonDelta, invoicesAffected: [...new Set(Object.values(invMap))], balanceUnchanged: action === 'arsip' };
+}
+// Execute the batch. Per-row try/catch; writes ONE audit batch entry with a JSON snapshot (for
+// undo/restore) and returns a per-row report. `hapus` requires the caller to type the count or "HAPUS".
+async function bulkExecuteTransactions(ids, action, body, actor) {
+  if (!BULK_ACTIONS.includes(action)) throw ApiError.badRequest('Aksi tidak dikenal.');
+  // SPECIFIC per-action capability, checked against LIVE DB perms (never the token blob).
+  const u = actor && actor.id ? await prisma.user.findUnique({ where: { id: actor.id }, select: { role: true, permissions: true } }) : null;
+  const live = resolvePerms(u ? u.role : (actor && actor.role), u ? u.permissions : (actor && actor.permissions));
+  const need = action === 'hapus' ? 'distribusi.transaksi.hapus' : action === 'arsip' ? 'distribusiLegacyImport' : 'distribusiVoid';
+  if (!live[need]) throw ApiError.forbidden('Akun kamu tidak punya akses untuk aksi ini.');
+  const list = normBulkIds(ids);
+  const note = String((body && body.note) || '').trim();
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  const reason = String((body && body.reason) || '').trim();
+  if (action === 'hapus') { const typed = String((body && body.confirm) || '').trim().toUpperCase(); const eligibleCount = list.length; if (typed !== 'HAPUS' && typed !== String(eligibleCount)) throw ApiError.badRequest('Ketik jumlah baris atau "HAPUS" untuk konfirmasi.'); }
+  const win = await resolveViewWindow(actor);
+  const rows = await prisma.distTransaction.findMany({ where: { id: { in: list } }, include: { corrections: true, customer: { select: { name: true } } } });
+  const byId = {}; rows.forEach((r) => { byId[r.id] = r; });
+  const invMap = action === 'hapus' ? await invoiceNumbersForTxns(new Set(list)) : {};
+  const snap = await actorSnap(actor);
+  const results = []; const snapshots = []; const affectedCustomers = new Set(); let fleetTag = '';
+  for (const id of list) {
+    const t = byId[id];
+    if (!t) { results.push({ id, ok: false, reason: 'not_found' }); continue; }
+    if (!fleetAllows(actor, t.fleetId)) { results.push({ id, ref: shortRefServer(id), ok: false, reason: 'out_of_scope' }); continue; }
+    const el = await bulkRowEligible(t, action, win, invMap);
+    if (!el.ok) { results.push({ id, ref: shortRefServer(id), ok: false, reason: el.reason, invoice: el.invoice || null }); continue; }
+    try {
+      if (action === 'batal') {
+        await prisma.$transaction(async (tx) => {
+          await tx.gallonMovement.updateMany({ where: { transactionId: id, active: true }, data: { active: false } });
+          await tx.distTransaction.update({ where: { id }, data: { status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedByRole: snap.actorRole, voidedAt: new Date(), voidReason: reason || note } });
+        });
+        snapshots.push({ id, action: 'batal' });
+      } else if (action === 'arsip') {
+        // Archive = hide from default/customer views but KEEP counted (bonCounted stays, gallon
+        // movements untouched) → NO balance change, exactly as the confirm dialog promises.
+        await prisma.distTransaction.update({ where: { id }, data: { legacy: true } });
+        snapshots.push({ id, action: 'arsip' });
+      } else {
+        const movements = await prisma.gallonMovement.findMany({ where: { transactionId: id } });
+        const corrections = await prisma.correction.findMany({ where: { transactionId: id } });
+        snapshots.push({ id, action: 'hapus', row: { ...t, customer: undefined, corrections: undefined }, movements, corrections });
+        await prisma.$transaction([
+          prisma.gallonMovement.deleteMany({ where: { transactionId: id } }),
+          prisma.correction.deleteMany({ where: { transactionId: id } }),
+          prisma.distTransaction.delete({ where: { id } }),
+        ]);
+      }
+      affectedCustomers.add(t.customerId); fleetTag = fleetTag || t.fleetId;
+      results.push({ id, ref: shortRefServer(id), ok: true, customerId: t.customerId });
+    } catch (e) { results.push({ id, ref: shortRefServer(id), ok: false, reason: (e && e.message) || 'error' }); }
+  }
+  const done = results.filter((r) => r.ok).length;
+  const KIND = action === 'hapus' ? 'hapus-massal' : action === 'arsip' ? 'arsip-massal' : 'batal-massal';
+  const big = action === 'hapus' && done > 50;
+  const detail = JSON.stringify({ v: 1, action, count: done, reason, note, results: results.filter((r) => r.ok), snapshots, restorable: action !== 'batal' || done > 0, big });
+  const audit = await logAudit(KIND, `${big ? '⚠ ' : ''}${action === 'hapus' ? 'Hapus permanen' : action === 'arsip' ? 'Arsipkan' : 'Batalkan'} massal: ${done} transaksi${big ? ' (>50 — perhatian GM/Pemilik)' : ''}`, `oleh ${snap.actorName} · ${note}${reason ? ' · ' + reason : ''} · SNAPSHOT ${detail}`, snap, fleetTag);
+  // Recompute the affected customers' balances for the response.
+  const balances = {};
+  for (const cid of affectedCustomers) balances[cid] = { sisaBon: await customerBonBalance(cid), gallonsHeld: await gallonBalanceOf(cid) };
+  return { batchId: audit.id, action, done, failed: results.filter((r) => !r.ok).length, results, balances, big };
+}
+// Undo/restore a batch by its audit id. batal → un-void; arsip → un-archive; hapus → recreate the row
+// (+ its gallon movements + corrections) from the snapshot. Owner-only for hapus.
+async function restoreBulk(batchId, actor) {
+  const audit = await prisma.distAuditLog.findUnique({ where: { id: String(batchId || '') } });
+  if (!audit) throw ApiError.notFound('Batch tidak ditemukan.');
+  const m = /SNAPSHOT (\{[\s\S]*\})$/.exec(audit.detail || ''); if (!m) throw ApiError.badRequest('Batch ini tidak bisa dipulihkan.');
+  let data; try { data = JSON.parse(m[1]); } catch (e) { throw ApiError.badRequest('Snapshot rusak.'); }
+  if (data.action === 'hapus' && !(actor && (actor.role === 'owner' || actor.role === 'gm'))) throw ApiError.forbidden('Hanya Owner/GM yang boleh memulihkan penghapusan.');
+  const snap = await actorSnap(actor);
+  const B = (v) => (typeof v === 'bigint' ? v : BigInt(Math.round(Number(v) || 0)));
+  const restored = [];
+  for (const s of (data.snapshots || [])) {
+    try {
+      if (s.action === 'batal') {
+        const t = await prisma.distTransaction.findUnique({ where: { id: s.id } }); if (!t || t.status !== 'void') continue;
+        await prisma.$transaction(async (tx) => {
+          await tx.gallonMovement.updateMany({ where: { transactionId: s.id, active: false }, data: { active: true } });
+          await tx.distTransaction.update({ where: { id: s.id }, data: { status: 'active', voidedById: null, voidedByName: null, voidedByRole: null, voidedAt: null, voidReason: null } });
+        });
+        restored.push(s.id);
+      } else if (s.action === 'arsip') {
+        const t = await prisma.distTransaction.findUnique({ where: { id: s.id } }); if (!t) continue;
+        await prisma.distTransaction.update({ where: { id: s.id }, data: { legacy: false } }); restored.push(s.id);
+      } else if (s.action === 'hapus' && s.row) {
+        const exists = await prisma.distTransaction.findUnique({ where: { id: s.id } }); if (exists) continue;
+        const r = s.row; const { corrections, customer, ...rowData } = r;
+        await prisma.$transaction(async (tx) => {
+          await tx.distTransaction.create({ data: { ...rowData, amount: B(rowData.amount), unitPriceLocked: B(rowData.unitPriceLocked), createdAt: rowData.createdAt ? new Date(rowData.createdAt) : undefined, voidedAt: rowData.voidedAt ? new Date(rowData.voidedAt) : null } });
+          for (const g of (s.movements || [])) { const { id: gid, ...gd } = g; await tx.gallonMovement.create({ data: { ...gd, createdAt: gd.createdAt ? new Date(gd.createdAt) : undefined } }); }
+          for (const c of (s.corrections || [])) { const { id: cid, ...cd } = c; await tx.correction.create({ data: { ...cd, deltaAmount: B(cd.deltaAmount), createdAt: cd.createdAt ? new Date(cd.createdAt) : undefined } }); }
+        });
+        restored.push(s.id);
+      }
+    } catch (e) { /* per-row best effort */ }
+  }
+  await logAudit('koreksi', `Pulihkan batch ${data.action}: ${restored.length} transaksi`, `dari batch ${batchId} · oleh ${snap.actorName}`, snap, audit.fleetId);
+  return { restored: restored.length, ids: restored };
+}
+
 // ── Invoices / Notas ── (documents; NEVER mutate transactions)
 function invoiceClient(inv, customer) {
   let items = []; try { items = JSON.parse(inv.items); } catch (e) {}
@@ -2920,7 +3078,7 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
-  listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
+  listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
   requestChange, listChangeRequests, decideChangeRequest,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,

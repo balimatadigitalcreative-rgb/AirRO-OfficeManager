@@ -115,6 +115,12 @@ router.delete('/kerugian/:id', requireCap('distribusiBonAdjust'), validate({ par
 // but owner by default). Typed ref/HAPUS + password + reason enforced in the service; an audit
 // entry is written BEFORE the row is removed, so a trace always survives. Fleet-scoped.
 router.delete('/transactions/:id', requireCap('distribusiHardDelete'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.hardDeleteSchema }), ctrl.hardDeleteTransaction);
+// BULK removal (batal · arsip · hapus). Preview is read-only (any distribusi user); execute requires
+// at least one bulk-capable cap (the SPECIFIC per-action cap is re-checked in the service); restore is
+// owner/GM for hapus (checked in the service). All eligibility is re-enforced per row server-side.
+router.post('/transactions/bulk/preview', requireCap('distribusi'), validate({ body: ctrl.schemas.bulkTxnPreviewSchema }), ctrl.bulkTxnPreview);
+router.post('/transactions/bulk/restore', requireCap('distribusi'), validate({ body: ctrl.schemas.bulkRestoreSchema }), ctrl.bulkTxnRestore);
+router.post('/transactions/bulk', requireAnyCap(['distribusiVoid', 'distribusiLegacyImport', 'distribusi.transaksi.hapus']), validate({ body: ctrl.schemas.bulkTxnSchema }), ctrl.bulkTxn);
 
 // ── Invoices / notas ── (documents; never mutate transactions). Any distribusi user can
 // view; creating one needs input or customer-management (so staff can bill on the spot).

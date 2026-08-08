@@ -157,7 +157,8 @@ const initialsOf = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((
 // Missing-field labels for the "Data belum lengkap" chips (keys match server completeness output).
 const MISSING_KEYS = { phone: 'dist.mPhone', location: 'dist.mLoc', armada: 'dist.mArmada', deliveryDays: 'dist.mDays', price: 'dist.mPrice' };
 const missChips = (missing) => (missing || []).map((k) => <span key={k} className="dist-miss-chip">{trD(MISSING_KEYS[k] || k)}</span>);
-const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' }, batal: { cls: 'koreksi', k: 'dist.akBatal' }, hapus: { cls: 'harga', k: 'dist.akHapus' }, akses: { cls: 'akses', k: 'dist.akAkses' } };
+const AUDIT_KIND = { koreksi: { cls: 'koreksi', k: 'dist.akKoreksi' }, harga: { cls: 'harga', k: 'dist.akHarga' }, input: { cls: 'input', k: 'dist.akInput' }, impor: { cls: 'input', k: 'dist.akImpor' }, pelanggan: { cls: 'input', k: 'dist.akPelanggan' }, batal: { cls: 'koreksi', k: 'dist.akBatal' }, hapus: { cls: 'harga', k: 'dist.akHapus' }, akses: { cls: 'akses', k: 'dist.akAkses' }, 'batal-massal': { cls: 'koreksi', k: 'dist.akBatalMassal' }, 'arsip-massal': { cls: 'input', k: 'dist.akArsipMassal' }, 'hapus-massal': { cls: 'akses', k: 'dist.akHapusMassal' } };
+const BULK_AUDIT_KINDS = ['batal-massal', 'arsip-massal', 'hapus-massal'];
 // Indonesian phone normalisation — MIRRORS server/src/utils/phone.js exactly (that one is
 // authoritative; this is for live preview/dedupe in the browser). Excel silently drops the
 // leading 0 from a phone column and people paste "+62 …", so every number is repaired to the
@@ -878,7 +879,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
-function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName, canViewAll, canView7, canViewMonth, canViewSisaBon, maxLookback, nav, histTick }) {
+function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, canHapus, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName, canViewAll, canView7, canViewMonth, canViewSisaBon, maxLookback, nav, histTick }) {
   // ── VIEW-WINDOW (time restriction) — the UI HIDES presets outside what the server allows; the
   // server still enforces (this is convenience, not the guard). Mirror viewWindowFrom() client-side.
   const vwAddDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -989,7 +990,8 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [colMenu, setColMenu] = uSx(false);
   const [colHidden, setColHidden] = uSx(() => { try { return new Set(JSON.parse(localStorage.getItem('tx_cols_hidden') || '[]')); } catch (e) { return new Set(); } });
   const [presets, setPresets] = uSx(() => { try { return JSON.parse(localStorage.getItem('tx_presets') || '[]'); } catch (e) { return []; } });
-  const [bulkVoid, setBulkVoid] = uSx(null);                     // { items } → bulk-cancel preview
+  const [bulkVoid, setBulkVoid] = uSx(null);                     // { action:'batal'|'arsip'|'hapus', ids } → bulk modal
+  const [bulkUndo, setBulkUndo] = uSx(null);                     // { batchId, action, n } → 15s undo toast
   const [printFor2, setPrintFor2] = uSx(null);                   // { txn, custObj? } → Cetak Nota via PrintCenter
   const [isNarrow, setIsNarrow] = uSx(() => { try { return window.matchMedia('(max-width: 900px)').matches; } catch (e) { return false; } });
   const [density, setDensity] = uSx(() => { try { return localStorage.getItem('tx_density') === 'compact' ? 'compact' : 'comfortable'; } catch (e) { return 'comfortable'; } });
@@ -1372,12 +1374,20 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
     const bl = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(bl); a.download = 'transaksi.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
   const doListPrint = () => { setTxVisible(Math.max(txVisible, txFiltered.length)); document.body.classList.add('txlist-printing'); setTimeout(() => { window.print(); setTimeout(() => document.body.classList.remove('txlist-printing'), 100); }, 120); };
-  // Bulk cancel (GM/owner, max 50) — loops the void-request endpoint (approval-gated) per row.
-  const runBulkVoid = (reason, done) => {
-    const items = (bulkVoid && bulkVoid.items) || [];
-    Promise.all(items.map((t) => window.API.distribusi.transactions.void(t.id, { reason }).then(() => ({ ok: true })).catch(() => ({ ok: false }))))
-      .then((rs) => { const ok = rs.filter((r) => r.ok).length; setBulkVoid(null); setSel({}); flash(trD('tx.bulkVoidDone', { n: ok })); reload(); if (onChanged) onChanged(); if (done) done(); });
+  // Bulk removal — one atomic server call (preview → execute happen in TxBulkModal); here we just
+  // finish: clear the selection, refresh, and (batal/arsip only) offer a 15-second UNDO.
+  const onBulkDone = (res) => {
+    setBulkVoid(null); setSel({});
+    const done = res.done || 0;
+    if ((res.action === 'batal' || res.action === 'arsip') && done > 0 && res.batchId) {
+      setBulkUndo({ batchId: res.batchId, action: res.action, n: done });
+      setTimeout(() => setBulkUndo((u) => (u && u.batchId === res.batchId ? null : u)), 15000);
+    } else {
+      flash(trD('tx.bulkDone', { n: done }));
+    }
+    reload(); if (onChanged) onChanged();
   };
+  const undoBulk = () => { if (!bulkUndo) return; const b = bulkUndo; setBulkUndo(null); window.API.distribusi.transactions.bulkRestore(b.batchId).then((r) => { flash(trD('tx.bulkUndone', { n: (r && r.data && r.data.restored) || 0 })); reload(); if (onChanged) onChanged(); }).catch(() => flash(trD('dist.loadErr'))); };
 
   // ── FORM ──
   if (view === 'form') {
@@ -1776,7 +1786,9 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
             <div style={{ flex: 1 }} />
             <button type="button" className="btn btn-ghost btn-sm" onClick={doListPrint}><IconDownload s={13} />{trD('dist.print')}</button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={exportCsv}><IconDownload s={13} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
-            {canVoid && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => setBulkVoid({ items: selRows.filter((t) => t.status !== 'void' && !t.legacy && !t.pendingRequest).slice(0, 50) })}><IconClose s={13} />{trD('dist.voidBtn')}</button>}
+            {canVoid && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBulkVoid({ action: 'batal', ids: selIds.slice(0, 200) })}><IconClose s={13} />{trD('tx.bulkBatal')}</button>}
+            {canArchive && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBulkVoid({ action: 'arsip', ids: selIds.slice(0, 200) })}><IconInvoice s={13} />{trD('tx.bulkArsip')}</button>}
+            {canHapus && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => setBulkVoid({ action: 'hapus', ids: selIds.slice(0, 200) })}><IconTrash s={13} />{trD('tx.bulkHapus')}</button>}
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSel({})}><IconClose s={13} />{trD('dist.cancel')}</button>
           </div>
         )}
@@ -1813,7 +1825,10 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       {detailTxn && !detailTxn._exp && <TxDetailPanel txn={detailTxn} custById={custById} idx={detailIdx} total={txSorted.length} canKoreksi={canKoreksi} canVoid={canVoid} canArchive={canArchive} canHardDelete={canHardDelete} userName={userName}
         onClose={closeSlide} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => openCorrect(t)} onVoid={(t) => { setVoidTxn(t); setVoidReason(''); }} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
       {advOpen && <TxAdvancedPanel onClose={() => setAdvOpen(false)} minAmt={minAmt} setMinAmt={setMinAmt} maxAmt={maxAmt} setMaxAmt={setMaxAmt} flagNote={flagNote} setFlagNote={setFlagNote} flagCorr={flagCorr} setFlagCorr={setFlagCorr} custFilter={custFilter} setCustFilter={setCustFilter} custOpts={custOpts} onClear={clearAll} anyFilter={anyFilter} />}
-      {bulkVoid && <TxBulkVoidModal items={bulkVoid.items} onClose={() => setBulkVoid(null)} onRun={runBulkVoid} />}
+      {bulkVoid && <TxBulkModal action={bulkVoid.action} ids={bulkVoid.ids} onClose={() => setBulkVoid(null)} onDone={onBulkDone} />}
+      {bulkUndo && (
+        <div className="tx-undo-toast no-print"><span><IconCheck s={15} />{trD('tx.bulk' + (bulkUndo.action === 'arsip' ? 'Arsip' : 'Batal') + 'Undo', { n: bulkUndo.n })}</span><button type="button" onClick={undoBulk}>{trD('tx.undo')}</button></div>
+      )}
       {printFor2 && <PrintCenter customer={printFor2.custObj || (custById[printFor2.txn.customerId] || { id: printFor2.txn.customerId, name: nameOf(printFor2.txn), code: codeOf(printFor2.txn), phone: phoneOf(printFor2.txn), transactions: [printFor2.txn], sisaBon: 0 })} userName={userName} mode="nota" txn={printFor2.txn} onClose={() => setPrintFor2(null)} />}
 
       {corrTxn && corrForm && (
@@ -2049,22 +2064,69 @@ function TxAdvancedPanel({ onClose, minAmt, setMinAmt, maxAmt, setMaxAmt, flagNo
 }
 
 // Bulk-cancel — a preview list + one shared reason; loops the void-REQUEST endpoint (approval-gated).
-function TxBulkVoidModal({ items, onClose, onRun }) {
+// Bulk removal modal — a SERVER-computed impact preview (eligible vs blocked-by-reason, per-customer
+// Sisa Bon change, gallon/invoice impact) → catatan (required) + reason (optional) → typed confirm for
+// hapus → atomic execute with a per-row result. One component for all three actions.
+const BULK_REASON = { not_found: 'tx.rNotFound', out_of_scope: 'tx.rScope', out_of_window: 'tx.rWindow', already_voided: 'tx.rVoided', already_archived: 'tx.rArchived', archived_row: 'tx.rArchivedRow', in_invoice: 'tx.rInvoice', dispute_approved: 'tx.rDispute', kerugian: 'tx.rKerugian', liability_repayments: 'tx.rLiability' };
+function TxBulkModal({ action, ids, onClose, onDone }) {
+  const [prev, setPrev] = uSx(null);
+  const [err, setErr] = uSx('');
+  const [note, setNote] = uSx('');
   const [reason, setReason] = uSx('');
+  const [confirm, setConfirm] = uSx('');
   const [busy, setBusy] = uSx(false);
+  const [result, setResult] = uSx(null);
+  const isHapus = action === 'hapus';
+  const title = trD(isHapus ? 'tx.bulkHapus' : action === 'arsip' ? 'tx.bulkArsip' : 'tx.bulkBatal');
+  React.useEffect(() => { window.API.distribusi.transactions.bulkPreview({ ids, action }).then((r) => setPrev(r.data)).catch((e) => setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr'))); }, []);
   React.useEffect(() => { const o = (e) => { if (e.key === 'Escape' && !busy) onClose(); }; window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, [busy]);
-  const run = () => { if (!reason.trim() || busy || !items.length) return; setBusy(true); onRun(reason.trim(), () => {}); };
+  const eligible = prev ? prev.eligible : [];
+  const confirmOk = !isHapus || confirm.trim().toUpperCase() === 'HAPUS' || confirm.trim() === String(eligible.length);
+  const canRun = !!prev && eligible.length > 0 && note.trim() && confirmOk && !busy;
+  const run = () => {
+    if (!canRun) return; setBusy(true); setErr('');
+    window.API.distribusi.transactions.bulk({ ids: eligible.map((e) => e.id), action, note: note.trim(), reason: reason.trim() || undefined, confirm: isHapus ? confirm.trim() : undefined })
+      .then((r) => { setResult(r.data); if (r.data.failed === 0) onDone(r.data); })
+      .catch((e) => { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
   return (
     <div className="modal-scrim" onClick={() => !busy && onClose()} style={{ zIndex: 240 }}>
-      <div className="modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.voidBtn')} · {items.length}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('tx.bulkVoidSub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+      <div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{title} · {ids.length}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD(isHapus ? 'tx.bulkHapusSub' : action === 'arsip' ? 'tx.bulkArsipSub' : 'tx.bulkBatalSub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
         <div className="modal-body">
-          <div className="dist-infobox" style={{ marginBottom: 10 }}><IconClock s={15} /><span>{trD('dist.korekApprovalInfo')}</span></div>
-          <div className="kv-preview-list">{items.map((t) => <div key={t.id} className="kv-preview-row"><span>{(t.customer && t.customer.name) || '—'}{t.customer && t.customer.code ? ' · ' + t.customer.code : ''} · {txnCode(t)}</span><b className="tnum">{rpFull(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</b></div>)}</div>
-          <label className="fld-label">{trD('tx.voidReasonLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-          <textarea className="fld" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={trD('tx.voidReasonPh')} />
+          {!prev && !err && <div className="dist-empty">{trD('common.loading') || '…'}</div>}
+          {err && <div className="login-err" style={{ marginBottom: 10 }}><IconClose s={13} />{err}</div>}
+          {result && (
+            <div className="dist-infobox" style={{ marginBottom: 10 }}><IconCheck s={15} /><span>{trD('tx.bulkResult', { done: result.done, failed: result.failed })}</span></div>
+          )}
+          {prev && !result && (<>
+            {action === 'arsip' && <div className="dist-infobox" style={{ marginBottom: 10 }}><IconInvoice s={15} /><span>{trD('tx.arsipNoBalance')}</span></div>}
+            {isHapus && <div className="dist-infobox danger" style={{ marginBottom: 10 }}><IconWarn s={15} /><span>{trD('tx.hapusWarn')}</span></div>}
+            <div className="tx-bulk-counts"><span className="ok">{trD('tx.eligibleN', { n: eligible.length })}</span>{prev.blocked.length > 0 && <span className="blk">{trD('tx.blockedN', { n: prev.blocked.length })}</span>}</div>
+            {/* Per-customer Sisa Bon change */}
+            {prev.sisaChanges.length > 0 && (
+              <div className="tx-bulk-sisa">{prev.sisaChanges.map((s) => <div key={s.customerId} className="tx-bulk-sisa-row"><span>{s.code ? s.code + ' · ' : ''}{s.name}</span><b className="tnum">{rpFull(s.before)} → {rpFull(s.after)}</b></div>)}</div>
+            )}
+            {(prev.gallonDelta !== 0 || prev.invoicesAffected.length > 0) && (
+              <div className="tx-bulk-meta">{prev.gallonDelta !== 0 && <span>{trD('tx.galonDelta', { n: prev.gallonDelta })}</span>}{prev.invoicesAffected.length > 0 && <span>{trD('tx.invAffected', { list: prev.invoicesAffected.join(', ') })}</span>}</div>
+            )}
+            {/* Blocked rows, per-row reason (invoice named) */}
+            {prev.blocked.length > 0 && (
+              <div className="tx-bulk-blocked">{prev.blocked.slice(0, 30).map((bk, i) => <div key={i} className="tx-bulk-blk-row"><span>{bk.ref || bk.id}{bk.customerName ? ' · ' + bk.customerName : ''}</span><em>{trD(BULK_REASON[bk.reason] || 'tx.rBlocked')}{bk.invoice ? ' (' + bk.invoice + ')' : ''}</em></div>)}</div>
+            )}
+            <label className="fld-label">{trD('tx.catatanLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <textarea className="fld" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('tx.catatanPh')} />
+            {action === 'batal' && (<><label className="fld-label">{trD('tx.voidReasonLbl')}</label><input className="fld" value={reason} onChange={(e) => setReason(e.target.value)} placeholder={trD('tx.voidReasonPh')} /></>)}
+            {isHapus && (<><label className="fld-label">{trD('tx.typeConfirm', { n: eligible.length })} <span style={{ color: 'var(--neg)' }}>*</span></label><input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={'HAPUS'} /></>)}
+          </>)}
+          {result && result.failed > 0 && (
+            <div className="tx-bulk-blocked" style={{ marginTop: 8 }}>{result.results.filter((r) => !r.ok).slice(0, 30).map((r, i) => <div key={i} className="tx-bulk-blk-row"><span>{r.ref || r.id}</span><em>{trD(BULK_REASON[r.reason] || 'tx.rBlocked')}{r.invoice ? ' (' + r.invoice + ')' : ''}</em></div>)}</div>
+          )}
         </div>
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose} disabled={busy}>{trD('dist.cancel')}</button><button className="btn dist-btn-danger" disabled={!reason.trim() || busy || !items.length} onClick={run}>{busy ? '…' : trD('tx.bulkVoidBtn', { n: items.length })}</button></div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>{result ? trD('dist.close') || 'Tutup' : trD('dist.cancel')}</button>
+          {!result && <button className={'btn ' + (isHapus ? 'dist-btn-danger' : 'btn-primary')} disabled={!canRun} onClick={run}>{busy ? '…' : trD('tx.bulkRun', { n: eligible.length })}</button>}
+        </div>
       </div>
     </div>
   );
@@ -4378,15 +4440,22 @@ function DistPrices({ canPrice, refreshKey, onChanged }) {
 }
 
 // ════════════════ LOG AUDIT (owner only, immutable timeline) ════════════════
-function DistAudit({ canAudit, refreshKey }) {
+function DistAudit({ canAudit, refreshKey, onChanged }) {
   const [rows, setRows] = uSx(null);
   const [kind, setKind] = uSx('all');
   const [q, setQ] = uSx('');
+  const [expanded, setExpanded] = uSx(null);   // audit id whose batch detail is open
+  const [restored, setRestored] = uSx({});      // audit id → restored count (after Pulihkan)
+  const [toast, setToast] = uSx('');
   const reload = () => window.API.distribusi.audit('limit=500').then((r) => setRows(r.data || [])).catch(() => setRows([]));
   uEx(() => { if (canAudit && window.API && window.API.distribusi) reload(); }, [refreshKey, canAudit]);
   if (!canAudit) return <DistLocked />;
+  // Parse the JSON snapshot a bulk-batch entry carries (after " SNAPSHOT ").
+  const batchData = (a) => { const m = /SNAPSHOT (\{[\s\S]*\})$/.exec(a.detail || ''); if (!m) return null; try { return JSON.parse(m[1]); } catch (e) { return null; } };
+  const cleanDetail = (d) => String(d || '').replace(/ · SNAPSHOT \{[\s\S]*\}$/, '');
+  const doRestore = (a) => { if (!window.confirm(trD('tx.restoreConfirm'))) return; window.API.distribusi.transactions.bulkRestore(a.id).then((r) => { setRestored((p) => ({ ...p, [a.id]: (r && r.data && r.data.restored) || 0 })); setToast(trD('tx.bulkUndone', { n: (r && r.data && r.data.restored) || 0 })); setTimeout(() => setToast(''), 3000); reload(); if (onChanged) onChanged(); }).catch((e) => { setToast((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); setTimeout(() => setToast(''), 3500); }); };
 
-  const kindChips = [['all', trD('dist.fAll')], ['koreksi', trD('dist.akKoreksi')], ['harga', trD('dist.akHarga')], ['input', trD('dist.akInput')], ['impor', trD('dist.akImpor')], ['pelanggan', trD('dist.akPelanggan')], ['akses', trD('dist.akAkses')]];
+  const kindChips = [['all', trD('dist.fAll')], ['koreksi', trD('dist.akKoreksi')], ['harga', trD('dist.akHarga')], ['input', trD('dist.akInput')], ['impor', trD('dist.akImpor')], ['pelanggan', trD('dist.akPelanggan')], ['akses', trD('dist.akAkses')], ['batal-massal', trD('dist.akBatalMassal')], ['arsip-massal', trD('dist.akArsipMassal')], ['hapus-massal', trD('dist.akHapusMassal')]];
   const filtered = (rows || []).filter((a) => {
     if (kind !== 'all' && a.kind !== kind) return false;
     if (q && !((a.title || '') + (a.detail || '') + (a.actorName || '')).toLowerCase().includes(q.toLowerCase())) return false;
@@ -4405,6 +4474,9 @@ function DistAudit({ canAudit, refreshKey }) {
         {rows !== null && filtered.length === 0 && <div className="dist-empty">{trD('dist.noAudit')}</div>}
         {filtered.map((a) => {
           const m = AUDIT_KIND[a.kind] || AUDIT_KIND.input;
+          const isBatch = BULK_AUDIT_KINDS.includes(a.kind);
+          const bd = isBatch ? batchData(a) : null;
+          const canRestore = isBatch && bd && bd.restorable && !restored[a.id];
           return (
             <div key={a.id} className="dist-audit-row">
               <div className="dist-audit-rail"><span className="dist-audit-dot" /></div>
@@ -4414,13 +4486,27 @@ function DistAudit({ canAudit, refreshKey }) {
                   <span className="dist-audit-title">{a.title}</span>
                   {a.actorStaff ? <span className="dist-audit-staff">{trD('dist.olehStaff')}</span> : null}
                 </div>
-                {a.detail ? <div className="dist-audit-detail">{a.detail}</div> : null}
+                {a.detail ? <div className="dist-audit-detail">{cleanDetail(a.detail)}</div> : null}
+                {isBatch && (
+                  <div className="dist-audit-actions">
+                    {bd && <button type="button" className="dist-link" onClick={() => setExpanded((x) => (x === a.id ? null : a.id))}>{trD('tx.lihatRincian')}</button>}
+                    {canRestore && <button type="button" className="dist-link" onClick={() => doRestore(a)}><IconRefresh s={12} />{trD('tx.pulihkan')}</button>}
+                    {restored[a.id] != null && <span className="dist-audit-restored">{trD('tx.restoredN', { n: restored[a.id] })}</span>}
+                  </div>
+                )}
+                {isBatch && expanded === a.id && bd && (
+                  <div className="dist-audit-rincian">
+                    <div className="dist-audit-rincian-h">{trD('tx.rincian', { action: a.kind, count: bd.count })}{bd.note ? ' · ' + bd.note : ''}</div>
+                    {(bd.results || []).slice(0, 60).map((r, i) => <div key={i} className="dist-audit-rincian-row">{r.ref || r.id}</div>)}
+                  </div>
+                )}
                 <div className="dist-audit-meta"><span className={a.actorStaff ? 'staff' : ''}>{a.actorName || a.actorRole || '—'}</span><span>{fmtDT(a.createdAt)}</span></div>
               </div>
             </div>
           );
         })}
       </div>
+      {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
   );
 }

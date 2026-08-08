@@ -1549,7 +1549,7 @@ function FApp() {
           {screen === 'dist-transactions' && (p.distribusiInput || p.distribusiKoreksi || p.distribusiExpense) && (
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
-              canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canHardDelete={!!p.distribusiHardDelete} canArchive={!!p.distribusiLegacyImport} canExpense={!!p.distribusiExpense} canPrice={!!p.distribusiHargaMaster} userName={user && user.name}
+              canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canHardDelete={!!p.distribusiHardDelete} canArchive={!!p.distribusiLegacyImport} canExpense={!!p.distribusiExpense} canPrice={!!p.distribusiHargaMaster} canHapus={!!p['distribusi.transaksi.hapus']} userName={user && user.name}
               canViewAll={!!p['distribusi.lihat.semua']} canView7={!!p['distribusi.lihat.7hari']} canViewMonth={!!p['distribusi.lihat.bulan_ini']} canViewSisaBon={!!(p['distribusi.lihat.semua'] || p['distribusi.lihat.sisa_bon'])} maxLookback={+p.maxLookbackDays || 0}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               nav={distNavRef.current} histTick={histTick}
@@ -1593,7 +1593,7 @@ function FApp() {
             <DIST.Integration refreshKey={distTick} today={FIN.TODAY} />
           )}
           {screen === 'dist-audit' && p.distribusiAudit && (
-            <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} />
+            <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-adjust-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
           </>)}

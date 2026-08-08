@@ -161,12 +161,16 @@ const hardDeleteSchema = z.object({
   confirm: z.string().min(1).max(40),
   password: z.string().min(1).max(200),
 });
+// BULK removal (batal · arsip · hapus): a preview + an execute + a restore.
+const bulkTxnPreviewSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(200), action: z.enum(['batal', 'arsip', 'hapus']) });
+const bulkTxnSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(200), action: z.enum(['batal', 'arsip', 'hapus']), note: z.string().trim().min(1).max(1000), reason: z.string().trim().max(1000).optional(), confirm: z.string().max(40).optional() });
+const bulkRestoreSchema = z.object({ batchId: z.string().min(1).max(60) });
 const listTxnQuery = z.object({
   date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(),
   customerId: z.string().optional(), method: z.enum(['lunas', 'bon', 'pelunasan']).optional(),
   fleet: z.string().max(60).optional(),
 });
-const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan', 'akses']).optional(), limit: z.coerce.number().int().positive().max(2000).optional(), fleet: z.string().max(60).optional() });
+const auditQuery = z.object({ kind: z.enum(['koreksi', 'harga', 'input', 'impor', 'pelanggan', 'akses', 'batal-massal', 'arsip-massal', 'hapus-massal']).optional(), limit: z.coerce.number().int().positive().max(2000).optional(), fleet: z.string().max(60).optional() });
 const summaryQuery = z.object({ date: DATE.optional(), period: z.enum(['today', 'week', 'month', 'range']).optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
 // Delivery report (Laporan Pengiriman) — a date or range + fleet. Read-only, server-cap-gated.
 const deliveryReportQuery = z.object({ period: z.enum(['today', 'week', 'month', 'range']).optional(), date: DATE.optional(), dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
@@ -287,6 +291,9 @@ const approveChangeRequest = asyncHandler(async (req, res) => { const r = await 
 const rejectChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'reject', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
 const setTransactionArchive = asyncHandler(async (req, res) => { const t = await service.setTransactionArchive(req.params.id, req.body.legacy, req.body, req.user); bcast('archive', req.params.id); res.json({ data: t }); });
 const hardDeleteTransaction = asyncHandler(async (req, res) => { const r = await service.hardDeleteTransaction(req.params.id, req.body, req.user); bcast('delete', req.params.id); res.json({ data: r }); });
+const bulkTxnPreview = asyncHandler(async (req, res) => { res.json({ data: await service.bulkTxnPreview(req.body.ids, req.body.action, req.user) }); });
+const bulkTxn = asyncHandler(async (req, res) => { const r = await service.bulkExecuteTransactions(req.body.ids, req.body.action, req.body, req.user); bcast('txn', 'bulk'); res.json({ data: r }); });
+const bulkTxnRestore = asyncHandler(async (req, res) => { const r = await service.restoreBulk(req.body.batchId, req.user); bcast('txn', 'restore'); res.json({ data: r }); });
 
 // ── invoices / notas ──
 const createInvoice = asyncHandler(async (req, res) => { const inv = await service.createInvoice(req.params.id, req.body, req.user); bcast('invoice', inv.id); res.status(201).json({ data: inv }); });
@@ -352,7 +359,7 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
-  listTransactions, createTransaction, requestCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, listAudit, dashboardSummary,
+  listTransactions, createTransaction, requestCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
@@ -361,5 +368,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema },
 };

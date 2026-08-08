@@ -3261,6 +3261,28 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .cl-trow.cl-flash, .cl-card.cl-flash { animation: clFlashPulse 1.5s ease-out; }
 .cl-card.cl-flash { border-radius: 12px; }
 
+/* ============ Bulk removal (batal · arsip · hapus) — preview modal + undo ============ */
+.tx-bulk-counts { display: flex; gap: 10px; margin-bottom: 10px; font-size: 12.5px; font-weight: 700; }
+.tx-bulk-counts .ok { color: var(--green-700, #0e7a5f); }
+.tx-bulk-counts .blk { color: #dc2626; }
+.tx-bulk-sisa { border: 1px solid var(--border); border-radius: 10px; padding: 4px 10px; margin-bottom: 8px; max-height: 160px; overflow-y: auto; }
+.tx-bulk-sisa-row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+.tx-bulk-sisa-row:last-child { border-bottom: 0; }
+.tx-bulk-sisa-row b { font-variant-numeric: tabular-nums; }
+.tx-bulk-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--text-mut); margin-bottom: 8px; }
+.tx-bulk-blocked { border: 1px solid #fde3b0; background: #fffaf0; border-radius: 10px; padding: 4px 10px; margin-bottom: 8px; max-height: 150px; overflow-y: auto; }
+.tx-bulk-blk-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 12px; }
+.tx-bulk-blk-row em { color: #b45309; font-style: normal; white-space: nowrap; }
+.dist-infobox.danger { background: #fdecec; border-color: #f4b4b4; color: #b3261e; }
+.tx-undo-toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 300; display: flex; align-items: center; gap: 14px; background: #0f2436; color: #fff; border-radius: 12px; padding: 11px 16px; font-size: 13px; box-shadow: var(--shadow-lg); }
+.tx-undo-toast span { display: inline-flex; align-items: center; gap: 7px; }
+.tx-undo-toast button { background: transparent; border: 0; color: #7fe0cb; font-weight: 800; font-size: 13px; cursor: pointer; }
+.dist-audit-actions { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.dist-audit-restored { font-size: 11.5px; color: var(--green-700, #0e7a5f); font-weight: 700; }
+.dist-audit-rincian { margin-top: 7px; border: 1px solid var(--border-soft); border-radius: 9px; padding: 8px 10px; background: var(--surface-2, #f6f8f9); }
+.dist-audit-rincian-h { font-size: 12px; font-weight: 700; color: var(--text-mut); margin-bottom: 5px; }
+.dist-audit-rincian-row { display: inline-block; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-mut); margin: 2px 8px 2px 0; }
+
 /* ============ Unified "Transaksi Baru" entry (segmented control + expense-in-list) ============ */
 .tx-entry-tabs { display: inline-flex; gap: 4px; background: var(--surface-2, #f6f8f9); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin: 4px 0 14px; }
 .tx-entry-tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; border-radius: 9px; padding: 8px 14px; font-size: 13.5px; font-weight: 700; color: var(--text-mut); cursor: pointer; transition: background .12s, color .12s; }

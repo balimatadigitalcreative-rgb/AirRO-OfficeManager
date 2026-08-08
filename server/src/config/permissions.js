@@ -16,7 +16,7 @@ const ROLE_PERMS = {
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
     // View-window (time-restriction): Pemilik sees all history + Sisa Bon.
-    'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true,
+    'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     // Gudang (warehouse) — view / manage stock / write-off damage / report.
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
@@ -30,7 +30,7 @@ const ROLE_PERMS = {
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
     distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
-    'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true,
+    'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     gudangView: true, gudangKelola: true, gudangDamage: true, gudangReport: true,
     // Split per-action manage caps (gudangKelola above is now only a deprecated alias).
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -217,6 +217,9 @@ function deriveDistribusiCaps(perms, role) {
   // Approving correction/void requests: a plain input/koreksi user may REQUEST a change but must never
   // gain approval by derivation (least-privilege) — yet owner/GM get it by default.
   if (p.distribusiApprove === undefined) p.distribusiApprove = isOwnerGm;
+  // BULK permanent deletion of transactions (owner/GM tier) — irreversible except by owner restore
+  // from the audit snapshot; never derived from the legacy flag.
+  if (p['distribusi.transaksi.hapus'] === undefined) p['distribusi.transaksi.hapus'] = isOwnerGm;
   // ── VIEW-WINDOW (time-restriction) caps — govern how far back a user may READ distribusi data
   // (list, dashboard, customer history, reports, exports, search). SERVER-ENFORCED in
   // resolveViewWindow(); the UI only hides what these forbid. Owner/GM see all history (`semua`).

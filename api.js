@@ -181,6 +181,10 @@
         paymentNotReceived: (data) => req('POST', '/distribusi/transactions/payment-not-received', data),
         // HARD DELETE (cap distribusiHardDelete, owner) — permanent; audit written first.
         hardDelete: (id, data) => req('DELETE', '/distribusi/transactions/' + id, data),     // { reason, confirm, password }
+        // BULK removal (batal · arsip · hapus): server-computed preview → execute → restore/undo.
+        bulkPreview: (data) => req('POST', '/distribusi/transactions/bulk/preview', data),   // { ids, action }
+        bulk: (data) => req('POST', '/distribusi/transactions/bulk', data),                  // { ids, action, note, reason?, confirm? }
+        bulkRestore: (batchId) => req('POST', '/distribusi/transactions/bulk/restore', { batchId }),
       },
       // CHANGE REQUESTS — the approval inbox for correction/void requests (cap distribusiApprove).
       changeRequests: {
