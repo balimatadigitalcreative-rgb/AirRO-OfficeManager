@@ -2513,15 +2513,19 @@ async function gallonSummary(user, qFleet) {
   const stock = await gallonStock(user, qFleet);
   const opening = await openingInfo(user, qFleet);
   const balMap = await gallonBalances(user, qFleet);
-  const rows = await prisma.gallonMovement.findMany({ where: { active: true, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'desc' }, take: 300 });
+  // Include INACTIVE rows too so a voided depot entry stays visible (muted + "Dibatalkan" badge, with
+  // a hide toggle). Stock/balances above are computed from active rows only, so display never affects
+  // the numbers. Each row carries `active` + a `blocker` (why it can't be voided here) for the UI.
+  const rows = await prisma.gallonMovement.findMany({ where: { ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'desc' }, take: 300 });
   const ids = [...new Set([...Object.keys(balMap).filter((id) => balMap[id] !== 0), ...rows.map((r) => r.customerId).filter(Boolean)])];
   const custs = ids.length ? await prisma.customer.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, armada: true } }) : [];
   const info = {}; custs.forEach((c) => { info[c.id] = c; });
   const balances = Object.keys(balMap).filter((id) => balMap[id] !== 0)
     .map((id) => ({ customerId: id, name: (info[id] && info[id].name) || '—', armada: (info[id] && info[id].armada) || '', held: balMap[id] }))
     .sort((a, b) => b.held - a.held);
+  const HARD_DEL_MS = GALON_HARD_DELETE_MAX_AGE_MS;
   // Display a legacy opening correction under the 'opening' tag so the ledger matches the card.
-  const movements = rows.map((r) => ({ id: r.id, type: isOpeningRow(r) ? 'opening' : r.type, qty: r.qty, customerId: r.customerId, customerName: r.customerId ? ((info[r.customerId] && info[r.customerId].name) || '—') : null, fleetId: r.fleetId, note: r.note, actorName: r.actorName, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null }));
+  const movements = rows.map((r) => { const blocker = gallonRowBlocker(r); const createdMs = r.createdAt ? new Date(r.createdAt).getTime() : null; return { id: r.id, type: isOpeningRow(r) ? 'opening' : r.type, qty: r.qty, customerId: r.customerId, customerName: r.customerId ? ((info[r.customerId] && info[r.customerId].name) || '—') : null, fleetId: r.fleetId, note: r.note, actorName: r.actorName, createdAt: createdMs, active: r.active, blocker, voidable: !blocker && r.active, restorable: !blocker && !r.active, deletable: !blocker && !r.active && createdMs != null && (Date.now() - createdMs) <= HARD_DEL_MS }; });
   return { stock, opening, balances, movements };
 }
 // Record a delivery's gallon flow (called from createTransaction). out = full gallons
@@ -2620,6 +2624,187 @@ async function resetGallon(body, actor) {
     `cakupan ${scopeLabel} · total ${before.totalOwned}→${target} · di pelanggan ${before.atCustomers}→0 · ${customersReset} pelanggan disetel · alasan: ${reason}`, snap, chosen);
   const after = await gallonStock(actor, qFleet);
   return { mode, scope: scopeLabel, target, before, after, customersReset, reason };
+}
+
+// ═══════════════════ DEPOT GALLON-STOCK ENTRY VOID / RESET / HARD-DELETE ═══════════════════
+// Expose the ledger's existing `active` flag (schema.prisma GallonMovement.active) for depot baseline
+// & unlinked depot-correction rows — we do NOT build a new mechanism. Every action here is confined to
+// customerId=null rows.
+//
+// ┌── SAFETY INVARIANT ─────────────────────────────────────────────────────────────────────────┐
+// │ Gallons AT CUSTOMERS are derived (gallonBalances / custEffect) ONLY from rows WITH a          │
+// │ customerId (delivery_out / return_in / customer correction). Depot baseline rows              │
+// │ (type='opening', customerId=null) contribute 0 to custEffect. Because every void/reset/delete │
+// │ below is RESTRICTED to customerId=null rows, no customer's gallon count can ever change.      │
+// │ The tests assert per-customer before==after equality to lock this in.                         │
+// └─────────────────────────────────────────────────────────────────────────────────────────────┘
+const GALON_VOID_REASONS = ['salah_input', 'duplikat', 'uji_coba', 'lainnya'];
+// Why a ledger row may NOT be voided/deleted from THIS depot tool (each points to the right module).
+// Only depot-baseline ('opening') and UNLINKED depot corrections (customerId=null, no cash/txn link)
+// are actionable here. A customerId row is a customer balance; a cashEntryId row mirrors a cash
+// purchase; a transactionId row is a delivery — each is managed where it was created.
+function gallonRowBlocker(m) {
+  if (!m) return 'not_found';
+  if (m.customerId) return 'has_customer';       // delivery_out / return_in / customer correction → Distribusi transaksi/koreksi
+  if (m.cashEntryId) return 'cash_linked';       // purchase mirror → delete the cash entry instead
+  if (m.transactionId) return 'txn_linked';      // delivery → cancel the transaction instead
+  return null;                                   // depot-baseline or unlinked depot correction → actionable
+}
+const GALON_BLOCK_MODULE = { has_customer: 'Kelola di Distribusi › Transaksi / Koreksi pelanggan.', cash_linked: 'Hapus entri kas "Pembelian Galon" terkait di Arus Kas.', txn_linked: 'Batalkan transaksi pengiriman terkait di Distribusi › Transaksi.' };
+const movDayISO = (m) => (m && m.createdAt) ? new Date(m.createdAt).toISOString().slice(0, 10) : todayISO();
+const movInWindow = (m, win) => win.unlimited || (movDayISO(m) >= win.from && movDayISO(m) <= win.to);
+// Load a movement and enforce the SAME visibility rules as a read (fleet scope + view window) — a user
+// who cannot SEE the row cannot act on it. Returns null-safe via ApiError.notFound.
+async function loadGallonMovementScoped(id, actor) {
+  const m = await prisma.gallonMovement.findUnique({ where: { id: String(id || '') } });
+  if (!m) throw ApiError.notFound('Baris stok galon tidak ditemukan.');
+  if (!fleetAllows(actor, m.fleetId)) throw ApiError.notFound('Baris stok galon tidak ditemukan.');
+  const win = await resolveViewWindow(actor);
+  if (!movInWindow(m, win)) throw ApiError.forbidden('Baris di luar jendela waktu Anda — tidak dapat diproses.');
+  return m;
+}
+// Recompute the fleet-scoped stock impact of toggling ONE row's `active`. atCustomers is shown so the
+// user can SEE it does not move; for an actionable (customerId=null) row custEffect(m) is 0, so
+// atCustomers is byte-identical before/after by construction.
+async function gallonMovementImpact(id, actor) {
+  const m = await loadGallonMovementScoped(id, actor);
+  const qFleet = m.fleetId ? m.fleetId : undefined;   // '' (global depot) → whole visible scope
+  const before = await gallonStock(actor, qFleet);
+  const goingActive = !m.active;                       // impact of the pending action (void: →false, restore: →true)
+  const sign = goingActive ? +1 : -1;                  // removing an active row subtracts its effect
+  const tEff = totalEffect(m), cEff = custEffect(m);
+  const after = {
+    totalOwned: before.totalOwned + sign * tEff,
+    atCustomers: before.atCustomers + sign * cEff,
+    atDepot: (before.totalOwned + sign * tEff) - (before.atCustomers + sign * cEff),
+  };
+  const blocker = gallonRowBlocker(m);
+  return {
+    id: m.id, type: isOpeningRow(m) ? 'opening' : m.type, qty: m.qty, fleetId: m.fleetId, active: m.active,
+    note: m.note, createdAt: m.createdAt ? new Date(m.createdAt).getTime() : null,
+    action: m.active ? 'void' : 'restore', blocker, blockerHint: blocker ? (GALON_BLOCK_MODULE[blocker] || null) : null,
+    depotBefore: before.atDepot, depotAfter: after.atDepot,
+    atCustomersBefore: before.atCustomers, atCustomersAfter: after.atCustomers,   // ALWAYS equal for actionable rows
+    totalBefore: before.totalOwned, totalAfter: after.totalOwned,
+    customersUnchanged: after.atCustomers === before.atCustomers,
+  };
+}
+// BATALKAN — soft void a single depot row (active=false). Reversible via restore. catatan REQUIRED;
+// alasan optional (dropdown). Blocks any linked/customer row. Audited (kind='input').
+async function voidGallonMovement(id, body, actor) {
+  const m = await loadGallonMovementScoped(id, actor);
+  if (!m.active) throw ApiError.badRequest('Baris sudah dibatalkan.');
+  const blk = gallonRowBlocker(m);
+  if (blk) throw ApiError.badRequest(`Baris ini tidak bisa dibatalkan di sini. ${GALON_BLOCK_MODULE[blk] || ''}`.trim());
+  const note = String((body && body.note) || '').trim();
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  const reason = GALON_VOID_REASONS.includes(body && body.reason) ? body.reason : '';
+  const snap = await actorSnap(actor);
+  await prisma.gallonMovement.update({ where: { id: m.id }, data: { active: false } });
+  const after = await gallonStock(actor, m.fleetId ? m.fleetId : undefined);
+  await logAudit('input', `Batalkan baris stok galon (${isOpeningRow(m) ? 'stok awal' : 'depot'})`,
+    `${(m.qty > 0 ? '+' : '') + m.qty} galon · depot → ${after.atDepot} · di pelanggan TIDAK BERUBAH (${after.atCustomers})${reason ? ' · ' + reason : ''} · ${note}`, snap, m.fleetId);
+  return { id: m.id, active: false, stock: after };
+}
+// PULIHKAN — un-void (active=true). Only unlinked customerId=null rows are restorable here (a row
+// deactivated because its linked cash purchase was deleted must NOT be resurrected — its blocker fires).
+async function restoreGallonMovement(id, body, actor) {
+  const m = await loadGallonMovementScoped(id, actor);
+  if (m.active) throw ApiError.badRequest('Baris masih aktif.');
+  const blk = gallonRowBlocker(m);
+  if (blk) throw ApiError.badRequest(`Baris ini tidak bisa dipulihkan di sini. ${GALON_BLOCK_MODULE[blk] || ''}`.trim());
+  const snap = await actorSnap(actor);
+  await prisma.gallonMovement.update({ where: { id: m.id }, data: { active: true } });
+  const after = await gallonStock(actor, m.fleetId ? m.fleetId : undefined);
+  await logAudit('input', `Pulihkan baris stok galon (${isOpeningRow(m) ? 'stok awal' : 'depot'})`,
+    `${(m.qty > 0 ? '+' : '') + m.qty} galon · depot → ${after.atDepot} · di pelanggan TIDAK BERUBAH (${after.atCustomers})`, snap, m.fleetId);
+  return { id: m.id, active: true, stock: after };
+}
+// HAPUS PERMANEN — owner-only, NARROW: only an already-voided (active=false), UNLINKED, customerId=null
+// row created within 30 days. Audit stores a full JSON snapshot FIRST (row survives in the trail even
+// though the DB row is gone). Otherwise the action is hidden/blocked.
+const GALON_HARD_DELETE_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+async function hardDeleteGallonMovement(id, body, actor) {
+  const m = await loadGallonMovementScoped(id, actor);
+  if (m.active) throw ApiError.badRequest('Hanya baris yang sudah dibatalkan yang bisa dihapus permanen.');
+  const blk = gallonRowBlocker(m);
+  if (blk) throw ApiError.badRequest(`Baris tertaut tidak bisa dihapus di sini. ${GALON_BLOCK_MODULE[blk] || ''}`.trim());
+  const ageMs = Date.now() - (m.createdAt ? new Date(m.createdAt).getTime() : 0);
+  if (ageMs > GALON_HARD_DELETE_MAX_AGE_MS) throw ApiError.badRequest('Baris lebih dari 30 hari — hapus permanen tidak diizinkan.');
+  const reason = String((body && body.note) || body && body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Catatan wajib diisi.');
+  const snap = await actorSnap(actor);
+  // AUDIT FIRST — the row is about to disappear; a full snapshot must survive for restore.
+  const detail = JSON.stringify({ v: 1, kind: 'galon-hapus', row: { ...m, createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null } });
+  await logAudit('input', `Hapus permanen baris stok galon (${isOpeningRow(m) ? 'stok awal' : 'depot'})`,
+    `${(m.qty > 0 ? '+' : '') + m.qty} galon · ${reason} · tidak bisa dikembalikan · SNAPSHOT ${detail}`, snap, m.fleetId);
+  await prisma.gallonMovement.delete({ where: { id: m.id } });
+  const after = await gallonStock(actor, m.fleetId ? m.fleetId : undefined);
+  return { deleted: true, id: m.id, stock: after };
+}
+
+// ── RESET STOK AWAL ──────────────────────────────────────────────────────────
+// Fleet-scoped, EXACT match (fleetId ''=global depot). Resetting 'Biru' never touches 'Merah' or ''.
+// Actionable opening rows = customerId=null AND isOpeningRow (dedicated 'opening' + legacy opening
+// corrections). Two paths, neither deletes history:
+//   • delta (targetQty)  → delegate to setOpeningStock: append ONE 'opening' row of (target − current).
+//   • void_all           → soft-void EVERY opening row in the fleet (active=false), typed row-count
+//                          confirmation, ONE audit batch entry (snapshot of ids for restore).
+function resolveResetFleet(actor, fleetIdRaw) {
+  const chosen = (fleetIdRaw && fleetIdRaw !== 'all') ? String(fleetIdRaw) : '';
+  if (chosen && !fleetAllows(actor, chosen)) throw ApiError.forbidden('Armada di luar akses Anda.');
+  return chosen;   // '' = global depot
+}
+async function openingRowsForFleet(fleetId) {
+  const candidates = await prisma.gallonMovement.findMany({ where: { active: true, customerId: null, type: { in: ['opening', 'correction'] }, fleetId }, orderBy: { createdAt: 'asc' } });
+  return candidates.filter(isOpeningRow);
+}
+async function openingResetImpact(body, actor) {
+  const fleetId = resolveResetFleet(actor, body && body.fleetId);
+  const mode = (body && body.mode) === 'void_all' ? 'void_all' : 'delta';
+  const before = await gallonStock(actor, fleetId ? fleetId : undefined);
+  const rows = await openingRowsForFleet(fleetId);
+  const current = rows.reduce((a, r) => a + r.qty, 0);
+  if (mode === 'void_all') {
+    const removed = rows.reduce((a, r) => a + totalEffect(r), 0);   // opening totalEffect = qty
+    return { mode, fleetId, rowCount: rows.length, openingCurrent: current,
+      depotBefore: before.atDepot, depotAfter: before.atDepot - removed,
+      atCustomersBefore: before.atCustomers, atCustomersAfter: before.atCustomers, customersUnchanged: true,
+      totalBefore: before.totalOwned, totalAfter: before.totalOwned - removed };
+  }
+  const target = Math.max(0, Math.round(+(body && body.targetQty) || 0));
+  const delta = target - current;
+  return { mode, fleetId, openingCurrent: current, target, delta,
+    depotBefore: before.atDepot, depotAfter: before.atDepot + delta,
+    atCustomersBefore: before.atCustomers, atCustomersAfter: before.atCustomers, customersUnchanged: true,
+    totalBefore: before.totalOwned, totalAfter: before.totalOwned + delta };
+}
+async function resetOpeningStock(body, actor) {
+  const fleetId = resolveResetFleet(actor, body && body.fleetId);
+  const note = String((body && body.note) || '').trim();
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  const mode = (body && body.mode) === 'void_all' ? 'void_all' : 'delta';
+  if (mode === 'delta') {
+    // Preferred: append a single 'opening' DELTA row — the existing append-only pattern.
+    const target = Math.max(0, Math.round(+(body && body.targetQty) || 0));
+    const r = await setOpeningStock({ qty: target, fleet: fleetId || 'all', reason: note }, actor);
+    const after = await gallonStock(actor, fleetId ? fleetId : undefined);
+    return { mode, fleetId, ...r, stock: after };
+  }
+  // void_all — bulk soft-void of opening rows in this fleet only.
+  const rows = await openingRowsForFleet(fleetId);
+  const typed = String((body && body.confirm) || '').trim();
+  if (typed !== String(rows.length)) throw ApiError.badRequest(`Ketik jumlah baris (${rows.length}) untuk konfirmasi.`);
+  if (!rows.length) throw ApiError.badRequest('Tidak ada baris stok awal untuk direset di armada ini.');
+  const snap = await actorSnap(actor);
+  const before = await gallonStock(actor, fleetId ? fleetId : undefined);
+  const ids = rows.map((r) => r.id);
+  await prisma.gallonMovement.updateMany({ where: { id: { in: ids } }, data: { active: false } });
+  const after = await gallonStock(actor, fleetId ? fleetId : undefined);
+  const detail = JSON.stringify({ v: 1, kind: 'galon-opening-void_all', ids });
+  const audit = await logAudit('input', `Batalkan semua stok awal galon (${fleetId || 'depot global'})`,
+    `${ids.length} baris · depot ${before.atDepot} → ${after.atDepot} · di pelanggan TIDAK BERUBAH (${after.atCustomers}) · ${note} · SNAPSHOT ${detail}`, snap, fleetId);
+  return { mode, fleetId, batchId: audit.id, voided: ids.length, ids, before, after, stock: after };
 }
 
 // ── Delivery board ──────────────────────────────────────────────────────────
@@ -3075,6 +3260,7 @@ async function deliveryReport(user, query) {
 module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
+  gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,

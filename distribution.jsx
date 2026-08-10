@@ -4886,12 +4886,15 @@ const GM_META = {
   damage: { l: 'dist.gmDamage', cls: 'dmg', sign: '−' },
   loss: { l: 'dist.gmLoss', cls: 'dmg', sign: '−' },
 };
-function DistGallon({ refreshKey, canCustomers, canReset, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);
   const [toast, setToast] = uSx('');
   const [corr, setCorr] = uSx(null);   // { customerId, name, qty, reason }
   const [opening, setOpening] = uSx(null);   // opening-stock modal: { qty, reason }
   const [reset, setReset] = uSx(null);   // reset-gallon modal: { mode, fleet, target, reason, confirm }
+  const [movAct, setMovAct] = uSx(null);   // depot-row action modal: { movement, kind:'void'|'restore'|'delete' }
+  const [resetAwal, setResetAwal] = uSx(null);   // "Setel Ulang Stok Awal" modal
+  const [hideVoided, setHideVoided] = uSx(true);   // hide "Dibatalkan" rows by default
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
   const ef = effFleet(fleetScope, distFleet);
@@ -4958,7 +4961,10 @@ function DistGallon({ refreshKey, canCustomers, canReset, fleetScope, fleet, dis
             : <div className="dist-gm-opening-sub">{trD('dist.gmOpeningNone')}</div>}
         </div>
         <div className="tnum dist-gm-opening-val">{numX(op.total || 0)}</div>
-        {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={openOpening}><IconPencil s={14} />{op.set ? trD('dist.gmOpeningAdjust') : trD('dist.gmOpeningBtn')}</button>}
+        <div className="dist-gm-opening-acts">
+          {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={openOpening}><IconPencil s={14} />{op.set ? trD('dist.gmOpeningAdjust') : trD('dist.gmOpeningBtn')}</button>}
+          {canReset && op.set && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setErr(''); setResetAwal({ mode: 'delta', target: String(op.total || 0), note: '', confirm: '' }); }}><IconRefresh s={14} />{trD('go.resetBtn')}</button>}
+        </div>
       </div>
       <div className="dist-cd-cols">
         <div className="card dist-card dist-gm-balcard">
@@ -4974,12 +4980,27 @@ function DistGallon({ refreshKey, canCustomers, canReset, fleetScope, fleet, dis
           ))}
         </div>
         <div className="card dist-card" style={{ flex: 1, minWidth: 280 }}>
-          <div className="sec-title" style={{ marginBottom: 8 }}>{trD('dist.gmLedger')}</div>
+          <div className="dist-card-head">
+            <div className="sec-title">{trD('dist.gmLedger')}</div>
+            {(data.movements || []).some((m) => m.active === false) && (
+              <button type="button" className="dist-link" onClick={() => setHideVoided((v) => !v)}>{hideVoided ? trD('gv.showVoided') : trD('gv.hideVoided')}</button>
+            )}
+          </div>
           {(data.movements || []).length === 0 && <div className="dist-empty">{trD('dist.gmNoMov')}</div>}
-          {(data.movements || []).map((m) => { const meta = GM_META[m.type] || GM_META.correction; const disp = meta.sign === '' ? ((m.qty > 0 ? '+' : '') + numX(m.qty)) : (meta.sign + numX(Math.abs(m.qty))); return (
-            <div key={m.id} className="dist-txn">
+          {(data.movements || []).filter((m) => !(hideVoided && m.active === false)).map((m) => { const meta = GM_META[m.type] || GM_META.correction; const disp = meta.sign === '' ? ((m.qty > 0 ? '+' : '') + numX(m.qty)) : (meta.sign + numX(Math.abs(m.qty))); const voided = m.active === false; return (
+            <div key={m.id} className={'dist-txn' + (voided ? ' gv-voided' : '')}>
               <span className={`dist-gm-mtag ${meta.cls}`}>{trD(meta.l)}</span>
-              <div className="dist-txn-mid"><div className="dist-txn-name">{m.type === 'opening' ? trD('dist.gmOpening') : (m.customerName || trD('dist.gmDepot'))}</div><div className="dist-txn-sub">{fmtDT(m.createdAt)}{m.actorName ? ' · ' + m.actorName : ''}{m.note && (m.type === 'correction' || m.type === 'opening') ? ' · ' + m.note : ''}</div></div>
+              <div className="dist-txn-mid">
+                <div className="dist-txn-name">{m.type === 'opening' ? trD('dist.gmOpening') : (m.customerName || trD('dist.gmDepot'))}{voided && <span className="gv-badge">{trD('gv.voidedBadge')}</span>}</div>
+                <div className="dist-txn-sub">{fmtDT(m.createdAt)}{m.actorName ? ' · ' + m.actorName : ''}{m.note && (m.type === 'correction' || m.type === 'opening') ? ' · ' + m.note : ''}</div>
+                {(canReset || canGalonDelete) && (m.voidable || m.restorable || m.deletable) && (
+                  <div className="gv-row-acts">
+                    {canReset && m.voidable && <button type="button" className="dist-link danger" onClick={() => { setErr(''); setMovAct({ movement: m, kind: 'void' }); }}>{trD('gv.void')}</button>}
+                    {canReset && m.restorable && <button type="button" className="dist-link" onClick={() => { setErr(''); setMovAct({ movement: m, kind: 'restore' }); }}>{trD('gv.restore')}</button>}
+                    {canGalonDelete && m.deletable && <button type="button" className="dist-link danger" onClick={() => { setErr(''); setMovAct({ movement: m, kind: 'delete' }); }}>{trD('gv.delete')}</button>}
+                  </div>
+                )}
+              </div>
               <b className={`tnum dist-gm-mqty ${meta.cls}`}>{disp}</b>
             </div>
           ); })}
@@ -5070,7 +5091,122 @@ function DistGallon({ refreshKey, canCustomers, canReset, fleetScope, fleet, dis
           </div>
         </div>
       ); })()}
+
+      {movAct && <GalonMovActionModal movement={movAct.movement} kind={movAct.kind} onClose={() => setMovAct(null)} onDone={(msg) => { setMovAct(null); flash(msg); reload(); }} />}
+      {resetAwal && <GalonOpeningResetModal ef={ef} init={resetAwal} onClose={() => setResetAwal(null)} onDone={(msg) => { setResetAwal(null); flash(msg); reload(); }} />}
+
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+    </div>
+  );
+}
+
+// Depot-row action (batalkan / pulihkan / hapus permanen) with a SERVER-COMPUTED impact preview that
+// shows the customer figure explicitly ("Galon di pelanggan: TIDAK BERUBAH (N)") so the user sees it
+// is safe. catatan REQUIRED; alasan optional dropdown for a void.
+const GV_REASONS = [['salah_input', 'gv.rsSalah'], ['duplikat', 'gv.rsDup'], ['uji_coba', 'gv.rsUji'], ['lainnya', 'gv.rsLain']];
+function GalonMovActionModal({ movement, kind, onClose, onDone }) {
+  const [imp, setImp] = uSx(null);
+  const [note, setNote] = uSx('');
+  const [reason, setReason] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o);
+    window.API.distribusi.gallonMovementImpact(movement.id).then((r) => setImp(r.data)).catch((e) => setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')));
+    return () => window.removeEventListener('keydown', o); }, []);
+  const titleK = kind === 'restore' ? 'gv.restoreTitle' : kind === 'delete' ? 'gv.deleteTitle' : 'gv.voidTitle';
+  const needNote = kind !== 'restore';
+  const commit = () => {
+    if (saving) return;
+    if (needNote && !note.trim()) { setErr(trD('gv.noteReq')); return; }
+    setSaving(true); setErr('');
+    const done = (msgK) => { setSaving(false); onDone(trD(msgK)); };
+    const fail = (e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); };
+    if (kind === 'void') window.API.distribusi.gallonMovementVoid(movement.id, { note: note.trim(), reason: reason || undefined }).then(() => done('gv.voidDone')).catch(fail);
+    else if (kind === 'restore') window.API.distribusi.gallonMovementRestore(movement.id, { note: note.trim() || undefined }).then(() => done('gv.restoreDone')).catch(fail);
+    else window.API.distribusi.gallonMovementDelete(movement.id, { note: note.trim() }).then(() => done('gv.deleteDone')).catch(fail);
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 230 }}>
+      <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD(titleK)}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{(movement.qty > 0 ? '+' : '') + numX(movement.qty)} {trD('dist.galonUnit')}{movement.note ? ' · ' + movement.note : ''}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {kind === 'delete' && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('gv.deleteWarn')}</span></div>}
+          {imp ? (
+            <div className="gv-impact">
+              <div className="gv-impact-row"><span>{trD('dist.gmAtDepot')}</span><b className="tnum">{numX(imp.depotBefore)} → {numX(imp.depotAfter)}</b></div>
+              <div className="gv-impact-safe"><IconCheck s={13} />{trD('gv.custSafe', { n: numX(imp.atCustomersBefore) })}</div>
+              <div className="gv-impact-row muted"><span>{trD('dist.gmTotal')}</span><b className="tnum">{numX(imp.totalBefore)} → {numX(imp.totalAfter)}</b></div>
+            </div>
+          ) : <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
+
+          {kind === 'void' && (
+            <><label className="fld-label">{trD('gv.reasonLbl')}</label>
+              <select className="fld" value={reason} onChange={(e) => setReason(e.target.value)}>
+                <option value="">{trD('gv.reasonNone')}</option>{GV_REASONS.map(([v, k]) => <option key={v} value={v}>{trD(k)}</option>)}
+              </select></>
+          )}
+          {needNote && (<>
+            <label className="fld-label">{trD('gv.noteLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <textarea className="fld" style={{ height: 60, padding: 12, resize: 'vertical' }} value={note} placeholder={trD('gv.notePh')} onChange={(e) => setNote(e.target.value)} />
+          </>)}
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className={'btn ' + (kind === 'restore' ? 'btn-primary' : 'btn-danger')} disabled={saving || !imp} onClick={commit}>{saving ? '…' : trD(titleK)}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// "Setel Ulang Stok Awal" — fleet-scoped. delta (append a correction, history kept) or void_all
+// (soft-void every opening row in this fleet, typed row-count confirm). Server-computed preview.
+function GalonOpeningResetModal({ ef, init, onClose, onDone }) {
+  const [mode, setMode] = uSx((init && init.mode) || 'delta');
+  const [target, setTarget] = uSx((init && init.target) || '0');
+  const [note, setNote] = uSx('');
+  const [confirm, setConfirm] = uSx('');
+  const [imp, setImp] = uSx(null);
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  const fleetId = (ef && ef !== 'all') ? ef : '';
+  const q = () => { const p = ['mode=' + mode, 'fleetId=' + encodeURIComponent(fleetId)]; if (mode === 'delta') p.push('targetQty=' + (parseInt(target || '0', 10) || 0)); return p.join('&'); };
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  uEx(() => { setImp(null); window.API.distribusi.openingResetImpact(q()).then((r) => setImp(r.data)).catch(() => setImp(null)); }, [mode, target]);
+  const commit = () => {
+    if (saving) return;
+    if (!note.trim()) { setErr(trD('gv.noteReq')); return; }
+    if (mode === 'void_all' && imp && confirm.trim() !== String(imp.rowCount)) { setErr(trD('go.confirmErr', { n: imp.rowCount })); return; }
+    setSaving(true); setErr('');
+    const body = { mode, fleetId, note: note.trim() };
+    if (mode === 'delta') body.targetQty = parseInt(target || '0', 10) || 0; else body.confirm = confirm.trim();
+    window.API.distribusi.openingReset(body).then(() => { setSaving(false); onDone(trD('go.resetDone')); }).catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 230 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('go.resetTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{fleetId || trD('dist.grAllFleets')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className={`dist-gr-mode ${mode === 'delta' ? 'on' : ''}`} onClick={() => setMode('delta')}><input type="radio" checked={mode === 'delta'} readOnly /><div><b>{trD('go.modeDelta')}</b><span>{trD('go.modeDeltaDesc')}</span></div></label>
+          <label className={`dist-gr-mode danger ${mode === 'void_all' ? 'on' : ''}`} onClick={() => setMode('void_all')}><input type="radio" checked={mode === 'void_all'} readOnly /><div><b>{trD('go.modeVoidAll')}</b><span>{trD('go.modeVoidAllDesc')}</span></div></label>
+          {mode === 'delta' && (<><label className="fld-label">{trD('go.targetLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label><input className="fld tnum" value={target} inputMode="numeric" placeholder="0" onChange={(e) => setTarget(e.target.value.replace(/[^0-9]/g, ''))} /></>)}
+          {imp && (
+            <div className="gv-impact">
+              <div className="gv-impact-row"><span>{trD('dist.gmAtDepot')}</span><b className="tnum">{numX(imp.depotBefore)} → {numX(imp.depotAfter)}</b></div>
+              <div className="gv-impact-safe"><IconCheck s={13} />{trD('gv.custSafe', { n: numX(imp.atCustomersBefore) })}</div>
+              <div className="gv-impact-row muted"><span>{trD('dist.gmTotal')}</span><b className="tnum">{numX(imp.totalBefore)} → {numX(imp.totalAfter)}</b></div>
+              {mode === 'void_all' && <div className="gv-impact-row muted"><span>{trD('go.rowCount')}</span><b className="tnum">{numX(imp.rowCount)}</b></div>}
+            </div>
+          )}
+          <label className="fld-label">{trD('gv.noteLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={note} placeholder={trD('gv.notePh')} onChange={(e) => setNote(e.target.value)} />
+          {mode === 'void_all' && (<>
+            <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('go.voidAllWarn')}</span></div>
+            <label className="fld-label">{trD('go.confirmLbl', { n: (imp && imp.rowCount) || 0 })}</label>
+            <input className="fld tnum" value={confirm} inputMode="numeric" placeholder={String((imp && imp.rowCount) || 0)} onChange={(e) => setConfirm(e.target.value.replace(/[^0-9]/g, ''))} />
+          </>)}
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className={'btn ' + (mode === 'void_all' ? 'btn-danger' : 'btn-primary')} disabled={saving} onClick={commit}>{saving ? '…' : trD('go.resetDo')}</button></div>
+      </div>
     </div>
   );
 }

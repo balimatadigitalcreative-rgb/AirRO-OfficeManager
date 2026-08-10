@@ -186,5 +186,19 @@ router.post('/gallon/opening', requireCap('distribusiCustomers'), validate({ bod
 // without it (403), not just a hidden button. Balanced mode appends corrections; purge deletes.
 router.post('/gallon/reset', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.gallonResetSchema }), ctrl.resetGallon);
 
-// NOTE: no DELETE routes anywhere — distribusi records are immutable/append-only.
+// ── Depot gallon-stock ENTRY void / restore / hard-delete + reset-stok-awal ──
+// All confined to customerId=null rows server-side, so customer gallon counts are structurally
+// untouchable (see distribution.service SAFETY INVARIANT). View-window + fleet scope re-checked per
+// row: a user who cannot SEE a row cannot act on it.
+//   void / restore / reset  → distribusiGallonReset (GM/owner)   ·   hard delete → distribusiHardDelete (owner)
+router.get('/gallon/movements/:id/impact', requireCap('distribusiGallonReset'), validate({ params: ctrl.schemas.idParams }), ctrl.gallonMovementImpact);
+router.post('/gallon/movements/:id/void', requireCap('distribusiGallonReset'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonVoidSchema }), ctrl.gallonMovementVoid);
+router.post('/gallon/movements/:id/restore', requireCap('distribusiGallonReset'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonRestoreSchema }), ctrl.gallonMovementRestore);
+router.get('/gallon/opening/reset/impact', requireCap('distribusiGallonReset'), validate({ query: ctrl.schemas.openingResetImpactSchema }), ctrl.openingResetImpact);
+router.post('/gallon/opening/reset', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.openingResetSchema }), ctrl.openingReset);
+// The ONLY DELETE in distribusi: owner-only, narrow hard-delete of an ALREADY-VOIDED, unlinked,
+// customerId=null depot row <30 days old. Audit keeps a full JSON snapshot. Everything else stays
+// append-only/immutable.
+router.delete('/gallon/movements/:id', requireCap('distribusiHardDelete'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonMovDeleteSchema }), ctrl.gallonMovementDelete);
+
 module.exports = router;

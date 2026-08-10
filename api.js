@@ -234,6 +234,13 @@
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),
       setOpeningStock: (data) => req('POST', '/distribusi/gallon/opening', data),   // { qty, fleet?, reason }
       resetGallon: (data) => req('POST', '/distribusi/gallon/reset', data),          // { mode:balanced|purge, fleet?, target?, confirm?, reason }
+      // Depot gallon-stock ENTRY void / restore / hard-delete + reset-stok-awal (customerId=null rows only).
+      gallonMovementImpact: (id) => req('GET', '/distribusi/gallon/movements/' + id + '/impact'),
+      gallonMovementVoid: (id, data) => req('POST', '/distribusi/gallon/movements/' + id + '/void', data),      // { note, reason? }
+      gallonMovementRestore: (id, data) => req('POST', '/distribusi/gallon/movements/' + id + '/restore', data || {}),
+      gallonMovementDelete: (id, data) => req('DELETE', '/distribusi/gallon/movements/' + id, data),            // owner; { note }
+      openingResetImpact: (q) => req('GET', '/distribusi/gallon/opening/reset/impact?' + q),                    // mode&targetQty&fleetId
+      openingReset: (data) => req('POST', '/distribusi/gallon/opening/reset', data),                            // { mode:delta|void_all, targetQty?, fleetId?, note, confirm? }
       // opts: { period?, dateFrom?, dateTo?, fleet? }. Default (no opts) = today only. History
       // periods require the distribusiDashHistory cap (server-enforced — a non-today window 403s).
       summary: (opts) => { const o = opts || {}; const p = []; ['period', 'dateFrom', 'dateTo'].forEach((k) => { if (o[k]) p.push(k + '=' + encodeURIComponent(o[k])); }); if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); return req('GET', '/distribusi/dashboard/summary' + (p.length ? '?' + p.join('&') : '')); },

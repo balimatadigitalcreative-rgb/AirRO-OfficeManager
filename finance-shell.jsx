@@ -1583,7 +1583,7 @@ function FApp() {
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
           {screen === 'dist-gallon' && p.distribusiGallon && (
-            <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canReset={!!p.distribusiGallonReset}
+            <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canReset={!!p.distribusiGallonReset} canGalonDelete={!!p.distribusiHardDelete}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
           {screen === 'dist-prices' && p.distribusiHargaMaster && (
