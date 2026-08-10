@@ -5205,7 +5205,7 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
       ); })()}
 
       {movAct && <GalonMovActionModal movement={movAct.movement} kind={movAct.kind} onClose={() => setMovAct(null)} onDone={(msg) => { setMovAct(null); flash(msg); reload(); }} />}
-      {resetAwal && <GalonOpeningResetModal ef={ef} init={resetAwal} onClose={() => setResetAwal(null)} onDone={(msg) => { setResetAwal(null); flash(msg); reload(); }} />}
+      {resetAwal && <GalonOpeningResetModal ef={ef} fleet={fleet} init={resetAwal} onClose={() => setResetAwal(null)} onDone={(msg) => { setResetAwal(null); flash(msg); reload(); }} />}
       {opname && <StokOpnameModal stock={st} fleet={fleet} init={opname} onClose={() => setOpname(null)} onDone={(msg) => { setOpname(null); flash(msg); reload(); }} />}
       {integrity && <GalonIntegrityModal onClose={() => setIntegrity(null)} onRepaired={() => { flash(trD('gi.repaired')); reload(); }} />}
 
@@ -5273,53 +5273,86 @@ function GalonMovActionModal({ movement, kind, onClose, onDone }) {
 
 // "Setel Ulang Stok Awal" — fleet-scoped. delta (append a correction, history kept) or void_all
 // (soft-void every opening row in this fleet, typed row-count confirm). Server-computed preview.
-function GalonOpeningResetModal({ ef, init, onClose, onDone }) {
+// FIXED: ONE base + honest preview. The target names the OPENING BASELINE ("Angka stok awal baru");
+// baseline & depot are read at the SAME exact scope (a specific fleet or the global depot — never a
+// cross-fleet sum). The preview is the SERVER's dryRun of the very write that runs on confirm, and it
+// blocks any result that would push a figure below 0. The current baseline (the mysterious "307") is
+// shown with a traceable row list.
+const OGFIG = { depot: 'go.figDepot', total: 'go.figTotal' };
+function GalonOpeningResetModal({ ef, fleet, init, onClose, onDone }) {
   const [mode, setMode] = uSx((init && init.mode) || 'delta');
+  const [scope, setScope] = uSx((ef && ef !== 'all') ? ef : '');   // '' = global depot; specific fleet otherwise
   const [target, setTarget] = uSx((init && init.target) || '0');
   const [note, setNote] = uSx('');
   const [confirm, setConfirm] = uSx('');
   const [imp, setImp] = uSx(null);
+  const [showRows, setShowRows] = uSx(false);
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
-  const fleetId = (ef && ef !== 'all') ? ef : '';
-  const q = () => { const p = ['mode=' + mode, 'fleetId=' + encodeURIComponent(fleetId)]; if (mode === 'delta') p.push('targetQty=' + (parseInt(target || '0', 10) || 0)); return p.join('&'); };
+  const scopeOpts = (fleet || []).filter(Boolean);
+  const q = () => { const p = ['mode=' + mode, 'fleetId=' + encodeURIComponent(scope)]; if (mode === 'delta') p.push('targetQty=' + (parseInt(target || '0', 10) || 0)); return p.join('&'); };
   uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  uEx(() => { setImp(null); window.API.distribusi.openingResetImpact(q()).then((r) => setImp(r.data)).catch(() => setImp(null)); }, [mode, target]);
+  uEx(() => { setImp(null); setShowRows(false); window.API.distribusi.openingResetImpact(q()).then((r) => setImp(r.data)).catch(() => setImp(null)); }, [mode, target, scope]);
   const commit = () => {
-    if (saving) return;
+    if (saving || (imp && imp.blocked)) return;
     if (!note.trim()) { setErr(trD('gv.noteReq')); return; }
     if (mode === 'void_all' && imp && confirm.trim() !== String(imp.rowCount)) { setErr(trD('go.confirmErr', { n: imp.rowCount })); return; }
     setSaving(true); setErr('');
-    const body = { mode, fleetId, note: note.trim() };
+    const body = { mode, fleetId: scope, note: note.trim() };
     if (mode === 'delta') body.targetQty = parseInt(target || '0', 10) || 0; else body.confirm = confirm.trim();
     window.API.distribusi.openingReset(body).then(() => { setSaving(false); onDone(trD('go.resetDone')); }).catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
+  const arrow = (a, b) => <b className="tnum">{numX(a)} → {numX(b)}</b>;
   return (
     <div className="modal-scrim" onClick={onClose} style={{ zIndex: 230 }}>
-      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('go.resetTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{fleetId || trD('dist.grAllFleets')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+      <div className="modal-card" style={{ maxWidth: 470 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('go.resetTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{scope || trD('go.depotGlobal')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
         <div className="modal-body">
+          {/* Scope — ONE fleet at a time (or the global depot). No cross-fleet summation. */}
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('go.scope')}</label>
+          <select className="fld" value={scope} onChange={(e) => setScope(e.target.value)}>
+            <option value="">{trD('go.depotGlobal')}</option>
+            {scopeOpts.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+
           <label className={`dist-gr-mode ${mode === 'delta' ? 'on' : ''}`} onClick={() => setMode('delta')}><input type="radio" checked={mode === 'delta'} readOnly /><div><b>{trD('go.modeDelta')}</b><span>{trD('go.modeDeltaDesc')}</span></div></label>
           <label className={`dist-gr-mode danger ${mode === 'void_all' ? 'on' : ''}`} onClick={() => setMode('void_all')}><input type="radio" checked={mode === 'void_all'} readOnly /><div><b>{trD('go.modeVoidAll')}</b><span>{trD('go.modeVoidAllDesc')}</span></div></label>
           {mode === 'delta' && (<><label className="fld-label">{trD('go.targetLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label><input className="fld tnum" value={target} inputMode="numeric" placeholder="0" onChange={(e) => setTarget(e.target.value.replace(/[^0-9]/g, ''))} /></>)}
+
+          {/* Trace the current baseline (the "307") to its ledger rows. */}
+          {imp && (
+            <div className="go-baseline">
+              <span>{trD('go.baselineNow', { n: numX(imp.baselineBefore), c: imp.rowCount })}</span>
+              {imp.rowCount > 0 && <button type="button" className="dist-link" onClick={() => setShowRows((v) => !v)}>{trD('go.detail')}</button>}
+            </div>
+          )}
+          {imp && showRows && (
+            <div className="go-rows">{imp.baselineRows.map((r) => <div key={r.id} className="go-row"><span className="tnum">{r.qty > 0 ? '+' : ''}{numX(r.qty)}</span><em>{fmtDT(r.createdAt)}{r.actorName ? ' · ' + r.actorName : ''}{r.note ? ' · ' + r.note : ''}</em></div>)}</div>
+          )}
+
+          {/* Honest 4-line preview — the SAME figures the write produces (server dryRun). */}
           {imp && (
             <div className="gv-impact">
-              <div className="gv-impact-row"><span>{trD('dist.gmAtDepot')}</span><b className="tnum">{numX(imp.depotBefore)} → {numX(imp.depotAfter)}</b></div>
+              <div className="gv-impact-row"><span>{trD('go.baseline')}</span>{arrow(imp.baselineBefore, imp.baselineAfter)}</div>
+              <div className="gv-impact-row"><span>{trD('go.depotRunning')}</span>{arrow(imp.depotBefore, imp.depotAfter)}</div>
               <div className="gv-impact-safe"><IconCheck s={13} />{trD('gv.custSafe', { n: numX(imp.atCustomersBefore) })}</div>
-              <div className="gv-impact-row muted"><span>{trD('dist.gmTotal')}</span><b className="tnum">{numX(imp.totalBefore)} → {numX(imp.totalAfter)}</b></div>
+              <div className="gv-impact-row muted"><span>{trD('dist.gmDimiliki')}</span>{arrow(imp.totalBefore, imp.totalAfter)}</div>
               {mode === 'void_all' && <div className="gv-impact-row muted"><span>{trD('go.rowCount')}</span><b className="tnum">{numX(imp.rowCount)}</b></div>}
             </div>
           )}
+          {/* FIX 2 — refuse an impossible (negative) result, naming the figure. */}
+          {imp && imp.blocked && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('go.negBlock')} {imp.offenders.map((o) => trD(OGFIG[o.figure] || 'go.figTotal') + ' → ' + numX(o.value)).join('; ')}</span></div>}
+
           <label className="fld-label">{trD('gv.noteLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
           <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={note} placeholder={trD('gv.notePh')} onChange={(e) => setNote(e.target.value)} />
-          {mode === 'void_all' && (<>
+          {mode === 'void_all' && !(imp && imp.blocked) && (<>
             <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('go.voidAllWarn')}</span></div>
             <label className="fld-label">{trD('go.confirmLbl', { n: (imp && imp.rowCount) || 0 })}</label>
             <input className="fld tnum" value={confirm} inputMode="numeric" placeholder={String((imp && imp.rowCount) || 0)} onChange={(e) => setConfirm(e.target.value.replace(/[^0-9]/g, ''))} />
           </>)}
           {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
         </div>
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className={'btn ' + (mode === 'void_all' ? 'btn-danger' : 'btn-primary')} disabled={saving} onClick={commit}>{saving ? '…' : trD('go.resetDo')}</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className={'btn ' + (mode === 'void_all' ? 'btn-danger' : 'btn-primary')} disabled={saving || (imp && imp.blocked)} onClick={commit}>{saving ? '…' : trD('go.resetDo')}</button></div>
       </div>
     </div>
   );

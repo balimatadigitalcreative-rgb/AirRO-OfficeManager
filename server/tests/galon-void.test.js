@@ -97,22 +97,24 @@ describe('fleet-scoped reset', () => {
     const before = await balSnapshot();
     const merahBefore = (await gallon('Merah')).stock.atDepot;
     const globalBefore = (await prisma.gallonMovement.findMany({ where: { fleetId: '', type: 'opening', active: true } })).length;
-    // impact preview for void_all on Biru
-    const imp = (await request(app).get('/api/v1/distribusi/gallon/opening/reset/impact?mode=void_all&fleetId=Biru').set(auth(owner))).body.data;
-    expect(imp.rowCount).toBe(1);
-    const r = await request(app).post('/api/v1/distribusi/gallon/opening/reset').set(auth(owner)).send({ mode: 'void_all', fleetId: 'Biru', note: 'baseline Biru salah', confirm: String(imp.rowCount) });
+    // delta reset Biru 300 → 150 (Biru has a customer holding gallons, so void_all would be correctly
+    // blocked — that negative guard is covered in opening-reset.test.js; here we check scope isolation).
+    const imp = (await request(app).get('/api/v1/distribusi/gallon/opening/reset/impact?mode=delta&targetQty=150&fleetId=Biru').set(auth(owner))).body.data;
+    expect(imp.blocked).toBe(false);
+    const r = await request(app).post('/api/v1/distribusi/gallon/opening/reset').set(auth(owner)).send({ mode: 'delta', targetQty: 150, fleetId: 'Biru', note: 'baseline Biru salah' });
     expect(r.status).toBe(201);
-    // Biru opening rows voided…
-    expect((await prisma.gallonMovement.count({ where: { fleetId: 'Biru', type: 'opening', active: true } }))).toBe(0);
+    expect((await gallon('Biru')).opening.total).toBe(150);   // baseline now 150 (delta appended, history kept)
     // …Merah + global depot untouched…
     expect((await gallon('Merah')).stock.atDepot).toBe(merahBefore);
     expect((await prisma.gallonMovement.findMany({ where: { fleetId: '', type: 'opening', active: true } })).length).toBe(globalBefore);
     // …and cA (a Biru customer) held is unchanged, per-customer.
     expect(await balSnapshot()).toEqual(before);
   });
-  it('wrong typed count is rejected', async () => {
-    const r = await request(app).post('/api/v1/distribusi/gallon/opening/reset').set(auth(owner)).send({ mode: 'void_all', fleetId: 'Merah', note: 'x', confirm: '99' });
+  it('wrong typed count is rejected (void_all, clean fleet)', async () => {
+    await makeOpening(50, 'Kuning');   // no customers on Kuning → void_all is not blocked; the confirm gate applies
+    const r = await request(app).post('/api/v1/distribusi/gallon/opening/reset').set(auth(owner)).send({ mode: 'void_all', fleetId: 'Kuning', note: 'x', confirm: '99' });
     expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/jumlah baris/i);
   });
 });
 

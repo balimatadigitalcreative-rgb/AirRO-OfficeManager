@@ -315,6 +315,7 @@
       'gv.noteLbl': 'Note', 'gv.notePh': 'Why is this row being changed?', 'gv.noteReq': 'A note is required.', 'gv.voidDone': 'Row cancelled', 'gv.restoreDone': 'Row restored', 'gv.deleteDone': 'Row deleted permanently',
       // Reset opening stock
       'go.resetBtn': 'Reset opening stock', 'go.resetTitle': 'Reset opening stock', 'go.resetDo': 'Reset', 'go.resetDone': 'Opening stock reset',
+      'go.scope': 'Scope', 'go.depotGlobal': 'Global depot', 'go.baseline': 'Opening (baseline)', 'go.depotRunning': 'Running depot stock', 'go.baselineNow': 'Current opening: {n} gallons ({c} rows)', 'go.detail': 'View rows', 'go.negBlock': 'Rejected — a figure would go negative:', 'go.figDepot': 'depot stock', 'go.figTotal': 'total owned',
       'go.modeDelta': 'Correct to a new figure', 'go.modeDeltaDesc': 'Keeps history — appends a correction of the difference.', 'go.modeVoidAll': 'Cancel all opening rows', 'go.modeVoidAllDesc': 'Soft-cancels every opening row in this fleet only.',
       'go.targetLbl': 'New opening figure', 'go.rowCount': 'Opening rows', 'go.voidAllWarn': 'Cancels all opening rows for this fleet. Reversible per row from the ledger.', 'go.confirmLbl': 'Type the row count ({n}) to confirm', 'go.confirmErr': 'Type {n} to confirm.',
       'pc.colDate': 'Date', 'pc.colCode': 'Txn code', 'pc.colType': 'Type', 'pc.colGalon': 'Gallons', 'pc.colUnit': 'Unit price', 'pc.colAmount': 'Amount', 'pc.colRunning': 'Running bon',
@@ -994,6 +995,7 @@
       'gv.noteLbl': 'Catatan', 'gv.notePh': 'Kenapa baris ini diubah?', 'gv.noteReq': 'Catatan wajib diisi.', 'gv.voidDone': 'Baris dibatalkan', 'gv.restoreDone': 'Baris dipulihkan', 'gv.deleteDone': 'Baris dihapus permanen',
       // Setel ulang stok awal
       'go.resetBtn': 'Setel Ulang Stok Awal', 'go.resetTitle': 'Setel Ulang Stok Awal', 'go.resetDo': 'Setel Ulang', 'go.resetDone': 'Stok awal disetel ulang',
+      'go.scope': 'Cakupan', 'go.depotGlobal': 'Depot global', 'go.baseline': 'Stok awal (baseline)', 'go.depotRunning': 'Stok depot berjalan', 'go.baselineNow': 'Stok awal saat ini: {n} galon ({c} baris)', 'go.detail': 'Lihat rincian', 'go.negBlock': 'Ditolak — sebuah angka akan negatif:', 'go.figDepot': 'stok depot', 'go.figTotal': 'total dimiliki',
       'go.modeDelta': 'Koreksi ke angka baru', 'go.modeDeltaDesc': 'Riwayat tetap — menambah koreksi sebesar selisih.', 'go.modeVoidAll': 'Batalkan semua baris stok awal', 'go.modeVoidAllDesc': 'Membatalkan (soft) semua baris stok awal di armada ini saja.',
       'go.targetLbl': 'Angka stok awal baru', 'go.rowCount': 'Baris stok awal', 'go.voidAllWarn': 'Membatalkan semua baris stok awal armada ini. Bisa dipulihkan per baris dari ledger.', 'go.confirmLbl': 'Ketik jumlah baris ({n}) untuk konfirmasi', 'go.confirmErr': 'Ketik {n} untuk konfirmasi.',
       'pc.colDate': 'Tanggal', 'pc.colCode': 'Kode Transaksi', 'pc.colType': 'Tipe', 'pc.colGalon': 'Galon', 'pc.colUnit': 'Harga Satuan', 'pc.colAmount': 'Nominal', 'pc.colRunning': 'Sisa Bon Berjalan',

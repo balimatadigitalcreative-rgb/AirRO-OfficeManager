@@ -3525,3 +3525,11 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .gm-loc.rusak { border-left: 3px solid var(--danger, #dc2626); }
 .gm-posisi-acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .run-armada-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #b45309; background: var(--warn-bg, #fef3c7); border-radius: 999px; padding: 3px 10px; margin-left: auto; margin-right: 8px; }
+
+/* ── Setel Ulang Stok Awal — baseline trace rows ─────────────────────────── */
+.go-baseline { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--text-mut); }
+.go-rows { margin-top: 6px; max-height: 150px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.go-row { display: flex; gap: 8px; padding: 5px 10px; font-size: 12px; border-bottom: 1px dashed var(--border); }
+.go-row:last-child { border-bottom: 0; }
+.go-row .tnum { min-width: 46px; font-weight: 700; }
+.go-row em { color: var(--text-mut); font-style: normal; }

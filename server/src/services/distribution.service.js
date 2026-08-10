@@ -2498,6 +2498,19 @@ async function gallonStock(user, qFleet) {
   const totalDimiliki = totalOwned + rusakHilang;   // 4-bucket grand total (incl. rusak/hilang)
   return { totalOwned, atCustomers, atDepot, atArmada, armadaByFleet, rusakHilang, totalDimiliki };
 }
+// EXACT-scope stock: one fleetId only ('' = global depot), never summed across fleets. This is the
+// comparable base for the opening-reset dialog — the opening baseline is also read at this exact
+// fleetId, so baseline and depot are the SAME base (the "Setel Ulang" −307 bug was mixing the two).
+async function scopedGallonStock(actor, fleetId) {
+  if (fleetId && !fleetAllows(actor, fleetId)) throw ApiError.forbidden('Armada di luar akses Anda.');
+  const where = { active: true, fleetId };
+  const cutRows = await prisma.gallonMovement.findMany({ where: { ...where, type: 'load_out' }, select: { createdAt: true } });
+  let cutoverMs = null; cutRows.forEach((r) => { const t = movMs(r); if (cutoverMs == null || t < cutoverMs) cutoverMs = t; });
+  const rows = await prisma.gallonMovement.findMany({ where, select: { type: true, qty: true, customerId: true, fleetId: true, createdAt: true, note: true } });
+  let totalOwned = 0, atCustomers = 0, atDepot = 0, rusakHilang = 0, atArmada = 0;
+  rows.forEach((r) => { totalOwned += totalEffect(r); atCustomers += custEffect(r); atDepot += depotEffect(r, cutoverMs); rusakHilang += rusakEffect(r); atArmada += armadaEffect(r, cutoverMs); });
+  return { totalOwned, atCustomers, atDepot, atArmada, rusakHilang, totalDimiliki: totalOwned + rusakHilang };
+}
 // The four-location INVARIANT, computed independently and returned for tests + the UI drift banner:
 //   depot + armada + pelanggan + rusak/hilang === total dimiliki.
 async function gallonInvariant(user, qFleet) {
@@ -2609,6 +2622,12 @@ async function setOpeningStock(body, actor) {
   const isFirst = existing.length === 0;
   const delta = target - current;
   if (delta === 0) throw ApiError.badRequest('Stok awal tidak berubah (nilai sama dengan saat ini).');
+  // A gallon count can never be negative: reject an adjustment that would drive depot/total below 0.
+  const scoped = await scopedGallonStock(actor, fleetId);
+  if (scoped.atDepot + delta < 0 || scoped.totalOwned + delta < 0) {
+    const fig = scoped.atDepot + delta < 0 ? `stok depot akan menjadi ${scoped.atDepot + delta}` : `total dimiliki akan menjadi ${scoped.totalOwned + delta}`;
+    throw ApiError.badRequest(`Ditolak: ${fig} (tidak boleh negatif). ${current} galon stok awal saat ini sebagian sudah tersalur.`);
+  }
   const snap = await actorSnap(actor);
   const note = isFirst ? reason : `${reason} · penyesuaian ${current} → ${target}`;
   const mov = await prisma.gallonMovement.create({ data: { type: 'opening', qty: delta, fleetId, active: true, note, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
@@ -2897,53 +2916,63 @@ async function openingRowsForFleet(fleetId) {
   const candidates = await prisma.gallonMovement.findMany({ where: { active: true, customerId: null, type: { in: ['opening', 'correction'] }, fleetId }, orderBy: { createdAt: 'asc' } });
   return candidates.filter(isOpeningRow);
 }
-async function openingResetImpact(body, actor) {
-  const fleetId = resolveResetFleet(actor, body && body.fleetId);
+// ── OPENING-STOCK RESET — ONE code path for preview AND write (dryRun toggles the append) ──────────
+// Fixes the "Setel Ulang Stok Awal −307" bug: baseline and depot are read at the SAME exact scope, the
+// target names ONE figure (the opening baseline), the delta is applied consistently, and any result
+// that would drive depot/total below 0 is REJECTED (a gallon count can never be negative). Never sums
+// across fleets — the scope is one fleetId ('' = global depot). Returns the baseline rows so the dialog
+// can show "Baris stok awal: N galon (n baris) [Lihat rincian]".
+async function planOpeningReset(body, actor, opts) {
+  const dryRun = !!(opts && opts.dryRun);
+  const fleetId = resolveResetFleet(actor, body && body.fleetId);   // exact fleetId, '' = global depot
   const mode = (body && body.mode) === 'void_all' ? 'void_all' : 'delta';
-  const before = await gallonStock(actor, fleetId ? fleetId : undefined);
-  const rows = await openingRowsForFleet(fleetId);
-  const current = rows.reduce((a, r) => a + r.qty, 0);
-  if (mode === 'void_all') {
-    const removed = rows.reduce((a, r) => a + totalEffect(r), 0);   // opening totalEffect = qty
-    return { mode, fleetId, rowCount: rows.length, openingCurrent: current,
-      depotBefore: before.atDepot, depotAfter: before.atDepot - removed,
-      atCustomersBefore: before.atCustomers, atCustomersAfter: before.atCustomers, customersUnchanged: true,
-      totalBefore: before.totalOwned, totalAfter: before.totalOwned - removed };
-  }
-  const target = Math.max(0, Math.round(+(body && body.targetQty) || 0));
-  const delta = target - current;
-  return { mode, fleetId, openingCurrent: current, target, delta,
-    depotBefore: before.atDepot, depotAfter: before.atDepot + delta,
-    atCustomersBefore: before.atCustomers, atCustomersAfter: before.atCustomers, customersUnchanged: true,
-    totalBefore: before.totalOwned, totalAfter: before.totalOwned + delta };
-}
-async function resetOpeningStock(body, actor) {
-  const fleetId = resolveResetFleet(actor, body && body.fleetId);
   const note = String((body && body.note) || '').trim();
-  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
-  const mode = (body && body.mode) === 'void_all' ? 'void_all' : 'delta';
-  if (mode === 'delta') {
-    // Preferred: append a single 'opening' DELTA row — the existing append-only pattern.
-    const target = Math.max(0, Math.round(+(body && body.targetQty) || 0));
-    const r = await setOpeningStock({ qty: target, fleet: fleetId || 'all', reason: note }, actor);
-    const after = await gallonStock(actor, fleetId ? fleetId : undefined);
-    return { mode, fleetId, ...r, stock: after };
-  }
-  // void_all — bulk soft-void of opening rows in this fleet only.
+  const before = await scopedGallonStock(actor, fleetId);           // SAME base as the baseline below
   const rows = await openingRowsForFleet(fleetId);
-  const typed = String((body && body.confirm) || '').trim();
-  if (typed !== String(rows.length)) throw ApiError.badRequest(`Ketik jumlah baris (${rows.length}) untuk konfirmasi.`);
-  if (!rows.length) throw ApiError.badRequest('Tidak ada baris stok awal untuk direset di armada ini.');
+  const baseline = rows.reduce((a, r) => a + r.qty, 0);
+  const baselineRows = rows.map((r) => ({ id: r.id, qty: r.qty, note: r.note || '', createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null, actorName: r.actorName || null }));
+  const target = mode === 'void_all' ? 0 : Math.max(0, Math.round(+(body && body.targetQty) || 0));
+  const delta = target - baseline;   // applied to the SAME base (baseline → target; depot/total move by delta)
+  const after = { baseline: target, depot: before.atDepot + delta, customers: before.atCustomers, total: before.totalOwned + delta, dimiliki: before.totalDimiliki + delta };
+  // FIX 2 — reject impossible results: no figure may go below 0. Name the offender.
+  const offenders = [];
+  if (after.depot < 0) offenders.push({ figure: 'depot', value: after.depot });
+  if (after.total < 0) offenders.push({ figure: 'total', value: after.total });
+  const blocked = offenders.length > 0;
+  const preview = {
+    mode, fleetId, scopeLabel: fleetId || 'depot global',
+    baselineBefore: baseline, baselineAfter: after.baseline,
+    depotBefore: before.atDepot, depotAfter: after.depot,
+    atCustomersBefore: before.atCustomers, atCustomersAfter: after.customers, customersUnchanged: true,
+    totalBefore: before.totalOwned, totalAfter: after.total,
+    dimilikiBefore: before.totalDimiliki, dimilikiAfter: after.dimiliki,
+    target, delta, rowCount: rows.length, baselineRows, blocked, offenders,
+  };
+  if (dryRun) return preview;
+  // ── EXECUTE ──
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  if (blocked) throw ApiError.badRequest(`Ditolak: ${offenders.map((o) => `${o.figure === 'depot' ? 'stok depot' : 'total dimiliki'} akan menjadi ${o.value} (tidak boleh negatif)`).join('; ')}.`);
   const snap = await actorSnap(actor);
-  const before = await gallonStock(actor, fleetId ? fleetId : undefined);
-  const ids = rows.map((r) => r.id);
-  await prisma.gallonMovement.updateMany({ where: { id: { in: ids } }, data: { active: false } });
-  const after = await gallonStock(actor, fleetId ? fleetId : undefined);
-  const detail = JSON.stringify({ v: 1, kind: 'galon-opening-void_all', ids });
-  const audit = await logAudit('input', `Batalkan semua stok awal galon (${fleetId || 'depot global'})`,
-    `${ids.length} baris · depot ${before.atDepot} → ${after.atDepot} · di pelanggan TIDAK BERUBAH (${after.atCustomers}) · ${note} · SNAPSHOT ${detail}`, snap, fleetId);
-  return { mode, fleetId, batchId: audit.id, voided: ids.length, ids, before, after, stock: after };
+  if (mode === 'void_all') {
+    if (!rows.length) throw ApiError.badRequest('Tidak ada baris stok awal untuk direset di cakupan ini.');
+    const typed = String((body && body.confirm) || '').trim();
+    if (typed !== String(rows.length)) throw ApiError.badRequest(`Ketik jumlah baris (${rows.length}) untuk konfirmasi.`);
+    const ids = rows.map((r) => r.id);
+    await prisma.gallonMovement.updateMany({ where: { id: { in: ids } }, data: { active: false } });
+    const detail = JSON.stringify({ v: 1, kind: 'galon-opening-void_all', ids });
+    const audit = await logAudit('input', `Batalkan semua stok awal galon (${fleetId || 'depot global'})`,
+      `${ids.length} baris · stok awal ${baseline} → 0 · depot ${before.atDepot} → ${after.depot} · di pelanggan TIDAK BERUBAH (${before.atCustomers}) · ${note}`, snap, fleetId);
+    return { mode, fleetId, batchId: audit.id, voided: ids.length, ids, preview, stock: await scopedGallonStock(actor, fleetId) };
+  }
+  // delta — append ONE 'opening' delta row (append-only; baseline → target).
+  if (delta === 0) throw ApiError.badRequest('Stok awal tidak berubah (nilai sama dengan saat ini).');
+  const mov = await prisma.gallonMovement.create({ data: { type: 'opening', qty: delta, fleetId, active: true, note: rows.length ? `${note} · penyesuaian ${baseline} → ${target}` : note, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+  await logAudit('koreksi', rows.length ? 'Penyesuaian stok galon awal' : 'Set stok galon awal',
+    `${baseline} → ${target} (${delta >= 0 ? '+' : ''}${delta}) · depot ${before.atDepot} → ${after.depot} · di pelanggan TIDAK BERUBAH (${before.atCustomers}) · ${note}`, snap, fleetId);
+  return { mode, fleetId, movement: mov, opening: { total: target, previous: baseline, delta }, preview, stock: await scopedGallonStock(actor, fleetId) };
 }
+async function openingResetImpact(body, actor) { return planOpeningReset(body, actor, { dryRun: true }); }
+async function resetOpeningStock(body, actor) { return planOpeningReset(body, actor, { dryRun: false }); }
 
 // ── Delivery board ──────────────────────────────────────────────────────────
 // One stop per fleet per date: 'jadwal' rows generated (idempotent) from each
@@ -3424,7 +3453,7 @@ module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
-  gallonInvariant, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair,
+  gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
