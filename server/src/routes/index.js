@@ -62,6 +62,19 @@ router.get('/version', (req, res) => {
   res.json(readVersion());
 });
 
+// PUBLIC signed invoice page (WhatsApp share). Unauthed, like /health — the token IS the credential.
+// Renders ONE invoice as noindex HTML (customer can Save-as-PDF). Expired/revoked/unknown → friendly page.
+const invoiceShare = require('../services/invoiceShare.service');
+router.get('/inv/:token', async (req, res) => {
+  let view;
+  try { view = await invoiceShare.publicView(req.params.token); }
+  catch (e) { view = { status: 'notfound' }; }
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  res.set('Cache-Control', 'no-store');
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.status(view.status === 'ok' ? 200 : 404).send(invoiceShare.renderPublicHtml(view));
+});
+
 router.use('/auth', require('./auth.routes'));
 router.use('/users', require('./user.routes'));
 router.use('/roles', require('./role.routes'));

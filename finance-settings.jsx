@@ -349,6 +349,56 @@ function BusinessUnitsPanel() {
   );
 }
 
+// WhatsApp message templates — shared across the business (app-state store). Editable bodies with
+// {placeholder} tokens; a live preview fills them with sample data so staff see the real message.
+const WA_SAMPLE = { nama: 'Budi', kode: 'C-0136', sisa_bon: 'Rp 120.000', periode: '1 – 31 Agu 2026', jatuh_tempo: '15 Agu 2026', no_invoice: 'INV-2026-0007', link: 'https://airro…/inv/xxxx', nama_usaha: 'AirRO Reverse Osmosis' };
+const WA_TPL_LIMIT = 1000;
+function WaTemplatesPanel() {
+  const [tpls, setTpls] = uSs(null);
+  const [saved, setSaved] = uSs(false);
+  const [err, setErr] = uSs('');
+  uEs(() => {
+    window.API.state.all().then((r) => setTpls(mergeWaTemplates(r && r.data && r.data[WA_TPL_KEY]))).catch(() => setTpls(mergeWaTemplates(null)));
+  }, []);
+  const editBody = (id, body) => setTpls((ts) => ts.map((t) => t.id === id ? { ...t, body } : t));
+  const save = () => {
+    setErr('');
+    window.API.state.set(WA_TPL_KEY, tpls).then(() => { setSaved(true); setTimeout(() => setSaved(false), 2000); })
+      .catch(() => setErr(trS('wa.saveErr')));
+  };
+  const restore = () => setTpls(DEFAULT_WA_TEMPLATES.map((t) => ({ ...t })));
+  if (!tpls) return null;
+  return (
+    <div className="card alert-settings">
+      <div className="cat-group-head" style={{ marginBottom: 6 }}>
+        <span className="icon-tile" style={{ background: 'var(--mint-100)', color: 'var(--green-800)', flexShrink: 0 }}><IconWhatsApp s={19} /></span>
+        <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap' }}>{trS('wa.tplTitle')}</div>
+        <div style={{ flex: 1 }} />
+        <button className="btn btn-ghost btn-sm" onClick={restore}>{trS('set.restore')}</button>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginBottom: 10 }}>{trS('wa.tplIntro')}</div>
+      <div className="wa-tpl-ph">{WA_PLACEHOLDERS.map((p) => <code key={p}>{'{' + p + '}'}</code>)}</div>
+      {tpls.map((t) => {
+        const preview = renderWaTemplate(t.body, WA_SAMPLE);
+        const over = preview.length > WA_TPL_LIMIT;
+        return (
+          <div key={t.id} className="wa-tpl-item">
+            <div className="wa-tpl-name">{t.name}</div>
+            <textarea className="fld wa-msg" rows={4} value={t.body} onChange={(e) => editBody(t.id, e.target.value)} />
+            <div className={'wa-count' + (over ? ' over' : '')}>{preview.length}/{WA_TPL_LIMIT}</div>
+            <div className="wa-tpl-prev">{preview}</div>
+          </div>
+        );
+      })}
+      {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+        <button className="btn btn-primary" onClick={save}>{trS('wa.tplSave')}</button>
+        {saved && <span className="wa-resolved"><IconCheck s={13} />{trS('wa.tplSaved')}</span>}
+      </div>
+    </div>
+  );
+}
+
 function SettingsScreen({ cats, onChange, canWipe, canManageUnits, settings, onSettingsChange, entries, accounts, catLabel }) {
   const setIncome = (income) => onChange({ ...cats, income });
   const setExpense = (expense) => onChange({ ...cats, expense });
@@ -394,6 +444,9 @@ function SettingsScreen({ cats, onChange, canWipe, canManageUnits, settings, onS
           </div>
         </div>
       )}
+
+      {/* WhatsApp message templates (shared across the business). */}
+      <WaTemplatesPanel />
 
       {/* Business unit dictionary (Stage 1 — labels only, changes no numbers). Owner-only. */}
       {canManageUnits && <BusinessUnitsPanel />}

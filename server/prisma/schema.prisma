@@ -942,6 +942,40 @@ model DistInvoice {
   @@index([fleetId])
 }
 
+// Signed, unguessable, EXPIRING public link to ONE invoice (the WhatsApp share target — wa.me can't
+// attach a file). The public page (no login, noindex) renders only that invoice. Revocable.
+model InvoiceLink {
+  id           String   @id @default(cuid())
+  token        String   @unique                  // unguessable (crypto random) — the whole secret
+  invoiceId    String
+  expiresAt    DateTime                           // default 30 days from creation
+  revoked      Boolean  @default(false)
+  createdById  String?
+  createdByName String?
+  createdAt    DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+// One record per time an invoice was DISPATCHED (opened in WhatsApp). We only know the app was
+// opened — never delivery/read — so status wording is "Dikirim (dibuka di WhatsApp)".
+model InvoiceDispatch {
+  id              String   @id @default(cuid())
+  invoiceId       String
+  customerId      String
+  channel         String   @default("wa")
+  phone           String   @default("")           // E.164, e.g. 628123456789
+  messageSnapshot String   @default("")            // the exact message text sent
+  linkUrl         String   @default("")
+  linkExpiresAt   DateTime?
+  sentById        String?
+  sentByName      String?
+  sentAt          DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([customerId])
+}
+
 // Proof photos / PDFs stored OUT of the record payload. Records (Entry/Setoran) keep
 // only a tiny reference ({"ref":"<id>","name":..,"isImg":..}) in their `proof` column,
 // so hydrate/login never drags the base64 bytes. The bytes live here and are fetched

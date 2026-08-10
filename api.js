@@ -197,6 +197,11 @@
         create: (customerId, data) => req('POST', '/distribusi/customers/' + customerId + '/invoices', data || {}),
         list: (customerId) => req('GET', '/distribusi/customers/' + customerId + '/invoices'),
         get: (id) => req('GET', '/distribusi/invoices/' + id),
+        // WhatsApp share: signed public link (create/reuse), revoke, dispatch log + history.
+        link: (id) => req('POST', '/distribusi/invoices/' + id + '/link'),                     // → { token, url, expiresAt }
+        revoke: (id) => req('POST', '/distribusi/invoices/' + id + '/revoke'),                 // → { revoked }
+        dispatch: (data) => req('POST', '/distribusi/invoices/dispatch', data),                // log a WA send
+        dispatches: (qs) => req('GET', '/distribusi/invoices/dispatches' + (qs ? '?' + qs : '')),
       },
       audit: (qs) => req('GET', '/distribusi/audit' + (qs ? '?' + qs : '')),
       // Cash Integration — one gated read (distribusiCashIntegrasi) returning { transactions, customers, audit }.

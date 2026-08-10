@@ -124,9 +124,15 @@ router.post('/transactions/bulk', requireAnyCap(['distribusiVoid', 'distribusiLe
 
 // ── Invoices / notas ── (documents; never mutate transactions). Any distribusi user can
 // view; creating one needs input or customer-management (so staff can bill on the spot).
+router.get('/invoices/dispatches', requireCap('distribusi'), validate({ query: ctrl.schemas.dispatchQuery }), ctrl.invoiceDispatches);   // BEFORE :id so 'dispatches' isn't an id
 router.get('/invoices/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getInvoice);
 router.get('/customers/:id/invoices', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.listInvoices);
 router.post('/customers/:id/invoices', requireAnyCap(['distribusiInput', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.invoiceCreateSchema }), ctrl.createInvoice);
+// Signed shareable link (WhatsApp) + dispatch log. The PUBLIC page is unauthed (mounted in routes/index).
+router.post('/invoices/:id/link', requireAnyCap(['distribusiInput', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams }), ctrl.invoiceLink);
+router.post('/invoices/:id/revoke', requireAnyCap(['distribusiInput', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams }), ctrl.invoiceRevoke);
+router.post('/invoices/dispatch', requireAnyCap(['distribusiInput', 'distribusiCustomers']), validate({ body: ctrl.schemas.dispatchSchema }), ctrl.invoiceDispatch);
+router.get('/invoices/dispatches', requireCap('distribusi'), validate({ query: ctrl.schemas.dispatchQuery }), ctrl.invoiceDispatches);
 
 // ── Audit (owner) + dashboard ── each view now has its OWN capability (the UI hides the
 // menu without it; the server rejects the request regardless of what the UI shows).

@@ -189,6 +189,36 @@ function normalizePhone(raw) {
 const phoneWasFixed = (raw) => { const d = expandSciDigits(raw).replace(/\D/g, ''); return !!d && normalizePhone(raw) !== d; };
 // WhatsApp wants the international form. Numbers are stored "08…", so: 62 + rest.
 const waNumber = (raw) => { const p = normalizePhone(raw); return p.startsWith('0') ? '62' + p.slice(1) : p; };
+// The ONE guarded gate before building any wa.me link — mirrors server/src/lib/phone.js toE164:
+// returns the E.164 digits (no '+') only when they are a plausible length (9–15), else '' so the
+// UI can disable the action and show "Nomor HP belum diisi" instead of opening a broken chat.
+const waE164 = (raw) => { const n = waNumber(raw); return (n && /^\d{9,15}$/.test(n)) ? n : ''; };
+const waValid = (raw) => !!waE164(raw);
+const waHref = (raw, text) => { const e = waE164(raw); return e ? ('https://wa.me/' + e + (text ? '?text=' + encodeURIComponent(text) : '')) : ''; };
+
+// ── WhatsApp message templates ──────────────────────────────────────────────
+// Editable in Pengaturan (shared across the business via the app-state store, key WA_TPL_KEY).
+// Placeholders are filled from the invoice/customer at send time; unknown ones are left blank.
+const WA_TPL_KEY = 'airro_wa_templates';
+const WA_PLACEHOLDERS = ['nama', 'kode', 'sisa_bon', 'periode', 'jatuh_tempo', 'no_invoice', 'link', 'nama_usaha'];
+const DEFAULT_WA_TEMPLATES = [
+  { id: 'tagihan', name: 'Tagihan baru', body: 'Halo {nama}, berikut tagihan air dari {nama_usaha}.\nNo. {no_invoice} · Periode {periode}\nSisa bon: {sisa_bon}\nJatuh tempo: {jatuh_tempo}\n\nRincian & simpan PDF: {link}\n\nTerima kasih 🙏' },
+  { id: 'pengingat', name: 'Pengingat', body: 'Halo {nama}, mengingatkan sisa bon Anda di {nama_usaha} sebesar {sisa_bon} (No. {no_invoice}), jatuh tempo {jatuh_tempo}.\n\nRincian: {link}\n\nTerima kasih 🙏' },
+  { id: 'riwayat', name: 'Riwayat transaksi (bukan tagihan)', body: 'Halo {nama}, berikut riwayat transaksi air Anda di {nama_usaha} untuk periode {periode}.\nNo. {no_invoice}\n\nLihat rincian: {link}\n\n(Ini bukan tagihan, hanya rekap.)' },
+  { id: 'terimakasih', name: 'Terima kasih', body: 'Terima kasih {nama} 🙏 Pembayaran Anda di {nama_usaha} telah kami terima. Sisa bon saat ini: {sisa_bon}.\n\nRincian: {link}' },
+];
+// Merge stored (edited) templates over the defaults, keeping order + any custom additions.
+function mergeWaTemplates(stored) {
+  const arr = Array.isArray(stored) ? stored : [];
+  const byId = {}; arr.forEach((t) => { if (t && t.id) byId[t.id] = t; });
+  const out = DEFAULT_WA_TEMPLATES.map((d) => byId[d.id] ? { ...d, ...byId[d.id] } : d);
+  arr.forEach((t) => { if (t && t.id && !out.some((o) => o.id === t.id)) out.push(t); });
+  return out;
+}
+// Fill {placeholders}; leaves unknown tokens untouched, blanks missing values. Never throws.
+function renderWaTemplate(body, ctx) {
+  return String(body || '').replace(/\{(\w+)\}/g, (m, k) => (ctx && ctx[k] != null) ? String(ctx[k]) : (WA_PLACEHOLDERS.includes(k) ? '' : m));
+}
 
 const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 function fmtDT(iso) { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const p = (n) => String(n).padStart(2, '0'); return d.getDate() + ' ' + MONTHS_ID[d.getMonth()] + ' ' + d.getFullYear() + ' · ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
@@ -2315,17 +2345,189 @@ function InvoiceBuilder({ customer, onClose, onCreated }) {
   );
 }
 
+// ── Send invoice via WhatsApp ────────────────────────────────────────────────
+// wa.me cannot attach a file, so we share (1) a signed, expiring, revocable public LINK that renders
+// this one invoice (customer can Save-as-PDF), plus (2) the message text. On phones that support it we
+// also offer navigator.share. Every send is logged (InvoiceDispatch) and shown as history with
+// [Kirim ulang]. Status wording is always "Dikirim (dibuka di WhatsApp)" — never "terkirim/dibaca".
+const WA_MSG_MAX = 1000;
+const waPeriodLabel = (items) => {
+  const ds = (items || []).map((it) => it.date).filter(Boolean).sort();
+  if (!ds.length) return '';
+  const a = fmtDateShort(ds[0]); const b = fmtDateShort(ds[ds.length - 1]);
+  return a === b ? a : (a + ' – ' + b);
+};
+function loadWaTemplates() { return window.API.state.all().then((r) => mergeWaTemplates(r && r.data && r.data[WA_TPL_KEY])).catch(() => DEFAULT_WA_TEMPLATES); }
+
+function InvoiceWaSend({ invoice, onClose }) {
+  const iv = invoice; const cust = iv.customer || {};
+  const [tpls, setTpls] = uSx(DEFAULT_WA_TEMPLATES);
+  const [tplId, setTplId] = uSx(DEFAULT_WA_TEMPLATES[0].id);
+  const [msg, setMsg] = uSx('');
+  const [phone, setPhone] = uSx(cust.phone || '');
+  const [link, setLink] = uSx(null);          // { url, expiresAt } | null
+  const [linking, setLinking] = uSx(true);
+  const [hist, setHist] = uSx([]);
+  const [busy, setBusy] = uSx(false);
+  const [toast, setToast] = uSx('');
+  const phoneRef = React.useRef(null);
+  const e164 = waE164(phone);
+  const tpl = tpls.find((t) => t.id === tplId) || tpls[0];
+  const ctx = {
+    nama: cust.name || '', kode: cust.code || '', sisa_bon: rpFull(iv.sisaBon),
+    periode: waPeriodLabel(iv.items), jatuh_tempo: iv.dueDate ? fmtDateShort(iv.dueDate) : '-',
+    no_invoice: iv.number, link: (link && link.url) || '', nama_usaha: BIZ_NAME,
+  };
+  const rendered = renderWaTemplate(msg, ctx);
+  const overLimit = rendered.length > WA_MSG_MAX;
+
+  const refreshHist = () => window.API.distribusi.invoices.dispatches('invoiceId=' + encodeURIComponent(iv.id)).then((r) => setHist(r.data || [])).catch(() => {});
+  uEx(() => {
+    const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o);
+    loadWaTemplates().then((list) => { setTpls(list); const first = list[0]; if (first) { setTplId(first.id); setMsg(first.body); } });
+    window.API.distribusi.invoices.link(iv.id).then((r) => setLink(r.data)).catch(() => {}).finally(() => setLinking(false));
+    refreshHist();
+    return () => window.removeEventListener('keydown', o);
+  }, []);
+  // When the picked template changes, load its body (only if the user hasn't hand-edited away from it).
+  const pickTpl = (id) => { const t = tpls.find((x) => x.id === id); setTplId(id); if (t) setMsg(t.body); };
+
+  const logAndClose = (channel) => {
+    window.API.distribusi.invoices.dispatch({
+      invoiceId: iv.id, phone: e164, channel, messageSnapshot: rendered.slice(0, 2000),
+      linkUrl: (link && link.url) || '', linkExpiresAt: link && link.expiresAt ? new Date(link.expiresAt).getTime() : undefined,
+    }).then(() => { refreshHist(); setToast(trD('wa.logged')); setTimeout(() => setToast(''), 2500); }).catch(() => {});
+  };
+  const openWa = () => {
+    if (!e164 || overLimit || busy) return;
+    const href = waHref(phone, rendered);
+    if (href) { window.open(href, '_blank'); logAndClose('wa'); }
+  };
+  const canShare = typeof navigator !== 'undefined' && navigator.share;
+  const sharePdf = () => {
+    if (!canShare) return;
+    navigator.share({ title: trD('inv.title') + ' ' + iv.number, text: rendered, url: (link && link.url) || undefined })
+      .then(() => logAndClose('share')).catch(() => {});
+  };
+
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card wa-send" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('wa.title')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{cust.name} · {iv.number}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {/* Destination number — resolved E.164 shown; disabled + notice when absent/invalid */}
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('wa.phoneLbl')}</label>
+          <input ref={phoneRef} className={'fld' + (phone && !e164 ? ' err' : '')} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={trD('wa.phonePh')} inputMode="tel" />
+          {e164 ? <div className="wa-resolved"><IconCheck s={12} />{trD('wa.resolved', { n: '+' + e164 })}</div>
+            : <div className="wa-missing"><IconWarn s={12} />{trD('wa.noPhone')} · <button type="button" className="dist-link" onClick={() => phoneRef.current && phoneRef.current.focus()}>{trD('wa.addPhone')}</button></div>}
+
+          {/* Template picker + editable body with live preview */}
+          <label className="fld-label">{trD('wa.template')}</label>
+          <div className="cat-chips">{tpls.map((t) => <button key={t.id} type="button" className={`cat-chip ${tplId === t.id ? 'on' : ''}`} onClick={() => pickTpl(t.id)}>{t.name}</button>)}</div>
+          <textarea className="fld wa-msg" rows={6} value={msg} onChange={(e) => setMsg(e.target.value)} />
+          <div className={'wa-count' + (overLimit ? ' over' : '')}>{rendered.length}/{WA_MSG_MAX}</div>
+
+          <label className="fld-label">{trD('wa.preview')}</label>
+          <div className="wa-preview">{rendered || <span style={{ color: 'var(--text-mut)' }}>—</span>}</div>
+
+          {/* Signed link status */}
+          <div className="wa-link">
+            {linking ? <span className="wa-link-load"><IconClock s={12} />{trD('wa.linking')}</span>
+              : link ? <><IconInvoice s={12} /><a href={link.url} target="_blank" rel="noopener noreferrer">{link.url}</a><span className="wa-link-exp">{trD('wa.expires', { d: fmtDateShort(new Date(link.expiresAt).toISOString().slice(0, 10)) })}</span></>
+                : <span className="wa-missing"><IconWarn s={12} />{trD('wa.linkErr')}</span>}
+          </div>
+
+          {toast && <div className="wa-toast"><IconCheck s={13} />{toast}</div>}
+
+          {/* Dispatch history */}
+          {hist.length > 0 && (
+            <div className="wa-hist">
+              <div className="wa-hist-h">{trD('wa.history')}</div>
+              {hist.slice(0, 8).map((h) => (
+                <div key={h.id} className="wa-hist-row">
+                  <span className="wa-hist-st"><IconCheck s={11} />{trD('wa.statusSent')}</span>
+                  <span className="wa-hist-meta">+{h.phone} · {h.sentByName || '—'} · {fmtDT(h.sentAt ? new Date(h.sentAt).toISOString() : '')}</span>
+                  <button type="button" className="dist-link" onClick={() => { setPhone(h.phone); setTimeout(openWa, 0); }}>{trD('wa.resend')}</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
+          {canShare && <button className="btn btn-ghost" disabled={overLimit} onClick={sharePdf}><IconWhatsApp s={15} />{trD('wa.sharePdf')}</button>}
+          <button className="btn btn-primary" disabled={!e164 || overLimit || busy} onClick={openWa}><IconWhatsApp s={16} />{trD('wa.open')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Bulk WhatsApp reminder queue ─────────────────────────────────────────────
+// From the customer list, gather outstanding-bon customers → send a reminder to each. Browsers block
+// opening many wa.me tabs at once, so this is a QUEUE: one [Buka WA] at a time, auto-advancing, with a
+// "X dari N" counter. Customers without a valid number are skipped and listed. This is a reminder
+// (no per-customer invoice link) — a lighter path than the single-invoice sender. WhatsApp may flag
+// high-volume sending, so we warn up front.
+function BulkWaQueue({ customers, onClose }) {
+  const all = (customers || []).filter((c) => (c.sisaBon || 0) > 0);
+  const eligible = all.filter((c) => waValid(c.phone));
+  const skipped = all.filter((c) => !waValid(c.phone));
+  const [tpls, setTpls] = uSx(DEFAULT_WA_TEMPLATES);
+  const [tplId, setTplId] = uSx('pengingat');
+  const [idx, setIdx] = uSx(0);                 // pointer into `eligible`
+  const [sent, setSent] = uSx({});              // id → true once its WA opened
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); loadWaTemplates().then(setTpls); return () => window.removeEventListener('keydown', o); }, []);
+  const tpl = tpls.find((t) => t.id === tplId) || tpls[0];
+  const sentCount = Object.keys(sent).length;
+  const msgFor = (c) => renderWaTemplate(tpl && tpl.body, {
+    nama: c.name || '', kode: c.code || '', sisa_bon: rpFull(c.sisaBon), periode: '', jatuh_tempo: '-',
+    no_invoice: '', link: '', nama_usaha: BIZ_NAME,
+  });
+  const openFor = (c, i) => { const href = waHref(c.phone, msgFor(c)); if (href) { window.open(href, '_blank'); setSent((s) => ({ ...s, [c.id]: true })); setIdx(Math.min(eligible.length, i + 1)); } };
+  const cur = eligible[idx];
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card wa-queue" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('wa.bulkTitle')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('wa.bulkProg', { n: sentCount, total: eligible.length })}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-warnbox"><IconWarn s={16} /><span>{trD('wa.bulkWarn')}</span></div>
+          <label className="fld-label" style={{ marginTop: 12 }}>{trD('wa.template')}</label>
+          <div className="cat-chips">{tpls.map((t) => <button key={t.id} type="button" className={`cat-chip ${tplId === t.id ? 'on' : ''}`} onClick={() => setTplId(t.id)}>{t.name}</button>)}</div>
+
+          {eligible.length === 0 ? <div className="dist-hint" style={{ marginTop: 12 }}><IconWarn s={12} />{trD('wa.bulkNone')}</div> : (
+            <div className="wa-q-list">
+              {eligible.map((c, i) => (
+                <div key={c.id} className={'wa-q-row' + (i === idx ? ' cur' : '') + (sent[c.id] ? ' done' : '')}>
+                  <div className="wa-q-c"><b>{c.name}</b><span>{[c.code, '+' + waE164(c.phone)].filter(Boolean).join(' · ')} · {trD('dist.sisaBon')} {rpFull(c.sisaBon)}</span></div>
+                  {sent[c.id] ? <span className="wa-q-st"><IconCheck s={12} />{trD('wa.statusSent')}</span>
+                    : <button type="button" className={'btn btn-sm ' + (i === idx ? 'btn-primary' : 'btn-ghost')} onClick={() => openFor(c, i)}><IconWhatsApp s={13} />{trD('wa.open')}</button>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {skipped.length > 0 && (
+            <div className="wa-q-skip">
+              <div className="wa-q-skip-h"><IconWarn s={12} />{trD('wa.bulkSkipped', { n: skipped.length })}</div>
+              {skipped.slice(0, 30).map((c) => <div key={c.id} className="wa-q-skip-row">{c.name}{c.code ? ' · ' + c.code : ''} · {trD('wa.noPhone')}</div>)}
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{sentCount >= eligible.length && eligible.length ? trD('wa.done') : trD('dist.cancel')}</button>
+          {cur && <button className="btn btn-primary" onClick={() => openFor(cur, idx)}><IconWhatsApp s={16} />{trD('wa.bulkNext', { name: cur.name })}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Printable invoice / nota. Print (window.print) + WhatsApp share; a document only.
 function InvoiceViewer({ invoice, onClose }) {
   uEx(() => { document.body.classList.add('invoice-open'); const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => { document.body.classList.remove('invoice-open'); window.removeEventListener('keydown', o); }; }, []);
   const iv = invoice; const cust = iv.customer || {};
-  const share = () => {
-    const lines = ['*Invoice ' + iv.number + '*', BIZ_NAME, trD('dist.invTo') + ': ' + cust.name, '',
-      ...iv.items.map((it) => it.date + ' · ' + it.qty + ' ' + trD('dist.galonUnit') + ' · ' + rpFull(it.amount)),
-      '', trD('dist.total') + ': ' + rpFull(iv.total), trD('dist.sisaBon') + ': ' + rpFull(iv.sisaBon),
-      iv.dueDate ? trD('dist.dueDate') + ': ' + iv.dueDate : ''].filter(Boolean);
-    window.open('https://wa.me/' + waNumber(cust.phone) + '?text=' + encodeURIComponent(lines.join('\n')), '_blank');
-  };
+  const [waOpen, setWaOpen] = uSx(false);
   const ketOf = (it) => it.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
   return (
     <div className="modal-scrim invoice-overlay pc-overlay" onClick={onClose} style={{ zIndex: 210 }}>
@@ -2334,9 +2536,10 @@ function InvoiceViewer({ invoice, onClose }) {
           <span className="pc-audlabel">{trD('dist.makeInvoice')}</span>
           <div style={{ flex: 1 }} />
           <button className="btn btn-primary" onClick={() => window.print()}><IconDownload s={16} />{trD('dist.print')}</button>
-          {cust.phone ? <button className="btn btn-ghost" onClick={share}><IconWhatsApp s={16} />WhatsApp</button> : null}
+          <button className="btn btn-ghost" onClick={() => setWaOpen(true)}><IconWhatsApp s={16} />{trD('wa.sendBtn')}</button>
           <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
         </div>
+        {waOpen && <InvoiceWaSend invoice={iv} onClose={() => setWaOpen(false)} />}
         <div className="pc-dochead">
           <div className="pc-biz"><Logo s={38} /><div><div className="pc-bizname">{BIZ_NAME}</div><div className="pc-bizsub">{BIZ_SUB}</div></div></div>
           <div className="pc-doctitle">{trD('inv.title')}</div>
@@ -3187,6 +3390,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const [obFor, setObFor] = uSx(null);   // customer whose opening/carry-over bon is being entered
   const [adjustFor, setAdjustFor] = uSx(null);   // { customer, kind } — balance adjustment modal
   const [disputeFor, setDisputeFor] = uSx(null); // { txn } — transaction dispute / loss modal
+  const [bulkWa, setBulkWa] = uSx(null);         // [customers] with outstanding bon → WhatsApp reminder queue
   const [cdDispute, setCdDispute] = uSx('all');  // transaksi-tab dispute filter: all | disengketakan | lossed
   // ── Customer-detail redesign (presentation-only) state ──
   const [cdTab, setCdTabState] = uSx(() => clParam0('tab', 'ringkasan'));
@@ -4057,6 +4261,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
           <button type="button" className={clView === 'kartu' ? 'on' : ''} onClick={() => setClView('kartu')} title={trD('cl.viewCards')} aria-pressed={clView === 'kartu'}><IconGrid s={15} /></button>
         </div>
         <button type="button" className="btn btn-ghost" disabled={!clFiltered.length} onClick={exportCustCsv}><IconDownload s={15} style={{ transform: 'rotate(180deg)' }} />{trD('cl.csv')}</button>
+        {clFiltered.some((c) => (c.sisaBon || 0) > 0) && <button type="button" className="btn btn-ghost" onClick={() => setBulkWa(clFiltered.filter((c) => (c.sisaBon || 0) > 0))}><IconWhatsApp s={15} />{trD('wa.bulkBtn')}</button>}
         {(canCustomers || canCustImport) ? (
           <div className="dist-cust-actions">
             {canCustomers && <button type="button" className="btn btn-ghost" onClick={() => setTypesOpen(true)}><IconSettings s={15} />{trD('dist.kelolaTipe')}</button>}
@@ -4186,6 +4391,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
       {renderForm()}
       {typesModal()}
       {delFor && <DeleteCustomerModal customer={delFor} busy={delBusy} onDeactivate={doDeactivate} onDelete={doDeletePermanent} onClose={() => setDelFor(null)} />}
+      {bulkWa && <BulkWaQueue customers={bulkWa} onClose={() => setBulkWa(null)} />}
 
       {impOpen && (
         <div className="modal-scrim" onClick={() => setImpOpen(false)} style={{ zIndex: 200 }}>
