@@ -56,11 +56,32 @@ const H = (t) => console.log('\n' + '═'.repeat(78) + '\n' + t + '\n' + '─'.r
   rows.forEach((m) => { const k = `${pad(m.type, 14)} cust=${m.customerId ? 'Y' : 'n'} active=${m.active ? 'Y' : 'n'}`; (g1[k] || (g1[k] = { n: 0, q: 0 })); g1[k].n++; g1[k].q += m.qty; });
   Object.keys(g1).sort().forEach((k) => console.log(`${k}   n=${pad(g1[k].n, 5)} sum(qty)=${g1[k].q}`));
 
-  // ── 2) rusak/hilang bucket rows ──
-  H('2) ROWS IN THE rusak/hilang BUCKET  (filter: type ∈ {damage,loss}, active)');
+  // ── TYPE AUDIT — distinct types, unknowns, nulls (does anything fall through?) ──
+  H('TYPE AUDIT (all rows) — is there an unknown/null type that a branch mis-catches?');
+  const KNOWN = new Set(['purchase', 'delivery_out', 'return_in', 'correction', 'opening', 'damage', 'loss', 'penyesuaian', 'load_out', 'load_return']);
+  const typeCount = {};
+  rows.forEach((m) => { const t = (m.type == null || m.type === '') ? '<NULL/EMPTY>' : m.type; typeCount[t] = (typeCount[t] || 0) + 1; });
+  Object.keys(typeCount).sort().forEach((t) => { const unk = t !== '<NULL/EMPTY>' && !KNOWN.has(t); console.log(`   ${pad(t, 16)} n=${typeCount[t]}${unk ? '   ⚠ UNKNOWN TYPE' : ''}${t === '<NULL/EMPTY>' ? '   ⚠ NULL/EMPTY' : ''}`); });
+  console.log('rusakEffect branch (the ONLY way into rusak/hilang): const rusakEffect = (m) => (DAMAGE_TYPES.has(m.type) ? Math.abs(m.qty) : 0);');
+  console.log('  → no else-branch: anything not in {damage,loss} returns 0 (EXCLUDED from rusak).');
+
+  // ── 2) EVERY row in the rusak/hilang bucket, with the branch that placed it ──
+  H('2) EVERY ROW IN rusak/hilang  ·  bucket · branch · type · qty · custNull · fleet · active · date · actor · note');
   const rusakRows = active.filter((m) => rusakEffect(m) > 0);
-  console.log(`count=${rusakRows.length}  sum=${rusakRows.reduce((a, m) => a + rusakEffect(m), 0)}`);
-  rusakRows.forEach((m) => console.log(`  ${pad(m.type, 8)} qty=${pad(m.qty, 5)} fleet=${pad(m.fleetId || '∅', 8)} ${minute(m)} ${m.actorName || '—'}  "${(m.note || '').slice(0, 50)}"`));
+  console.log(`count=${rusakRows.length}  sum(|qty|)=${rusakRows.reduce((a, m) => a + rusakEffect(m), 0)}   (UI shows 122 → these MUST total 122)`);
+  rusakRows.forEach((m) => console.log(
+    `  rusak · L2424 DAMAGE_TYPES.has(type) · ${pad(m.type, 6)} · qty=${pad(m.qty, 4)} · custNull=${m.customerId ? 'n' : 'Y'} · fleet=${pad(m.fleetId || '∅', 8)} · active=${m.active ? 'Y' : 'n'} · ${minute(m)} · ${pad(m.actorName || '—', 14)} · "${(m.note || '').slice(0, 44)}"`));
+  // breakdown by type + provenance (Gudang damage form vs rit-close resolution vs other)
+  const byType = {}; rusakRows.forEach((m) => { byType[m.type] = (byType[m.type] || 0) + Math.abs(m.qty); });
+  console.log('  by type:', JSON.stringify(byType));
+  const fromRit = rusakRows.filter((m) => /Selisih rit/i.test(m.note || '')).reduce((a, m) => a + Math.abs(m.qty), 0);
+  const fromForm = rusakRows.filter((m) => !/Selisih rit/i.test(m.note || '')).reduce((a, m) => a + Math.abs(m.qty), 0);
+  console.log(`  provenance: rit-close resolution=${fromRit}  ·  damage-report form / other=${fromForm}`);
+  // the user's hypothesis, checked directly: correction rows that isOpeningRow REJECTS — where do they land?
+  const rejectedCorr = active.filter((m) => m.type === 'correction' && !m.customerId && !isOpeningRow(m));
+  console.log(`\n  HYPOTHESIS CHECK — 'correction' cust=null rows rejected by isOpeningRow: ${rejectedCorr.length}`);
+  rejectedCorr.forEach((m) => console.log(`     lands in ${rusakEffect(m) > 0 ? 'RUSAK ⚠' : 'DEPOT (L2453)'} · qty=${m.qty} fleet=${m.fleetId || '∅'} "${(m.note || '').slice(0, 40)}"  [rusakEffect=${rusakEffect(m)}, depotEffect=${depotEffect(m, cut[m.fleetId])}]`));
+  console.log(`  → rejected corrections contribute to rusak: ${rejectedCorr.reduce((a, m) => a + rusakEffect(m), 0)} (expected 0 — they go to DEPOT, not rusak)`);
   // fall-through detector: active rows contributing to good total but landing in NO bucket
   const fell = active.filter((m) => totalEffect(m) !== 0 && depotEffect(m, cut[m.fleetId]) === 0 && armadaEffect(m, cut[m.fleetId]) === 0 && custEffect(m) === 0 && rusakEffect(m) === 0);
   console.log(`Unclassified (good≠0 but no bucket): ${fell.length}` + (fell.length ? ' ⚠' : ''));
@@ -70,17 +91,20 @@ const H = (t) => console.log('\n' + '═'.repeat(78) + '\n' + t + '\n' + '─'.r
   H('3) +N/−N PAIRS (same customer, same minute) — type + transactionId of each side');
   const byKey = {};
   active.filter((m) => m.customerId).forEach((m) => { const k = m.customerId + '|' + minute(m); (byKey[k] || (byKey[k] = [])).push(m); });
+  // NOTE: return_in.qty is stored POSITIVE; the minus is applied by custEffect/display. So classify the
+  // +/− sides by custEffect (the customer-balance effect), which is what the UI shows as +3/−3.
   let pairShown = 0;
   Object.keys(byKey).forEach((k) => {
     const grp = byKey[k];
-    const pos = grp.filter((m) => m.qty > 0), neg = grp.filter((m) => m.qty < 0);
+    const pos = grp.filter((m) => custEffect(m) > 0), neg = grp.filter((m) => custEffect(m) < 0);
     if (pos.length && neg.length && pairShown < 25) {
       pairShown++;
       const p = pos[0], n = neg[0];
       const dup = p.type === n.type;   // same type on both sides = suspicious duplicate
-      console.log(`  cust=${short(k.split('|')[0])} @${k.split('|')[1]}${dup ? '  ⚠ SAME TYPE (possible dup)' : ''}`);
-      console.log(`     +  ${pad(p.type, 12)} qty=${p.qty} txn=${short(p.transactionId)} "${(p.note || '').slice(0, 24)}"`);
-      console.log(`     -  ${pad(n.type, 12)} qty=${n.qty} txn=${short(n.transactionId)} "${(n.note || '').slice(0, 24)}"`);
+      const sameTxn = p.transactionId && p.transactionId === n.transactionId;
+      console.log(`  cust=${short(k.split('|')[0])} @${k.split('|')[1]}${dup ? '  ⚠ SAME TYPE (possible dup)' : sameTxn ? '  ✓ one exchange (same txn, two legs)' : '  · two txns'}`);
+      console.log(`     +  ${pad(p.type, 12)} qty=${p.qty} effect=${num(custEffect(p))} txn=${short(p.transactionId)} "${(p.note || '').slice(0, 24)}"`);
+      console.log(`     -  ${pad(n.type, 12)} qty=${n.qty} effect=${num(custEffect(n))} txn=${short(n.transactionId)} "${(n.note || '').slice(0, 24)}"`);
     }
   });
   console.log(`(pairs shown: ${pairShown})`);
@@ -106,6 +130,22 @@ const H = (t) => console.log('\n' + '═'.repeat(78) + '\n' + t + '\n' + '─'.r
   console.log(`RESET depot-corrections (note "reset stok galon", cust=null): count=${resetCorr.length} sum=${resetSum}`);
   console.log(`delivery_out − return_in (net at customers): ${deliveredNet}`);
   console.log(`→ opening + resetSum − rusak(as depot) = ${opening + resetSum - rusak}  (should equal depot=${depot} if that is the story)`);
+
+  // ── 5b) DOUBLE-WRITE CHECK by customer name (default "ASTAWA"; override: node scripts/diagnose-gallon.js "NAME") ──
+  H('5b) DOUBLE-WRITE CHECK — every gallon row for a named customer, with transactionId');
+  const nameArg = process.argv[2] || 'ASTAWA';
+  const custs = await prisma.customer.findMany({ where: { name: { contains: nameArg } }, select: { id: true, name: true } });
+  if (!custs.length) console.log(`(no customer matching "${nameArg}" — pass a name as the first arg)`);
+  for (const c of custs) {
+    const mine = rows.filter((m) => m.customerId === c.id).sort((a, b) => movMs(a) - movMs(b));
+    console.log(`\n${c.name} (${short(c.id)}) — ${mine.length} gallon rows`);
+    mine.forEach((m) => console.log(`   ${minute(m)} ${pad(m.type, 12)} qty=${pad(num(m.qty), 5)} txn=${short(m.transactionId)} active=${m.active ? 'Y' : 'n'} "${(m.note || '').slice(0, 30)}"`));
+    const seen = {}, dups = [];
+    mine.forEach((m) => { const k = m.type + '|' + (m.transactionId || 'ø'); seen[k] = (seen[k] || 0) + 1; if (seen[k] === 2) dups.push(m.type); });
+    console.log(`   duplicates (SAME type + SAME transactionId > 1): ${dups.length ? '⚠ ' + dups.join(', ') : 'none'}`);
+    console.log('   NOTE: a +N delivery_out and −N return_in that SHARE one transactionId are the two legs of a single');
+    console.log('         exchange written by recordDelivery (full out + empty in) — that is ONE code path, not two.');
+  }
 
   // ── 6) opening adjustments + reset-produced rows, with deltas ──
   H('6) OPENING ADJUSTMENTS + RESET-PRODUCED ROWS (deltas, chronological)');
