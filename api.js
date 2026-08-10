@@ -219,7 +219,7 @@
       runs: {
         list: (date, fleet, status) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); if (status) p.push('status=' + encodeURIComponent(status)); return req('GET', '/distribusi/runs' + (p.length ? '?' + p.join('&') : '')); },
         open: (data) => req('POST', '/distribusi/runs/open', data),               // { date, fleet, gallonsOut, note? }
-        close: (id, data) => req('POST', '/distribusi/runs/' + id + '/close', data), // { gallonsFullReturned, gallonsEmptyReturned, diffReason? }
+        close: (id, data) => req('POST', '/distribusi/runs/' + id + '/close', data), // { gallonsFullReturned, gallonsEmptyReturned, diffReason?, resolution? }
         correct: (id, data) => req('POST', '/distribusi/runs/' + id + '/corrections', data), // { out?, full?, empty?, reason } — corrected absolute values
       },
       // Field expenses (pengeluaran lapangan): cash a driver paid out, with an optional receipt photo.
@@ -231,6 +231,11 @@
       },
       // Gallon stock (loan/exchange): summary + per-customer balances + ledger; correction.
       gallon: (fleet) => req('GET', '/distribusi/gallon' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
+      // Location model: physical count (opname) + integrity guard (silent-leakage check).
+      opname: (data) => req('POST', '/distribusi/gallon/opname', data),                 // { location:'depot'|fleetId, count, note, proof? }
+      opnameHistory: (fleet) => req('GET', '/distribusi/gallon/opname/history' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
+      gallonIntegrity: () => req('GET', '/distribusi/gallon/integrity'),
+      gallonIntegrityRepair: () => req('POST', '/distribusi/gallon/integrity/repair'),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),
       setOpeningStock: (data) => req('POST', '/distribusi/gallon/opening', data),   // { qty, fleet?, reason }
       resetGallon: (data) => req('POST', '/distribusi/gallon/reset', data),          // { mode:balanced|purge, fleet?, target?, confirm?, reason }

@@ -203,4 +203,12 @@ router.post('/gallon/opening/reset', requireCap('distribusiGallonReset'), valida
 // append-only/immutable.
 router.delete('/gallon/movements/:id', requireCap('distribusiHardDelete'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonMovDeleteSchema }), ctrl.gallonMovementDelete);
 
+// ── Location model: Stok Opname (physical count → correction) + integrity guard ──
+// Opname = a STOCK action (same cap as reset). The integrity check is read-only for any gallon
+// viewer; the repair is owner-only (creates/deactivates ledger rows).
+router.post('/gallon/opname', requireAnyCap(['distribusiCustomers', 'distribusiGallonReset']), validate({ body: ctrl.schemas.opnameSchema }), ctrl.stockOpname);
+router.get('/gallon/opname/history', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.opnameHistory);
+router.get('/gallon/integrity', requireCap('distribusiGallon'), ctrl.gallonIntegrity);
+router.post('/gallon/integrity/repair', requireCap('distribusiHardDelete'), ctrl.gallonIntegrityRepair);
+
 module.exports = router;

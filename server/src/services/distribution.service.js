@@ -2413,6 +2413,57 @@ const totalEffect = (m) => {
   if (m.type === 'penyesuaian') return m.qty;   // a customer gallon adjustment changes total owned too (at-depot unchanged)
   return 0;
 };
+// ── LOCATION MODEL ────────────────────────────────────────────────────────────
+// A gallon is never destroyed, only relocated. Every owned gallon sits in exactly one of four
+// locations: DEPOT · ARMADA · PELANGGAN · RUSAK/HILANG. INVARIANT (galon-location.test.js):
+//   depot + armada + pelanggan + rusak/hilang === total galon dimiliki.
+// `totalEffect` above stays the GOOD-stock total (depot+armada+pelanggan) so every existing number
+// and test is untouched; rusak/hilang is a 4th bucket and totalDimiliki = good + rusak. custEffect
+// (pelanggan) is byte-identical — customer balances must never move.
+const DAMAGE_TYPES = new Set(['damage', 'loss']);
+const rusakEffect = (m) => (DAMAGE_TYPES.has(m.type) ? Math.abs(m.qty) : 0);
+const grandTotalEffect = (m) => totalEffect(m) + rusakEffect(m);   // total dimiliki incl. rusak/hilang
+const movMs = (m) => (m && m.createdAt ? new Date(m.createdAt).getTime() : 0);
+// ARMADA bucket, per fleetId. 'load_out'/'load_return' relocate depot↔armada. A delivery moves
+// armada→pelanggan — but ONLY once armada tracking has started for that fleet: a delivery BEFORE the
+// fleet's first load_out (its cutover) is legacy and went depot→pelanggan directly (see MIGRATION).
+const armadaEffect = (m, cutoverMs) => {
+  if (m.type === 'load_out') return m.qty;
+  if (m.type === 'load_return') return -m.qty;
+  const armadaEra = cutoverMs != null && movMs(m) >= cutoverMs;
+  if (m.type === 'delivery_out') return armadaEra ? -m.qty : 0;
+  if (m.type === 'return_in') return armadaEra ? m.qty : 0;
+  if (DAMAGE_TYPES.has(m.type) && m.fleetId && !m.customerId) return -Math.abs(m.qty);   // rusak/hilang taken off the truck
+  if (m.type === 'correction' && !m.customerId && m.fleetId && OPNAME_ARMADA.test(m.note || '')) return m.qty;   // armada opname (marker in note we control)
+  return 0;
+};
+// DEPOT bucket (computed INDEPENDENTLY, not as a residual, so the invariant is a real check). For a
+// pre-cutover fleet armadaEffect is 0 everywhere, so depotEffect reduces to the historical
+// atDepot = good − atCustomers and existing tests stay byte-identical.
+const depotEffect = (m, cutoverMs) => {
+  if (m.type === 'opening' || m.type === 'purchase') return m.qty;
+  if (m.type === 'load_out') return -m.qty;
+  if (m.type === 'load_return') return m.qty;
+  const armadaEra = cutoverMs != null && movMs(m) >= cutoverMs;
+  if (m.type === 'delivery_out') return armadaEra ? 0 : -m.qty;   // legacy delivery: depot→pelanggan
+  if (m.type === 'return_in') return armadaEra ? 0 : m.qty;
+  if (DAMAGE_TYPES.has(m.type) && !m.fleetId && !m.customerId) return -Math.abs(m.qty);   // depot damage/loss
+  // A customerId-null correction is a DEPOT adjustment by default (incl. a scoped user's depot
+  // correction, which carries their fleetId) — EXCEPT an armada opname (its note carries the marker).
+  if (m.type === 'correction' && !m.customerId && !(m.fleetId && OPNAME_ARMADA.test(m.note || ''))) return m.qty;
+  if (m.type === 'correction' && m.customerId) return -m.qty;   // customer ledger correction pulls from depot (penyesuaian does NOT — it creates owned)
+  return 0;
+};
+// Marker (in a note we generate) that tags a correction as an ARMADA opname vs an ordinary DEPOT one.
+const OPNAME_ARMADA = /^Opname armada /;
+// Earliest active load_out per fleet = that fleet's armada cutover (ms), or absent = no armada
+// tracking yet (all its deliveries are legacy depot→pelanggan).
+async function fleetCutovers(user, qFleet) {
+  const rows = await prisma.gallonMovement.findMany({ where: { active: true, type: 'load_out', ...fleetWhere(user, 'fleetId', qFleet) }, select: { fleetId: true, createdAt: true } });
+  const m = {};
+  rows.forEach((r) => { const t = movMs(r); if (m[r.fleetId] == null || t < m[r.fleetId]) m[r.fleetId] = t; });
+  return m;
+}
 // A ledger row that REPRESENTS opening stock. The dedicated 'opening' type, PLUS legacy depot
 // corrections whose note was tagged as opening/starting stock (entered via "Koreksi depot"
 // before this feature existed). Recognising both keeps ONE source of truth: the Stok Awal card,
@@ -2432,10 +2483,95 @@ async function gallonBalanceOf(customerId) {
   return rows.reduce((a, r) => a + custEffect(r), 0);
 }
 async function gallonStock(user, qFleet) {
-  const rows = await prisma.gallonMovement.findMany({ where: { active: true, ...fleetWhere(user, 'fleetId', qFleet) }, select: { type: true, qty: true, customerId: true } });
-  let totalOwned = 0, atCustomers = 0;
-  rows.forEach((r) => { totalOwned += totalEffect(r); atCustomers += custEffect(r); });
-  return { totalOwned, atCustomers, atDepot: totalOwned - atCustomers };
+  const cut = await fleetCutovers(user, qFleet);
+  const rows = await prisma.gallonMovement.findMany({ where: { active: true, ...fleetWhere(user, 'fleetId', qFleet) }, select: { type: true, qty: true, customerId: true, fleetId: true, createdAt: true } });
+  let totalOwned = 0, atCustomers = 0, atDepot = 0, rusakHilang = 0; const armadaByFleet = {};
+  rows.forEach((r) => {
+    const cm = cut[r.fleetId];
+    totalOwned += totalEffect(r);           // GOOD stock (depot+armada+pelanggan) — unchanged
+    atCustomers += custEffect(r);           // pelanggan — byte-identical
+    atDepot += depotEffect(r, cm);          // computed independently (real invariant check)
+    rusakHilang += rusakEffect(r);
+    const a = armadaEffect(r, cm); if (a) armadaByFleet[r.fleetId] = (armadaByFleet[r.fleetId] || 0) + a;
+  });
+  const atArmada = Object.values(armadaByFleet).reduce((a, b) => a + b, 0);
+  const totalDimiliki = totalOwned + rusakHilang;   // 4-bucket grand total (incl. rusak/hilang)
+  return { totalOwned, atCustomers, atDepot, atArmada, armadaByFleet, rusakHilang, totalDimiliki };
+}
+// The four-location INVARIANT, computed independently and returned for tests + the UI drift banner:
+//   depot + armada + pelanggan + rusak/hilang === total dimiliki.
+async function gallonInvariant(user, qFleet) {
+  const s = await gallonStock(user, qFleet);
+  const lhs = s.atDepot + s.atArmada + s.atCustomers + s.rusakHilang;
+  return { ...s, lhs, ok: lhs === s.totalDimiliki, drift: lhs - s.totalDimiliki };
+}
+
+// ── STOK OPNAME (physical count) ──────────────────────────────────────────────
+// Pick a location — 'depot' (global depot bucket) or a fleet id (that fleet's armada) — enter the
+// physical count; the system shows its figure + the difference. Confirming appends a 'correction' row
+// (reason=opname, note REQUIRED, optional photo) — it never silently edits history. Kept auditable.
+async function stockOpname(body, actor) {
+  const loc = String((body && body.location) || '').trim();
+  const isDepot = loc === '' || loc === 'depot';
+  const fleetId = isDepot ? '' : loc;
+  if (!isDepot && !fleetAllows(actor, fleetId)) throw ApiError.forbidden('Armada di luar akses Anda.');
+  const count = Math.round(+(body && body.count));
+  if (!Number.isFinite(count) || count < 0) throw ApiError.badRequest('Jumlah hitung fisik tidak valid.');
+  const note = String((body && body.note) || '').trim();
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  const before = await gallonStock(actor, isDepot ? undefined : fleetId);
+  const systemFigure = isDepot ? before.atDepot : (before.armadaByFleet[fleetId] || 0);
+  const diff = count - systemFigure;
+  const snap = await actorSnap(actor);
+  let movementId = null;
+  if (diff !== 0) {
+    const proof = (body && body.proof) ? String(body.proof).slice(0, 300) : null;
+    // Note prefix is a MARKER read by the derivation: "Opname armada <fleet>" reconciles the fleet's
+    // armada bucket; "Opname depot" reconciles the depot bucket.
+    const label = isDepot ? 'depot' : `armada ${fleetId}`;
+    const mov = await prisma.gallonMovement.create({ data: { type: 'correction', qty: diff, customerId: null, fleetId, active: true, proof, note: `Opname ${label}: fisik ${count} vs sistem ${systemFigure} (${diff >= 0 ? '+' : ''}${diff}) · ${note}`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+    movementId = mov.id;
+  }
+  await logAudit('koreksi', `Stok opname ${isDepot ? 'depot' : fleetId}`, `fisik ${count} · sistem ${systemFigure} · selisih ${diff >= 0 ? '+' : ''}${diff} · ${note}`, snap, fleetId);
+  const after = await gallonStock(actor, isDepot ? undefined : fleetId);
+  return { location: isDepot ? 'depot' : fleetId, count, systemFigure, diff, movementId, stock: after };
+}
+async function opnameHistory(user, qFleet) {
+  const rows = await prisma.distAuditLog.findMany({ where: { kind: 'koreksi', title: { startsWith: 'Stok opname' }, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'desc' }, take: 100 });
+  return rows.map((r) => ({ id: r.id, title: r.title, detail: r.detail, actorName: r.actorName || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null }));
+}
+
+// ── INTEGRITY GUARD (silent-leakage check) ────────────────────────────────────
+// Every DistTransaction that delivers gallons MUST have a matching active delivery ledger row, and no
+// ledger row may point at a missing transaction. On-demand; the controller surfaces a positive result
+// in Log Audit as "Ketidakcocokan ledger galon" with an owner-only repair.
+async function gallonIntegrityCheck(user) {
+  const txns = await prisma.distTransaction.findMany({ where: { status: 'active', legacy: false, method: { in: ['lunas', 'bon'] }, qty: { gt: 0 }, ...fleetWhere(user, 'fleetId') }, select: { id: true, qty: true, customerId: true, fleetId: true, txnDate: true } });
+  const movs = await prisma.gallonMovement.findMany({ where: { transactionId: { not: null } }, select: { id: true, transactionId: true, type: true, active: true, qty: true, fleetId: true } });
+  const haveDelivery = new Set(movs.filter((m) => m.active && (m.type === 'delivery_out' || m.type === 'return_in')).map((m) => m.transactionId));
+  const missingLedger = txns.filter((t) => !haveDelivery.has(t.id)).slice(0, 500);
+  const movTxIds = [...new Set(movs.map((m) => m.transactionId))];
+  const existing = new Set((movTxIds.length ? await prisma.distTransaction.findMany({ where: { id: { in: movTxIds } }, select: { id: true } }) : []).map((t) => t.id));
+  const orphanRows = movs.filter((m) => m.active && !existing.has(m.transactionId)).slice(0, 500);
+  const invariant = await gallonInvariant(user);
+  return { missingLedger, orphanRows, missingCount: missingLedger.length, orphanCount: orphanRows.length, invariant };
+}
+// Owner repair: create the missing delivery_out rows from their transactions, and deactivate ledger
+// rows whose transaction no longer exists. Audited. Recomputes the invariant.
+async function gallonIntegrityRepair(actor) {
+  const chk = await gallonIntegrityCheck(actor);
+  const snap = await actorSnap(actor);
+  let created = 0, deactivated = 0;
+  for (const t of chk.missingLedger) {
+    await prisma.gallonMovement.create({ data: { type: 'delivery_out', qty: t.qty, customerId: t.customerId, transactionId: t.id, fleetId: t.fleetId || '', active: true, note: 'Perbaikan ledger (delivery_out hilang)', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+    created++;
+  }
+  if (chk.orphanRows.length) {
+    const r = await prisma.gallonMovement.updateMany({ where: { id: { in: chk.orphanRows.map((o) => o.id) } }, data: { active: false } });
+    deactivated = r.count;
+  }
+  if (created || deactivated) await logAudit('koreksi', 'Perbaikan ketidakcocokan ledger galon', `${created} baris delivery_out dibuat · ${deactivated} baris yatim dinonaktifkan · oleh ${snap.actorName}`, snap, '');
+  return { created, deactivated, invariant: await gallonInvariant(actor) };
 }
 // Opening-stock rollup (fleet-scoped): the physical gallons owned at go-live, kept as its
 // own movement type so it shows separately from purchases/deliveries and its provenance is
@@ -2526,7 +2662,9 @@ async function gallonSummary(user, qFleet) {
   const HARD_DEL_MS = GALON_HARD_DELETE_MAX_AGE_MS;
   // Display a legacy opening correction under the 'opening' tag so the ledger matches the card.
   const movements = rows.map((r) => { const blocker = gallonRowBlocker(r); const createdMs = r.createdAt ? new Date(r.createdAt).getTime() : null; return { id: r.id, type: isOpeningRow(r) ? 'opening' : r.type, qty: r.qty, customerId: r.customerId, customerName: r.customerId ? ((info[r.customerId] && info[r.customerId].name) || '—') : null, fleetId: r.fleetId, note: r.note, actorName: r.actorName, createdAt: createdMs, active: r.active, blocker, voidable: !blocker && r.active, restorable: !blocker && !r.active, deletable: !blocker && !r.active && createdMs != null && (Date.now() - createdMs) <= HARD_DEL_MS }; });
-  return { stock, opening, balances, movements };
+  const lhs = stock.atDepot + stock.atArmada + stock.atCustomers + stock.rusakHilang;
+  const invariant = { ok: lhs === stock.totalDimiliki, lhs, drift: lhs - stock.totalDimiliki };
+  return { stock, opening, balances, movements, invariant };
 }
 // Record a delivery's gallon flow (called from createTransaction). out = full gallons
 // delivered, in_ = empty gallons returned. Tied to the transaction + customer.
@@ -2960,9 +3098,14 @@ async function openRun(body, actor) {
   const runNo = (last ? last.runNo : 0) + 1;
   const snap = await actorSnap(actor);
   const run = await prisma.deliveryRun.create({ data: { date, fleetId, runNo, gallonsOut, note: String(body.note || '').slice(0, 300), status: 'open', openedById: snap.actorId, openedByName: snap.actorName } });
+  // MUAT = relocate full gallons depot → armada in the ledger (load_out). This is the missing link
+  // that makes "di armada" a real, ledger-derived location; it does NOT change total owned (relocation).
+  // The FIRST load_out for a fleet is its armada cutover — deliveries from here on are armada→pelanggan.
+  await prisma.gallonMovement.create({ data: { type: 'load_out', qty: gallonsOut, fleetId, active: true, note: `Muat rit-${runNo} · ${date}`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
   await logAudit('pengiriman', `Muat rit-${runNo}: ${fleetId}`, `${gallonsOut} galon dimuat · ${date}`, snap, fleetId);
   return runClient(run, 0);
 }
+const RUN_RESOLUTIONS = ['kembali_besok', 'rusak', 'hilang', 'salah_hitung'];
 // TUTUP — close a run: record full + empty gallons returned, reconcile vs expected, and REQUIRE
 // a reason when the difference ≠ 0.
 async function closeRun(id, body, actor) {
@@ -2977,15 +3120,35 @@ async function closeRun(id, body, actor) {
   const corrs = (await correctionsForRuns([id]))[id] || [];
   const expectedRemaining = effectiveRun(run, corrs).out - sold;
   const diff = full - expectedRemaining;
+  const selisih = expectedRemaining - full;   // >0 = gallons unaccounted, still "on the armada"
   const reason = String(body.diffReason || '').trim();
   if (diff !== 0 && !reason) throw ApiError.badRequest(`Selisih ${diff > 0 ? '+' : ''}${diff} galon (seharusnya ${expectedRemaining}, dikembalikan ${full}) — alasan wajib diisi.`, { diff, expectedRemaining, sold });
+  // Resolution of a non-zero selisih writes the MATCHING ledger row so the difference is never left
+  // unexplained. Optional for backward compatibility (a legacy diffReason-only close leaves the gallons
+  // on the armada = implicit "kembali besok"). rusak/hilang require a positive (missing) selisih.
+  const resolution = String(body.resolution || '').trim();
+  if (resolution && !RUN_RESOLUTIONS.includes(resolution)) throw ApiError.badRequest('Resolusi selisih tidak dikenal.');
+  if ((resolution === 'rusak' || resolution === 'hilang') && selisih <= 0) throw ApiError.badRequest('Rusak/hilang hanya untuk selisih kurang (galon hilang dari armada).');
   const snap = await actorSnap(actor);
   const updated = await prisma.deliveryRun.update({ where: { id }, data: {
     status: 'closed', gallonsFullReturned: full, gallonsEmptyReturned: empty, diffReason: diff !== 0 ? reason : '',
     closedById: snap.actorId, closedByName: snap.actorName, closedAt: new Date(),
   } });
+  // TUTUP = relocate the unsold full gallons armada → depot (load_return), then resolve any selisih.
+  if (full > 0) await prisma.gallonMovement.create({ data: { type: 'load_return', qty: full, fleetId: run.fleetId, active: true, note: `Isi kembali rit-${run.runNo} · ${run.date}`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+  if (selisih !== 0 && resolution && resolution !== 'kembali_besok') {
+    const note = `Selisih rit-${run.runNo}: ${resolution.replace('_', ' ')}${reason ? ' · ' + reason : ''}`;
+    if (resolution === 'rusak' || resolution === 'hilang') {
+      // armada → rusak/hilang (good total drops, rusak bucket rises; grand total conserved).
+      await prisma.gallonMovement.create({ data: { type: resolution === 'rusak' ? 'damage' : 'loss', qty: Math.abs(selisih), fleetId: run.fleetId, active: true, note, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+    } else if (resolution === 'salah_hitung') {
+      // reconcile the armada by the miscount (signed) — an armada correction.
+      await prisma.gallonMovement.create({ data: { type: 'correction', qty: -selisih, fleetId: run.fleetId, active: true, note, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+    }
+    // 'kembali_besok' writes nothing — the gallons stay on the armada into tomorrow's balance.
+  }
   await logAudit('pengiriman', `Tutup rit-${run.runNo}: ${run.fleetId}`,
-    `muat ${effectiveRun(run, corrs).out} · terjual ${sold} · sisa seharusnya ${expectedRemaining} · dikembalikan ${full} · selisih ${diff}${diff !== 0 ? ' (' + reason + ')' : ''} · kosong ${empty}`, snap, run.fleetId);
+    `muat ${effectiveRun(run, corrs).out} · terjual ${sold} · sisa seharusnya ${expectedRemaining} · dikembalikan ${full} · selisih ${diff}${diff !== 0 ? ' (' + (resolution ? resolution.replace('_', ' ') + ': ' : '') + reason + ')' : ''} · kosong ${empty}`, snap, run.fleetId);
   return runClient(updated, sold, corrs);
 }
 // KOREKSI RIT (append-only) — fix a mistake in a run's muat / isi-kembali / kosong without
@@ -3261,6 +3424,7 @@ module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
+  gallonInvariant, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,

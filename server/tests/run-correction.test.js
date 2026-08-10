@@ -83,13 +83,12 @@ describe('Distribusi — Koreksi Rit (append-only run corrections)', () => {
     expect(mine.some((a) => /kosong 0 → 44/.test(a.detail))).toBe(true);
   });
 
-  it('a run correction writes NO GallonMovement (runs do not feed stock)', async () => {
-    const before = await prisma.gallonMovement.count();
-    const rid = await makeClosedRun({ out: 60, sold: 10, full: 50, empty: 0 });
+  it('a run CORRECTION writes NO GallonMovement (muat/tutup feed the ledger; a correction does not)', async () => {
+    const rid = await makeClosedRun({ out: 60, sold: 10, full: 50, empty: 0 });   // load_out + delivery + load_return
+    const before = await prisma.gallonMovement.count();   // measure ONLY around the correction
     await request(app).post(`/api/v1/distribusi/runs/${rid}/corrections`).set(auth(owner)).send({ empty: 9, reason: 'x' });
-    // the 10-gallon sale creates a delivery_out movement; the correction itself must add none.
     const after = await prisma.gallonMovement.count();
-    expect(after - before).toBe(1);   // only the sale's movement, none from the correction
+    expect(after - before).toBe(0);   // the correction itself adds no ledger row
   });
 
   it('open run: only muat correctable — full/empty rejected until closed', async () => {

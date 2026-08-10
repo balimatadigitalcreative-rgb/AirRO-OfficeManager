@@ -4886,6 +4886,120 @@ const GM_META = {
   damage: { l: 'dist.gmDamage', cls: 'dmg', sign: '−' },
   loss: { l: 'dist.gmLoss', cls: 'dmg', sign: '−' },
 };
+// POSISI GALON — the single four-location card. A gallon is never destroyed, only relocated:
+// depot + armada + pelanggan + rusak/hilang = total dimiliki. A warning banner shows if the ledger
+// invariant ever fails (drift ≠ 0). Reused on the Stok Galon screen + the Distribusi dashboard.
+function PosisiGalon({ stock, invariant, onOpname, onIntegrity, compact }) {
+  const s = stock || {};
+  const byFleet = s.armadaByFleet || {};
+  const fleets = Object.keys(byFleet).filter((f) => byFleet[f]);
+  const ok = !invariant || invariant.ok;
+  return (
+    <div className={'card gm-posisi' + (compact ? ' compact' : '')}>
+      <div className="gm-posisi-head">
+        <div className="sec-title">{trD('dist.posisiTitle')}</div>
+        <div className="gm-posisi-total">{trD('dist.gmDimiliki')}: <b className="tnum">{numX(s.totalDimiliki || 0)}</b></div>
+      </div>
+      {!ok && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('dist.driftWarn', { n: (invariant && invariant.drift) || 0 })}</span></div>}
+      <div className="gm-posisi-grid">
+        <div className="gm-loc depot"><span>{trD('dist.gmAtDepot')}</span><b className="tnum">{numX(s.atDepot || 0)}</b></div>
+        <div className="gm-loc armada"><span>{trD('dist.gmAtArmada')}</span><b className="tnum">{numX(s.atArmada || 0)}</b>{fleets.length > 0 && <small>{fleets.map((f) => f + ' ' + numX(byFleet[f])).join(' · ')}</small>}</div>
+        <div className="gm-loc pelanggan"><span>{trD('dist.gmAtCust')}</span><b className="tnum">{numX(s.atCustomers || 0)}</b></div>
+        <div className="gm-loc rusak"><span>{trD('dist.gmRusak')}</span><b className="tnum">{numX(s.rusakHilang || 0)}</b></div>
+      </div>
+      {(onOpname || onIntegrity) && (
+        <div className="gm-posisi-acts">
+          {onOpname && <button type="button" className="btn btn-ghost btn-sm" onClick={onOpname}><IconCheck s={13} />{trD('op.btn')}</button>}
+          {onIntegrity && <button type="button" className="btn btn-ghost btn-sm" onClick={onIntegrity}><IconRefresh s={13} />{trD('gi.btn')}</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// STOK OPNAME — physical count at a location (depot or a fleet's armada) → writes a 'correction'
+// (reason=opname) with the difference; never edits history. Shows the system figure + live diff.
+function StokOpnameModal({ stock, fleet, init, onClose, onDone }) {
+  const [location, setLocation] = uSx((init && init.location) || 'depot');
+  const [count, setCount] = uSx((init && init.count) || '');
+  const [note, setNote] = uSx('');
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const fleetOpts = (fleet || []).filter(Boolean);
+  const s = stock || {};
+  const systemFigure = location === 'depot' ? (s.atDepot || 0) : ((s.armadaByFleet || {})[location] || 0);
+  const physical = count === '' ? null : (parseInt(count, 10) || 0);
+  const diff = physical == null ? null : physical - systemFigure;
+  const commit = () => {
+    if (saving) return;
+    if (physical == null || physical < 0) { setErr(trD('op.countErr')); return; }
+    if (!note.trim()) { setErr(trD('gv.noteReq')); return; }
+    setSaving(true); setErr('');
+    window.API.distribusi.opname({ location, count: physical, note: note.trim() })
+      .then((r) => { setSaving(false); onDone(trD('op.done', { d: (r.data.diff >= 0 ? '+' : '') + numX(r.data.diff) })); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 230 }}>
+      <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('op.title')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('op.sub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trD('op.location')}</label>
+          <select className="fld" value={location} onChange={(e) => setLocation(e.target.value)}>
+            <option value="depot">{trD('op.depot')}</option>
+            {fleetOpts.map((f) => <option key={f} value={f}>{trD('op.armada')} {f}</option>)}
+          </select>
+          <div className="gv-impact" style={{ marginTop: 12 }}>
+            <div className="gv-impact-row"><span>{trD('op.system')}</span><b className="tnum">{numX(systemFigure)}</b></div>
+            {diff != null && <div className={'gv-impact-row' + (diff !== 0 ? '' : ' muted')}><span>{trD('op.diff')}</span><b className="tnum" style={diff !== 0 ? { color: 'var(--warn)' } : null}>{(diff >= 0 ? '+' : '') + numX(diff)}</b></div>}
+          </div>
+          <label className="fld-label">{trD('op.count')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <input className="fld tnum" value={count} inputMode="numeric" placeholder="0" onChange={(e) => setCount(e.target.value.replace(/[^0-9]/g, ''))} />
+          <label className="fld-label">{trD('gv.noteLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={note} placeholder={trD('op.notePh')} onChange={(e) => setNote(e.target.value)} />
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={saving} onClick={commit}>{saving ? '…' : trD('op.save')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// INTEGRITY GUARD — lists deliveries with no ledger row + ledger rows pointing at a missing txn, and
+// (owner) offers a one-click repair. This is where silent gallon leakage would hide.
+function GalonIntegrityModal({ onClose, onRepaired }) {
+  const [data, setData] = uSx(null);
+  const [busy, setBusy] = uSx(false);
+  const [err, setErr] = uSx('');
+  const load = () => window.API.distribusi.gallonIntegrity().then((r) => setData(r.data)).catch((e) => setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')));
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); load(); return () => window.removeEventListener('keydown', o); }, []);
+  const repair = () => { if (busy) return; setBusy(true); window.API.distribusi.gallonIntegrityRepair().then(() => { setBusy(false); onRepaired(); load(); }).catch((e) => { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); }); };
+  const clean = data && data.missingCount === 0 && data.orphanCount === 0 && data.invariant.ok;
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 230 }}>
+      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('gi.title')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('gi.sub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {!data ? <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div> : (
+            <div className="gv-impact">
+              <div className="gv-impact-row"><span>{trD('gi.missing')}</span><b className="tnum" style={data.missingCount ? { color: 'var(--neg)' } : null}>{numX(data.missingCount)}</b></div>
+              <div className="gv-impact-row"><span>{trD('gi.orphan')}</span><b className="tnum" style={data.orphanCount ? { color: 'var(--neg)' } : null}>{numX(data.orphanCount)}</b></div>
+              <div className="gv-impact-row muted"><span>{trD('gi.invariant')}</span><b>{data.invariant.ok ? trD('gi.ok') : trD('dist.driftWarn', { n: data.invariant.drift })}</b></div>
+            </div>
+          )}
+          {clean && <div className="wa-resolved" style={{ marginTop: 10 }}><IconCheck s={13} />{trD('gi.clean')}</div>}
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
+          {data && !clean && <button className="btn btn-danger" disabled={busy} onClick={repair}><IconRefresh s={15} />{busy ? '…' : trD('gi.repair')}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);
   const [toast, setToast] = uSx('');
@@ -4894,6 +5008,8 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
   const [reset, setReset] = uSx(null);   // reset-gallon modal: { mode, fleet, target, reason, confirm }
   const [movAct, setMovAct] = uSx(null);   // depot-row action modal: { movement, kind:'void'|'restore'|'delete' }
   const [resetAwal, setResetAwal] = uSx(null);   // "Setel Ulang Stok Awal" modal
+  const [opname, setOpname] = uSx(null);          // stok opname modal: { location, count, note }
+  const [integrity, setIntegrity] = uSx(null);    // integrity-guard result modal
   const [hideVoided, setHideVoided] = uSx(true);   // hide "Dibatalkan" rows by default
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
@@ -4946,11 +5062,7 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
           <button type="button" className="btn btn-danger btn-sm" onClick={openReset}><IconRefresh s={14} />{trD('dist.grBtn')}</button>
         </div>
       )}
-      <div className="dist-gm-cards">
-        <div className="card stat-box"><span className="icon-tile" style={{ background: '#EAF1F4', color: '#5E7A88' }}>{IcX('IconDrop', { s: 18 })}</span><div className="tnum dist-gm-val">{numX(st.totalOwned || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmTotal')}</div></div>
-        <div className="card stat-box"><span className="icon-tile" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>{IcX('IconCustomers', { s: 18 })}</span><div className="tnum dist-gm-val" style={{ color: 'var(--warn)' }}>{numX(st.atCustomers || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmAtCust')}</div></div>
-        <div className="card stat-box"><span className="icon-tile" style={{ background: 'var(--pos-bg)', color: 'var(--green-800)' }}>{IcX('IconTruck', { s: 18 })}</span><div className="tnum dist-gm-val" style={{ color: 'var(--green-700)' }}>{numX(st.atDepot || 0)}</div><div className="dist-gm-lbl">{trD('dist.gmAtDepot')}</div></div>
-      </div>
+      <PosisiGalon stock={st} invariant={data.invariant} onOpname={(canReset || canCustomers) ? () => { setErr(''); setOpname({ location: 'depot', count: '', note: '' }); } : null} onIntegrity={canGalonDelete ? () => setIntegrity({ loading: true }) : null} />
       <div className="dist-gm-note"><IconInvoice s={13} /><span>{trD('dist.gmTotalNote')}</span></div>
       <div className="card dist-gm-opening">
         <span className="icon-tile" style={{ background: '#EEF2FF', color: '#5b6ed6' }}>{IcX('IconWallet', { s: 17 })}</span>
@@ -5094,6 +5206,8 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
 
       {movAct && <GalonMovActionModal movement={movAct.movement} kind={movAct.kind} onClose={() => setMovAct(null)} onDone={(msg) => { setMovAct(null); flash(msg); reload(); }} />}
       {resetAwal && <GalonOpeningResetModal ef={ef} init={resetAwal} onClose={() => setResetAwal(null)} onDone={(msg) => { setResetAwal(null); flash(msg); reload(); }} />}
+      {opname && <StokOpnameModal stock={st} fleet={fleet} init={opname} onClose={() => setOpname(null)} onDone={(msg) => { setOpname(null); flash(msg); reload(); }} />}
+      {integrity && <GalonIntegrityModal onClose={() => setIntegrity(null)} onRepaired={() => { flash(trD('gi.repaired')); reload(); }} />}
 
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
@@ -5338,7 +5452,8 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
     const expected = modal.run.expectedRemaining;
     const diff = full - expected;
     if (diff !== 0 && !(modal.diffReason || '').trim()) { setSaving(false); setErr(trD('run.errDiffReason', { d: (diff > 0 ? '+' : '') + numX(diff) })); return; }
-    window.API.distribusi.runs.close(modal.run.id, { gallonsFullReturned: full, gallonsEmptyReturned: empty, diffReason: (modal.diffReason || '').trim() || undefined }).then(() => done(trD('run.closed'))).catch(fail);
+    if (diff !== 0 && !modal.resolution) { setSaving(false); setErr(trD('run.errResolution')); return; }
+    window.API.distribusi.runs.close(modal.run.id, { gallonsFullReturned: full, gallonsEmptyReturned: empty, diffReason: (modal.diffReason || '').trim() || undefined, resolution: modal.resolution || undefined }).then(() => done(trD('run.closed'))).catch(fail);
   };
   const dayRuns = (runs || []);
   const totals = dayRuns.reduce((a, r) => ({ out: a.out + r.gallonsOut, sold: a.sold + r.sold, full: a.full + (r.gallonsFullReturned || 0), empty: a.empty + (r.gallonsEmptyReturned || 0) }), { out: 0, sold: 0, full: 0, empty: 0 });
@@ -5346,6 +5461,8 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
     <div className="card dist-card gud-runpanel">
       <div className="dist-card-head">
         <div className="sec-title"><IconTruck s={15} /> {trD('run.title')}</div>
+        {/* Running "di armada" = full gallons still on open trucks (muat − terjual), all day. */}
+        {openRuns.length > 0 && <span className="run-armada-chip"><IconDrop s={12} />{trD('run.diArmada', { n: numX(openRuns.reduce((a, r) => a + Math.max(0, r.gallonsOut - r.sold), 0)) })}</span>}
         <button type="button" className="btn btn-primary btn-sm" onClick={openModal}><IconPlus s={14} />{trD('run.muat')}</button>
       </div>
 
@@ -5433,10 +5550,16 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
                 {modal.full !== '' && (() => { const d = (parseInt(modal.full, 10) || 0) - modal.run.expectedRemaining; return <div className={`run-diffline ${d !== 0 ? 'bad' : 'ok'}`}>{d === 0 ? trD('run.diffOk') : trD('run.diffBad', { d: (d > 0 ? '+' : '') + numX(d) })}</div>; })()}
                 <label className="fld-label">{trD('run.emptyReturned')}</label>
                 <input className="fld tnum" value={modal.empty} inputMode="numeric" placeholder="cth. 55" onChange={(e) => setModal({ ...modal, empty: e.target.value.replace(/[^0-9]/g, '') })} />
-                {modal.full !== '' && (parseInt(modal.full, 10) || 0) !== modal.run.expectedRemaining && (<>
-                  <label className="fld-label">{trD('run.diffReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-                  <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={modal.diffReason} placeholder={trD('run.diffReasonPh')} onChange={(e) => setModal({ ...modal, diffReason: e.target.value })} />
-                </>)}
+                {modal.full !== '' && (parseInt(modal.full, 10) || 0) !== modal.run.expectedRemaining && (() => {
+                  const selisih = modal.run.expectedRemaining - (parseInt(modal.full, 10) || 0);   // >0 = galon hilang dari armada
+                  const RES = [['kembali_besok', 'run.resCarry'], ...(selisih > 0 ? [['rusak', 'run.resRusak'], ['hilang', 'run.resHilang']] : []), ['salah_hitung', 'run.resMiscount']];
+                  return (<>
+                    <label className="fld-label">{trD('run.resLbl', { n: (selisih > 0 ? '+' : '') + numX(selisih) })} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                    <div className="cat-chips">{RES.map(([v, k]) => <button key={v} type="button" className={`cat-chip ${modal.resolution === v ? 'on' : ''}`} onClick={() => setModal({ ...modal, resolution: v })}>{trD(k)}</button>)}</div>
+                    <label className="fld-label">{trD('run.diffReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                    <textarea className="fld" style={{ height: 58, padding: 12, resize: 'vertical' }} value={modal.diffReason} placeholder={trD('run.diffReasonPh')} onChange={(e) => setModal({ ...modal, diffReason: e.target.value })} />
+                  </>);
+                })()}
               </>)}
               {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
             </div>

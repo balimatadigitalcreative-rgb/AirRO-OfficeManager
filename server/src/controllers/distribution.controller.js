@@ -183,7 +183,7 @@ const closeSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(),
 const closeoutQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
 // Delivery runs (rit)
 const runOpenSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), gallonsOut: z.number().int().positive(), note: z.string().max(300).optional() });
-const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegative(), gallonsEmptyReturned: z.number().int().nonnegative(), diffReason: z.string().max(300).optional() });
+const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegative(), gallonsEmptyReturned: z.number().int().nonnegative(), diffReason: z.string().max(300).optional(), resolution: z.enum(['kembali_besok', 'rusak', 'hilang', 'salah_hitung']).optional() });
 // Koreksi Rit (append-only): CORRECTED absolute value(s) for muat/isi-kembali/kosong + a required
 // reason. At least one field must be present (enforced in the service via a zero-change check).
 const runCorrectionSchema = z.object({ out: z.number().int().nonnegative().optional(), full: z.number().int().nonnegative().optional(), empty: z.number().int().nonnegative().optional(), reason: z.string().min(1).max(300) });
@@ -346,6 +346,18 @@ const closeDay = asyncHandler(async (req, res) => {
 const listCloseouts = asyncHandler(async (req, res) => res.json(await service.listCloseouts(req.user, req.query)));
 
 // ── Delivery runs (rit) ──
+// Location-based gallon: opname (physical count → correction), invariant, integrity guard.
+const stockOpname = asyncHandler(async (req, res) => { const r = await service.stockOpname(req.body, req.user); bcast('gallon', 'opname'); res.status(201).json({ data: r }); });
+const opnameHistory = asyncHandler(async (req, res) => res.json({ data: await service.opnameHistory(req.user, req.query.fleet) }));
+const gallonIntegrity = asyncHandler(async (req, res) => {
+  const r = await service.gallonIntegrityCheck(req.user);
+  if (r.missingCount > 0 || r.orphanCount > 0 || !r.invariant.ok) {
+    await service.logDistAudit('koreksi', 'Ketidakcocokan ledger galon', `${r.missingCount} transaksi tanpa baris ledger · ${r.orphanCount} baris yatim · invariant ${r.invariant.ok ? 'ok' : 'DRIFT ' + r.invariant.drift}`, req.user, '');
+  }
+  res.json({ data: r });
+});
+const gallonIntegrityRepair = asyncHandler(async (req, res) => { const r = await service.gallonIntegrityRepair(req.user); bcast('gallon', 'repair'); res.json({ data: r }); });
+const opnameSchema = z.object({ location: z.string().max(60), count: z.coerce.number().int().nonnegative(), note: z.string().trim().min(1).max(500), proof: z.string().max(300).optional() });
 const openRun = asyncHandler(async (req, res) => { const r = await service.openRun(req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.status(201).json({ data: r }); });
 const closeRun = asyncHandler(async (req, res) => { const r = await service.closeRun(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.json({ data: r }); });
 const correctRun = asyncHandler(async (req, res) => { const r = await service.correctRun(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.json({ data: r }); });
@@ -380,7 +392,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, requestCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
-  gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
+  gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
@@ -388,5 +400,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };
