@@ -1652,7 +1652,10 @@ function FApp() {
           {screen === 'overview' && p.cashflow && (
             <div className="screen-enter">
               {p.seeMoney && <ALERTS.AlertBanner alerts={alerts} />}
-              <FIN.StatRow stats={stats} seeMoney={p.seeMoney} deltas={deltas} />
+              {/* Dashboard Keuangan — KPI cards (each states its period scope + drills to the ledger),
+                  cash position per account, P&L month-vs-last, 12-month trend, ratios. All over the
+                  cash-book figures the shell already computes; AR/liabilities gated to the engine. */}
+              <FIN.Dashboard stats={stats} deltas={deltas} shownAccounts={scopedAccounts} allAccounts={accounts} allEntries={entries} transfers={transfers} plEntries={scopedEntries} breakdown={breakdown} periodLbl={periodLbl} seeMoney={p.seeMoney} onDrill={go} />
               {/* Per-unit breakdown — only in the combined view. Its columns sum EXACTLY to the
                   StatRow above (the Stage-3 invariant). Clicking a unit focuses the whole view. */}
               {p.seeMoney && activeUnit === 'all' && unitStats.length > 1 && (
@@ -1689,9 +1692,9 @@ function FApp() {
                   <FIN.EntriesList entries={recent} onDelete={del} onEdit={editEntryRow} title={tr('recent.title')} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
                 </div>
                 <div className="fin-col">
+                  {/* The 12-month trend + expense donut now live in the dashboard above; keep the
+                      at-a-glance "today" card next to the add form and recent-entries list. */}
                   <FIN.TodayCard today={today} seeMoney={p.seeMoney} />
-                  <FIN.MonitorCard last7={last7} />
-                  {p.seeMoney && <FIN.CategoryCard breakdown={breakdown.segs} total={breakdown.total} monLabel={periodLbl} />}
                 </div>
               </div>
             </div>

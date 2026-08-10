@@ -734,4 +734,155 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
   );
 }
 
-window.FIN = { AddEntry, StatRow, MonitorCard, CategoryCard, TodayCard, EntriesList, MoneySpots, TODAY, MONTHS, FULLMON, fmt, fmtS, fmtC };
+/* ═══════════════ Dashboard Keuangan (Ringkasan) — presentation over existing cash-book data ═══════════════
+   Every figure comes from data the shell already computes: `stats`/`deltas` (period P&L), per-account
+   balances via FS.acctBalance over the FULL arrays (identical to the Kas & Bank screen, so the numbers
+   match), and monthly aggregates of the scoped entries. No new business logic. Cards that need the
+   double-entry engine (AR aging, liabilities due, gross margin, AR turnover) are shown as engine-gated
+   placeholders so the dashboard's information architecture is complete and lights up when Part 3 ships. */
+const monKeyOf = (ds) => (ds || '').slice(0, 7);
+function monthAgg(entries, key) {
+  let income = 0, expense = 0, count = 0;
+  (entries || []).forEach((e) => { if (monKeyOf(e.date) === key) { count++; if (e.type === 'income') income += e.amount; else expense += e.amount; } });
+  return { income, expense, profit: income - expense, count };
+}
+function prevMonKey(key) { const p = key.split('-').map(Number); const d = new Date(p[0], p[1] - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+function build12mo(entries) {
+  const arr = []; const now = new Date(TODAY + 'T00:00');
+  for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); arr.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, m: Mn()[d.getMonth()], rev: 0, exp: 0 }); }
+  const idx = {}; arr.forEach((a) => { idx[a.key] = a; });
+  (entries || []).forEach((e) => { const a = idx[monKeyOf(e.date)]; if (a) { if (e.type === 'income') a.rev += e.amount; else a.exp += e.amount; } });
+  return arr;
+}
+const dPctOf = (c, p) => (!p ? (c ? null : 0) : Math.round(((c - p) / Math.abs(p)) * 1000) / 10);
+
+function DashKpi({ label, value, scope, icon, tone, cls, delta, invert, onClick }) {
+  const bg = { accent: 'var(--green-800)', pos: 'var(--mint-100)', neg: '#EAF1F4', neutral: 'var(--card-soft)' }[tone] || 'var(--card-soft)';
+  const fg = { accent: '#fff', pos: 'var(--green-800)', neg: '#5E7A88', neutral: 'var(--text-mut)' }[tone] || 'var(--text-mut)';
+  const inner = (<>
+    <div className="fin-kpi-top">
+      <span className="fin-kpi-ic" style={{ background: bg, color: fg }}>{Icn(icon, { s: 18 })}</span>
+      {onClick && <span className="fin-kpi-drill">{Icn('IconCaret', { s: 14 })}</span>}
+    </div>
+    <div className={`fin-kpi-val ${cls || ''}`}>{value}</div>
+    <div className="fin-kpi-label">{label}</div>
+    <div className="fin-kpi-scope">{Icn('IconCalendar', { s: 11 })}{scope}</div>
+    {delta !== undefined && delta !== null && <DeltaPillF delta={delta} invert={invert} />}
+  </>);
+  return onClick
+    ? <button type="button" className="fin-kpi" onClick={onClick} aria-label={label + ': ' + value}>{inner}</button>
+    : <div className="fin-kpi">{inner}</div>;
+}
+
+function GatedMini({ icon, title, note }) {
+  return (
+    <div className="card fin-gated">
+      <div className="fin-gated-head">
+        <span className="fin-kpi-ic" style={{ background: 'var(--mint-100)', color: 'var(--green-800)' }}>{Icn(icon, { s: 18 })}</span>
+        <span className="fin-gated-title">{title}</span>
+        <span className="fin-badge-soon">{trF('fin.soonBadge')}</span>
+      </div>
+      <div className="fin-gated-note">{note}</div>
+    </div>
+  );
+}
+
+function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, transfers, plEntries, breakdown, periodLbl, seeMoney, onDrill }) {
+  const cur = monKeyOf(TODAY), prv = prevMonKey(cur);
+  const mtd = uM(() => monthAgg(plEntries, cur), [plEntries, cur]);
+  const lm = uM(() => monthAgg(plEntries, prv), [plEntries, prv]);
+  const series12 = uM(() => build12mo(plEntries), [plEntries]);
+  // Per-account balance uses the FULL arrays — identical to FIN.MoneySpots — so the dashboard and the
+  // Kas & Bank screen never disagree. Only the DISPLAYED set is the scoped one.
+  const acctRows = uM(() => (shownAccounts || []).map((a) => ({ ...a, bal: FS.acctBalance(a, allEntries, allAccounts, transfers) })), [shownAccounts, allEntries, allAccounts, transfers]);
+  const totalCash = acctRows.reduce((s, a) => s + a.bal, 0);
+  const netMargin = stats.income ? Math.round((stats.profit / stats.income) * 1000) / 10 : 0;
+  const curNm = FULLMON[+cur.split('-')[1] - 1], prvNm = FULLMON[+prv.split('-')[1] - 1];
+
+  const kpis = seeMoney ? [
+    { key: 'cash', label: trF('stat.balance'), value: (totalCash < 0 ? '−' : '') + fmt(totalCash), scope: trF('dash.nowScope'), icon: 'IconWallet', tone: 'accent', drill: 'moneyspots' },
+    { key: 'income', label: trF('stat.income'), value: fmt(stats.income), scope: periodLbl, icon: 'IconCoinIn', tone: 'pos', cls: 'amt-pos', delta: deltas && deltas.income, drill: 'entries' },
+    { key: 'expense', label: trF('stat.expense'), value: fmt(stats.expense), scope: periodLbl, icon: 'IconCoinOut', tone: 'neg', cls: 'amt-neg', delta: deltas && deltas.expense, invert: true, drill: 'entries' },
+    { key: 'profit', label: trF('stat.profit'), value: fmtS(stats.profit), scope: periodLbl, icon: 'IconTrendUp', tone: stats.profit >= 0 ? 'pos' : 'neg', cls: stats.profit >= 0 ? 'amt-pos' : 'amt-neg', delta: deltas && deltas.profit, drill: 'entries' },
+  ] : [
+    { key: 'income', label: trF('stat.income'), value: fmt(stats.income), scope: periodLbl, icon: 'IconCoinIn', tone: 'pos', cls: 'amt-pos', delta: deltas && deltas.income, drill: 'entries' },
+    { key: 'expense', label: trF('stat.expense'), value: fmt(stats.expense), scope: periodLbl, icon: 'IconCoinOut', tone: 'neg', cls: 'amt-neg', delta: deltas && deltas.expense, invert: true, drill: 'entries' },
+  ];
+  const donutPal = ['#065489', '#0B7EB1', '#138FB3', '#8DD3D0', '#3FB8B2', '#DDF7F6'];
+
+  return (
+    <div className="screen-enter fin-scope">
+      <div className="fin-kpi-grid">
+        {kpis.map((c) => <DashKpi key={c.key} {...c} onClick={onDrill ? () => onDrill(c.drill) : undefined} />)}
+      </div>
+
+      {seeMoney && (
+        <div className="fin-dash-grid">
+          <div className="card fin-dash-card">
+            <div className="fin-dash-cardhead"><div className="sec-title">{trF('dash.cashPos')}</div><button className="dist-link" onClick={() => onDrill && onDrill('moneyspots')}>{trF('dash.viewAll')}</button></div>
+            <div className="fin-acctlist">
+              {acctRows.map((a) => (
+                <button key={a.id} type="button" className="fin-acctline" onClick={() => onDrill && onDrill('moneyspots')}>
+                  <span className="fin-acctline-ic" style={{ background: a.color || 'var(--green-800)' }}>{Icn(a.type === 'cash' ? 'IconWallet' : 'IconStore', { s: 15 })}</span>
+                  <span className="fin-acctline-name">{a.name}<em>{a.type === 'bank' ? (a.number || trF('ms.bank')) : trF('ms.cash')}</em></span>
+                  <span className="tnum fin-acctline-bal">{fmt(a.bal)}</span>
+                </button>
+              ))}
+              <div className="fin-acctline total"><span className="fin-acctline-name">{trF('dash.totalCash')}</span><span className="tnum fin-acctline-bal">{fmt(totalCash)}</span></div>
+            </div>
+          </div>
+
+          <div className="card fin-dash-card">
+            <div className="fin-dash-cardhead"><div className="sec-title">{trF('dash.plCompare')}</div></div>
+            <div className="fin-cmp">
+              <div className="fin-cmp-head"><span /><span className="fin-r">{curNm}</span><span className="fin-r">{prvNm}</span><span className="fin-r">Δ</span></div>
+              {[['stat.income', mtd.income, lm.income, false], ['stat.expense', mtd.expense, lm.expense, true], ['stat.profit', mtd.profit, lm.profit, false]].map((r) => (
+                <div key={r[0]} className="fin-cmp-row">
+                  <span className="fin-cmp-lbl">{trF(r[0])}</span>
+                  <span className="fin-r tnum fin-cmp-strong">{fmt(r[1])}</span>
+                  <span className="fin-r tnum fin-cmp-mut">{fmt(r[2])}</span>
+                  <span className="fin-r"><DeltaPillF delta={dPctOf(r[1], r[2])} invert={r[3]} /></span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {seeMoney && (
+        <div className="card fin-dash-card" style={{ marginTop: 'var(--fs-4)' }}>
+          <div className="fin-dash-cardhead">
+            <div className="sec-title">{trF('dash.trend12')}</div>
+            <div style={{ display: 'flex', gap: 14 }}>
+              <span className="fin-legend"><span className="fin-legend-dot" style={{ background: '#065489' }} />{trF('stat.income')}</span>
+              <span className="fin-legend"><span className="fin-legend-dot" style={{ background: '#22A7A1' }} />{trF('stat.expense')}</span>
+            </div>
+          </div>
+          <CashflowChart data={series12} range="ALL" />
+        </div>
+      )}
+
+      {seeMoney && (
+        <div className="fin-dash-grid" style={{ marginTop: 'var(--fs-4)' }}>
+          <div className="card fin-dash-card">
+            <div className="fin-dash-cardhead"><div className="sec-title">{trF('dash.ratios')}</div><span className="fin-kpi-scope">{Icn('IconCalendar', { s: 11 })}{periodLbl}</span></div>
+            <div className="fin-ratio-row">
+              <div className="fin-ratio"><div className="fin-ratio-lbl">{trF('dash.netMargin')}</div><div className="fin-ratio-val">{netMargin}%</div></div>
+              <div className="fin-ratio fin-ratio-gated"><div className="fin-ratio-lbl">{trF('dash.grossMargin')} <span className="fin-badge-soon">{trF('fin.soonBadge')}</span></div><div className="fin-ratio-val fin-cmp-mut">—</div></div>
+              <div className="fin-ratio fin-ratio-gated"><div className="fin-ratio-lbl">{trF('dash.arTurnover')} <span className="fin-badge-soon">{trF('fin.soonBadge')}</span></div><div className="fin-ratio-val fin-cmp-mut">—</div></div>
+            </div>
+            {breakdown && breakdown.segs && breakdown.segs.length > 0 && (
+              <div className="fin-mini-donut"><DonutChart segments={breakdown.segs.slice(0, 6)} total={breakdown.total} centerLabel={trF('add.expense')} palette={donutPal} /></div>
+            )}
+          </div>
+          <div className="fin-dash-col">
+            <GatedMini icon="IconInvoice" title={trF('dash.arAging')} note={trF('dash.needEngine')} />
+            <GatedMini icon="IconCoinOut" title={trF('dash.liabilities')} note={trF('dash.needEngine')} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+window.FIN = { AddEntry, StatRow, MonitorCard, CategoryCard, TodayCard, EntriesList, MoneySpots, Dashboard, TODAY, MONTHS, FULLMON, fmt, fmtS, fmtC };

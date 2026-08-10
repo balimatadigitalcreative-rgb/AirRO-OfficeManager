@@ -3809,3 +3809,45 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .fin-scope .fin-trow, .fin-scope .fin-acct-row { break-inside: avoid; }
   .fin-scope .fin-trow.subtotal, .fin-scope .fin-trow.grand, .fin-scope .fin-totals-block { break-inside: avoid; page-break-inside: avoid; }
 }
+
+/* ═══════════ FINANCE REDESIGN — Stage 2 (Dashboard Keuangan) ═══════════ */
+.fin-kpi-grid { margin-bottom: var(--fs-4); }
+.fin-dash-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--fs-4); }
+@media (max-width: 900px) { .fin-dash-grid { grid-template-columns: 1fr; } }
+.fin-dash-card { padding: var(--fs-4); }
+.fin-dash-card .sec-title { font-size: 15px; font-weight: 700; }
+.fin-dash-cardhead { display: flex; align-items: center; justify-content: space-between; gap: var(--fs-2); margin-bottom: var(--fs-3); }
+.fin-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-mut); font-weight: 600; }
+.fin-legend-dot { width: 9px; height: 9px; border-radius: 3px; }
+
+/* Cash position per account — each row drills to the Kas & Bank ledger */
+.fin-acctlist { display: flex; flex-direction: column; }
+.fin-acctline { display: flex; align-items: center; gap: var(--fs-3); width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border-soft); padding: 10px var(--fs-1); cursor: pointer; font: inherit; }
+.fin-acctline:last-of-type { border-bottom: none; }
+.fin-acctline:hover { background: var(--card-soft); }
+.fin-acctline-ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: #fff; flex-shrink: 0; }
+.fin-acctline-name { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; font-weight: 600; }
+.fin-acctline-name em { font-style: normal; font-size: 11px; color: var(--text-faint); font-weight: 500; }
+.fin-acctline-bal { margin-left: auto; font-weight: 700; font-size: 14px; white-space: nowrap; }
+.fin-acctline.total { border-top: 2px solid var(--border); margin-top: 4px; padding-top: 12px; cursor: default; font-weight: 800; }
+.fin-acctline.total .fin-acctline-name { font-weight: 800; }
+.fin-acctline.total .fin-acctline-bal { color: var(--green-800); font-size: 15px; }
+
+/* Laba Rugi — this month vs last month */
+.fin-cmp { display: flex; flex-direction: column; gap: 2px; }
+.fin-cmp-head { display: grid; grid-template-columns: 1fr auto auto 78px; gap: var(--fs-3); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); padding: 0 0 6px; border-bottom: 1px solid var(--border-soft); }
+.fin-cmp-row { display: grid; grid-template-columns: 1fr auto auto 78px; gap: var(--fs-3); align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.fin-cmp-row:last-child { border-bottom: none; }
+.fin-cmp-lbl { color: var(--text-mut); font-weight: 600; }
+.fin-cmp-strong { font-weight: 700; }
+.fin-cmp-mut { color: var(--text-mut); }
+.fin-cmp-head span.fin-r, .fin-cmp-row span.fin-r { text-align: right; }
+
+.fin-mini-donut { margin-top: var(--fs-4); }
+.fin-ratio-gated { opacity: .82; }
+.fin-ratio-gated .fin-badge-soon { margin-left: 4px; }
+.fin-dash-col { display: flex; flex-direction: column; gap: var(--fs-4); }
+.fin-gated { padding: var(--fs-4); border-style: dashed; }
+.fin-gated-head { display: flex; align-items: center; gap: var(--fs-2); }
+.fin-gated-title { font-weight: 700; font-size: 13.5px; }
+.fin-gated-note { font-size: 12px; color: var(--text-faint); margin-top: var(--fs-2); line-height: 1.4; }
