@@ -3667,3 +3667,145 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .audit-act { font-size: 12.5px; font-weight: 600; }
 .audit-extra { font-weight: 400; color: var(--text-mut); }
 .audit-meta { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   FINANCE REDESIGN — Stage 1 foundation (presentation-only). Additive: introduces the shared
+   `fin-*` vocabulary the accounting screens use. Reuses the existing tokens (styles.css:13) and the
+   proven fixed-column table approach (the tx-table fix) so header/row geometry can never drift.
+   Single accent = --green-800 #065489. Nothing here overrides an existing rule.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* A real 4px spacing scale (the design system had only literal px). New names → zero risk to
+   existing rules; new finance markup uses these so spacing is consistent and rhythmic. */
+:root {
+  --fs-1: 4px; --fs-2: 8px; --fs-3: 12px; --fs-4: 16px; --fs-5: 20px; --fs-6: 24px; --fs-8: 32px; --fs-10: 40px;
+  --fin-accent: var(--green-800);          /* THE one accent, aliased for finance scope */
+  --fin-accent-soft: var(--mint-100);
+  --fin-row-h: 52px;                        /* comfortable density row height */
+  --fin-row-h-compact: 40px;
+}
+
+/* ── The finance workspace header (title · scope · actions) shared by every accounting screen ── */
+.fin-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--fs-4); flex-wrap: wrap; margin-bottom: var(--fs-4); }
+.fin-head-titles h2 { font-family: 'Poppins'; font-size: 19px; font-weight: 800; line-height: 1.1; }
+.fin-head-scope { font-size: 12.5px; color: var(--text-mut); margin-top: 3px; }
+.fin-head-actions { display: flex; align-items: center; gap: var(--fs-2); flex-wrap: wrap; }
+
+/* ── KPI cards (dashboard) — each states its period scope explicitly and drills through ── */
+.fin-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--fs-3); }
+.fin-kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--fs-4); display: flex; flex-direction: column; gap: var(--fs-1); text-align: left; position: relative; transition: box-shadow .14s, border-color .14s, transform .06s; }
+button.fin-kpi { cursor: pointer; width: 100%; font: inherit; }
+button.fin-kpi:hover { border-color: var(--mint-200); box-shadow: var(--shadow-md); }
+button.fin-kpi:active { transform: translateY(1px); }
+.fin-kpi-top { display: flex; align-items: center; justify-content: space-between; gap: var(--fs-2); }
+.fin-kpi-ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; }
+.fin-kpi-label { font-size: 12px; color: var(--text-mut); font-weight: 600; }
+.fin-kpi-val { font-family: 'Poppins'; font-size: 22px; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fin-kpi-scope { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: var(--text-faint); }
+.fin-kpi-scope svg { width: 11px; height: 11px; }
+.fin-kpi-drill { position: absolute; top: var(--fs-3); right: var(--fs-3); color: var(--text-faint); opacity: 0; transition: opacity .14s; }
+button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
+.fin-ratio-row { display: flex; flex-wrap: wrap; gap: var(--fs-3); }
+.fin-ratio { flex: 1; min-width: 150px; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--r-sm); padding: var(--fs-3) var(--fs-4); }
+.fin-ratio-lbl { font-size: 11.5px; color: var(--text-mut); font-weight: 600; }
+.fin-ratio-val { font-family: 'Poppins'; font-size: 18px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+@media (max-width: 1180px) { .fin-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .fin-kpi-grid { grid-template-columns: 1fr; } }
+
+/* ── THE finance table — ONE fixed column system shared by header and rows. Same approach as the
+   Transaksi fix: table-layout:fixed + a <colgroup> whose widths ARE the geometry, so a header cell
+   and its body cells are guaranteed identical. Sticky header, right-aligned tabular money that never
+   clips (columns are sized for their content), density toggle, single page scrollbar. ── */
+.fin-tablewrap { position: relative; width: 100%; overflow-x: auto; overflow-y: visible; border-radius: var(--r-md); }
+.fin-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.fin-table col.fin-grow { width: auto; }
+.fin-th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); text-align: left; padding: 0 var(--fs-3); height: 36px; background: var(--surface); position: sticky; top: var(--fin-stick, 0px); z-index: 6; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fin-th.fin-r { text-align: right; }
+.fin-th.fin-sort { cursor: pointer; user-select: none; }
+.fin-th.fin-sort:hover { color: var(--text); }
+.fin-td { padding: 0 var(--fs-3); border-bottom: 1px solid rgba(15,30,45,.07); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.fin-td.fin-r { text-align: right; }
+.fin-td.fin-num { font-variant-numeric: tabular-nums; }
+.fin-trow { height: var(--fin-row-h); transition: background .1s; }
+.fin-dense-compact .fin-trow { height: var(--fin-row-h-compact); }
+.fin-dense-compact .fin-td-sub { display: none; }
+.fin-trow.clickable { cursor: pointer; }
+.fin-trow.clickable:hover { background: var(--card-soft); }
+.fin-trow.active { background: var(--mint-100); box-shadow: inset 3px 0 0 var(--green-600); }
+.fin-td-desc { font-weight: 500; }
+.fin-td-sub { font-size: 11px; color: var(--text-faint); }
+/* Running-balance / total rows: subtle top rule; total row heavier. Never split across a print page. */
+.fin-trow.subtotal td { background: var(--card-soft); font-weight: 700; }
+.fin-trow.grand td { background: var(--surface); font-weight: 800; border-top: 2px solid var(--green-800); }
+.fin-r.amt-pos { color: var(--green-800); }
+.fin-r.amt-neg { color: var(--neg); }
+/* Density mini-toggle (Nyaman / Padat) — mirrors .tx-denseg */
+.fin-denseg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.fin-denseg button { border: none; background: var(--surface); color: var(--text-mut); font-size: 12px; font-weight: 600; padding: 6px 11px; cursor: pointer; }
+.fin-denseg button.on { background: var(--green-800); color: #fff; }
+.fin-more { text-align: center; padding: var(--fs-3); font-size: 12px; color: var(--text-faint); }
+
+/* Collapsible account hierarchy (Buku Besar / Neraca / Laba Rugi) */
+.fin-acct-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--fs-3); padding: 9px var(--fs-3); border-bottom: 1px solid var(--border-soft); }
+.fin-acct-row.lvl-0 { font-weight: 800; }
+.fin-acct-row.lvl-1 { padding-left: var(--fs-6); }
+.fin-acct-row.lvl-2 { padding-left: var(--fs-10); color: var(--text-mut); }
+.fin-acct-caret { display: inline-flex; width: 18px; color: var(--text-faint); cursor: pointer; transition: transform .12s; }
+.fin-acct-caret.open { transform: rotate(90deg); }
+.fin-acct-code { font-variant-numeric: tabular-nums; color: var(--text-faint); font-size: 11.5px; margin-right: var(--fs-2); }
+
+/* ── States: skeleton · empty · error · coming-soon — used on every finance screen ── */
+.fin-skel { padding: var(--fs-2) 0; }
+.fin-skel-row { display: flex; align-items: center; gap: var(--fs-3); height: var(--fin-row-h); padding: 0 var(--fs-3); border-bottom: 1px solid var(--border-soft); }
+.fin-skel-bar { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--border-soft) 25%, var(--card-soft) 37%, var(--border-soft) 63%); background-size: 400% 100%; animation: finShimmer 1.3s ease infinite; }
+@keyframes finShimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .fin-skel-bar { animation: none; } }
+.fin-empty, .fin-error, .fin-coming { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: var(--fs-2); padding: var(--fs-10) var(--fs-4); color: var(--text-mut); }
+.fin-empty-ic, .fin-coming-ic { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 15px; background: var(--card-soft); color: var(--text-faint); }
+.fin-coming-ic { background: var(--mint-100); color: var(--green-800); }
+.fin-empty-t, .fin-coming-t { font-size: 15px; font-weight: 700; color: var(--text); }
+.fin-empty-s, .fin-coming-s { font-size: 12.5px; color: var(--text-faint); max-width: 380px; }
+.fin-error { color: var(--neg); }
+.fin-error-ic { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 15px; background: var(--neg-bg); color: var(--neg); }
+.fin-badge-soon { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--green-800); background: var(--mint-100); border-radius: 999px; padding: 1px 7px; margin-left: 6px; }
+
+/* ── Accessibility: a visible focus ring for keyboard users on every finance control. Mouse users
+   never see it (:focus-visible). Contrast: accent #065489 on white = 7.0:1, muted text ≥ 4.6:1. ── */
+.fin-scope :focus-visible,
+.fin-kpi:focus-visible, .fin-th.fin-sort:focus-visible, .fin-trow.clickable:focus-visible,
+.fin-denseg button:focus-visible, .fin-acct-caret:focus-visible {
+  outline: 2px solid var(--green-700); outline-offset: 2px; border-radius: 6px;
+}
+
+/* ── Mobile: below 900px the fixed table is replaced by stacked cards (no horizontal scroll). The
+   JSX flips to card render at the same 900px breakpoint the dist screens use. ── */
+.fin-cards { display: flex; flex-direction: column; gap: var(--fs-2); }
+.fin-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--fs-3) var(--fs-4); }
+.fin-card-top { display: flex; align-items: center; justify-content: space-between; gap: var(--fs-2); }
+.fin-card-title { font-weight: 700; font-size: 13.5px; }
+.fin-card-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 1px; }
+.fin-card-amt { font-family: 'Poppins'; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.fin-card-meta { display: flex; flex-wrap: wrap; gap: var(--fs-1) var(--fs-3); margin-top: var(--fs-2); font-size: 11.5px; color: var(--text-mut); }
+@media (max-width: 900px) {
+  .fin-kpi-grid { grid-template-columns: 1fr 1fr; }
+  .fin-head { align-items: flex-start; }
+}
+@media (max-width: 560px) {
+  .fin-head-actions .btn span.fin-btn-lbl { display: none; }   /* icon-only actions on tiny screens */
+}
+
+/* ── A4 print — reuses the statement fixes: repeating table headers, totals block never split,
+   no app chrome, one clean report. Screen keeps the interactive version. ── */
+.fin-print-head { display: none; }
+@media print {
+  @page { size: A4; margin: 14mm; }
+  .fin-print-head { display: block !important; margin-bottom: 10mm; }
+  .fin-scope .btn, .fin-scope .fin-denseg, .fin-scope .fin-head-actions, .fin-scope .fin-kpi-drill { display: none !important; }
+  .fin-scope .card, .fin-scope .fin-kpi { box-shadow: none !important; border: 1px solid #cfd8dc; break-inside: avoid; }
+  .fin-scope .fin-table { font-size: 10.5px; }
+  .fin-scope .fin-table thead { display: table-header-group; }   /* header repeats on every page */
+  .fin-scope .fin-table tfoot { display: table-footer-group; }
+  .fin-scope .fin-th { position: static; }
+  .fin-scope .fin-trow, .fin-scope .fin-acct-row { break-inside: avoid; }
+  .fin-scope .fin-trow.subtotal, .fin-scope .fin-trow.grand, .fin-scope .fin-totals-block { break-inside: avoid; page-break-inside: avoid; }
+}

@@ -16,10 +16,19 @@ function navForRole(p, role) {
   const items = [];
   if (p.company) items.push({ id: 'company', label: tr('nav.company'), icon: 'IconHome', grp: 'overview' });
   if (p.company && p.reset) items.push({ id: 'projects', label: tr('nav.projects'), icon: 'IconBolt', grp: 'overview' });
-  if (p.cashflow) items.push({ id: 'overview', label: tr('nav.overview'), icon: 'IconDashboard', grp: 'finance' });
+  // ── FINANCE — restructured by ACCOUNTING WORKFLOW, not by screen: Ringkasan · Transaksi ·
+  //    Kas & Bank · Buku Besar · Laporan · Rekonsiliasi · Tutup Buku. The last three are the
+  //    double-entry engine (accounting v2). Their screens render an informative "coming soon" card
+  //    until that engine's UI ships, so the information architecture is complete today with no dead
+  //    links. (Kas & Bank stays a distinct item so account CRUD is never hidden — the spec folds it
+  //    under "Transaksi (kas & bank)"; here it sits directly beneath Transaksi.)
+  if (p.cashflow) items.push({ id: 'overview', label: tr('nav.finSummary'), icon: 'IconDashboard', grp: 'finance' });
+  if (p.allEntries) items.push({ id: 'entries', label: tr('nav.finTransaksi'), icon: 'IconTx', grp: 'finance' });
   if (p.cashflow) items.push({ id: 'moneyspots', label: tr('nav.moneyspots'), icon: 'IconWallet', grp: 'finance' });
-  if (p.allEntries) items.push({ id: 'entries', label: tr('nav.entries'), icon: 'IconTx', grp: 'finance' });
+  if (p.reports) items.push({ id: 'ledger', label: tr('nav.finLedger'), icon: 'IconInvoice', grp: 'finance', soon: true });
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
+  if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'finance', soon: true });
+  if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'finance', soon: true });
   if (p.employees) items.push({ id: 'employees', label: tr('nav.employees'), icon: 'IconCustomers', grp: 'hr' });
   if (p.employees) items.push({ id: 'hrcalendar', label: tr('nav.hrcalendar'), icon: 'IconCalendar', grp: 'hr' });
   if (p.payroll) items.push({ id: 'orientation', label: tr('nav.orientation'), icon: 'IconUserCircle', grp: 'hr' });
@@ -70,6 +79,23 @@ function navForRole(p, role) {
   return items;
 }
 const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'];
+
+// Placeholder for accounting-v2 screens (Buku Besar · Rekonsiliasi · Tutup Buku) whose backend
+// (double-entry engine) is built but whose UI ships in a later stage. Keeps the workflow nav honest:
+// the section exists and explains what's coming, instead of a dead tab or a 404.
+function FinComingSoon({ icon, body }) {
+  return (
+    <div className="screen-enter fin-scope">
+      <div className="card">
+        <div className="fin-coming">
+          <span className="fin-coming-ic">{Ish(icon, { s: 24 })}</span>
+          <div className="fin-coming-t">{tr('fin.soonTitle')}</div>
+          <div className="fin-coming-s">{body}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // PER-UNIT MODULE TOGGLE (client mirror of BusinessUnit.enabledModules). The toggleable modules are
 // the four operational nav groups; 'overview' and 'admin' (company/reports-overview + settings/users/
@@ -1440,7 +1466,7 @@ function FApp() {
             </button>
             {!collapsed && items.map((n) => (
               <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''}`} title={n.title || n.label} onClick={() => go(n.id)}>
-                {Ish(n.icon, { s: 20 })}<span>{n.label}</span>
+                {Ish(n.icon, { s: 20 })}<span>{n.label}</span>{n.soon && <span className="fin-badge-soon">{tr('fin.soonBadge')}</span>}
               </button>
             ))}
           </div>
@@ -1470,11 +1496,14 @@ function FApp() {
     thr: { t: tr('t.thr'), s: tr('s.thr') },
     rollcall: { t: tr('t.rollcall'), s: tr('s.rollcall') },
     approvals: { t: tr('t.approvals'), s: tr('s.approvals') },
-    overview: { t: tr('t.overview'), s: tr('s.overview') },
+    overview: { t: tr('nav.finSummary'), s: tr('s.overview') },
     moneyspots: { t: tr('t.moneyspots'), s: tr('s.moneyspots') },
     setoran: { t: tr('t.setoran'), s: tr('s.setoran') },
-    entries: { t: tr('t.entries'), s: tr('s.entries') },
+    entries: { t: tr('nav.finTransaksi'), s: tr('s.entries') },
     reports: { t: tr('t.reports'), s: tr('s.reports') },
+    ledger: { t: tr('t.finLedger'), s: tr('s.finLedger') },
+    reconcile: { t: tr('t.finRekon'), s: tr('s.finRekon') },
+    close: { t: tr('t.finClose'), s: tr('s.finClose') },
     payroll: { t: tr('t.payroll'), s: tr('s.payroll') },
     kasbon: { t: tr('nav.kasbon'), s: tr('kb.intro') },
     settings: { t: tr('t.settings'), s: tr('s.settings') },
@@ -1726,6 +1755,11 @@ function FApp() {
           {screen === 'thr' && p.payroll && (
             <COMPANY.ThrScreen staff={scopedStaff} rates={hrdRates} setRates={applyRates} today={FIN.TODAY} posted={thrPosted} onPost={postThr} canPost={p.addEntry || p.payroll} canEdit={p.payroll} />
           )}
+
+          {/* Accounting-workflow sections whose UI ships in a later redesign stage (backend exists). */}
+          {screen === 'ledger' && p.reports && (<FinComingSoon icon="IconInvoice" body={tr('fin.ledgerSoon')} />)}
+          {screen === 'reconcile' && p.reports && (<FinComingSoon icon="IconRefresh" body={tr('fin.rekonSoon')} />)}
+          {screen === 'close' && p.reports && (<FinComingSoon icon="IconLock" body={tr('fin.closeSoon')} />)}
 
           {screen === 'payroll' && p.payroll && (
             <PAYROLL.PayrollScreen defaultUnit={unitDefaultForNew()} rates={hrdRates} setRates={applyRates} staff={scopedStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} departments={departments} positions={positions} setPositions={applyPositions} />
