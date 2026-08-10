@@ -240,6 +240,11 @@
       resetTotalPreview: (data) => req('POST', '/distribusi/gallon/reset-total/preview', data),   // { mode, counts } → dryRun preview
       resetTotal: (data) => req('POST', '/distribusi/gallon/reset-total', data),                  // { mode, counts, note, confirm:'RESET TOTAL' }
       resetTotalRestore: (batchId) => req('POST', '/distribusi/gallon/reset-total/restore', { batchId }),
+      // Rincian Stok Awal — per-row opening/depot management (customerId=null rows only; never money).
+      openingRows: (fleet) => req('GET', '/distribusi/gallon/opening-rows' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
+      openingRowsPreview: (data) => req('POST', '/distribusi/gallon/opening-rows/bulk/preview', data),   // { ids, action, fleetId }
+      openingRowsBulk: (data) => req('POST', '/distribusi/gallon/opening-rows/bulk', data),              // { ids, action, fleetId, note }
+      openingRowsRestore: (batchId) => req('POST', '/distribusi/gallon/opening-rows/restore', { batchId }),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),
       setOpeningStock: (data) => req('POST', '/distribusi/gallon/opening', data),   // { qty, fleet?, reason }
       resetGallon: (data) => req('POST', '/distribusi/gallon/reset', data),          // { mode:balanced|purge, fleet?, target?, confirm?, reason }

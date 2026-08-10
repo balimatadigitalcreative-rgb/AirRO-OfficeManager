@@ -219,4 +219,12 @@ router.post('/gallon/reset-total/preview', requireCap('distribusi.galon.reset_to
 router.post('/gallon/reset-total', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalSchema }), ctrl.resetTotalCommit);
 router.post('/gallon/reset-total/restore', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalRestoreSchema }), ctrl.resetTotalRestore);
 
+// ── RINCIAN STOK AWAL — per-row opening/depot management (customerId=null rows only) ──
+// list = read (distribusiGallon); bulk void/restore = distribusiGallonReset (GM/owner); the hard-delete
+// path inside bulk is owner-checked in the service. All customerId=null; money is never touched.
+router.get('/gallon/opening-rows', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.openingRowsList);
+router.post('/gallon/opening-rows/bulk/preview', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.openingRowsBulkSchema }), ctrl.openingRowsBulkPreview);
+router.post('/gallon/opening-rows/bulk', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.openingRowsBulkSchema }), ctrl.openingRowsBulk);
+router.post('/gallon/opening-rows/restore', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.resetTotalRestoreSchema }), ctrl.openingRowsRestore);
+
 module.exports = router;

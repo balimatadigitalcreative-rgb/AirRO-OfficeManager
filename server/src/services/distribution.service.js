@@ -2704,6 +2704,134 @@ async function gallonResetReassurance() {
   const [txnCount, invoiceCount] = await Promise.all([prisma.distTransaction.count(), prisma.distInvoice.count()]);
   return { txnCount, invoiceCount, unchanged: true };
 }
+
+// ═══════════════════ RINCIAN STOK AWAL — per-row opening/depot management ═══════════════════
+// Fixes the two "Batalkan semua baris stok awal" bugs found in STEP 0:
+//   (1) it selected rows via isOpeningRow(), which REJECTS correction rows whose note matches
+//       /reset stok galon/i — so rows written by earlier reset attempts were invisible and never voided;
+//   (2) it scoped to ONE exact fleetId while the "Stok awal" figure sums opening rows across ALL fleets,
+//       so it could never clear everything from the "Semua armada" view.
+// This panel lists EVERY customerId=null depot-affecting row (opening + corrections + purchase +
+// damage/loss), across the selected scope ('' = every fleet + global depot on "Semua armada"), flags
+// the ones isOpeningRow excludes as "tidak terklasifikasi", and drives per-row + bulk void/hard-delete
+// with a server-computed impact preview. customerId=null ONLY → customer balances & money are untouched.
+const OPENING_PANEL_TYPES = ['opening', 'correction', 'purchase', 'damage', 'loss'];
+function openingRowClass(m) {
+  if (isOpeningRow(m)) return 'opening';
+  if (m.type === 'purchase') return 'pembelian';
+  if (m.type === 'damage' || m.type === 'loss') return 'rusak';
+  if (m.type === 'correction') {
+    if (/reset stok galon/i.test(m.note || '')) return 'reset';
+    if (/^Reset total /i.test(m.note || '')) return 'reset_total';
+    if (OPNAME_ARMADA.test(m.note || '') || /^Opname /.test(m.note || '')) return 'opname';
+    return 'koreksi';
+  }
+  return 'lainnya';
+}
+const OPENING_HARD_DELETE_MS = 30 * 24 * 3600 * 1000;
+async function openingRowsPanel(user, qFleet) {
+  // customerId=null ONLY (safety), across the WHOLE scope (fleetWhere('') = all fleets + '' depot).
+  const rows = await prisma.gallonMovement.findMany({ where: { customerId: null, type: { in: OPENING_PANEL_TYPES }, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { createdAt: 'asc' } });
+  const now = Date.now();
+  const list = rows.map((m) => {
+    const blk = gallonRowBlocker(m);
+    const created = m.createdAt ? new Date(m.createdAt).getTime() : null;
+    const opening = isOpeningRow(m);
+    const dep = depotEffect(m, null);   // panel types don't depend on cutover
+    return {
+      id: m.id, createdAt: created, qty: m.qty, fleetId: m.fleetId, note: m.note || '', actorName: m.actorName || null, active: m.active,
+      cashEntryId: m.cashEntryId || null, transactionId: m.transactionId || null,
+      classification: openingRowClass(m), isOpening: opening,
+      unclassified: !opening && dep !== 0,   // affects depot but isOpeningRow hides it — the "invisible" rows
+      depotEffect: dep, rusakEffect: rusakEffect(m),
+      voidable: !blk && m.active, restorable: !blk && !m.active, deletable: !blk && !m.active && created != null && (now - created) <= OPENING_HARD_DELETE_MS,
+      blocker: blk,
+    };
+  });
+  const baseline = list.filter((r) => r.isOpening && r.active).reduce((a, r) => a + r.qty, 0);
+  const unclassifiedDepot = list.filter((r) => r.unclassified && r.active).reduce((a, r) => a + r.depotEffect, 0);
+  return { rows: list, baseline, unclassifiedDepot, count: list.length };
+}
+// ONE function for the bulk impact preview (dryRun) AND the write. action: batal | hapus | pulihkan.
+// customerId=null enforced in the query; per-row eligibility re-checked; any negative result rejected.
+async function openingRowsBulk(ids, action, body, actor, opts) {
+  const dryRun = !!(opts && opts.dryRun);
+  const A = ['batal', 'hapus', 'pulihkan'].includes(action) ? action : 'batal';
+  const list = [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean).map(String))].slice(0, 500);
+  const rows = await prisma.gallonMovement.findMany({ where: { id: { in: list }, customerId: null } });   // customerId=null ONLY
+  const isOwner = !!(actor && actor.role === 'owner');
+  const eligible = [], blocked = [];
+  for (const m of rows) {
+    if (!fleetAllows(actor, m.fleetId)) { blocked.push({ id: m.id, reason: 'out_of_scope' }); continue; }
+    const blk = gallonRowBlocker(m);
+    if (blk) { blocked.push({ id: m.id, reason: blk }); continue; }
+    if (A === 'batal' && !m.active) { blocked.push({ id: m.id, reason: 'already_voided' }); continue; }
+    if (A === 'pulihkan' && m.active) { blocked.push({ id: m.id, reason: 'already_active' }); continue; }
+    if (A === 'hapus') {
+      if (m.active) { blocked.push({ id: m.id, reason: 'still_active' }); continue; }
+      if (!isOwner) { blocked.push({ id: m.id, reason: 'owner_only' }); continue; }
+      const age = Date.now() - (m.createdAt ? new Date(m.createdAt).getTime() : 0);
+      if (age > OPENING_HARD_DELETE_MS) { blocked.push({ id: m.id, reason: 'too_old' }); continue; }
+    }
+    eligible.push(m);
+  }
+  const before = await gallonStock(actor, qFleetFrom(body));
+  const beforeBaseline = (await openingInfo(actor, qFleetFrom(body))).total || 0;
+  let dDepot = 0, dTotal = 0, dRusak = 0, dBaseline = 0;
+  for (const m of eligible) {
+    const sign = A === 'pulihkan' ? +1 : A === 'batal' ? -1 : 0;   // hapus targets already-inactive rows → no bucket change
+    dDepot += sign * depotEffect(m, null); dTotal += sign * grandTotalEffect(m); dRusak += sign * rusakEffect(m); dBaseline += sign * (isOpeningRow(m) ? m.qty : 0);
+  }
+  const after = { baseline: beforeBaseline + dBaseline, depot: before.atDepot + dDepot, pelanggan: before.atCustomers, rusak: before.rusakHilang + dRusak, total: before.totalDimiliki + dTotal };
+  const offenders = [];
+  if (after.depot < 0) offenders.push({ figure: 'depot', value: after.depot });
+  if (after.rusak < 0) offenders.push({ figure: 'rusak', value: after.rusak });
+  if (after.total < 0) offenders.push({ figure: 'total', value: after.total });
+  const blockedNeg = offenders.length > 0;
+  const preview = {
+    action: A, eligibleCount: eligible.length, eligible: eligible.map((m) => ({ id: m.id, qty: m.qty, fleetId: m.fleetId, note: m.note || '' })), blocked, offenders, blockedNeg,
+    before: { baseline: beforeBaseline, depot: before.atDepot, pelanggan: before.atCustomers, rusak: before.rusakHilang, total: before.totalDimiliki }, after,
+  };
+  if (dryRun) return preview;
+  // ── EXECUTE ──
+  const note = String((body && body.note) || '').trim();
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  if (blockedNeg) throw ApiError.badRequest(`Ditolak: ${offenders.map((o) => `${o.figure} akan menjadi ${o.value}`).join('; ')} (tidak boleh negatif).`);
+  if (!eligible.length) throw ApiError.badRequest('Tidak ada baris yang bisa diproses.');
+  const snap = await actorSnap(actor);
+  const snapshots = []; const done = [];
+  for (const m of eligible) {
+    if (A === 'batal') { await prisma.gallonMovement.update({ where: { id: m.id }, data: { active: false } }); snapshots.push({ id: m.id, action: 'batal' }); }
+    else if (A === 'pulihkan') { await prisma.gallonMovement.update({ where: { id: m.id }, data: { active: true } }); snapshots.push({ id: m.id, action: 'pulihkan' }); }
+    else { snapshots.push({ id: m.id, action: 'hapus', row: { ...m, createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null } }); await prisma.gallonMovement.delete({ where: { id: m.id } }); }
+    done.push(m.id);
+  }
+  const label = A === 'batal' ? 'Batalkan' : A === 'pulihkan' ? 'Pulihkan' : 'Hapus permanen';
+  const detail = JSON.stringify({ v: 1, kind: 'galon-stokawal-bulk', action: A, note, snapshots });
+  const audit = await logAudit('input', `Stok awal — ${label} ${done.length} baris`, `oleh ${snap.actorName} · stok awal ${beforeBaseline} → ${after.baseline} · di pelanggan TIDAK BERUBAH (${before.atCustomers}) · ${note} · SNAPSHOT ${detail}`, snap, '');
+  return { batchId: audit.id, action: A, done: done.length, blocked, preview, stock: await gallonStock(actor, qFleetFrom(body)) };
+}
+// The panel's fleet selector → qFleet for the impact scope ('' / 'all' → whole scope).
+function qFleetFrom(body) { const f = body && body.fleetId; return (f && f !== 'all') ? String(f) : undefined; }
+// Restore a Rincian Stok Awal bulk batch (batal → un-void; hapus → recreate the row from its snapshot).
+async function restoreOpeningRowsBatch(batchId, actor) {
+  const audit = await prisma.distAuditLog.findUnique({ where: { id: String(batchId || '') } });
+  if (!audit) throw ApiError.notFound('Batch tidak ditemukan.');
+  const mm = /SNAPSHOT (\{[\s\S]*\})$/.exec(audit.detail || ''); if (!mm) throw ApiError.badRequest('Batch ini tidak bisa dipulihkan.');
+  let data; try { data = JSON.parse(mm[1]); } catch (e) { throw ApiError.badRequest('Snapshot rusak.'); }
+  if (data.action === 'hapus' && !(actor && actor.role === 'owner')) throw ApiError.forbidden('Hanya Pemilik yang boleh memulihkan penghapusan.');
+  const snap = await actorSnap(actor);
+  const restored = [];
+  for (const s of (data.snapshots || [])) {
+    try {
+      if (s.action === 'batal') { await prisma.gallonMovement.update({ where: { id: s.id }, data: { active: true } }); restored.push(s.id); }
+      else if (s.action === 'pulihkan') { await prisma.gallonMovement.update({ where: { id: s.id }, data: { active: false } }); restored.push(s.id); }
+      else if (s.action === 'hapus' && s.row) { const exists = await prisma.gallonMovement.findUnique({ where: { id: s.id } }); if (exists) continue; const { createdAt, ...r } = s.row; await prisma.gallonMovement.create({ data: { ...r, createdAt: createdAt ? new Date(createdAt) : undefined } }); restored.push(s.id); }
+    } catch (e) { /* best effort per row */ }
+  }
+  await logAudit('input', `Pulihkan batch stok awal (${data.action})`, `${restored.length} baris · dari batch ${batchId} · oleh ${snap.actorName}`, snap, '');
+  return { restored: restored.length, ids: restored, stock: await gallonStock(actor, undefined) };
+}
 // Opening-stock rollup (fleet-scoped): the physical gallons owned at go-live, kept as its
 // own movement type so it shows separately from purchases/deliveries and its provenance is
 // clear. total = Σ opening deltas; first entry = when/who set it, last = when/who last tuned it.
@@ -3571,7 +3699,7 @@ module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
-  gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance,
+  gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance, openingRowsPanel, openingRowsBulk, restoreOpeningRowsBatch,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,

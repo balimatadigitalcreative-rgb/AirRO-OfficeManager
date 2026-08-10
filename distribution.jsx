@@ -5079,6 +5079,107 @@ function ResetTotalModal({ fleet, onClose, onDone }) {
   );
 }
 
+// RINCIAN STOK AWAL — lists EVERY customerId=null depot row (opening + corrections + purchase + rusak),
+// including the ones isOpeningRow hides (flagged "tidak terklasifikasi"), across all fleets + the global
+// depot. Per-row + bulk void/hard-delete with a server impact preview. customerId=null → money untouched.
+const SA_CLASS = { opening: 'sa.cOpening', reset: 'sa.cReset', reset_total: 'sa.cResetTotal', opname: 'sa.cOpname', koreksi: 'sa.cKoreksi', pembelian: 'sa.cPembelian', rusak: 'sa.cRusak', lainnya: 'sa.cLainnya' };
+const SA_BLOCK = { cash_linked: 'gv.rsLain', txn_linked: 'gv.rsLain', has_customer: 'gv.rsLain' };
+function StokAwalPanel({ ef, canReset, canGalonDelete, onClose, onChanged }) {
+  const [data, setData] = uSx(null);
+  const [showVoided, setShowVoided] = uSx(false);
+  const [sel, setSel] = uSx({});
+  const [confirm, setConfirm] = uSx(null);   // { action, ids }
+  const [prev, setPrev] = uSx(null);
+  const [note, setNote] = uSx('');
+  const [busy, setBusy] = uSx(false);
+  const [err, setErr] = uSx('');
+  const load = () => window.API.distribusi.openingRows(ef).then((r) => setData(r.data)).catch(() => setData({ rows: [], baseline: 0 }));
+  uEx(() => { const o = (e) => e.key === 'Escape' && (confirm ? setConfirm(null) : onClose()); window.addEventListener('keydown', o); load(); return () => window.removeEventListener('keydown', o); }, []);
+  uEx(() => { if (!confirm) { setPrev(null); return; } setNote(''); setErr(''); window.API.distribusi.openingRowsPreview({ ids: confirm.ids, action: confirm.action, fleetId: (ef && ef !== 'all') ? ef : undefined }).then((r) => setPrev(r.data)).catch(() => setPrev(null)); }, [confirm]);
+  if (!data) return <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}><div className="modal-card" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}><div className="modal-body"><div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div></div></div></div>;
+  const rows = (data.rows || []).filter((r) => showVoided || r.active);
+  const selIds = Object.keys(sel).filter((k) => sel[k]);
+  const commit = () => {
+    if (busy || (prev && prev.blockedNeg)) return;
+    if (!note.trim()) { setErr(trD('gv.noteReq')); return; }
+    setBusy(true); setErr('');
+    window.API.distribusi.openingRowsBulk({ ids: confirm.ids, action: confirm.action, note: note.trim() })
+      .then(() => { setBusy(false); setConfirm(null); setSel({}); load(); onChanged(); })
+      .catch((e) => { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const arrow = (a, b) => <b className="tnum">{numX(a)} → {numX(b)}</b>;
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card sa-panel" style={{ maxWidth: 820 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('sa.title')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('sa.sub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="sa-toolbar">
+            <span className="sa-running">{trD('sa.running')}: <b className="tnum">{numX(data.baseline)}</b>{data.unclassifiedDepot ? <em> · {trD('sa.unclDepot', { n: numX(data.unclassifiedDepot) })}</em> : null}</span>
+            <div style={{ flex: 1 }} />
+            {data.rows.some((r) => !r.active) && <button type="button" className="dist-link" onClick={() => setShowVoided((v) => !v)}>{showVoided ? trD('gv.hideVoided') : trD('gv.showVoided')}</button>}
+          </div>
+          <div className="sa-table-wrap">
+            <table className="sa-table">
+              <thead><tr><th /><th>{trD('sa.colDate')}</th><th className="r">{trD('sa.colQty')}</th><th>{trD('sa.colFleet')}</th><th>{trD('sa.colClass')}</th><th>{trD('sa.colNote')}</th><th>{trD('sa.colBy')}</th><th>{trD('sa.colStatus')}</th><th /></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className={r.active ? '' : 'sa-voided'}>
+                    <td>{(canReset && (r.voidable || r.restorable)) ? <input type="checkbox" checked={!!sel[r.id]} onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} /> : null}</td>
+                    <td className="tnum">{fmtDT(r.createdAt)}</td>
+                    <td className="r tnum"><b className={r.qty >= 0 ? 'amt-pos' : 'amt-neg'}>{(r.qty >= 0 ? '+' : '') + numX(r.qty)}</b></td>
+                    <td>{r.fleetId || trD('go.depotGlobal')}</td>
+                    <td><span className={'sa-badge ' + r.classification + (r.unclassified ? ' uncl' : '')}>{trD(SA_CLASS[r.classification] || 'sa.cLainnya')}{r.unclassified ? ' ⚠' : ''}</span></td>
+                    <td className="sa-note" title={r.note}>{r.note || '—'}</td>
+                    <td>{r.actorName || '—'}</td>
+                    <td>{r.active ? <span className="sa-st ok">{trD('sa.aktif')}</span> : <span className="sa-st void">{trD('sa.dibatalkan')}</span>}</td>
+                    <td className="sa-acts">
+                      {canReset && r.voidable && <button type="button" className="dist-link danger" onClick={() => setConfirm({ action: 'batal', ids: [r.id] })}>{trD('gv.void')}</button>}
+                      {canReset && r.restorable && <button type="button" className="dist-link" onClick={() => setConfirm({ action: 'pulihkan', ids: [r.id] })}>{trD('gv.restore')}</button>}
+                      {canGalonDelete && r.deletable && <button type="button" className="dist-link danger" onClick={() => setConfirm({ action: 'hapus', ids: [r.id] })}>{trD('gv.delete')}</button>}
+                      {r.blocker && !r.active === false && r.active && !r.voidable && <span className="sa-blk" title={trD('gv.deleteWarn')}>🔒</span>}
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && <tr><td colSpan={9}><div className="dist-empty">{trD('dist.gmNoMov')}</div></td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
+          <div style={{ flex: 1 }} />
+          {canReset && selIds.length > 0 && <button type="button" className="btn btn-danger btn-sm" onClick={() => setConfirm({ action: 'batal', ids: selIds })}><IconClose s={13} />{trD('sa.batalSel', { n: selIds.length })}</button>}
+          {canGalonDelete && selIds.length > 0 && <button type="button" className="btn btn-danger btn-sm" onClick={() => setConfirm({ action: 'hapus', ids: selIds })}><IconTrash s={13} />{trD('sa.hapusSel', { n: selIds.length })}</button>}
+        </div>
+
+        {confirm && (
+          <div className="modal-scrim" onClick={() => setConfirm(null)} style={{ zIndex: 250 }}>
+            <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 800 }}>{trD(confirm.action === 'hapus' ? 'gv.delete' : confirm.action === 'pulihkan' ? 'gv.restore' : 'gv.void')} · {confirm.ids.length}</div><button className="jp-icon" onClick={() => setConfirm(null)}><IconClose s={18} /></button></div>
+              <div className="modal-body">
+                {prev ? (
+                  <div className="gv-impact">
+                    <div className="gv-impact-row"><span>{trD('go.baseline')}</span>{arrow(prev.before.baseline, prev.after.baseline)}</div>
+                    <div className="gv-impact-row"><span>{trD('dist.gmAtDepot')}</span>{arrow(prev.before.depot, prev.after.depot)}</div>
+                    <div className="gv-impact-safe"><IconCheck s={13} />{trD('gv.custSafe', { n: numX(prev.before.pelanggan) })}</div>
+                    <div className="gv-impact-row muted"><span>{trD('dist.gmDimiliki')}</span>{arrow(prev.before.total, prev.after.total)}</div>
+                    {prev.blocked.length > 0 && <div className="gv-impact-row muted"><span>{trD('sa.blocked', { n: prev.blocked.length })}</span><b /></div>}
+                  </div>
+                ) : <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
+                {prev && prev.blockedNeg && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('go.negBlock')} {prev.offenders.map((o) => o.figure + ' → ' + numX(o.value)).join('; ')}</span></div>}
+                <label className="fld-label">{trD('gv.noteLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <textarea className="fld" style={{ height: 54, padding: 12, resize: 'vertical' }} value={note} placeholder={trD('gv.notePh')} onChange={(e) => setNote(e.target.value)} />
+                {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+              </div>
+              <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setConfirm(null)}>{trD('dist.cancel')}</button><button className={'btn ' + (confirm.action === 'pulihkan' ? 'btn-primary' : 'btn-danger')} disabled={busy || (prev && prev.blockedNeg)} onClick={commit}>{busy ? '…' : trD('sa.confirmDo')}</button></div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, canResetTotal, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);
   const [toast, setToast] = uSx('');
@@ -5091,6 +5192,7 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, canRes
   const [integrity, setIntegrity] = uSx(null);    // integrity-guard result modal
   const [resetTotal, setResetTotal] = uSx(null);  // "Reset Total Stok Galon" wizard
   const [rtUndo, setRtUndo] = uSx(null);          // { batchId } → 15s undo of a retire reset
+  const [stokAwalPanel, setStokAwalPanel] = uSx(false);   // "Rincian Stok Awal" per-row panel
   const [hideVoided, setHideVoided] = uSx(true);   // hide "Dibatalkan" rows by default
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
@@ -5151,10 +5253,10 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, canRes
         <div className="dist-gm-opening-main">
           <div className="dist-gm-opening-lbl">{trD('dist.gmOpeningTitle')}</div>
           {op.set
-            ? <div className="dist-gm-opening-sub">{trD('dist.gmOpeningSet', { d: fmtDT(op.setAt), who: op.setByName || '—' })}{op.adjustCount > 0 ? ' · ' + trD('dist.gmOpeningAdj', { n: op.adjustCount, d: fmtDT(op.lastAt) }) : ''}</div>
+            ? <div className="dist-gm-opening-sub">{trD('dist.gmOpeningSet', { d: fmtDT(op.setAt), who: op.setByName || '—' })}{op.adjustCount > 0 ? ' · ' + trD('dist.gmOpeningAdj', { n: op.adjustCount, d: fmtDT(op.lastAt) }) : ''}{canReset ? <> · <button type="button" className="dist-link" onClick={() => setStokAwalPanel(true)}>{trD('sa.lihat')}</button></> : null}</div>
             : <div className="dist-gm-opening-sub">{trD('dist.gmOpeningNone')}</div>}
         </div>
-        <div className="tnum dist-gm-opening-val">{numX(op.total || 0)}</div>
+        <div className="tnum dist-gm-opening-val" style={canReset ? { cursor: 'pointer' } : null} onClick={canReset ? () => setStokAwalPanel(true) : undefined} title={canReset ? trD('sa.lihat') : ''}>{numX(op.total || 0)}</div>
         <div className="dist-gm-opening-acts">
           {(canCustomers || canReset) && <button type="button" className="btn btn-ghost btn-sm" onClick={openOpening}><IconPencil s={14} />{op.set ? trD('dist.gmOpeningAdjust') : trD('dist.gmOpeningBtn')}</button>}
           {canReset && op.set && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setErr(''); setResetAwal({ mode: 'delta', target: String(op.total || 0), note: '', confirm: '' }); }}><IconRefresh s={14} />{trD('go.resetBtn')}</button>}
@@ -5290,6 +5392,7 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, canRes
       {resetAwal && <GalonOpeningResetModal ef={ef} fleet={fleet} init={resetAwal} onClose={() => setResetAwal(null)} onDone={(msg) => { setResetAwal(null); flash(msg); reload(); }} />}
       {opname && <StokOpnameModal stock={st} fleet={fleet} init={opname} onClose={() => setOpname(null)} onDone={(msg) => { setOpname(null); flash(msg); reload(); }} />}
       {integrity && <GalonIntegrityModal onClose={() => setIntegrity(null)} onRepaired={() => { flash(trD('gi.repaired')); reload(); }} />}
+      {stokAwalPanel && <StokAwalPanel ef={ef} canReset={canReset} canGalonDelete={canGalonDelete} onClose={() => setStokAwalPanel(false)} onChanged={() => reload()} />}
       {resetTotal && <ResetTotalModal fleet={fleet} onClose={() => setResetTotal(null)} onDone={(res) => { setResetTotal(null); flash(trD('rt.done')); reload(); if (res && res.mode === 'retire' && res.batchId) { setRtUndo({ batchId: res.batchId }); setTimeout(() => setRtUndo((u) => (u && u.batchId === res.batchId ? null : u)), 15000); } }} />}
       {rtUndo && (
         <div className="tx-undo-toast">
