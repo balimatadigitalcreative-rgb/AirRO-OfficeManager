@@ -3851,3 +3851,26 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-gated-head { display: flex; align-items: center; gap: var(--fs-2); }
 .fin-gated-title { font-weight: 700; font-size: 13.5px; }
 .fin-gated-note { font-size: 12px; color: var(--text-faint); margin-top: var(--fs-2); line-height: 1.4; }
+
+/* ═══════════ FINANCE REDESIGN — Stage 3 (entry form journal preview) ═══════════ */
+.fin-jtoggle { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: var(--fs-4); padding: 10px var(--fs-3); background: var(--card-soft); border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; font-weight: 700; color: var(--green-800); cursor: pointer; }
+.fin-jtoggle:hover { background: var(--mint-100); }
+.fin-jtoggle span:nth-child(2) { flex: 1; text-align: left; }
+.fin-jcaret { display: inline-flex; transition: transform .14s; }
+.fin-jcaret.open { transform: rotate(180deg); }
+.fin-journal { margin-top: var(--fs-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--fs-3) var(--fs-4); background: var(--surface); }
+.fin-journal-cap { font-size: 11.5px; color: var(--text-mut); font-weight: 600; margin-bottom: var(--fs-2); }
+.fin-jrow { display: grid; grid-template-columns: 1fr 110px 110px; gap: var(--fs-2); align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.fin-jrow.head { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); padding-top: 0; }
+.fin-jrow.head span.fin-r, .fin-jrow span.fin-r { text-align: right; }
+.fin-jrow.total { border-bottom: none; border-top: 2px solid var(--green-800); font-weight: 800; color: var(--green-800); margin-top: 2px; padding-top: 9px; }
+.fin-jacct { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-jacct b { color: var(--text-faint); font-weight: 700; margin-right: 6px; }
+.fin-journal-empty { font-size: 12.5px; color: var(--text-faint); padding: var(--fs-3) 0; text-align: center; }
+.fin-coa { margin-top: var(--fs-3); padding-top: var(--fs-3); border-top: 1px dashed var(--border); }
+.fin-coa-search { height: 34px; }
+.fin-coa-list { margin-top: var(--fs-2); max-height: 168px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.fin-coa-item { display: flex; align-items: center; gap: var(--fs-3); padding: 6px var(--fs-2); border-radius: 7px; font-size: 12.5px; }
+.fin-coa-item:hover { background: var(--card-soft); }
+.fin-coa-item b { color: var(--green-800); font-weight: 700; min-width: 54px; }
+.fin-coa-none { font-size: 12px; color: var(--text-faint); padding: var(--fs-2); }

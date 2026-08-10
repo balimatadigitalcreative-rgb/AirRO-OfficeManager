@@ -429,6 +429,10 @@
       'dash.totalCash': 'Total cash', 'dash.plCompare': 'Profit & loss — this month vs last', 'dash.trend12': '12-month trend',
       'dash.ratios': 'Key ratios', 'dash.netMargin': 'Net margin', 'dash.grossMargin': 'Gross margin', 'dash.arTurnover': 'Receivables turnover',
       'dash.arAging': 'Receivables (aging)', 'dash.liabilities': 'Liabilities due', 'dash.needEngine': 'Needs the double-entry accounting engine — arrives with receivables integration.',
+      // Entry-form journal preview (Rincian jurnal)
+      'je.toggle': 'Journal detail', 'je.caption': 'This entry posts to the ledger as:', 'je.account': 'Account', 'je.debit': 'Debit', 'je.credit': 'Credit',
+      'je.balanced': 'Balanced', 'je.unbalanced': 'Not balanced', 'je.enterAmount': 'Enter an amount to preview the journal entry.',
+      'je.searchCoa': 'Chart of accounts — search by code or name', 'je.coaNone': 'No matching account.',
       'nav.company': 'Company', 'nav.employees': 'Employees', 'nav.hrcalendar': 'HR Calendar', 'nav.approvals': 'Requests', 'nav.rollcall': 'Roll-Call', 'nav.hrsettings': 'HR Settings', 'nav.hrreport': 'HR Report', 'nav.moneyspots': 'Money Spots', 'nav.setoran': 'Setoran', 'nav.thr': 'THR / Holiday',
       'cal.holiday': 'Holiday', 'cal.leave': 'Leave', 'cal.permit': 'Permit', 'cal.add': 'Add event', 'cal.type': 'Type', 'cal.evTitle': 'Title', 'cal.start': 'Start date', 'cal.end': 'End date', 'cal.note': 'Note', 'cal.save': 'Save', 'cal.allEmp': 'All employees', 'cal.eventsIn': 'Events in {m}', 'cal.none': 'No events this month', 'cal.fromApproval': 'from request', 'cal.holidayFor': '{r} holiday', 'cal.remove': 'Remove', 'cal.removeConfirm': 'Remove this event?',
       't.thr': 'THR — Holiday Allowance', 's.thr': 'Tunjangan Hari Raya, prorated by length of service',
@@ -731,6 +735,10 @@
       'dash.totalCash': 'Total kas', 'dash.plCompare': 'Laba rugi — bulan ini vs lalu', 'dash.trend12': 'Tren 12 bulan',
       'dash.ratios': 'Rasio ringkas', 'dash.netMargin': 'Margin bersih', 'dash.grossMargin': 'Margin kotor', 'dash.arTurnover': 'Perputaran piutang',
       'dash.arAging': 'Piutang (umur)', 'dash.liabilities': 'Kewajiban jatuh tempo', 'dash.needEngine': 'Perlu mesin pembukuan berpasangan — hadir bersama integrasi piutang.',
+      // Rincian jurnal pada form input
+      'je.toggle': 'Rincian jurnal', 'je.caption': 'Transaksi ini tercatat ke buku besar sebagai:', 'je.account': 'Akun', 'je.debit': 'Debit', 'je.credit': 'Kredit',
+      'je.balanced': 'Seimbang', 'je.unbalanced': 'Tidak seimbang', 'je.enterAmount': 'Isi nominal untuk melihat pratinjau jurnal.',
+      'je.searchCoa': 'Bagan akun — cari kode atau nama', 'je.coaNone': 'Akun tidak ditemukan.',
       'navgrp.overview': 'Ringkasan', 'navgrp.finance': 'Keuangan', 'navgrp.hr': 'SDM / HRD', 'navgrp.distribusi': 'Distribusi', 'navgrp.gudang': 'Gudang', 'navgrp.admin': 'Administrasi',
       'nav.distDashboard': 'Dashboard', 'nav.distCustomers': 'Pelanggan', 'nav.distTransactions': 'Transaksi', 'nav.distGallon': 'Stok Galon', 'nav.distIntegration': 'Integrasi Kas', 'nav.distPrices': 'Harga Master', 'nav.distAudit': 'Log Audit', 'nav.distDeliveries': 'Pengiriman', 'nav.distExpenses': 'Pengeluaran', 'nav.gudang': 'Gudang', 'nav.suppliers': 'Pemasok',
       'wipe.errLoad': 'Gagal memuat kategori: {msg}', 'wipe.errStaleToken': 'Sesi Anda belum membawa hak akses ini. Logout lalu login lagi, kemudian coba lagi.', 'wipe.errNoApi': 'API hapus data tidak tersedia — aplikasi mungkin memakai versi lama. Muat ulang halaman.', 'wipe.errEmpty': 'Tidak ada kategori yang bisa dihapus.',

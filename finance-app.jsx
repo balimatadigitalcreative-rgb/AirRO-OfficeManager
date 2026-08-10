@@ -36,6 +36,28 @@ function AmountInput({ value, onChange, accent, big }) {
   );
 }
 
+/* ── Journal projection (client mirror of server accounting.service postEntry) ──────────────────────
+   Presentation only: this NEVER changes the cash-book payload. It projects the entry the user is
+   composing into the balanced double-entry journal the backend WOULD post, so the form previews it.
+   Kept byte-for-byte in step with accounting.service.js CHART / CAT_MAP (income → Dr cash / Cr revenue;
+   gallon purchase → Dr Persediaan / Cr cash; else expense → Dr expense / Cr cash). */
+const FIN_CATMAP = {
+  income: { Refill: '4-1000', Bulk: '4-1000', Deposit: '4-2000', Dispenser: '4-2000', OtherIn: '4-2000' },
+  expense: { Fuel: '6-2000', Supplies: '6-3000', Salaries: '6-1000', Orientation: '6-1000', Maintenance: '6-4000', Utilities: '6-5000', Rent: '6-6000', OtherOut: '6-9000' },
+};
+const FIN_CHART = { '1-1000': 'Kas', '1-1100': 'Bank', '1-1200': 'Piutang Usaha', '1-1300': 'Persediaan Galon', '1-1400': 'Peralatan', '2-1000': 'Utang Usaha', '2-2000': 'Utang Gaji', '3-1000': 'Modal', '3-2000': 'Laba Ditahan', '3-3000': 'Prive', '4-1000': 'Penjualan Air', '4-2000': 'Pendapatan Lain', '5-1000': 'HPP Galon', '6-1000': 'Beban Gaji', '6-2000': 'Beban BBM & Pengiriman', '6-3000': 'Beban Perlengkapan', '6-4000': 'Beban Pemeliharaan', '6-5000': 'Beban Utilitas', '6-6000': 'Beban Sewa', '6-9000': 'Beban Lain-lain' };
+function finDeriveJournal({ type, amount, category, acctType, gallonQty }) {
+  const A = Math.round(+amount || 0);
+  if (!A) return { lines: [], dr: 0, cr: 0, balanced: true };
+  const cash = acctType === 'cash' ? '1-1000' : '1-1100';
+  let lines;
+  if (type === 'income') { const rev = FIN_CATMAP.income[category] || '4-2000'; lines = [{ code: cash, dr: A, cr: 0 }, { code: rev, dr: 0, cr: A }]; }
+  else if (+gallonQty > 0) { lines = [{ code: '1-1300', dr: A, cr: 0 }, { code: cash, dr: 0, cr: A }]; }   // stock purchase → inventory, not expense
+  else { const exp = FIN_CATMAP.expense[category] || '6-9000'; lines = [{ code: exp, dr: A, cr: 0 }, { code: cash, dr: 0, cr: A }]; }
+  const dr = lines.reduce((s, l) => s + l.dr, 0), cr = lines.reduce((s, l) => s + l.cr, 0);
+  return { lines, dr, cr, balanced: dr === cr };
+}
+
 /* ---------------- Add entry form ---------------- */
 function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit }) {
   const INC = incomeCats && incomeCats.length ? incomeCats : FS.INCOME_CATS;
@@ -51,6 +73,8 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
   const [proof, setProof] = uS(null);
   const [gallonQty, setGallonQty] = uS(0);   // "Pembelian Galon" stock qty (expense only)
   const [err, setErr] = uS(null);
+  const [showJournal, setShowJournal] = uS(false);   // "Rincian jurnal" — off by default (simple mode for staff)
+  const [coaQ, setCoaQ] = uS('');                     // chart-of-accounts search (by code or name)
   // Follow the global unit selector: when the active-unit context changes, default new entries
   // to it (until the user overrides for this entry).
   uE(() => { setUnit(defaultUnit || 'air'); }, [defaultUnit]);
@@ -90,7 +114,7 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
   };
 
   return (
-    <div className="card add-card">
+    <div className="card add-card fin-scope">
       <div className="sec-title" style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>{trF('add.title')}</div>
       <div className="type-toggle">
         <button className={`tt-btn ${type === 'income' ? 'on inc' : ''}`} onClick={() => switchType('income')}>
@@ -163,6 +187,40 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
 
       <label className="fld-label">{trF('att.proof')}</label>
       <UI.FileAttach value={proof} onChange={setProof} />
+
+      {/* RINCIAN JURNAL — the double-entry preview. Off by default (staff keep the simple form); the
+          toggle reveals exactly how this entry posts to the ledger, which is what makes it feel like a
+          real accounting program. Projection only — the saved cash-book entry is unchanged. */}
+      <button type="button" className="fin-jtoggle" aria-expanded={showJournal} onClick={() => setShowJournal((v) => !v)}>
+        {Icn('IconInvoice', { s: 15 })}<span>{trF('je.toggle')}</span><span className={`fin-jcaret ${showJournal ? 'open' : ''}`}>{Icn('IconCaret', { s: 13 })}</span>
+      </button>
+      {showJournal && (() => {
+        const acctType = (ACCTS.find((a) => a.id === acct) || {}).type;
+        const j = finDeriveJournal({ type, amount, category: cat, acctType, gallonQty });
+        const q = coaQ.trim().toLowerCase();
+        const coaHits = q ? Object.entries(FIN_CHART).filter(([code, name]) => code.includes(q) || name.toLowerCase().includes(q)) : [];
+        return (
+          <div className="fin-journal">
+            <div className="fin-journal-cap">{trF('je.caption')}</div>
+            {j.lines.length ? (<>
+              <div className="fin-jrow head"><span>{trF('je.account')}</span><span className="fin-r">{trF('je.debit')}</span><span className="fin-r">{trF('je.credit')}</span></div>
+              {j.lines.map((l, i) => (
+                <div key={i} className="fin-jrow"><span className="fin-jacct"><b className="tnum">{l.code}</b> {FIN_CHART[l.code] || l.code}</span><span className="fin-r tnum">{l.dr ? fmt(l.dr) : ''}</span><span className="fin-r tnum">{l.cr ? fmt(l.cr) : ''}</span></div>
+              ))}
+              <div className="fin-jrow total"><span>{j.balanced ? trF('je.balanced') : trF('je.unbalanced')}</span><span className="fin-r tnum">{fmt(j.dr)}</span><span className="fin-r tnum">{fmt(j.cr)}</span></div>
+            </>) : <div className="fin-journal-empty">{trF('je.enterAmount')}</div>}
+            {/* Chart-of-accounts reference — search by code or name */}
+            <div className="fin-coa">
+              <div className="tx-search fin-coa-search"><IconSearch s={15} style={{ color: 'var(--text-faint)' }} /><input value={coaQ} onChange={(e) => setCoaQ(e.target.value)} placeholder={trF('je.searchCoa')} /></div>
+              {q && (
+                <div className="fin-coa-list">
+                  {coaHits.length ? coaHits.map(([code, name]) => (<div key={code} className="fin-coa-item"><b className="tnum">{code}</b><span>{name}</span></div>)) : <div className="fin-coa-none">{trF('je.coaNone')}</div>}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {err && <div className="add-err" role="alert"><IconClose s={14} />{err}</div>}
 
