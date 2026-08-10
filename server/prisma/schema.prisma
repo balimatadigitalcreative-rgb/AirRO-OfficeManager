@@ -103,6 +103,63 @@ model Category {
   entries Entry[]
 }
 
+// ══════════════ ACCOUNTING v2 (double-entry LAYER on top of the cash book) ══════════════
+// Additive only: the cash book (Entry/Account/Category) is unchanged and remains the source of truth
+// for every existing report. These tables are populated by the ONE posting service (accounting.service)
+// and are gated behind the ACCOUNTING_V2 feature flag until the new engine is proven byte-identical.
+model ChartAccount {
+  id             String   @id @default(cuid())
+  code           String   @unique // e.g. "1-1200"
+  name           String
+  type           String            // asset | liability | equity | revenue | expense
+  subtype        String   @default("")
+  parentId       String?           // hierarchy (self-relation, kept loose to avoid seeding order issues)
+  isActive       Boolean  @default(true)
+  businessUnitId String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  lines JournalLine[]
+  @@index([type])
+  @@index([parentId])
+}
+
+model JournalEntry {
+  id           String   @id @default(cuid())
+  date         String            // YYYY-MM-DD (business date, mirrors the source)
+  ref          String   @default("")
+  description  String   @default("")
+  sourceType   String            // entry | transfer | setoran | dist_txn | dist_expense | gallon_purchase | manual | adjust
+  sourceId     String?           // the source record id (null for manual)
+  postedById   String?
+  postedByName String?
+  postedAt     DateTime @default(now())
+  reversalOf   String?           // the JournalEntry this reverses (adjusting/correction)
+  periodId     String?
+  createdAt    DateTime @default(now())
+
+  lines JournalLine[]
+  // ONE journal per source record → posting is idempotent (re-post updates, never duplicates).
+  @@unique([sourceType, sourceId])
+  @@index([date])
+  @@index([sourceType])
+}
+
+model JournalLine {
+  id             String @id @default(cuid())
+  journalEntryId String
+  chartAccountId String
+  debit          BigInt @default(0) // IDR, one of debit/credit is 0
+  credit         BigInt @default(0)
+  businessUnitId String?
+  fleetId        String @default("")
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  chartAccount ChartAccount @relation(fields: [chartAccountId], references: [id])
+  @@index([journalEntryId])
+  @@index([chartAccountId])
+}
+
 model Entry {
   id          String    @id @default(cuid())
   type        String // "income" | "expense"

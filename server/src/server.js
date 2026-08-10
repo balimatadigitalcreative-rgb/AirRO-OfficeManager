@@ -7,6 +7,7 @@ const distribution = require('./services/distribution.service');
 const gudang = require('./services/gudang.service');
 const attachments = require('./services/attachment.service');
 const businessUnits = require('./services/businessUnit.service');
+const accounting = require('./services/accounting.service');
 
 const app = createApp();
 // Ensure built-in roles exist + warm the permission cache (idempotent). resolvePerms
@@ -35,6 +36,10 @@ attachments.migrateInlineProofs().catch(() => {});
 // cashbon, legacy setoran, …) so GET /state stops shipping megabytes of photos. Runs
 // after inline-proofs; both are idempotent and safe to run on every boot.
 attachments.migrateStateBlobProofs().catch(() => {});
+// ACCOUNTING v2 (double-entry) — behind ACCOUNTING_V2. While the flag is off nothing is served or
+// seeded; when on, ensure the chart of accounts exists (idempotent). The cash book is untouched either
+// way — journals live in separate tables and are projected, never a source of truth.
+if (config.accountingV2) accounting.seedChart().catch(() => {});
 
 const server = app.listen(config.port, config.host, () => {
   // eslint-disable-next-line no-console

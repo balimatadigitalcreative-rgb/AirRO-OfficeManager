@@ -97,6 +97,7 @@ router.use('/settings', require('./settings.routes'));
 router.use('/business-units', require('./businessUnit.routes'));   // unit bisnis dictionary (labels only, Stage 1)
 router.use('/inter-unit-transfers', require('./interUnitTransfer.routes'));   // Stage 4: internal money movement between units
 router.use('/reports', require('./report.routes'));
+router.use('/accounting', require('./accounting.routes'));   // ACCOUNTING v2 (double-entry) — flag-gated
 router.use('/data-wipe', require('./dataWipe.routes'));   // selective, guarded data wipe (cap: dataWipe)
 router.use('/state', require('./state.routes'));   // shared app-state document store
 router.use('/events', require('./events.routes')); // SSE realtime change stream

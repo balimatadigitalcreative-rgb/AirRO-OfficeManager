@@ -31,6 +31,9 @@ const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   corsOrigin: process.env.CORS_ORIGIN || '*',
+  // ACCOUNTING v2 (double-entry) feature flag. OFF by default — the cash book stays the sole source of
+  // truth for every existing report until the new engine is proven byte-identical and cut over.
+  accountingV2: process.env.ACCOUNTING_V2 === 'true',
   // Rate limiting (per real client IP — see app.set('trust proxy')). All configurable via env so an
   // office behind one NAT IP can raise the general limit without a code change.
   rateLimit: {
