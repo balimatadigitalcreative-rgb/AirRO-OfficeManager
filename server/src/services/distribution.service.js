@@ -2745,7 +2745,7 @@ async function openingRowsPanel(user, qFleet) {
       unclassified: !opening && dep !== 0,   // affects depot but isOpeningRow hides it — the "invisible" rows
       depotEffect: dep, rusakEffect: rusakEffect(m),
       voidable: !blk && m.active, restorable: !blk && !m.active, deletable: !blk && !m.active && created != null && (now - created) <= OPENING_HARD_DELETE_MS,
-      blocker: blk,
+      blocker: blk, blockerRef: gallonRowRef(m, blk),
     };
   });
   const baseline = list.filter((r) => r.isOpening && r.active).reduce((a, r) => a + r.qty, 0);
@@ -2761,17 +2761,20 @@ async function openingRowsBulk(ids, action, body, actor, opts) {
   const rows = await prisma.gallonMovement.findMany({ where: { id: { in: list }, customerId: null } });   // customerId=null ONLY
   const isOwner = !!(actor && actor.role === 'owner');
   const eligible = [], blocked = [];
+  const blk_ = (m, reason) => ({ id: m.id, reason, ref: gallonRowRef(m, reason), qty: m.qty, note: m.note || '' });
   for (const m of rows) {
-    if (!fleetAllows(actor, m.fleetId)) { blocked.push({ id: m.id, reason: 'out_of_scope' }); continue; }
+    if (!fleetAllows(actor, m.fleetId)) { blocked.push(blk_(m, 'out_of_scope')); continue; }
     const blk = gallonRowBlocker(m);
-    if (blk) { blocked.push({ id: m.id, reason: blk }); continue; }
-    if (A === 'batal' && !m.active) { blocked.push({ id: m.id, reason: 'already_voided' }); continue; }
-    if (A === 'pulihkan' && m.active) { blocked.push({ id: m.id, reason: 'already_active' }); continue; }
+    if (blk) { blocked.push(blk_(m, blk)); continue; }   // only REAL cash/txn/customer links block here
+    if (A === 'batal' && !m.active) { blocked.push(blk_(m, 'already_voided')); continue; }
+    if (A === 'pulihkan' && m.active) { blocked.push(blk_(m, 'already_active')); continue; }
     if (A === 'hapus') {
-      if (m.active) { blocked.push({ id: m.id, reason: 'still_active' }); continue; }
-      if (!isOwner) { blocked.push({ id: m.id, reason: 'owner_only' }); continue; }
+      // Hard delete needs the row VOIDED first — that is NOT a "linked" block; name it so the UI can say
+      // "batalkan dulu" instead of the misleading "tertaut".
+      if (m.active) { blocked.push(blk_(m, 'still_active')); continue; }
+      if (!isOwner) { blocked.push(blk_(m, 'owner_only')); continue; }
       const age = Date.now() - (m.createdAt ? new Date(m.createdAt).getTime() : 0);
-      if (age > OPENING_HARD_DELETE_MS) { blocked.push({ id: m.id, reason: 'too_old' }); continue; }
+      if (age > OPENING_HARD_DELETE_MS) { blocked.push(blk_(m, 'too_old')); continue; }
     }
     eligible.push(m);
   }
@@ -3046,12 +3049,21 @@ const GALON_VOID_REASONS = ['salah_input', 'duplikat', 'uji_coba', 'lainnya'];
 // Only depot-baseline ('opening') and UNLINKED depot corrections (customerId=null, no cash/txn link)
 // are actionable here. A customerId row is a customer balance; a cashEntryId row mirrors a cash
 // purchase; a transactionId row is a delivery — each is managed where it was created.
+// A link field only blocks when it holds a REAL id — an empty string / whitespace is NOT a link
+// (the columns are nullable but defensive trimming avoids "" reading as truthy).
+const gmLinked = (v) => v != null && String(v).trim() !== '';
 function gallonRowBlocker(m) {
   if (!m) return 'not_found';
-  if (m.customerId) return 'has_customer';       // delivery_out / return_in / customer correction → Distribusi transaksi/koreksi
-  if (m.cashEntryId) return 'cash_linked';       // purchase mirror → delete the cash entry instead
-  if (m.transactionId) return 'txn_linked';      // delivery → cancel the transaction instead
-  return null;                                   // depot-baseline or unlinked depot correction → actionable
+  if (gmLinked(m.customerId)) return 'has_customer';   // delivery_out / return_in / customer correction → Distribusi transaksi/koreksi
+  if (gmLinked(m.cashEntryId)) return 'cash_linked';   // purchase mirror → delete the cash entry instead
+  if (gmLinked(m.transactionId)) return 'txn_linked';  // delivery → cancel the transaction instead
+  return null;                                         // depot-baseline or unlinked depot correction → actionable
+}
+// Named reference for a blocked row, so the dialog can say "tertaut ke TRX-…" / "tertaut ke kas …".
+function gallonRowRef(m, reason) {
+  if (reason === 'txn_linked') return 'TRX-' + shortRefServer(m.transactionId);
+  if (reason === 'cash_linked') return String(m.cashEntryId || '').slice(0, 12);
+  return null;
 }
 const GALON_BLOCK_MODULE = { has_customer: 'Kelola di Distribusi › Transaksi / Koreksi pelanggan.', cash_linked: 'Hapus entri kas "Pembelian Galon" terkait di Arus Kas.', txn_linked: 'Batalkan transaksi pengiriman terkait di Distribusi › Transaksi.' };
 const movDayISO = (m) => (m && m.createdAt) ? new Date(m.createdAt).toISOString().slice(0, 10) : todayISO();

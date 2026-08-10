@@ -5083,7 +5083,8 @@ function ResetTotalModal({ fleet, onClose, onDone }) {
 // including the ones isOpeningRow hides (flagged "tidak terklasifikasi"), across all fleets + the global
 // depot. Per-row + bulk void/hard-delete with a server impact preview. customerId=null → money untouched.
 const SA_CLASS = { opening: 'sa.cOpening', reset: 'sa.cReset', reset_total: 'sa.cResetTotal', opname: 'sa.cOpname', koreksi: 'sa.cKoreksi', pembelian: 'sa.cPembelian', rusak: 'sa.cRusak', lainnya: 'sa.cLainnya' };
-const SA_BLOCK = { cash_linked: 'gv.rsLain', txn_linked: 'gv.rsLain', has_customer: 'gv.rsLain' };
+// Blocked reasons shown BY NAME (not a bare "tertaut" count) so the user knows what to do per row.
+const SA_REASON = { still_active: 'sa.rStillActive', cash_linked: 'sa.rCash', txn_linked: 'sa.rTxn', has_customer: 'sa.rCust', owner_only: 'sa.rOwner', too_old: 'sa.rOld', out_of_scope: 'sa.rScope', already_voided: 'sa.rVoided', already_active: 'sa.rActive', not_found: 'sa.rNotFound' };
 function StokAwalPanel({ ef, canReset, canGalonDelete, onClose, onChanged }) {
   const [data, setData] = uSx(null);
   const [showVoided, setShowVoided] = uSx(false);
@@ -5148,8 +5149,10 @@ function StokAwalPanel({ ef, canReset, canGalonDelete, onClose, onChanged }) {
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
           <div style={{ flex: 1 }} />
-          {canReset && selIds.length > 0 && <button type="button" className="btn btn-danger btn-sm" onClick={() => setConfirm({ action: 'batal', ids: selIds })}><IconClose s={13} />{trD('sa.batalSel', { n: selIds.length })}</button>}
-          {canGalonDelete && selIds.length > 0 && <button type="button" className="btn btn-danger btn-sm" onClick={() => setConfirm({ action: 'hapus', ids: selIds })}><IconTrash s={13} />{trD('sa.hapusSel', { n: selIds.length })}</button>}
+          {/* Primary cleanup: void EVERY voidable row in one batch — nets depot to 0, never negative. */}
+          {canReset && data.rows.some((r) => r.voidable) && <button type="button" className="btn btn-danger btn-sm" onClick={() => setConfirm({ action: 'batal', ids: data.rows.filter((r) => r.voidable).map((r) => r.id) })}><IconRefresh s={13} />{trD('sa.batalAll')}</button>}
+          {canReset && selIds.length > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirm({ action: 'batal', ids: selIds })}><IconClose s={13} />{trD('sa.batalSel', { n: selIds.length })}</button>}
+          {canGalonDelete && selIds.length > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirm({ action: 'hapus', ids: selIds })}><IconTrash s={13} />{trD('sa.hapusSel', { n: selIds.length })}</button>}
         </div>
 
         {confirm && (
@@ -5166,12 +5169,19 @@ function StokAwalPanel({ ef, canReset, canGalonDelete, onClose, onChanged }) {
                     {prev.blocked.length > 0 && <div className="gv-impact-row muted"><span>{trD('sa.blocked', { n: prev.blocked.length })}</span><b /></div>}
                   </div>
                 ) : <div className="dist-empty">{trD('common.loading') || 'Memuat…'}</div>}
-                {prev && prev.blockedNeg && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('go.negBlock')} {prev.offenders.map((o) => o.figure + ' → ' + numX(o.value)).join('; ')}</span></div>}
+                {prev && prev.eligibleCount === 0 && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('sa.allBlocked')}</span></div>}
+                {prev && prev.blocked && prev.blocked.length > 0 && (
+                  <div className="sa-blocked">
+                    <div className="sa-blocked-h">{trD('sa.blockedH', { n: prev.blocked.length })}</div>
+                    {prev.blocked.slice(0, 12).map((b, i) => <div key={i} className="sa-blocked-row"><IconClose s={11} />{trD(SA_REASON[b.reason] || 'gv.rsLain', { ref: b.ref || '' })}{b.note ? ' · ' + b.note.slice(0, 26) : ''}</div>)}
+                  </div>
+                )}
+                {prev && prev.blockedNeg && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('go.negBlock')} {prev.offenders.map((o) => o.figure + ' → ' + numX(o.value)).join('; ')} · {trD('sa.negHint')}</span></div>}
                 <label className="fld-label">{trD('gv.noteLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
                 <textarea className="fld" style={{ height: 54, padding: 12, resize: 'vertical' }} value={note} placeholder={trD('gv.notePh')} onChange={(e) => setNote(e.target.value)} />
                 {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
               </div>
-              <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setConfirm(null)}>{trD('dist.cancel')}</button><button className={'btn ' + (confirm.action === 'pulihkan' ? 'btn-primary' : 'btn-danger')} disabled={busy || (prev && prev.blockedNeg)} onClick={commit}>{busy ? '…' : trD('sa.confirmDo')}</button></div>
+              <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setConfirm(null)}>{trD('dist.cancel')}</button><button className={'btn ' + (confirm.action === 'pulihkan' ? 'btn-primary' : 'btn-danger')} disabled={busy || !prev || prev.blockedNeg || prev.eligibleCount === 0} onClick={commit}>{busy ? '…' : trD('sa.confirmDo', { n: prev ? prev.eligibleCount : 0 })}</button></div>
             </div>
           </div>
         )}

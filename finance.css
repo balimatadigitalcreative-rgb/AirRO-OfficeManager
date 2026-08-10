@@ -3560,3 +3560,8 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .sa-acts { display: flex; gap: 8px; white-space: nowrap; }
 .amt-pos { color: var(--green-800, #15803d); }
 .amt-neg { color: var(--danger, #dc2626); }
+
+/* Rincian Stok Awal — named blocked reasons */
+.sa-blocked { margin: 10px 0; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface-2, #f6f8fa); }
+.sa-blocked-h { font-size: 12px; font-weight: 700; color: var(--warn, #b45309); margin-bottom: 5px; }
+.sa-blocked-row { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-mut); padding: 2px 0; }
