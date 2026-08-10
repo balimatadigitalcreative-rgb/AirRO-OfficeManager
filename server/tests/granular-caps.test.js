@@ -148,10 +148,10 @@ describe('back-compat for users stored before the split', () => {
     ['gudangAddStock', 'gudangKoreksi', 'gudangBuffer', 'gudangItems', 'gudangSupplier'].forEach((c) => expect(legacy[c]).toBe(true));
     const narrowed = resolvePerms('finance', JSON.stringify({ gudangKelola: true, gudangKoreksi: false }));
     expect(narrowed.gudangKoreksi).toBe(false);      // an explicit off is never re-derived
-    expect(narrowed.gudangAddStock).toBe(true);
-    // the alias stays truthy while ANY manage action remains, so old clients still work
-    expect(narrowed.gudangKelola).toBe(true);
-    expect(resolvePerms('finance', JSON.stringify({ gudangView: true })).gudangKelola).toBe(false);
+    expect(narrowed.gudangAddStock).toBe(true);      // split caps still BACKFILL from a stored gudangKelola
+    // PART 1: the gudangKelola alias is RETIRED — it is no longer re-exposed (no route/UI uses it).
+    expect(narrowed.gudangKelola).toBeUndefined();
+    expect(resolvePerms('finance', JSON.stringify({ gudangView: true })).gudangKelola).toBeUndefined();
   });
 
   it('owner and GM hold every new capability', () => {

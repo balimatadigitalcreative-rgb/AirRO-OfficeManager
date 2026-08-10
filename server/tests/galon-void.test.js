@@ -135,12 +135,13 @@ describe('restore a voided row', () => {
 
 describe('reported bug: opening figure is changeable by a stock manager (no customer cap)', () => {
   // Regression for "the opening stock figure cannot be changed": a role that manages gallon stock
-  // (distribusiGallonReset) but NOT customers (distribusiCustomers) must be able to set/adjust the
-  // depot baseline — and doing so must not move any customer's gallons.
+  // (gudangGalonKoreksi) but NOT customers (distribusiCustomers) must be able to set/adjust the depot
+  // baseline — and doing so must not move any customer's gallons. (Post PART-1: setting opening is a
+  // GUDANG gallon cap, never a customer cap.)
   let stockUser;
   beforeAll(async () => {
     const u = await reg({ name: 'Gudang', username: 'stk_gv', password: 'secret123', role: 'finance' });
-    await prisma.user.update({ where: { id: u.user.id }, data: { permissions: JSON.stringify({ distribusiGallon: true, distribusiGallonReset: true, distribusiCustomers: false }) } });
+    await prisma.user.update({ where: { id: u.user.id }, data: { permissions: JSON.stringify({ gudangGalonView: true, gudangGalonKoreksi: true, distribusiCustomers: false }) } });
     stockUser = (await request(app).post('/api/v1/auth/login').send({ username: 'stk_gv', password: 'secret123' })).body.token;
   });
   it('sets opening 400 then adjusts to 90 via the delta engine; customers byte-identical', async () => {

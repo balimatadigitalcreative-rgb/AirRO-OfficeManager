@@ -65,7 +65,7 @@ function navForRole(p, role) {
   // Stok Galon lives under GUDANG (it is stock, not distribution paperwork) but is still a
   // DISTRIBUSI screen in every other respect: same id/hash '#dist-gallon', same component,
   // same 'distribusiGallon' capability and fleet scope. Only the menu position moved.
-  if (p.distribusiGallon) items.push({ id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', grp: 'gudang' });
+  if (p.gudangGalonView) items.push({ id: 'dist-gallon', label: tr('nav.distGallon'), icon: 'IconDrop', grp: 'gudang' });
   if (p.gudangSupplier) items.push({ id: 'suppliers', label: tr('nav.suppliers'), icon: 'IconCustomers', grp: 'gudang' });
   return items;
 }
@@ -1582,8 +1582,8 @@ function FApp() {
             <DIST.AdjustReport refreshKey={distTick} today={FIN.TODAY}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
-          {screen === 'dist-gallon' && p.distribusiGallon && (
-            <DIST.Gallon refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canReset={!!p.distribusiGallonReset} canGalonDelete={!!p.distribusiHardDelete} canResetTotal={!!p['distribusi.galon.reset_total']}
+          {screen === 'dist-gallon' && p.gudangGalonView && (
+            <DIST.Gallon refreshKey={distTick} canCustomers={!!p.gudangGalonKoreksi} canOpname={!!p.gudangGalonOpname} canReset={!!p.gudangGalonReset} canGalonDelete={!!p.gudangGalonHardDelete} canResetTotal={!!p['gudang.galon.reset_total']}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} />
           )}
           {screen === 'dist-prices' && p.distribusiHargaMaster && (

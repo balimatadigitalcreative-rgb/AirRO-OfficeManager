@@ -176,55 +176,44 @@ router.get('/expenses', requireCap('distribusiExpense'), validate({ query: ctrl.
 router.post('/expenses', requireCap('distribusiExpense'), validate({ body: ctrl.schemas.expenseSchema }), ctrl.createExpense);
 router.post('/expenses/:id/void', requireCap('distribusiExpense'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.expenseVoidSchema }), ctrl.voidExpense);
 
-// ── Gallon stock (loan/exchange) — read = distribusiGallon; correction = distribusiCustomers. ──
-router.get('/gallon', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
-router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);
-// Opening (go-live) depot stock — same stock-management cap as a correction. Append-only:
-// records the delta as an 'opening' movement, never overwrites the ledger.
-// Setting the depot baseline is a STOCK action, so a gallon-stock manager (distribusiGallonReset) may
-// do it too — not only customer-management. (A reset-holder could already change it via opening/reset.)
-router.post('/gallon/opening', requireAnyCap(['distribusiCustomers', 'distribusiGallonReset']), validate({ body: ctrl.schemas.openingStockSchema }), ctrl.setOpeningStock);
-// Reset gallon count — GM-tier destructive action, its OWN capability. Server rejects anyone
-// without it (403), not just a hidden button. Balanced mode appends corrections; purge deletes.
-router.post('/gallon/reset', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.gallonResetSchema }), ctrl.resetGallon);
+// ── GALLON STOCK (Stok Galon page) — the URLs stay under /distribusi/gallon (client + nginx depend on
+// them) but every cap is now in the GUDANG namespace, because the user SEES this page under Gudang.
+// ACCESS-CONTROL FIX: correction & opname no longer accept distribusiCustomers (a customer cap must not
+// grant a warehouse write). See permissions.deriveGudangGalonCaps for the safe old→new derivation. ──
+router.get('/gallon', requireCap('gudangGalonView'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.gallonSummary);
+router.post('/gallon/correction', requireCap('gudangGalonKoreksi'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);
+// Opening (go-live) depot stock — a stock adjustment, so it shares the gallon-correction cap.
+router.post('/gallon/opening', requireCap('gudangGalonKoreksi'), validate({ body: ctrl.schemas.openingStockSchema }), ctrl.setOpeningStock);
+// Reset gallon count — GM-tier destructive stock action, its OWN cap. Server rejects anyone without it.
+router.post('/gallon/reset', requireCap('gudangGalonReset'), validate({ body: ctrl.schemas.gallonResetSchema }), ctrl.resetGallon);
 
 // ── Depot gallon-stock ENTRY void / restore / hard-delete + reset-stok-awal ──
 // All confined to customerId=null rows server-side, so customer gallon counts are structurally
-// untouchable (see distribution.service SAFETY INVARIANT). View-window + fleet scope re-checked per
-// row: a user who cannot SEE a row cannot act on it.
-//   void / restore / reset  → distribusiGallonReset (GM/owner)   ·   hard delete → distribusiHardDelete (owner)
-router.get('/gallon/movements/:id/impact', requireCap('distribusiGallonReset'), validate({ params: ctrl.schemas.idParams }), ctrl.gallonMovementImpact);
-router.post('/gallon/movements/:id/void', requireCap('distribusiGallonReset'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonVoidSchema }), ctrl.gallonMovementVoid);
-router.post('/gallon/movements/:id/restore', requireCap('distribusiGallonReset'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonRestoreSchema }), ctrl.gallonMovementRestore);
-router.get('/gallon/opening/reset/impact', requireCap('distribusiGallonReset'), validate({ query: ctrl.schemas.openingResetImpactSchema }), ctrl.openingResetImpact);
-router.post('/gallon/opening/reset', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.openingResetSchema }), ctrl.openingReset);
-// The ONLY DELETE in distribusi: owner-only, narrow hard-delete of an ALREADY-VOIDED, unlinked,
-// customerId=null depot row <30 days old. Audit keeps a full JSON snapshot. Everything else stays
-// append-only/immutable.
-router.delete('/gallon/movements/:id', requireCap('distribusiHardDelete'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonMovDeleteSchema }), ctrl.gallonMovementDelete);
+// untouchable. void / restore / reset → gudangGalonReset (GM/owner) · hard delete → gudangGalonHardDelete (owner).
+router.get('/gallon/movements/:id/impact', requireCap('gudangGalonReset'), validate({ params: ctrl.schemas.idParams }), ctrl.gallonMovementImpact);
+router.post('/gallon/movements/:id/void', requireCap('gudangGalonReset'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonVoidSchema }), ctrl.gallonMovementVoid);
+router.post('/gallon/movements/:id/restore', requireCap('gudangGalonReset'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonRestoreSchema }), ctrl.gallonMovementRestore);
+router.get('/gallon/opening/reset/impact', requireCap('gudangGalonReset'), validate({ query: ctrl.schemas.openingResetImpactSchema }), ctrl.openingResetImpact);
+router.post('/gallon/opening/reset', requireCap('gudangGalonReset'), validate({ body: ctrl.schemas.openingResetSchema }), ctrl.openingReset);
+// Owner-only narrow hard-delete of an already-voided, unlinked, customerId=null depot row <30 days old.
+router.delete('/gallon/movements/:id', requireCap('gudangGalonHardDelete'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonMovDeleteSchema }), ctrl.gallonMovementDelete);
 
-// ── Location model: Stok Opname (physical count → correction) + integrity guard ──
-// Opname = a STOCK action (same cap as reset). The integrity check is read-only for any gallon
-// viewer; the repair is owner-only (creates/deactivates ledger rows).
-router.post('/gallon/opname', requireAnyCap(['distribusiCustomers', 'distribusiGallonReset']), validate({ body: ctrl.schemas.opnameSchema }), ctrl.stockOpname);
-router.get('/gallon/opname/history', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.opnameHistory);
-router.get('/gallon/integrity', requireCap('distribusiGallon'), ctrl.gallonIntegrity);
-router.post('/gallon/integrity/repair', requireCap('distribusiHardDelete'), ctrl.gallonIntegrityRepair);
+// ── Stok Opname (physical count → correction) + integrity guard ──
+// Opname = a STOCK write (its own cap). Integrity check is read-only for any gallon viewer; repair is owner.
+router.post('/gallon/opname', requireCap('gudangGalonOpname'), validate({ body: ctrl.schemas.opnameSchema }), ctrl.stockOpname);
+router.get('/gallon/opname/history', requireCap('gudangGalonView'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.opnameHistory);
+router.get('/gallon/integrity', requireCap('gudangGalonView'), ctrl.gallonIntegrity);
+router.post('/gallon/integrity/repair', requireCap('gudangGalonHardDelete'), ctrl.gallonIntegrityRepair);
 
 // ── RESET TOTAL STOK GALON (OWNER ONLY) — clean slate for the whole gallon ledger ──
-// Touches only GallonMovement; never transactions/money (asserted in galon-reset-total.test.js).
-// The cap is owner-only (distribusi.galon.reset_total) and enforced HERE server-side — a crafted
-// request from a non-owner is rejected regardless of the client.
-router.post('/gallon/reset-total/preview', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalSchema }), ctrl.resetTotalPreview);
-router.post('/gallon/reset-total', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalSchema }), ctrl.resetTotalCommit);
-router.post('/gallon/reset-total/restore', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalRestoreSchema }), ctrl.resetTotalRestore);
+router.post('/gallon/reset-total/preview', requireCap('gudang.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalSchema }), ctrl.resetTotalPreview);
+router.post('/gallon/reset-total', requireCap('gudang.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalSchema }), ctrl.resetTotalCommit);
+router.post('/gallon/reset-total/restore', requireCap('gudang.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalRestoreSchema }), ctrl.resetTotalRestore);
 
 // ── RINCIAN STOK AWAL — per-row opening/depot management (customerId=null rows only) ──
-// list = read (distribusiGallon); bulk void/restore = distribusiGallonReset (GM/owner); the hard-delete
-// path inside bulk is owner-checked in the service. All customerId=null; money is never touched.
-router.get('/gallon/opening-rows', requireCap('distribusiGallon'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.openingRowsList);
-router.post('/gallon/opening-rows/bulk/preview', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.openingRowsBulkSchema }), ctrl.openingRowsBulkPreview);
-router.post('/gallon/opening-rows/bulk', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.openingRowsBulkSchema }), ctrl.openingRowsBulk);
-router.post('/gallon/opening-rows/restore', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.resetTotalRestoreSchema }), ctrl.openingRowsRestore);
+router.get('/gallon/opening-rows', requireCap('gudangGalonView'), validate({ query: ctrl.schemas.gallonQuery }), ctrl.openingRowsList);
+router.post('/gallon/opening-rows/bulk/preview', requireCap('gudangGalonReset'), validate({ body: ctrl.schemas.openingRowsBulkSchema }), ctrl.openingRowsBulkPreview);
+router.post('/gallon/opening-rows/bulk', requireCap('gudangGalonReset'), validate({ body: ctrl.schemas.openingRowsBulkSchema }), ctrl.openingRowsBulk);
+router.post('/gallon/opening-rows/restore', requireCap('gudangGalonReset'), validate({ body: ctrl.schemas.resetTotalRestoreSchema }), ctrl.openingRowsRestore);
 
 module.exports = router;

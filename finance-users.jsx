@@ -58,7 +58,6 @@ const CAP_GROUPS = [
     ['distribusiDashboard', 'Lihat Dashboard'],
     ['distribusiDashHistory', 'Lihat Periode Sebelumnya'],
     ['distribusiCashIntegrasi', 'Lihat Integrasi Kas'],
-    ['distribusiGallon', 'Lihat Stok Galon'],
     ['distribusiPengiriman', 'Lihat Papan Pengiriman'],
     ['distribusiPengirimanReport', 'Lihat Laporan Pengiriman'],
     ['distribusiExpense', 'Catat Pengeluaran Lapangan'],
@@ -66,7 +65,6 @@ const CAP_GROUPS = [
     ['distribusiRute', 'Atur Urutan Rute Pengiriman'],
     ['distribusiHargaMaster', 'Ubah Harga Master'],
     ['distribusiCustomerDelete', 'Hapus / Nonaktifkan Pelanggan'],
-    ['distribusiGallonReset', 'Reset Jumlah Galon'],
     ['distribusiLegacyImport', 'Impor Riwayat Transaksi (arsip)'],
     ['distribusiVoid', 'Batalkan Transaksi'],
     ['distribusiApprove', 'Setujui Perubahan Distribusi (koreksi/pembatalan)'],
@@ -85,6 +83,13 @@ const CAP_GROUPS = [
     ['gudangSupplier', 'Kelola Supplier'],
     ['gudangDamage', 'Catat Rusak / Hilang'],
     ['gudangReport', 'Lihat Laporan Gudang'],
+    // Stok Galon (the page lives under Gudang) — its OWN caps, moved out of Distribusi.
+    ['gudangGalonView', 'Lihat Stok Galon'],
+    ['gudangGalonKoreksi', 'Koreksi Stok Galon (depot + stok awal)'],
+    ['gudangGalonOpname', 'Stok Opname Galon (hitung fisik)'],
+    ['gudangGalonReset', '⚠ Reset / Batalkan Baris Stok Galon'],
+    ['gudangGalonHardDelete', '⚠ Hapus Permanen Baris Galon'],
+    ['gudang.galon.reset_total', '⚠ Reset Total Stok Galon (pemilik)'],
   ] },
 ];
 

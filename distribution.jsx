@@ -5190,7 +5190,7 @@ function StokAwalPanel({ ef, canReset, canGalonDelete, onClose, onChanged }) {
   );
 }
 
-function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, canResetTotal, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistGallon({ refreshKey, canCustomers, canOpname, canReset, canGalonDelete, canResetTotal, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);
   const [toast, setToast] = uSx('');
   const [corr, setCorr] = uSx(null);   // { customerId, name, qty, reason }
@@ -5256,7 +5256,7 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, canRes
           <button type="button" className="btn btn-danger btn-sm" onClick={openReset}><IconRefresh s={14} />{trD('dist.grBtn')}</button>
         </div>
       )}
-      <PosisiGalon stock={st} invariant={data.invariant} onOpname={(canReset || canCustomers) ? () => { setErr(''); setOpname({ location: 'depot', count: '', note: '' }); } : null} onIntegrity={canGalonDelete ? () => setIntegrity({ loading: true }) : null} />
+      <PosisiGalon stock={st} invariant={data.invariant} onOpname={canOpname ? () => { setErr(''); setOpname({ location: 'depot', count: '', note: '' }); } : null} onIntegrity={canGalonDelete ? () => setIntegrity({ loading: true }) : null} />
       <div className="dist-gm-note"><IconInvoice s={13} /><span>{trD('dist.gmTotalNote')}</span></div>
       <div className="card dist-gm-opening">
         <span className="icon-tile" style={{ background: '#EEF2FF', color: '#5b6ed6' }}>{IcX('IconWallet', { s: 17 })}</span>
