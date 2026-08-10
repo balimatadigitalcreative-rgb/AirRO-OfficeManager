@@ -30,6 +30,74 @@ function downloadCSV(rows, catMap, label) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// XLSX export — SpreadsheetML 2003 (a real Excel workbook: typed number cells, opens natively in
+// Excel/LibreOffice) generated with no bundled library, keeping the app self-contained.
+function downloadXLSX(rows, catMap, label) {
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const cell = (v, num) => num ? `<Cell><Data ss:Type="Number">${v}</Data></Cell>` : `<Cell><Data ss:Type="String">${esc(v)}</Data></Cell>`;
+  const head = ['Tanggal', 'Waktu', 'Jenis', 'Kategori', 'Catatan', 'Jumlah (IDR)'];
+  const headRow = '<Row>' + head.map((h) => cell(h)).join('') + '</Row>';
+  let body = '';
+  rows.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).forEach((e) => {
+    body += '<Row>' + cell(e.date) + cell(e.time) + cell(e.type) + cell(FS.catInfo(catMap, e.category).label) + cell(e.note) + cell(e.type === 'income' ? e.amount : -e.amount, true) + '</Row>';
+  });
+  const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Buku Kas"><Table>${headRow}${body}</Table></Worksheet></Workbook>`;
+  const blob = new Blob(['﻿' + xml], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `AirRO-BukuKas-${label.replace(/[^\w]+/g, '-')}.xls`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Drill-down: a report figure → the journal each source row posts → the source record itself. Uses the
+// same client journal projection as the entry form (finDeriveJournal, a global from finance-app.jsx),
+// so what you see here matches what the entry form previews and what the engine would post.
+function DrillModal({ label, kind, entries, catMap, onOpenEntry, onClose }) {
+  const [openId, setOpenId] = uSr(null);
+  React.useEffect(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const total = entries.reduce((s, e) => s + e.amount, 0);
+  const rows = entries.slice().sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card wide fin-scope" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{trR('rep.drillCount', { n: rows.length })} · <b className="tnum">{FIN.fmt(total)}</b></div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><IconClose s={18} /></button>
+        </div>
+        <div className="modal-body">
+          {rows.length === 0 && <div className="fin-empty-s" style={{ padding: '30px 0', textAlign: 'center' }}>{trR('rep.nodata')}</div>}
+          {rows.map((e) => {
+            const j = finDeriveJournal({ type: e.type, amount: e.amount, category: e.category, acctType: e.method === 'Transfer' ? 'bank' : 'cash', gallonQty: e.gallonQty });
+            const open = openId === e.id;
+            const cat = FS.catInfo(catMap, e.category);
+            return (
+              <div key={e.id} className={`fin-drill-row ${open ? 'open' : ''}`}>
+                <button type="button" className="fin-drill-main" onClick={() => setOpenId(open ? null : e.id)} aria-expanded={open}>
+                  <span className="fin-drill-date tnum">{e.date}</span>
+                  <span className="fin-drill-desc">{cat.label}{e.note && e.note !== cat.label ? ' — ' + e.note : ''}</span>
+                  <span className={`tnum fin-drill-amt ${e.type === 'income' ? 'amt-pos' : 'amt-neg'}`}>{FIN.fmt(e.amount)}</span>
+                  <span className={`fin-jcaret ${open ? 'open' : ''}`}>{IcR('IconCaret', { s: 13 })}</span>
+                </button>
+                {open && (
+                  <div className="fin-drill-journal">
+                    <div className="fin-jrow head"><span>{trR('je.account')}</span><span className="fin-r">{trR('je.debit')}</span><span className="fin-r">{trR('je.credit')}</span></div>
+                    {j.lines.map((l, i) => (<div key={i} className="fin-jrow"><span className="fin-jacct"><b className="tnum">{l.code}</b> {FIN_CHART[l.code] || l.code}</span><span className="fin-r tnum">{l.dr ? FIN.fmt(l.dr) : ''}</span><span className="fin-r tnum">{l.cr ? FIN.fmt(l.cr) : ''}</span></div>))}
+                    {onOpenEntry && <button type="button" className="btn btn-ghost btn-sm fin-drill-open" onClick={() => { onClose(); onOpenEntry(e); }}>{IcR('IconPencil', { s: 14 })}{trR('rep.openSource')}</button>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeltaPill({ delta, invert }) {
   if (delta == null) return null;
   const up = delta > 0, flat = delta === 0;
@@ -56,7 +124,7 @@ function MiniKpi({ label, value, cls, icon, bg, fg, sub, delta, invert }) {
   );
 }
 
-function BreakdownCard({ title, segs, total, palette, period }) {
+function BreakdownCard({ title, segs, total, palette, period, onSeg }) {
   if (!segs.length) return (
     <div className="card" style={{ padding: 18 }}>
       <div className="sec-title" style={{ fontSize: 16, fontWeight: 700 }}>{title}</div>
@@ -70,15 +138,19 @@ function BreakdownCard({ title, segs, total, palette, period }) {
         <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{period}</span>
       </div>
       <div style={{ margin: '14px 0' }}><DonutChart segments={segs} total={total} centerLabel="Total" palette={palette} /></div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-        {segs.map((s, i) => (
-          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="tnum" style={{ width: 32, fontSize: 12, fontWeight: 700, color: 'var(--text-mut)' }}>{s.pct}%</span>
-            <span style={{ width: 9, height: 9, borderRadius: 3, background: palette[i % palette.length], flexShrink: 0 }} />
-            <span style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</span>
-            <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap' }}>{FIN.fmt(s.value)}</span>
-          </div>
-        ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {segs.map((s, i) => {
+          const Tag = onSeg ? 'button' : 'div';
+          return (
+            <Tag key={s.key} type={onSeg ? 'button' : undefined} className={`fin-bd-seg ${onSeg ? 'clickable' : ''}`} onClick={onSeg ? () => onSeg(s) : undefined} title={onSeg ? trR('rep.drillHint') : undefined}>
+              <span className="tnum" style={{ width: 32, fontSize: 12, fontWeight: 700, color: 'var(--text-mut)' }}>{s.pct}%</span>
+              <span style={{ width: 9, height: 9, borderRadius: 3, background: palette[i % palette.length], flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</span>
+              <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap' }}>{FIN.fmt(s.value)}</span>
+              {onSeg && <span className="fin-bd-caret">{IcR('IconCaret', { s: 12 })}</span>}
+            </Tag>
+          );
+        })}
       </div>
     </div>
   );
@@ -237,8 +309,9 @@ function HrdReport({ staff, rates, monLabel, payrollPosted, payrollTotal, onPost
   );
 }
 
-function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted, payrollTotal, payrollLabel, onPostPayroll }) {
+function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted, payrollTotal, payrollLabel, onPostPayroll, onOpenEntry, unitLabel }) {
   const [tab, setTab] = uSr('fin');
+  const [drill, setDrill] = uSr(null);   // { type, key, label } → opens the figure→journal→source modal
   const [gran, setGran] = uSr('month');
   const [anchor, setAnchor] = uSr(FIN.TODAY);
   const [cStart, setCStart] = uSr('2026-05-01');
@@ -274,8 +347,9 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
   const exp = uMr(() => seg('expense'), [rows, catMap]);
   const inc = uMr(() => seg('income'), [rows, catMap]);
 
+  const drillEntries = drill ? rows.filter((e) => e.type === drill.type && e.category === drill.key) : [];
   return (
-    <div className="screen-enter" id="report-area">
+    <div className="screen-enter fin-scope" id="report-area">
       {/* print-only header */}
       <div className="print-head print-only">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -331,14 +405,15 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
           )}
         </div>
         <div className="rep-actions">
-          <button className="btn btn-ghost" style={{ height: 42 }} onClick={() => downloadCSV(rows, catMap, label)}><IconDownload s={17} />{trR('rep.exportcsv')}</button>
-          <button className="btn btn-primary" style={{ height: 42 }} onClick={() => window.print()}><IconReport s={17} />{trR('rep.savepdf')}</button>
+          <button className="btn btn-ghost" style={{ height: 42 }} onClick={() => downloadXLSX(rows, catMap, label)} title="Excel (SpreadsheetML)"><IconDownload s={17} /><span className="fin-btn-lbl">{trR('rep.exportxlsx')}</span></button>
+          <button className="btn btn-ghost" style={{ height: 42 }} onClick={() => downloadCSV(rows, catMap, label)}><IconDownload s={17} /><span className="fin-btn-lbl">CSV</span></button>
+          <button className="btn btn-primary" style={{ height: 42 }} onClick={() => window.print()}><IconReport s={17} /><span className="fin-btn-lbl">{trR('rep.print')}</span></button>
         </div>
       </div>
 
       <div className="rep-subhead">
         <span style={{ fontSize: 17, fontWeight: 800 }}>{label}</span>
-        <span style={{ fontSize: 13, color: 'var(--text-mut)' }}>{niceDate(range.start)} – {niceDate(range.end)} · {trR('rep.entriesDays', { c: k.count, d: k.days })}</span>
+        <span style={{ fontSize: 13, color: 'var(--text-mut)' }}>{unitLabel ? unitLabel + ' · ' : ''}{niceDate(range.start)} – {niceDate(range.end)} · {trR('rep.entriesDays', { c: k.count, d: k.days })}</span>
       </div>
 
       <div className="rep-kpi-row">
@@ -360,11 +435,12 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
       </div>
 
       <div className="rep-grid">
-        <BreakdownCard title={trR('rep.expBy')} segs={exp.segs} total={exp.total} palette={EXP_PAL} period={label} />
-        <BreakdownCard title={trR('rep.incBy')} segs={inc.segs} total={inc.total} palette={INC_PAL} period={label} />
+        <BreakdownCard title={trR('rep.expBy')} segs={exp.segs} total={exp.total} palette={EXP_PAL} period={label} onSeg={(s) => setDrill({ type: 'expense', key: s.key, label: s.label })} />
+        <BreakdownCard title={trR('rep.incBy')} segs={inc.segs} total={inc.total} palette={INC_PAL} period={label} onSeg={(s) => setDrill({ type: 'income', key: s.key, label: s.label })} />
       </div>
       </div>
       )}
+      {drill && <DrillModal label={drill.label + ' · ' + label} kind={drill.type} entries={drillEntries} catMap={catMap} onOpenEntry={onOpenEntry} onClose={() => setDrill(null)} />}
     </div>
   );
 }

@@ -1752,7 +1752,7 @@ function FApp() {
           )}
 
           {screen === 'reports' && p.reports && (
-            <REPORTS.ReportsScreen entries={reportEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={scopedStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} />
+            <REPORTS.ReportsScreen entries={reportEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={scopedStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} onOpenEntry={p.edit ? editEntryRow : null} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} />
           )}
 
           {screen === 'thr' && p.payroll && (

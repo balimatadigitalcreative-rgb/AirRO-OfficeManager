@@ -3874,3 +3874,20 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-coa-item:hover { background: var(--card-soft); }
 .fin-coa-item b { color: var(--green-800); font-weight: 700; min-width: 54px; }
 .fin-coa-none { font-size: 12px; color: var(--text-faint); padding: var(--fs-2); }
+
+/* ═══════════ FINANCE REDESIGN — Stage 4 (report viewer: drill-down figure→journal→source) ═══════════ */
+.fin-bd-seg { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: none; padding: 7px 8px; border-radius: 9px; font: inherit; }
+.fin-bd-seg.clickable { cursor: pointer; }
+.fin-bd-seg.clickable:hover { background: var(--card-soft); }
+.fin-bd-caret { display: inline-flex; color: var(--text-faint); margin-left: 2px; opacity: 0; transition: opacity .12s; }
+.fin-bd-seg.clickable:hover .fin-bd-caret { opacity: 1; }
+.fin-drill-row { border-bottom: 1px solid var(--border-soft); }
+.fin-drill-row.open { background: var(--card-soft); border-radius: var(--r-sm); }
+.fin-drill-main { display: grid; grid-template-columns: 92px 1fr auto 20px; gap: var(--fs-3); align-items: center; width: 100%; text-align: left; background: none; border: none; padding: 11px var(--fs-2); font: inherit; cursor: pointer; }
+.fin-drill-main:hover { background: var(--card-soft); }
+.fin-drill-date { font-size: 12px; color: var(--text-faint); }
+.fin-drill-desc { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fin-drill-amt { font-weight: 700; font-size: 13.5px; white-space: nowrap; }
+.fin-drill-journal { padding: var(--fs-2) var(--fs-4) var(--fs-4) var(--fs-6); }
+.fin-drill-open { margin-top: var(--fs-3); }
+@media (max-width: 560px) { .fin-drill-main { grid-template-columns: 1fr auto 20px; } .fin-drill-date { display: none; } }
