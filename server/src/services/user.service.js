@@ -6,6 +6,32 @@ const { resolvePerms } = require('../config/permissions');
 const { PUBLIC_FIELDS, publicUser, normUsername, isWeakPassword } = require('./auth.service');
 const { unitScopeOf } = require('../lib/scope');
 
+// ── ADMIN AUDIT — every user/permission/role/scope/status change writes one row (actor, target,
+// before→after diff). Best-effort: auditing NEVER blocks the underlying write.
+function effDiff(before, after) {
+  const be = resolvePerms(before.role, before.permissions), ae = resolvePerms(after.role, after.permissions);
+  const keys = new Set([...Object.keys(be), ...Object.keys(ae)]);
+  const added = [], removed = [];
+  keys.forEach((k) => { const b = !!be[k], a = !!ae[k]; if (a && !b) added.push(k); if (b && !a) removed.push(k); });
+  return { added: added.sort(), removed: removed.sort() };
+}
+async function writeAudit(target, actor, action, detail) {
+  try {
+    let actorName = null;
+    if (actor && actor.id) { const a = await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true } }); actorName = a && a.name; }
+    await prisma.userAuditLog.create({ data: { targetUserId: target.id, targetName: target.name || '', actorId: (actor && actor.id) || null, actorName, action, detail: JSON.stringify(detail || {}) } });
+  } catch (e) { /* audit is best-effort */ }
+}
+function auditClient(r) {
+  let detail = {}; try { detail = JSON.parse(r.detail || '{}'); } catch (e) {}
+  return { id: r.id, targetUserId: r.targetUserId, targetName: r.targetName || '', actorName: r.actorName || null, action: r.action, detail, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null };
+}
+async function listAudit(userId, limit) {
+  const where = userId ? { targetUserId: String(userId) } : {};
+  const rows = await prisma.userAuditLog.findMany({ where, orderBy: { createdAt: 'desc' }, take: Math.min(200, limit || 100) });
+  return rows.map(auditClient);
+}
+
 // LOCKOUT GUARD: the system must never end up with zero ACTIVE users who hold
 // `manageUsers` — otherwise nobody can ever administer users again. Given a pending
 // change to one user (new perms / role / active, or a delete), recompute how many active
@@ -77,17 +103,19 @@ async function getById(id) {
   if (!u) throw ApiError.notFound('User not found');
   return publicUser(u);
 }
-async function create({ password, ...rest }) {
+async function create({ password, ...rest }, actor) {
   if (rest.username != null) rest.username = normUsername(rest.username);   // case-insensitive
   const existing = await prisma.user.findUnique({ where: { username: rest.username } });
   if (existing) throw ApiError.conflict('Username is already taken');
   await assertRole(rest.role);
   const passwordHash = await bcrypt.hash(password, 10);
   const u = await prisma.user.create({ data: { ...normalize(rest), passwordHash, weakPassword: isWeakPassword(password) }, select: PUBLIC_FIELDS });
-  return publicUser(u);
+  const pub = publicUser(u);
+  await writeAudit(pub, actor, 'create', { role: pub.role });
+  return pub;
 }
-async function update(id, { password, ...rest }) {
-  await getById(id);
+async function update(id, { password, ...rest }, actor) {
+  const before = await getById(id);
   await assertRole(rest.role);
   if (rest.username != null) {
     rest.username = normUsername(rest.username);   // case-insensitive
@@ -116,14 +144,23 @@ async function update(id, { password, ...rest }) {
   const data = normalize(rest);
   if (password) { data.passwordHash = await bcrypt.hash(password, 10); data.weakPassword = isWeakPassword(password); }   // admin reset → re-evaluate the flag
   const u = await prisma.user.update({ where: { id }, data, select: PUBLIC_FIELDS });
-  return publicUser(u);
+  const after = publicUser(u);
+  // AUDIT (best-effort) — one entry per changed dimension, with the before→after diff.
+  if ('permissions' in rest || 'role' in rest) { const d = effDiff(before, after); if (d.added.length || d.removed.length) await writeAudit(after, actor, 'permissions', d); }
+  if ('role' in rest && before.role !== after.role) await writeAudit(after, actor, 'role', { from: before.role, to: after.role });
+  if ('active' in rest && before.active !== after.active) await writeAudit(after, actor, 'active', { from: before.active, to: after.active });
+  if ('fleetScope' in rest && JSON.stringify(before.fleetScope) !== JSON.stringify(after.fleetScope)) await writeAudit(after, actor, 'fleetScope', { from: before.fleetScope, to: after.fleetScope });
+  if ('unitScope' in rest && JSON.stringify(before.unitScope) !== JSON.stringify(after.unitScope)) await writeAudit(after, actor, 'unitScope', { from: before.unitScope, to: after.unitScope });
+  if (password) await writeAudit(after, actor, 'password', {});
+  return after;
 }
-async function remove(id, currentUserId) {
+async function remove(id, currentUserId, actor) {
   if (id === currentUserId) throw ApiError.badRequest('You cannot delete your own account');
-  await getById(id);
+  const target = await getById(id);
   await assertManageUsersKept({ targetId: id, deleting: true });   // don't delete the last admin
   await assertUnitAccessKept({ targetId: id, deleting: true });    // …nor the last all-unit admin
   await prisma.user.delete({ where: { id } });
+  await writeAudit(target, actor || { id: currentUserId }, 'delete', { role: target.role });
 }
 
 // ── Password-reset requests (forgot-password → admin queue) ──────────────────
@@ -155,4 +192,4 @@ async function handleResetRequest(id, status, actor) {
   return resetReqClient(updated);
 }
 
-module.exports = { list, getById, create, update, remove, listResetRequests, handleResetRequest };
+module.exports = { list, getById, create, update, remove, listResetRequests, handleResetRequest, listAudit };

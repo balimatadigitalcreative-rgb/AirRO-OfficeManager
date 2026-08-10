@@ -27,10 +27,11 @@ const resetReqUpdate = z.object({ status: z.enum(['selesai', 'ditolak']) });
 
 const list = asyncHandler(async (req, res) => res.json({ data: await service.list() }));
 const getOne = asyncHandler(async (req, res) => res.json({ data: await service.getById(req.params.id) }));
-const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body) }));
-const update = asyncHandler(async (req, res) => res.json({ data: await service.update(req.params.id, req.body) }));
-const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id, req.user.id); res.status(204).send(); });
+const create = asyncHandler(async (req, res) => res.status(201).json({ data: await service.create(req.body, req.user) }));
+const update = asyncHandler(async (req, res) => res.json({ data: await service.update(req.params.id, req.body, req.user) }));
+const remove = asyncHandler(async (req, res) => { await service.remove(req.params.id, req.user.id, req.user); res.status(204).send(); });
 const listResetRequests = asyncHandler(async (req, res) => res.json({ data: await service.listResetRequests(req.query) }));
 const handleResetRequest = asyncHandler(async (req, res) => res.json({ data: await service.handleResetRequest(req.params.id, req.body.status, req.user) }));
+const audit = asyncHandler(async (req, res) => res.json({ data: await service.listAudit(req.query.userId, req.query.limit ? parseInt(req.query.limit, 10) : undefined) }));
 
-module.exports = { list, getOne, create, update, remove, listResetRequests, handleResetRequest, schemas: { createSchema, updateSchema, idParams, resetReqQuery, resetReqUpdate } };
+module.exports = { list, getOne, create, update, remove, listResetRequests, handleResetRequest, audit, schemas: { createSchema, updateSchema, idParams, resetReqQuery, resetReqUpdate } };

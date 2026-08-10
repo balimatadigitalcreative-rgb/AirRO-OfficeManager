@@ -100,6 +100,7 @@
       // Forgot-password request queue (owner/GM).
       resetRequests: (status) => req('GET', '/users/reset-requests' + (status ? '?status=' + encodeURIComponent(status) : '')),
       handleResetRequest: (id, status) => req('PATCH', '/users/reset-requests/' + id, { status }),
+      audit: (userId) => req('GET', '/users/audit' + (userId ? '?userId=' + encodeURIComponent(userId) : '')),   // admin audit trail (all or one user)
     }),
     roles: collection('roles'),
     // Proof attachments live out of the record payload. `create` uploads a compressed

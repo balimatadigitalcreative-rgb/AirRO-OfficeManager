@@ -30,12 +30,29 @@ model User {
   permissions  String? // JSON capability map; null = use the role's defaults
   fleetScope   String   @default("all") // distribusi fleet access: "all" or a JSON array of fleet names
   unitScope    String   @default("all") // business-unit access: "all" or a JSON array of businessUnitIds
+  lastLoginAt  DateTime? // last successful login (shown as "Terakhir masuk" in user management)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   entries   Entry[]
   setorans  Setoran[]
   transfers Transfer[]
+}
+
+// Admin audit trail for user/role administration — every permission/role/scope/status change writes
+// one row (actor, target, action, before→after diff JSON). Surfaced in Log Audit + the user's detail.
+model UserAuditLog {
+  id           String   @id @default(cuid())
+  targetUserId String
+  targetName   String   @default("")
+  actorId      String?
+  actorName    String?
+  action       String                     // 'permissions' | 'role' | 'active' | 'fleetScope' | 'unitScope' | 'create' | 'delete' | 'password'
+  detail       String   @default("")      // JSON diff { added:[], removed:[], from, to, … }
+  createdAt    DateTime @default(now())
+
+  @@index([targetUserId])
+  @@index([createdAt])
 }
 
 // ── Roles (editable by owner/GM; seeded from config/permissions.js) ───────

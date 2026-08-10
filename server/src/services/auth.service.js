@@ -9,7 +9,7 @@ const { parsePerms, resolvePerms } = require('../config/permissions');
 const PASSWORD_MIN = 8;   // minimum length for a user-chosen password (self change)
 const PUBLIC_FIELDS = {
   id: true, name: true, username: true, role: true, sub: true,
-  color: true, active: true, permissions: true, fleetScope: true, unitScope: true, mustChangePassword: true, weakPassword: true, createdAt: true,
+  color: true, active: true, permissions: true, fleetScope: true, unitScope: true, mustChangePassword: true, weakPassword: true, createdAt: true, lastLoginAt: true,
 };
 
 // Is this plaintext password weak/temporary? Used to FLAG (not block) accounts for the owner —
@@ -91,8 +91,8 @@ async function login({ username, password }, ctx) {
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) { console.warn(`[auth] login gagal — password salah (username="${uname}", id=${user.id}, ip=${ip})`); throw ApiError.unauthorized('Invalid credentials'); }
 
-  const { passwordHash, pin, updatedAt, ...safe } = user;
-  return { user: selfUser(safe), token: signToken(user) };
+  const stamped = await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, select: PUBLIC_FIELDS });
+  return { user: selfUser(stamped), token: signToken(user) };
 }
 
 // Forgot-password (request-to-admin; no email). ALWAYS succeeds silently from the client's
