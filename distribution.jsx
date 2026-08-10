@@ -4962,7 +4962,7 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
         </div>
         <div className="tnum dist-gm-opening-val">{numX(op.total || 0)}</div>
         <div className="dist-gm-opening-acts">
-          {canCustomers && <button type="button" className="btn btn-ghost btn-sm" onClick={openOpening}><IconPencil s={14} />{op.set ? trD('dist.gmOpeningAdjust') : trD('dist.gmOpeningBtn')}</button>}
+          {(canCustomers || canReset) && <button type="button" className="btn btn-ghost btn-sm" onClick={openOpening}><IconPencil s={14} />{op.set ? trD('dist.gmOpeningAdjust') : trD('dist.gmOpeningBtn')}</button>}
           {canReset && op.set && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setErr(''); setResetAwal({ mode: 'delta', target: String(op.total || 0), note: '', confirm: '' }); }}><IconRefresh s={14} />{trD('go.resetBtn')}</button>}
         </div>
       </div>

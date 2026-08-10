@@ -181,7 +181,9 @@ router.get('/gallon', requireCap('distribusiGallon'), validate({ query: ctrl.sch
 router.post('/gallon/correction', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.gallonCorrectionSchema }), ctrl.gallonCorrection);
 // Opening (go-live) depot stock — same stock-management cap as a correction. Append-only:
 // records the delta as an 'opening' movement, never overwrites the ledger.
-router.post('/gallon/opening', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.openingStockSchema }), ctrl.setOpeningStock);
+// Setting the depot baseline is a STOCK action, so a gallon-stock manager (distribusiGallonReset) may
+// do it too — not only customer-management. (A reset-holder could already change it via opening/reset.)
+router.post('/gallon/opening', requireAnyCap(['distribusiCustomers', 'distribusiGallonReset']), validate({ body: ctrl.schemas.openingStockSchema }), ctrl.setOpeningStock);
 // Reset gallon count — GM-tier destructive action, its OWN capability. Server rejects anyone
 // without it (403), not just a hidden button. Balanced mode appends corrections; purge deletes.
 router.post('/gallon/reset', requireCap('distribusiGallonReset'), validate({ body: ctrl.schemas.gallonResetSchema }), ctrl.resetGallon);

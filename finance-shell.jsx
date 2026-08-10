@@ -1604,7 +1604,8 @@ function FApp() {
           {(screen === 'gudang' || screen === 'suppliers' || screen === 'setoran') && screenModuleBlocked(screen) ? moduleNotice(screen) : (<>
           {screen === 'gudang' && p.gudangView && (
             <GUDANG.Dept refreshKey={distTick} canAddStock={!!p.gudangAddStock} canKoreksi={!!p.gudangKoreksi} canBuffer={!!p.gudangBuffer}
-              canItems={!!p.gudangItems} canSupplier={!!p.gudangSupplier} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport} fleet={fleet} today={FIN.TODAY} />
+              canItems={!!p.gudangItems} canSupplier={!!p.gudangSupplier} canDamage={!!p.gudangDamage} canReport={!!p.gudangReport}
+              canGalon={!!p.distribusiGallon} onOpenGalon={() => go('dist-gallon')} fleet={fleet} today={FIN.TODAY} />
           )}
           {screen === 'suppliers' && p.gudangSupplier && (
             <GUDANG.Suppliers />

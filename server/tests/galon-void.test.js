@@ -131,6 +131,29 @@ describe('restore a voided row', () => {
   });
 });
 
+describe('reported bug: opening figure is changeable by a stock manager (no customer cap)', () => {
+  // Regression for "the opening stock figure cannot be changed": a role that manages gallon stock
+  // (distribusiGallonReset) but NOT customers (distribusiCustomers) must be able to set/adjust the
+  // depot baseline — and doing so must not move any customer's gallons.
+  let stockUser;
+  beforeAll(async () => {
+    const u = await reg({ name: 'Gudang', username: 'stk_gv', password: 'secret123', role: 'finance' });
+    await prisma.user.update({ where: { id: u.user.id }, data: { permissions: JSON.stringify({ distribusiGallon: true, distribusiGallonReset: true, distribusiCustomers: false }) } });
+    stockUser = (await request(app).post('/api/v1/auth/login').send({ username: 'stk_gv', password: 'secret123' })).body.token;
+  });
+  it('sets opening 400 then adjusts to 90 via the delta engine; customers byte-identical', async () => {
+    const before = await balSnapshot();
+    const set = await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(stockUser)).send({ qty: 400, fleet: 'D8', reason: 'stok awal awal' });
+    expect(set.status).toBe(201);
+    const adj = await request(app).post('/api/v1/distribusi/gallon/opening').set(auth(stockUser)).send({ qty: 90, fleet: 'D8', reason: 'koreksi stok awal' });
+    expect(adj.status).toBe(201);
+    const d = await request(app).get('/api/v1/distribusi/gallon?fleet=D8').set(auth(owner)).then((r) => r.body.data);
+    expect(d.opening.total).toBe(90);           // baseline became the target via the delta row
+    expect(d.stock.atDepot).toBe(90);
+    expect(await balSnapshot()).toEqual(before); // no customer gallon moved
+  });
+});
+
 describe('hard delete (owner, narrow)', () => {
   it('rejects an ACTIVE row; deletes an already-voided unlinked row with an audit snapshot', async () => {
     await makeOpening(70, 'D7');

@@ -51,7 +51,7 @@ function GudThumb({ photoId, kind }) {
 
 // Capabilities are PER ACTION (server-enforced in gudang.routes.js); the buttons below
 // mirror them one-for-one, so a user only ever sees what they may actually do.
-function GudangDept({ refreshKey, canAddStock, canKoreksi, canBuffer, canItems, canSupplier, canDamage, canReport, fleet, today }) {
+function GudangDept({ refreshKey, canAddStock, canKoreksi, canBuffer, canItems, canSupplier, canDamage, canReport, canGalon, onOpenGalon, fleet, today }) {
   const [data, setData] = uSg(null);
   const [err, setErr] = uSg('');
   const [toast, setToast] = uSg('');
@@ -233,7 +233,10 @@ function GudangDept({ refreshKey, canAddStock, canKoreksi, canBuffer, canItems, 
             {it.kind === 'galon' ? (
               <>
                 <div className="gud-card-note"><IconLock s={12} />{trD('gud.galonManaged')}</div>
-                {(canItems || canDamage) && <div className="gud-card-actions">
+                {(canGalon || canItems || canDamage) && <div className="gud-card-actions">
+                  {/* Opening stock / reset is NOT set here — it lives in the Stok Galon screen (single
+                      authoritative figure). This button removes the old dead-end: one click to that screen. */}
+                  {canGalon && onOpenGalon && <button type="button" className="btn btn-ghost btn-sm" onClick={onOpenGalon}><IconDrop s={13} />{trD('gud.galonOpen')}</button>}
                   {canItems && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(it)}><IconPencil s={13} />{trD('gud.editItem')}</button>}
                   {canDamage && <button type="button" className="btn btn-ghost btn-sm gud-dmg" onClick={openReport}><IconWarn s={13} />{trD('gud.report')}</button>}
                 </div>}
