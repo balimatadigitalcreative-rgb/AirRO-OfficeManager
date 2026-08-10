@@ -236,6 +236,10 @@
       opnameHistory: (fleet) => req('GET', '/distribusi/gallon/opname/history' + (fleet && fleet !== 'all' ? '?fleet=' + encodeURIComponent(fleet) : '')),
       gallonIntegrity: () => req('GET', '/distribusi/gallon/integrity'),
       gallonIntegrityRepair: () => req('POST', '/distribusi/gallon/integrity/repair'),
+      // Reset Total Stok Galon (owner) — clean slate for the whole gallon ledger; never touches money.
+      resetTotalPreview: (data) => req('POST', '/distribusi/gallon/reset-total/preview', data),   // { mode, counts } → dryRun preview
+      resetTotal: (data) => req('POST', '/distribusi/gallon/reset-total', data),                  // { mode, counts, note, confirm:'RESET TOTAL' }
+      resetTotalRestore: (batchId) => req('POST', '/distribusi/gallon/reset-total/restore', { batchId }),
       gallonCorrection: (data) => req('POST', '/distribusi/gallon/correction', data),
       setOpeningStock: (data) => req('POST', '/distribusi/gallon/opening', data),   // { qty, fleet?, reason }
       resetGallon: (data) => req('POST', '/distribusi/gallon/reset', data),          // { mode:balanced|purge, fleet?, target?, confirm?, reason }

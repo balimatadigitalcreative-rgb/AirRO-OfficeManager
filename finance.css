@@ -3533,3 +3533,9 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .go-row:last-child { border-bottom: 0; }
 .go-row .tnum { min-width: 46px; font-weight: 700; }
 .go-row em { color: var(--text-mut); font-style: normal; }
+
+/* ── Reset Total Stok Galon wizard ───────────────────────────────────────── */
+.rt-armada { display: flex; flex-direction: column; gap: 6px; }
+.rt-armada-row { display: flex; align-items: center; gap: 10px; }
+.rt-armada-row span { min-width: 80px; font-size: 13px; font-weight: 600; }
+.rt-armada-row .fld { flex: 1; }

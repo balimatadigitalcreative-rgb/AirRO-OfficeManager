@@ -211,4 +211,12 @@ router.get('/gallon/opname/history', requireCap('distribusiGallon'), validate({ 
 router.get('/gallon/integrity', requireCap('distribusiGallon'), ctrl.gallonIntegrity);
 router.post('/gallon/integrity/repair', requireCap('distribusiHardDelete'), ctrl.gallonIntegrityRepair);
 
+// ── RESET TOTAL STOK GALON (OWNER ONLY) — clean slate for the whole gallon ledger ──
+// Touches only GallonMovement; never transactions/money (asserted in galon-reset-total.test.js).
+// The cap is owner-only (distribusi.galon.reset_total) and enforced HERE server-side — a crafted
+// request from a non-owner is rejected regardless of the client.
+router.post('/gallon/reset-total/preview', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalSchema }), ctrl.resetTotalPreview);
+router.post('/gallon/reset-total', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalSchema }), ctrl.resetTotalCommit);
+router.post('/gallon/reset-total/restore', requireCap('distribusi.galon.reset_total'), validate({ body: ctrl.schemas.resetTotalRestoreSchema }), ctrl.resetTotalRestore);
+
 module.exports = router;

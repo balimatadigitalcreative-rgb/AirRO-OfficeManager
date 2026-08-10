@@ -7,6 +7,7 @@
 //     or delete is exposed; mistakes are fixed by appending a correction;
 //   • every write also appends an immutable DistAuditLog row.
 const prisma = require('../lib/prisma');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/ApiError');
 const { normalizePhone } = require('../utils/phone');
@@ -2586,6 +2587,123 @@ async function gallonIntegrityRepair(actor) {
   if (created || deactivated) await logAudit('koreksi', 'Perbaikan ketidakcocokan ledger galon', `${created} baris delivery_out dibuat · ${deactivated} baris yatim dinonaktifkan · oleh ${snap.actorName}`, snap, '');
   return { created, deactivated, invariant: await gallonInvariant(actor) };
 }
+
+// ═══════════════════ RESET TOTAL STOK GALON — clean-slate for the WHOLE gallon ledger ═══════════════
+// ┌── ABSOLUTE BOUNDARY (also asserted in galon-reset-total.test.js) ────────────────────────────────┐
+// │ This touches ONLY the GallonMovement table. It NEVER reads from or writes to DistTransaction,     │
+// │ payments, invoices, receivables, or cash. Sisa Bon, transaction nominals, invoice totals and every│
+// │ revenue/cash figure are therefore byte-identical before and after — the reset cannot move money.  │
+// └───────────────────────────────────────────────────────────────────────────────────────────────────┘
+// The fresh baseline is written as rows whose TYPES make the four buckets equal the physical counts
+// EXACTLY (depot correction · per-fleet correction+load_out · rusak correction+damage · per-customer
+// penyesuaian) — and NONE is an 'opening'/isOpeningRow, so "Stok awal" reads 0 after (matches the
+// spec preview "Stok awal 611 → 0"). preview == write: both build these specs and run them through the
+// SAME derivation. A physically counted gallon is never negative → any negative result is rejected.
+const RESET_TOTAL_CONFIRM = 'RESET TOTAL';
+const nrInt = (v) => Math.max(0, Math.round(+v || 0));   // non-negative int
+// Build the fresh baseline rows from the counts. `custFigs` = resolved per-customer gallon figures.
+function resetBaselineSpecs(counts, custFigs, dateStr) {
+  const tag = (label) => `Reset total ${dateStr}: ${label}`;
+  const specs = [];
+  const depot = nrInt(counts.depot);
+  if (depot > 0) specs.push({ type: 'correction', qty: depot, fleetId: '', customerId: null, note: tag('depot') });
+  for (const [f, q0] of Object.entries(counts.armada || {})) { const q = nrInt(q0); if (q > 0 && f) { specs.push({ type: 'correction', qty: q, fleetId: f, customerId: null, note: tag('sumber armada ' + f) }); specs.push({ type: 'load_out', qty: q, fleetId: f, customerId: null, note: tag('armada ' + f) }); } }
+  const rusak = nrInt(counts.rusak);
+  if (rusak > 0) { specs.push({ type: 'correction', qty: rusak, fleetId: '', customerId: null, note: tag('sumber rusak/hilang') }); specs.push({ type: 'damage', qty: rusak, fleetId: '', customerId: null, note: tag('rusak/hilang') }); }
+  for (const [cid, q0] of Object.entries(custFigs || {})) { const q = Math.round(+q0 || 0); if (q !== 0 && cid) specs.push({ type: 'penyesuaian', qty: q, fleetId: '', customerId: cid, note: tag('pelanggan') }); }
+  return specs;
+}
+// Simulate the buckets these specs produce, from a ZERO base (after a retire, everything is inactive).
+// cutover is irrelevant here — baseline specs contain no delivery_out/return_in — so pass null.
+function simulateResetBuckets(specs) {
+  let depot = 0, atArmada = 0, pelanggan = 0, rusak = 0, good = 0; const armadaByFleet = {};
+  specs.forEach((s) => { good += totalEffect(s); pelanggan += custEffect(s); rusak += rusakEffect(s); depot += depotEffect(s, null); const a = armadaEffect(s, null); if (a) { armadaByFleet[s.fleetId] = (armadaByFleet[s.fleetId] || 0) + a; atArmada += a; } });
+  return { depot, atArmada, armadaByFleet, pelanggan, rusak, total: good + rusak };
+}
+// ONE function for preview (dryRun) and execute. Mode 'retire' (reversible) or 'purge' (irreversible).
+async function resetTotalGallon(body, actor, opts) {
+  const dryRun = !!(opts && opts.dryRun);
+  const mode = (body && body.mode) === 'purge' ? 'purge' : 'retire';
+  const counts = (body && body.counts) || {};
+  const custMode = ['zero', 'enter', 'preserve'].includes(counts.customersMode) ? counts.customersMode : 'zero';
+  // Resolve per-customer figures (GallonMovement only — gallonBalances reads GallonMovement, never money).
+  let custFigs = {};
+  if (custMode === 'preserve') custFigs = await gallonBalances(actor, undefined);
+  else if (custMode === 'enter') { for (const [c, q] of Object.entries(counts.customers || {})) { const n = Math.round(+q || 0); if (n) custFigs[c] = n; } }
+  const dateStr = todayISO();
+  const specs = resetBaselineSpecs(counts, custFigs, dateStr);
+  const before = await gallonStock(actor, undefined);                 // ONLY GallonMovement
+  const beforeOpening = (await openingInfo(actor, undefined)).total || 0;
+  const after = simulateResetBuckets(specs);                          // exactly what the write will produce
+  // Reject any negative figure anywhere (a physical count can never be negative).
+  const offenders = [];
+  if (after.depot < 0) offenders.push({ figure: 'depot', value: after.depot });
+  Object.entries(after.armadaByFleet).forEach(([f, q]) => { if (q < 0) offenders.push({ figure: 'armada ' + f, value: q }); });
+  if (after.pelanggan < 0) offenders.push({ figure: 'pelanggan', value: after.pelanggan });
+  Object.entries(custFigs).forEach(([c, q]) => { if (q < 0) offenders.push({ figure: 'pelanggan ' + c.slice(-6), value: q }); });
+  if (after.rusak < 0) offenders.push({ figure: 'rusak', value: after.rusak });
+  if (after.total < 0) offenders.push({ figure: 'total', value: after.total });
+  const blocked = offenders.length > 0;
+  const activeCount = await prisma.gallonMovement.count({ where: { active: true } });
+  const preview = {
+    mode, blocked, offenders, customersMode: custMode,
+    before: { baseline: beforeOpening, depot: before.atDepot, armada: before.atArmada, pelanggan: before.atCustomers, rusak: before.rusakHilang, total: before.totalDimiliki },
+    after: { baseline: 0, depot: after.depot, armada: after.atArmada, armadaByFleet: after.armadaByFleet, pelanggan: after.pelanggan, rusak: after.rusak, total: after.total },
+    counts: { depot: nrInt(counts.depot), armada: after.armadaByFleet, rusak: nrInt(counts.rusak), customers: custFigs },
+    retireCount: activeCount, baselineRowCount: specs.length,
+  };
+  if (dryRun) return preview;
+  // ── EXECUTE (owner cap enforced at the route) ──
+  const note = String((body && body.note) || '').trim();
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');
+  if (String((body && body.confirm) || '').trim().toUpperCase() !== RESET_TOTAL_CONFIRM) throw ApiError.badRequest(`Ketik "${RESET_TOTAL_CONFIRM}" untuk konfirmasi.`);
+  if (blocked) throw ApiError.badRequest(`Ditolak: ${offenders.map((o) => `${o.figure} akan menjadi ${o.value}`).join('; ')} (tidak boleh negatif).`);
+  const snap = await actorSnap(actor);
+  const batchId = 'rt_' + crypto.randomBytes(10).toString('hex');
+  const rowData = (s) => ({ ...s, active: true, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName });
+  let retired = 0; let purgeAuditId = null;
+  if (mode === 'purge') {
+    // Full JSON export FIRST (recoverable outside the app), then physically delete every row.
+    const all = await prisma.gallonMovement.findMany();
+    const exp = await logAudit('input', `Ekspor ledger galon sebelum hapus total (${all.length} baris)`, `batch ${batchId} · SNAPSHOT ${JSON.stringify(all)}`, snap, '');
+    purgeAuditId = exp.id;
+    const del = await prisma.gallonMovement.deleteMany({});
+    retired = del.count;
+  } else {
+    // RETIRE — set active=false + tag EVERY currently-active row (all types/fleets, incl. delivery rows).
+    // Delivery rows are voided as LEDGER rows only; their DistTransaction is never touched.
+    const r = await prisma.gallonMovement.updateMany({ where: { active: true }, data: { active: false, resetBatchId: batchId } });
+    retired = r.count;
+  }
+  // Write the fresh baseline rows.
+  const baselineIds = [];
+  for (const s of specs) { const m = await prisma.gallonMovement.create({ data: rowData(s) }); baselineIds.push(m.id); }
+  const detail = JSON.stringify({ v: 1, kind: 'galon-reset-total', mode, batchId, counts: preview.counts, customersMode: custMode, retired, baselineIds, before: preview.before, after: preview.after, purgeAuditId, restorable: mode === 'retire' });
+  const audit = await logAudit('input', `Reset total stok galon (${mode === 'purge' ? 'hapus permanen' : 'retire'})`, `${retired} baris di-retire · depot ${after.depot} · armada ${after.atArmada} · pelanggan ${after.pelanggan} · rusak ${after.rusak} · oleh ${snap.actorName} · ${note} · SNAPSHOT ${detail}`, snap, '');
+  return { batchId, mode, retired, baselineRowCount: specs.length, preview, stock: await gallonStock(actor, undefined), auditId: audit.id };
+}
+// Restore a RETIRE batch (owner) — reactivate the retired rows and deactivate the fresh baseline rows.
+async function restoreResetTotal(batchId, actor) {
+  const audit = await prisma.distAuditLog.findFirst({ where: { detail: { contains: `"batchId":"${String(batchId || '')}"` } }, orderBy: { createdAt: 'desc' } });
+  if (!audit) throw ApiError.notFound('Batch reset tidak ditemukan.');
+  const m = /SNAPSHOT (\{[\s\S]*\})$/.exec(audit.detail || ''); if (!m) throw ApiError.badRequest('Batch ini tidak bisa dipulihkan.');
+  let data; try { data = JSON.parse(m[1]); } catch (e) { throw ApiError.badRequest('Snapshot rusak.'); }
+  if (data.mode !== 'retire') throw ApiError.badRequest('Hanya reset mode retire yang bisa dipulihkan (purge bersifat permanen).');
+  const snap = await actorSnap(actor);
+  await prisma.$transaction([
+    prisma.gallonMovement.updateMany({ where: { id: { in: data.baselineIds || [] } }, data: { active: false } }),   // drop the fresh baseline
+    prisma.gallonMovement.updateMany({ where: { resetBatchId: data.batchId }, data: { active: true, resetBatchId: null } }),   // bring the old ledger back
+  ]);
+  await logAudit('input', 'Pulihkan reset total stok galon', `batch ${data.batchId} · oleh ${snap.actorName}`, snap, '');
+  return { restored: true, batchId: data.batchId, stock: await gallonStock(actor, undefined) };
+}
+// READ-ONLY, DISPLAY-ONLY reassurance for the reset preview: how many transactions/invoices exist so
+// the user sees they are untouched. Deliberately SEPARATE from resetTotalGallon (which never reads
+// transactions) — this only counts, never mutates, and the reset write path does not call it.
+async function gallonResetReassurance() {
+  const [txnCount, invoiceCount] = await Promise.all([prisma.distTransaction.count(), prisma.distInvoice.count()]);
+  return { txnCount, invoiceCount, unchanged: true };
+}
 // Opening-stock rollup (fleet-scoped): the physical gallons owned at go-live, kept as its
 // own movement type so it shows separately from purchases/deliveries and its provenance is
 // clear. total = Σ opening deltas; first entry = when/who set it, last = when/who last tuned it.
@@ -3453,7 +3571,7 @@ module.exports = {
   METHODS, DAY_CODES, PRICE_SCOPES,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
-  gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair,
+  gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance,
   listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,

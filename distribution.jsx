@@ -5000,7 +5000,86 @@ function GalonIntegrityModal({ onClose, onRepaired }) {
   );
 }
 
-function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetScope, fleet, distFleet, setDistFleet }) {
+// RESET TOTAL STOK GALON (owner) — a clean slate for the WHOLE gallon ledger from physical counts,
+// WITHOUT touching customer transactions/sisa bon/invoices (server enforces the boundary). Rebaseline
+// wizard → server-computed preview (dryRun of the exact write) → typed "RESET TOTAL" confirm.
+function ResetTotalModal({ fleet, onClose, onDone }) {
+  const [mode, setMode] = uSx('retire');
+  const [depot, setDepot] = uSx('');
+  const [armada, setArmada] = uSx({});          // { fleet: qty-string }
+  const [rusak, setRusak] = uSx('');
+  const [custMode, setCustMode] = uSx('zero');   // zero | preserve | enter (enter handled elsewhere)
+  const [note, setNote] = uSx('');
+  const [confirm, setConfirm] = uSx('');
+  const [imp, setImp] = uSx(null);
+  const [saving, setSaving] = uSx(false);
+  const [err, setErr] = uSx('');
+  const fleets = (fleet || []).filter(Boolean);
+  const body = () => ({ mode, counts: { depot: parseInt(depot || '0', 10) || 0, armada: Object.fromEntries(Object.entries(armada).map(([f, v]) => [f, parseInt(v || '0', 10) || 0])), rusak: parseInt(rusak || '0', 10) || 0, customersMode: custMode } });
+  uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  uEx(() => { setImp(null); window.API.distribusi.resetTotalPreview(body()).then((r) => setImp(r.data)).catch(() => setImp(null)); }, [mode, depot, JSON.stringify(armada), rusak, custMode]);
+  const commit = () => {
+    if (saving || (imp && imp.blocked)) return;
+    if (!note.trim()) { setErr(trD('gv.noteReq')); return; }
+    if (confirm.trim().toUpperCase() !== 'RESET TOTAL') { setErr(trD('rt.confirmErr')); return; }
+    setSaving(true); setErr('');
+    window.API.distribusi.resetTotal({ ...body(), note: note.trim(), confirm: confirm.trim() })
+      .then((r) => { setSaving(false); onDone(r.data); })
+      .catch((e) => { setSaving(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const arrow = (a, b) => <b className="tnum">{numX(a)} → {numX(b)}</b>;
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
+      <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('rt.title')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{trD('rt.sub')}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('rt.boundary')}</span></div>
+          {/* mode */}
+          <label className={`dist-gr-mode ${mode === 'retire' ? 'on' : ''}`} onClick={() => setMode('retire')}><input type="radio" checked={mode === 'retire'} readOnly /><div><b>{trD('rt.modeRetire')}</b><span>{trD('rt.modeRetireDesc')}</span></div></label>
+          <label className={`dist-gr-mode danger ${mode === 'purge' ? 'on' : ''}`} onClick={() => setMode('purge')}><input type="radio" checked={mode === 'purge'} readOnly /><div><b>{trD('rt.modePurge')}</b><span>{trD('rt.modePurgeDesc')}</span></div></label>
+
+          {/* counts */}
+          <label className="fld-label">{trD('rt.depot')}</label>
+          <input className="fld tnum" value={depot} inputMode="numeric" placeholder="0" onChange={(e) => setDepot(e.target.value.replace(/[^0-9]/g, ''))} />
+          {fleets.length > 0 && <><label className="fld-label">{trD('rt.armada')}</label>
+            <div className="rt-armada">{fleets.map((f) => <div key={f} className="rt-armada-row"><span>{f}</span><input className="fld tnum" value={armada[f] || ''} inputMode="numeric" placeholder="0" onChange={(e) => setArmada((a) => ({ ...a, [f]: e.target.value.replace(/[^0-9]/g, '') }))} /></div>)}</div></>}
+          <label className="fld-label">{trD('rt.rusak')}</label>
+          <input className="fld tnum" value={rusak} inputMode="numeric" placeholder="0" onChange={(e) => setRusak(e.target.value.replace(/[^0-9]/g, ''))} />
+
+          {/* customer choice — explicit, never silent */}
+          <label className="fld-label">{trD('rt.custLbl')}</label>
+          <div className="cat-chips">
+            <button type="button" className={`cat-chip ${custMode === 'zero' ? 'on' : ''}`} onClick={() => setCustMode('zero')}>{trD('rt.custZero')}</button>
+            <button type="button" className={`cat-chip ${custMode === 'preserve' ? 'on' : ''}`} onClick={() => setCustMode('preserve')}>{trD('rt.custPreserve')}</button>
+          </div>
+
+          {/* preview (server dryRun of the exact write) */}
+          {imp && (
+            <div className="gv-impact" style={{ marginTop: 12 }}>
+              <div className="gv-impact-row"><span>{trD('go.baseline')}</span>{arrow(imp.before.baseline, imp.after.baseline)}</div>
+              <div className="gv-impact-row"><span>{trD('dist.gmAtDepot')}</span>{arrow(imp.before.depot, imp.after.depot)}</div>
+              <div className="gv-impact-row"><span>{trD('dist.gmAtArmada')}</span>{arrow(imp.before.armada, imp.after.armada)}</div>
+              <div className="gv-impact-row"><span>{trD('dist.gmAtCust')}</span>{arrow(imp.before.pelanggan, imp.after.pelanggan)}</div>
+              <div className="gv-impact-row"><span>{trD('dist.gmRusak')}</span>{arrow(imp.before.rusak, imp.after.rusak)}</div>
+              <div className="gv-impact-row muted"><span>{trD('dist.gmDimiliki')}</span>{arrow(imp.before.total, imp.after.total)}</div>
+              <div className="gv-impact-safe"><IconCheck s={13} />{trD('rt.txnSafe', { n: (imp.transaksi && imp.transaksi.txnCount) || 0 })}</div>
+            </div>
+          )}
+          {imp && imp.blocked && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('go.negBlock')} {imp.offenders.map((o) => o.figure + ' → ' + numX(o.value)).join('; ')}</span></div>}
+
+          <label className="fld-label">{trD('gv.noteLbl')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+          <textarea className="fld" style={{ height: 52, padding: 12, resize: 'vertical' }} value={note} placeholder={trD('rt.notePh')} onChange={(e) => setNote(e.target.value)} />
+          <label className="fld-label">{trD('rt.confirmLbl')}</label>
+          <input className="fld" value={confirm} placeholder="RESET TOTAL" onChange={(e) => setConfirm(e.target.value)} />
+          {err && <div className="login-err" style={{ marginTop: 10 }}><IconClose s={13} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-danger" disabled={saving || (imp && imp.blocked)} onClick={commit}><IconTrash s={15} />{saving ? '…' : trD('rt.do')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, canResetTotal, fleetScope, fleet, distFleet, setDistFleet }) {
   const [data, setData] = uSx(null);
   const [toast, setToast] = uSx('');
   const [corr, setCorr] = uSx(null);   // { customerId, name, qty, reason }
@@ -5010,6 +5089,8 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
   const [resetAwal, setResetAwal] = uSx(null);   // "Setel Ulang Stok Awal" modal
   const [opname, setOpname] = uSx(null);          // stok opname modal: { location, count, note }
   const [integrity, setIntegrity] = uSx(null);    // integrity-guard result modal
+  const [resetTotal, setResetTotal] = uSx(null);  // "Reset Total Stok Galon" wizard
+  const [rtUndo, setRtUndo] = uSx(null);          // { batchId } → 15s undo of a retire reset
   const [hideVoided, setHideVoided] = uSx(true);   // hide "Dibatalkan" rows by default
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
@@ -5056,9 +5137,10 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
   return (
     <div className="dist-dash screen-enter">
       {bar}
-      {canReset && (
+      {(canReset || canResetTotal) && (
         <div className="dist-gm-resetbar">
           <div style={{ flex: 1 }} />
+          {canResetTotal && <button type="button" className="btn btn-danger btn-sm" onClick={() => setResetTotal(true)}><IconTrash s={14} />{trD('rt.btn')}</button>}
           <button type="button" className="btn btn-danger btn-sm" onClick={openReset}><IconRefresh s={14} />{trD('dist.grBtn')}</button>
         </div>
       )}
@@ -5208,6 +5290,13 @@ function DistGallon({ refreshKey, canCustomers, canReset, canGalonDelete, fleetS
       {resetAwal && <GalonOpeningResetModal ef={ef} fleet={fleet} init={resetAwal} onClose={() => setResetAwal(null)} onDone={(msg) => { setResetAwal(null); flash(msg); reload(); }} />}
       {opname && <StokOpnameModal stock={st} fleet={fleet} init={opname} onClose={() => setOpname(null)} onDone={(msg) => { setOpname(null); flash(msg); reload(); }} />}
       {integrity && <GalonIntegrityModal onClose={() => setIntegrity(null)} onRepaired={() => { flash(trD('gi.repaired')); reload(); }} />}
+      {resetTotal && <ResetTotalModal fleet={fleet} onClose={() => setResetTotal(null)} onDone={(res) => { setResetTotal(null); flash(trD('rt.done')); reload(); if (res && res.mode === 'retire' && res.batchId) { setRtUndo({ batchId: res.batchId }); setTimeout(() => setRtUndo((u) => (u && u.batchId === res.batchId ? null : u)), 15000); } }} />}
+      {rtUndo && (
+        <div className="tx-undo-toast">
+          <span><IconRefresh s={14} />{trD('rt.undoMsg')}</span>
+          <button type="button" onClick={() => { window.API.distribusi.resetTotalRestore(rtUndo.batchId).then(() => { setRtUndo(null); flash(trD('rt.restored')); reload(); }).catch(() => {}); }}>{trD('gv.restore')}</button>
+        </div>
+      )}
 
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>

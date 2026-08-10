@@ -894,12 +894,14 @@ model GallonMovement {
   actorId       String?
   actorRole     String?
   actorName     String?
+  resetBatchId  String?                         // set when a row is RETIRED by a "Reset Total Stok Galon" batch (for restore + hiding retired history)
   createdAt     DateTime @default(now())
 
   @@index([customerId])
   @@index([cashEntryId])
   @@index([type])
   @@index([fleetId])
+  @@index([resetBatchId])
 }
 
 // Immutable, append-only audit trail for every distribusi write.

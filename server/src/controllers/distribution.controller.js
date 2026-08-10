@@ -357,6 +357,27 @@ const gallonIntegrity = asyncHandler(async (req, res) => {
   res.json({ data: r });
 });
 const gallonIntegrityRepair = asyncHandler(async (req, res) => { const r = await service.gallonIntegrityRepair(req.user); bcast('gallon', 'repair'); res.json({ data: r }); });
+// Reset Total Stok Galon (owner) — dryRun preview (+ read-only transaksi reassurance) · commit · restore.
+const resetTotalPreview = asyncHandler(async (req, res) => {
+  const preview = await service.resetTotalGallon(req.body, req.user, { dryRun: true });
+  const transaksi = await service.gallonResetReassurance();   // display-only; the reset never touches these
+  res.json({ data: { ...preview, transaksi } });
+});
+const resetTotalCommit = asyncHandler(async (req, res) => { const r = await service.resetTotalGallon(req.body, req.user, { dryRun: false }); bcast('gallon', 'reset-total'); res.status(201).json({ data: r }); });
+const resetTotalRestore = asyncHandler(async (req, res) => { const r = await service.restoreResetTotal(req.body.batchId, req.user); bcast('gallon', 'reset-total-restore'); res.json({ data: r }); });
+const resetTotalSchema = z.object({
+  mode: z.enum(['retire', 'purge']).optional(),
+  counts: z.object({
+    depot: z.coerce.number().int().min(0).optional(),
+    armada: z.record(z.coerce.number().int().min(0)).optional(),
+    rusak: z.coerce.number().int().min(0).optional(),
+    customersMode: z.enum(['zero', 'enter', 'preserve']).optional(),
+    customers: z.record(z.coerce.number().int()).optional(),
+  }).optional(),
+  note: z.string().max(500).optional(),
+  confirm: z.string().max(30).optional(),
+});
+const resetTotalRestoreSchema = z.object({ batchId: z.string().min(3).max(60) });
 const opnameSchema = z.object({ location: z.string().max(60), count: z.coerce.number().int().nonnegative(), note: z.string().trim().min(1).max(500), proof: z.string().max(300).optional() });
 const openRun = asyncHandler(async (req, res) => { const r = await service.openRun(req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.status(201).json({ data: r }); });
 const closeRun = asyncHandler(async (req, res) => { const r = await service.closeRun(req.params.id, req.body, req.user); bus.broadcast({ entity: 'distribusi', action: 'run', id: r.id, fleetId: r.fleetId }); res.json({ data: r }); });
@@ -392,7 +413,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, requestCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
-  gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
+  gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, resetTotalPreview, resetTotalCommit, resetTotalRestore, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
@@ -400,5 +421,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };
