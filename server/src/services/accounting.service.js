@@ -8,37 +8,48 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 
-// ── Indonesian SMB chart of accounts (seed). code · name · type · parent(code). ──
+// ── Indonesian SMB chart of accounts (seed). code · name · type · parent(code) · subtype. ──
+// `subtype` drives the ARUS KAS (cash flow) classification (see CF_SECTION) — explicit + configurable
+// here, never buried in report logic. 'cash' = the cash being explained; 'header' rows carry no lines.
 const CHART = [
-  ['1-0000', 'Aset', 'asset', ''],
-  ['1-1000', 'Kas', 'asset', '1-0000'],
-  ['1-1100', 'Bank', 'asset', '1-0000'],
-  ['1-1200', 'Piutang Usaha', 'asset', '1-0000'],
-  ['1-1300', 'Persediaan Galon', 'asset', '1-0000'],
-  ['1-1400', 'Peralatan', 'asset', '1-0000'],
-  ['2-0000', 'Kewajiban', 'liability', ''],
-  ['2-1000', 'Utang Usaha', 'liability', '2-0000'],
-  ['2-2000', 'Utang Gaji', 'liability', '2-0000'],
-  ['2-3000', 'Uang Muka Pelanggan', 'liability', '2-0000'],   // customer credit balance (overpaid bon → not negative AR)
-  ['3-0000', 'Ekuitas', 'equity', ''],
-  ['3-1000', 'Modal', 'equity', '3-0000'],
-  ['3-2000', 'Laba Ditahan', 'equity', '3-0000'],
-  ['3-3000', 'Prive', 'equity', '3-0000'],
-  ['4-0000', 'Pendapatan', 'revenue', ''],
-  ['4-1000', 'Penjualan Air', 'revenue', '4-0000'],
-  ['4-2000', 'Pendapatan Lain', 'revenue', '4-0000'],
-  ['5-0000', 'Harga Pokok Penjualan', 'expense', ''],
-  ['5-1000', 'HPP Galon', 'expense', '5-0000'],
-  ['6-0000', 'Beban Operasional', 'expense', ''],
-  ['6-1000', 'Beban Gaji', 'expense', '6-0000'],
-  ['6-2000', 'Beban BBM & Pengiriman', 'expense', '6-0000'],
-  ['6-3000', 'Beban Perlengkapan', 'expense', '6-0000'],
-  ['6-4000', 'Beban Pemeliharaan', 'expense', '6-0000'],
-  ['6-5000', 'Beban Utilitas', 'expense', '6-0000'],
-  ['6-6000', 'Beban Sewa', 'expense', '6-0000'],
-  ['6-7000', 'Beban Kerugian Piutang', 'expense', '6-0000'],   // bad-debt / dispute loss (kerugian) + write-offs
-  ['6-9000', 'Beban Lain-lain', 'expense', '6-0000'],
+  ['1-0000', 'Aset', 'asset', '', 'header'],
+  ['1-1000', 'Kas', 'asset', '1-0000', 'cash'],
+  ['1-1100', 'Bank', 'asset', '1-0000', 'cash'],
+  ['1-1200', 'Piutang Usaha', 'asset', '1-0000', 'receivable'],
+  ['1-1300', 'Persediaan Galon', 'asset', '1-0000', 'inventory'],
+  ['1-1400', 'Peralatan', 'asset', '1-0000', 'fixed_asset'],
+  ['2-0000', 'Kewajiban', 'liability', '', 'header'],
+  ['2-1000', 'Utang Usaha', 'liability', '2-0000', 'payable'],
+  ['2-2000', 'Utang Gaji', 'liability', '2-0000', 'payable'],
+  ['2-3000', 'Uang Muka Pelanggan', 'liability', '2-0000', 'deferred_income'],   // customer credit balance (overpaid bon → not negative AR)
+  ['3-0000', 'Ekuitas', 'equity', '', 'header'],
+  ['3-1000', 'Modal', 'equity', '3-0000', 'capital'],
+  ['3-2000', 'Laba Ditahan', 'equity', '3-0000', 'retained'],
+  ['3-3000', 'Prive', 'equity', '3-0000', 'drawing'],
+  ['4-0000', 'Pendapatan', 'revenue', '', 'header'],
+  ['4-1000', 'Penjualan Air', 'revenue', '4-0000', 'revenue'],
+  ['4-2000', 'Pendapatan Lain', 'revenue', '4-0000', 'revenue'],
+  ['5-0000', 'Harga Pokok Penjualan', 'expense', '', 'header'],
+  ['5-1000', 'HPP Galon', 'expense', '5-0000', 'cogs'],
+  ['6-0000', 'Beban Operasional', 'expense', '', 'header'],
+  ['6-1000', 'Beban Gaji', 'expense', '6-0000', 'expense'],
+  ['6-2000', 'Beban BBM & Pengiriman', 'expense', '6-0000', 'expense'],
+  ['6-3000', 'Beban Perlengkapan', 'expense', '6-0000', 'expense'],
+  ['6-4000', 'Beban Pemeliharaan', 'expense', '6-0000', 'expense'],
+  ['6-5000', 'Beban Utilitas', 'expense', '6-0000', 'expense'],
+  ['6-6000', 'Beban Sewa', 'expense', '6-0000', 'expense'],
+  ['6-7000', 'Beban Kerugian Piutang', 'expense', '6-0000', 'expense'],   // bad-debt / dispute loss (kerugian) + write-offs
+  ['6-9000', 'Beban Lain-lain', 'expense', '6-0000', 'expense'],
 ];
+// ARUS KAS classification — subtype → section. Explicit + configurable. An account whose subtype is not
+// here (and isn't 'cash'/'header') is REPORTED as unclassified, never silently folded into Operasi.
+const CF_SECTION = {
+  cash: 'cash', header: 'header',
+  receivable: 'operasi', inventory: 'operasi', payable: 'operasi', deferred_income: 'operasi', revenue: 'operasi', expense: 'operasi', cogs: 'operasi',
+  fixed_asset: 'investasi',
+  capital: 'pendanaan', retained: 'pendanaan', drawing: 'pendanaan',
+};
+const CF_INCOME_SUBTYPES = new Set(['revenue', 'expense', 'cogs']);   // the accounts that make up "laba bersih"
 const AR = '1-1200', KAS = '1-1000', BANK = '1-1100', PERSEDIAAN = '1-1300';
 const REV_MAIN = '4-1000', REV_OTHER = '4-2000', EXP_OTHER = '6-9000';
 const UANG_MUKA = '2-3000', LOSS_AR = '6-7000';   // customer-credit liability · bad-debt/dispute loss
@@ -56,9 +67,10 @@ const n = (v) => Math.round(Number(v) || 0);
 
 async function seedChart() {
   for (let i = 0; i < CHART.length; i++) {
-    const [code, name, type, parent] = CHART[i];
+    const [code, name, type, parent, subtype] = CHART[i];
     const existing = await prisma.chartAccount.findUnique({ where: { code } });
-    if (!existing) await prisma.chartAccount.create({ data: { code, name, type, sortOrder: i, businessUnitId: null } });
+    if (!existing) await prisma.chartAccount.create({ data: { code, name, type, subtype: subtype || '', sortOrder: i, businessUnitId: null } });
+    else if ((existing.subtype || '') !== (subtype || '')) await prisma.chartAccount.update({ where: { code }, data: { subtype: subtype || '' } });   // backfill subtype on rows seeded before cash-flow
   }
   // fill parentId now that all rows exist (kept loose to avoid seeding-order FK issues)
   const rows = await prisma.chartAccount.findMany({ select: { id: true, code: true } });
@@ -326,8 +338,59 @@ async function generalLedger({ code, dateFrom, dateTo } = {}) {
   return { account: { code: acct.code, name: acct.name, type: acct.type }, opening, rows, closing: bal };
 }
 
+// ARUS KAS (cash flow statement) — INDIRECT method, computed from the journal. Chosen over a
+// transaction-by-transaction direct build because the identity Δcash = −Σ Δ(non-cash accounts) holds
+// on any balanced ledger, so summing each non-cash account's period change and negating it gives the
+// cash effect EXACTLY — kas awal + arus kas bersih == kas akhir by construction, no drift. It naturally
+// produces the indirect layout: revenue/expense roll up to laba bersih; receivable/inventory/payable
+// changes are working-capital adjustments (a credit sale nets to zero until collected). Sections come
+// from the ChartAccount subtype (CF_SECTION); an unclassified account with movement is reported in its
+// own bucket (still counted, so the statement always reconciles) rather than hidden inside Operasi.
+async function cashFlow({ dateFrom, dateTo, businessUnitId, fleetId } = {}) {
+  const lw = {};
+  if (businessUnitId) lw.businessUnitId = businessUnitId;
+  if (fleetId) lw.fleetId = fleetId;
+  const rawMap = async (dateCond) => {
+    const lines = await prisma.journalLine.findMany({ where: { ...lw, ...(dateCond ? { journalEntry: { date: dateCond } } : {}) }, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, subtype: true } } } });
+    const m = {};
+    for (const l of lines) { const a = l.chartAccount; (m[a.code] || (m[a.code] = { code: a.code, name: a.name, subtype: a.subtype || '', raw: 0 })).raw += Number(l.debit) - Number(l.credit); }
+    return m;
+  };
+  const endMap = await rawMap(dateTo ? { lte: dateTo } : undefined);
+  const startMap = dateFrom ? await rawMap({ lt: dateFrom }) : {};
+  const buckets = { operasi: [], investasi: [], pendanaan: [], unclassified: [] };
+  let kasAwal = 0, kasAkhir = 0, netIncome = 0;
+  for (const code of new Set([...Object.keys(endMap), ...Object.keys(startMap)])) {
+    const info = endMap[code] || startMap[code];
+    const startRaw = startMap[code] ? startMap[code].raw : 0;
+    const endRaw = endMap[code] ? endMap[code].raw : 0;
+    const section = CF_SECTION[info.subtype] || 'unclassified';
+    if (section === 'cash') { kasAwal += startRaw; kasAkhir += endRaw; continue; }   // the cash being explained
+    if (section === 'header') continue;
+    const delta = endRaw - startRaw;
+    if (delta === 0) continue;
+    const amount = -delta;   // indirect identity: an account's cash-flow effect is minus its raw change
+    if (CF_INCOME_SUBTYPES.has(info.subtype)) netIncome += amount;
+    buckets[section].push({ code: info.code, name: info.name, subtype: info.subtype, amount });
+  }
+  const sum = (rows) => rows.reduce((s, r) => s + r.amount, 0);
+  const operasiTotal = sum(buckets.operasi), investasiTotal = sum(buckets.investasi), pendanaanTotal = sum(buckets.pendanaan), unclassifiedTotal = sum(buckets.unclassified);
+  const netFlow = operasiTotal + investasiTotal + pendanaanTotal + unclassifiedTotal;
+  return {
+    range: { dateFrom: dateFrom || null, dateTo: dateTo || null },
+    kasAwal, kasAkhir,
+    operasi: { netIncome, workingCapital: buckets.operasi.filter((r) => !CF_INCOME_SUBTYPES.has(r.subtype)), incomeItems: buckets.operasi.filter((r) => CF_INCOME_SUBTYPES.has(r.subtype)), rows: buckets.operasi, total: operasiTotal },
+    investasi: { rows: buckets.investasi, total: investasiTotal },
+    pendanaan: { rows: buckets.pendanaan, total: pendanaanTotal },
+    unclassified: buckets.unclassified,   // accounts with movement but no cash-flow section — fix the subtype
+    netFlow,
+    reconciles: kasAwal + netFlow === kasAkhir,
+    reconciliation: { kasAwal, netFlow, kasAkhir, diff: kasAkhir - (kasAwal + netFlow) },
+  };
+}
+
 module.exports = {
-  CHART, CAT_MAP, seedChart, chartMap, postJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
+  CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, postJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
   postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, unmappedCategories, categoryToCode,
-  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger,
+  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, cashFlow,
 };

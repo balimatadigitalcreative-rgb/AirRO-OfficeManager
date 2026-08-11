@@ -58,6 +58,9 @@
   async function forgot(username, note) { return req('POST', '/auth/forgot', { username, note: note || undefined }); }
   function logout() { setToken(null); }
 
+  // Build a ?a=b&c=d query string, dropping null/'' values.
+  const acctQs = (p) => { const q = []; Object.keys(p || {}).forEach((k) => { const v = p[k]; if (v != null && v !== '') q.push(k + '=' + encodeURIComponent(v)); }); return q.length ? '?' + q.join('&') : ''; };
+
   // ---- generic resource helpers ----
   const collection = (name) => ({
     list: (qs) => req('GET', '/' + name + (qs ? '?' + qs : '')),
@@ -103,6 +106,12 @@
       audit: (userId) => req('GET', '/users/audit' + (userId ? '?userId=' + encodeURIComponent(userId) : '')),   // admin audit trail (all or one user)
     }),
     roles: collection('roles'),
+    // ACCOUNTING v2 (double-entry) reports — flag-gated server-side (404 when ACCOUNTING_V2 is off).
+    accounting: {
+      cashFlow: (p) => req('GET', '/accounting/cash-flow' + acctQs(p)),   // { dateFrom, dateTo, businessUnitId?, fleetId? }
+      ledger: (p) => req('GET', '/accounting/ledger' + acctQs(p)),        // { code, dateFrom?, dateTo? } — drill target
+      aging: (p) => req('GET', '/accounting/aging' + acctQs(p)),
+    },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes
     // (only when a proof is actually opened).

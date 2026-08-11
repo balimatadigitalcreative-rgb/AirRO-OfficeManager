@@ -309,6 +309,140 @@ function HrdReport({ staff, rates, monLabel, payrollPosted, payrollTotal, onPost
   );
 }
 
+// ARUS KAS (cash flow) export — SpreadsheetML, same self-contained approach as the cash-book XLSX.
+function downloadCashFlowXLSX(data, label) {
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const cell = (v, num) => num ? `<Cell><Data ss:Type="Number">${v}</Data></Cell>` : `<Cell><Data ss:Type="String">${esc(v)}</Data></Cell>`;
+  const row = (cells) => '<Row>' + cells + '</Row>';
+  let body = row(cell('ARUS KAS') + cell(label)) + row(cell('Kas awal') + cell(data.kasAwal, true));
+  const sec = (title, s) => { body += row(cell(title)); (s.rows || []).forEach((r) => { body += row(cell('  ' + r.code + ' ' + r.name) + cell(r.amount, true)); }); body += row(cell('  Total ' + title) + cell(s.total, true)); };
+  sec('Operasi', data.operasi); sec('Investasi', data.investasi); sec('Pendanaan', data.pendanaan);
+  if (data.unclassified && data.unclassified.length) { body += row(cell('Tidak terklasifikasi')); data.unclassified.forEach((r) => { body += row(cell('  ' + r.code + ' ' + r.name) + cell(r.amount, true)); }); }
+  body += row(cell('Arus kas bersih') + cell(data.netFlow, true)) + row(cell('Kas akhir') + cell(data.kasAkhir, true));
+  const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Arus Kas"><Table>${body}</Table></Worksheet></Workbook>`;
+  const blob = new Blob(['﻿' + xml], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob); const a = document.createElement('a');
+  a.href = url; a.download = `AirRO-ArusKas-${label.replace(/[^\w]+/g, '-')}.xls`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Drill from any cash-flow figure → the account's journal lines (with source refs) for the period.
+function LedgerDrill({ code, name, range, onClose }) {
+  const [rows, setRows] = uSr(null); const [st, setSt] = uSr('loading');
+  React.useEffect(() => {
+    let alive = true;
+    window.API.accounting.ledger({ code, dateFrom: range.start, dateTo: range.end })
+      .then((r) => { if (alive) { setRows((r.data && r.data.rows) || []); setSt('ready'); } })
+      .catch(() => { if (alive) setSt('error'); });
+    const esc = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', esc); return () => { alive = false; window.removeEventListener('keydown', esc); };
+  }, [code, range.start, range.end]);
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card wide fin-scope" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 16, fontWeight: 800 }}><span className="tnum" style={{ color: 'var(--text-faint)', marginRight: 6 }}>{code}</span>{name}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{trR('rep.drillLedger')}</div></div><button className="icon-btn" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {st === 'loading' && <div className="fin-skel">{[0, 1, 2, 3].map((i) => <div key={i} className="fin-skel-row"><span className="fin-skel-bar" style={{ width: '100%' }} /></div>)}</div>}
+          {st === 'error' && <div className="fin-error"><span className="fin-error-ic"><IconClose s={20} /></span><div>{trR('rep.nodata')}</div></div>}
+          {st === 'ready' && (
+            <div className="fin-tablewrap"><table className="fin-table"><colgroup><col style={{ width: '92px' }} /><col /><col style={{ width: '110px' }} /><col style={{ width: '110px' }} /><col style={{ width: '120px' }} /></colgroup>
+              <thead><tr><th className="fin-th">{trR('ms.date')}</th><th className="fin-th">{trR('je.account')}</th><th className="fin-th fin-r">{trR('je.debit')}</th><th className="fin-th fin-r">{trR('je.credit')}</th><th className="fin-th fin-r">{trR('ms.running')}</th></tr></thead>
+              <tbody>{rows.map((r, i) => (<tr key={i} className="fin-trow"><td className="fin-td tnum">{r.date}</td><td className="fin-td"><span className="fin-td-desc">{r.description || '—'}</span><span className="fin-td-sub">{r.sourceType}{r.sourceId ? ' · ' + r.sourceId : ''}</span></td><td className="fin-td fin-r tnum">{r.debit ? FIN.fmt(r.debit) : ''}</td><td className="fin-td fin-r tnum">{r.credit ? FIN.fmt(r.credit) : ''}</td><td className="fin-td fin-r tnum">{FIN.fmt(r.balance)}</td></tr>))}
+                {rows.length === 0 && <tr><td className="fin-td" colSpan={5} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: 24 }}>{trR('rep.nodata')}</td></tr>}
+              </tbody>
+            </table></div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CashFlowReport({ range, label, prevRange, prevLabel, unitLabel, fleetId }) {
+  const [data, setData] = uSr(null); const [prev, setPrev] = uSr(null);
+  const [st, setSt] = uSr('loading'); const [drill, setDrill] = uSr(null);
+  React.useEffect(() => {
+    let alive = true; setSt('loading'); setPrev(null);
+    const base = { dateFrom: range.start, dateTo: range.end, fleetId: fleetId || undefined };
+    window.API.accounting.cashFlow(base)
+      .then((r) => {
+        if (!alive) return; setData(r.data); setSt('ready');
+        if (prevRange) window.API.accounting.cashFlow({ dateFrom: prevRange.start, dateTo: prevRange.end, fleetId: fleetId || undefined }).then((pr) => { if (alive) setPrev(pr.data); }).catch(() => {});
+      })
+      .catch((err) => { if (!alive) return; const gated = err && (err.status === 404 || /404|not found|disabled/i.test(String((err && err.message) || ''))); setSt(gated ? 'gated' : 'error'); });
+    return () => { alive = false; };
+  }, [range.start, range.end, fleetId]);
+
+  if (st === 'loading') return <div className="card" style={{ padding: 18 }}><div className="fin-skel">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="fin-skel-row"><span className="fin-skel-bar" style={{ width: (60 + (i * 7) % 40) + '%' }} /></div>)}</div></div>;
+  if (st === 'gated') return <div className="card fin-scope"><div className="fin-coming"><span className="fin-coming-ic">{IcR('IconRefresh', { s: 24 })}</span><div className="fin-coming-t">{trR('cf.title')}</div><div className="fin-coming-s">{trR('cf.gated')}</div></div></div>;
+  if (st === 'error' || !data) return <div className="card fin-scope"><div className="fin-error"><span className="fin-error-ic"><IconClose s={20} /></span><div className="fin-empty-t">{trR('rep.nodata')}</div></div></div>;
+
+  const prevTotals = prev ? { operasi: prev.operasi.total, investasi: prev.investasi.total, pendanaan: prev.pendanaan.total, netFlow: prev.netFlow } : null;
+  const Line = ({ code, name, amount, drillable }) => (
+    <div className={`cf-row ${drillable ? 'clickable' : ''}`} onClick={drillable ? () => setDrill({ code, name }) : undefined}>
+      <span className="cf-row-lbl">{code && <b className="tnum cf-code">{code}</b>}{name}</span>
+      <span className={`tnum cf-amt ${amount < 0 ? 'amt-neg' : ''}`}>{FIN.fmtS(amount)}</span>
+      {drillable && <span className="cf-drill">{IcR('IconCaret', { s: 12 })}</span>}
+    </div>
+  );
+  const SectionTotal = ({ label: t, total, prevTotal }) => (
+    <div className="cf-row total"><span className="cf-row-lbl">{t}</span><span className="tnum cf-amt">{FIN.fmtS(total)}</span>{prevTotals && <span className="tnum cf-prev">{FIN.fmtS(prevTotal)}</span>}</div>
+  );
+
+  return (
+    <div className="screen-enter fin-scope" id="report-area">
+      <div className="fin-print-head print-only">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><Logo s={30} /><div><div style={{ fontSize: 19, fontWeight: 800 }}>{trR('cf.title')}</div><div style={{ fontSize: 12.5, color: '#555' }}>{label}{unitLabel ? ' · ' + unitLabel : ''} · {niceDate(range.start)}–{niceDate(range.end)}</div></div></div>
+        <hr style={{ border: 'none', borderTop: '2px solid #065489', margin: '12px 0 4px' }} />
+      </div>
+
+      <div className="rep-head">
+        <div className="rep-subhead" style={{ marginTop: 0 }}>
+          <span style={{ fontSize: 17, fontWeight: 800 }}>{trR('cf.title')}</span>
+          <span style={{ fontSize: 13, color: 'var(--text-mut)' }}>{label}{unitLabel ? ' · ' + unitLabel : ''}{prevLabel ? ' · ' + trR('cf.vs', { p: prevLabel }) : ''}</span>
+        </div>
+        <div className="rep-actions">
+          <button className="btn btn-ghost" style={{ height: 42 }} onClick={() => downloadCashFlowXLSX(data, label)}><IconDownload s={17} /><span className="fin-btn-lbl">{trR('rep.exportxlsx')}</span></button>
+          <button className="btn btn-primary" style={{ height: 42 }} onClick={() => window.print()}><IconReport s={17} /><span className="fin-btn-lbl">{trR('rep.print')}</span></button>
+        </div>
+      </div>
+
+      {/* HARD RECONCILIATION — kas awal + arus kas bersih == kas akhir, from the real cash balances. */}
+      <div className={`cf-recon ${data.reconciles ? 'ok' : 'bad'}`}>
+        {IcR(data.reconciles ? 'IconCheck' : 'IconWarn', { s: 18 })}
+        <span><b className="tnum">{FIN.fmt(data.kasAwal)}</b> {trR('cf.kasAwal')} {FIN.fmtS(data.netFlow)} {trR('cf.net')} = <b className="tnum">{FIN.fmt(data.kasAkhir)}</b> {trR('cf.kasAkhir')}</span>
+        <span className="cf-recon-tag">{data.reconciles ? trR('cf.reconciled') : trR('cf.mismatch', { d: FIN.fmtS(data.reconciliation.diff) })}</span>
+      </div>
+
+      <div className={`card fin-scope cf-card ${prevTotals ? 'has-cmp' : ''}`}>
+        {prevTotals && <div className="cf-row cf-colhead"><span /><span className="cf-amt">{label}</span><span className="cf-prev">{prevLabel}</span></div>}
+        {/* OPERASI (indirect): laba bersih + working-capital changes */}
+        <div className="cf-sec-title">{trR('cf.operasi')}</div>
+        <Line name={trR('cf.labaBersih')} amount={data.operasi.netIncome} />
+        {data.operasi.workingCapital.map((r) => <Line key={r.code} code={r.code} name={r.name} amount={r.amount} drillable />)}
+        <SectionTotal label={trR('cf.operasiTotal')} total={data.operasi.total} prevTotal={prevTotals && prevTotals.operasi} />
+        {/* INVESTASI */}
+        <div className="cf-sec-title">{trR('cf.investasi')}</div>
+        {data.investasi.rows.length ? data.investasi.rows.map((r) => <Line key={r.code} code={r.code} name={r.name} amount={r.amount} drillable />) : <div className="cf-row cf-empty">{trR('cf.none')}</div>}
+        <SectionTotal label={trR('cf.investasiTotal')} total={data.investasi.total} prevTotal={prevTotals && prevTotals.investasi} />
+        {/* PENDANAAN */}
+        <div className="cf-sec-title">{trR('cf.pendanaan')}</div>
+        {data.pendanaan.rows.length ? data.pendanaan.rows.map((r) => <Line key={r.code} code={r.code} name={r.name} amount={r.amount} drillable />) : <div className="cf-row cf-empty">{trR('cf.none')}</div>}
+        <SectionTotal label={trR('cf.pendanaanTotal')} total={data.pendanaan.total} prevTotal={prevTotals && prevTotals.pendanaan} />
+        {/* UNCLASSIFIED — surfaced, never hidden in Operasi */}
+        {data.unclassified.length > 0 && (<>
+          <div className="cf-sec-title cf-warn">{trR('cf.unclassified')}</div>
+          {data.unclassified.map((r) => <Line key={r.code} code={r.code} name={r.name + (r.subtype ? ' (' + r.subtype + ')' : '')} amount={r.amount} drillable />)}
+        </>)}
+        {/* NET */}
+        <div className="cf-row grand"><span className="cf-row-lbl">{trR('cf.net')}</span><span className="tnum cf-amt">{FIN.fmtS(data.netFlow)}</span>{prevTotals && <span className="tnum cf-prev">{FIN.fmtS(prevTotals.netFlow)}</span>}</div>
+      </div>
+
+      {data.unclassified.length > 0 && <div className="cf-warnbox">{IcR('IconWarn', { s: 15 })}<span>{trR('cf.unclassifiedHint')}</span></div>}
+      {drill && <LedgerDrill code={drill.code} name={drill.name} range={range} onClose={() => setDrill(null)} />}
+    </div>
+  );
+}
+
 function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted, payrollTotal, payrollLabel, onPostPayroll, onOpenEntry, unitLabel }) {
   const [tab, setTab] = uSr('fin');
   const [drill, setDrill] = uSr(null);   // { type, key, label } → opens the figure→journal→source modal
@@ -332,6 +466,9 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
   const avgIncome = k.days ? Math.round(k.income / k.days) : 0;
 
   const prev = uMr(() => { const pm = P().prevMatched(gran, anchor, cStart, cEnd, FIN.TODAY); const ce = pm.curEnd < range.end ? pm.curEnd : range.end; return { cur: P().aggregate(entries, range.start, ce), prv: P().aggregate(entries, pm.start, pm.end) }; }, [entries, gran, anchor, cStart, cEnd, range.start, range.end]);
+  // Previous matched period (for the Arus Kas comparison column).
+  const prevRange = uMr(() => { const pm = P().prevMatched(gran, anchor, cStart, cEnd, FIN.TODAY); return { start: pm.start, end: pm.end }; }, [gran, anchor, cStart, cEnd]);
+  const prevLbl = uMr(() => (gran !== 'custom' ? periodLabel(gran, stepAnchor(anchor, gran, -1), prevRange) : (trR('rep.prev') || 'Sebelumnya')), [gran, anchor, prevRange.start, prevRange.end]);
   const dInc = P().pctDelta(prev.cur.income, prev.prv.income);
   const dExp = P().pctDelta(prev.cur.expense, prev.prv.expense);
   const dProf = P().pctDelta(prev.cur.profit, prev.prv.profit);
@@ -368,6 +505,7 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
 
       <div className="rep-tabs">
         <button className={`rep-tab ${tab === 'fin' ? 'on' : ''}`} onClick={() => setTab('fin')}><IconReport s={16} />{trR('rep.tabFin')}</button>
+        <button className={`rep-tab ${tab === 'kas' ? 'on' : ''}`} onClick={() => setTab('kas')}><IconRefresh s={16} />{trR('cf.title')}</button>
         <button className={`rep-tab ${tab === 'hrd' ? 'on' : ''}`} onClick={() => setTab('hrd')}><IconUsersGroup s={16} />{trR('rep.tabHrd')}</button>
       </div>
 
@@ -384,6 +522,20 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
             </div>
           </div>
           <HrdReport staff={staff} rates={rates} monLabel={payrollLabel || label} payrollPosted={payrollPosted} payrollTotal={payrollTotal} onPost={onPostPayroll} />
+        </div>
+      ) : tab === 'kas' ? (
+        <div className="screen-enter">
+          <div className="rep-head">
+            <div className="rep-controls">
+              <div className="range-picker">
+                {GRAN_KEYS.map((r) => (<button key={r[0]} className={`range-btn ${gran === r[0] ? 'on' : ''}`} onClick={() => setGran(r[0])}>{trR(r[1])}</button>))}
+              </div>
+              {gran !== 'custom' ? (<DP.PeriodNav gran={gran} anchor={anchor} onAnchor={setAnchor} label={label} today={FIN.TODAY} />) : (
+                <span className="custom-range"><span className="custom-date"><DP.DateField value={cStart} max={cEnd} onChange={setCStart} /></span><span style={{ color: 'var(--text-faint)' }}>{trR('rep.to')}</span><span className="custom-date"><DP.DateField value={cEnd} min={cStart} max={FIN.TODAY} onChange={setCEnd} /></span></span>
+              )}
+            </div>
+          </div>
+          <CashFlowReport range={range} label={label} prevRange={prevRange} prevLabel={prevLbl} unitLabel={unitLabel} />
         </div>
       ) : (
       <div className="screen-enter">

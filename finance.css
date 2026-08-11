@@ -3908,3 +3908,37 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .fin-scope { max-width: 100%; }
   .fin-scope .fin-kpi-val { font-size: 20px; }
 }
+
+/* ═══════════ ARUS KAS (cash flow statement) ═══════════ */
+.cf-recon { display: flex; align-items: center; gap: var(--fs-3); flex-wrap: wrap; padding: 11px var(--fs-4); border-radius: var(--r-sm); font-size: 13px; margin: var(--fs-3) 0; }
+.cf-recon.ok { background: var(--pos-bg); color: var(--green-800); }
+.cf-recon.bad { background: var(--neg-bg); color: var(--neg); }
+.cf-recon svg { flex-shrink: 0; }
+.cf-recon-tag { margin-left: auto; font-weight: 800; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
+.cf-card { padding: var(--fs-4) var(--fs-5); }
+.cf-sec-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--text-mut); margin: var(--fs-4) 0 var(--fs-1); padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.cf-sec-title:first-child { margin-top: 0; }
+.cf-sec-title.cf-warn { color: var(--warn); border-color: var(--warn-bg); }
+.cf-row { display: grid; grid-template-columns: 1fr 150px; gap: var(--fs-3); align-items: center; padding: 8px var(--fs-1); font-size: 13.5px; border: none; background: none; width: 100%; text-align: left; font: inherit; }
+.cf-row.cf-colhead { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); padding-bottom: 2px; }
+.cf-row.clickable { cursor: pointer; border-radius: 8px; }
+.cf-row.clickable:hover { background: var(--card-soft); }
+.cf-row-lbl { display: flex; align-items: center; gap: var(--fs-2); min-width: 0; color: var(--text); }
+.cf-code { color: var(--text-faint); font-weight: 700; font-size: 11.5px; }
+.cf-amt { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cf-prev { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-mut); font-weight: 600; white-space: nowrap; }
+.cf-row.cf-colhead .cf-amt, .cf-row.cf-colhead .cf-prev { font-weight: 700; }
+.cf-drill { display: inline-flex; color: var(--text-faint); opacity: 0; }
+.cf-row.clickable:hover .cf-drill { opacity: 1; }
+.cf-row.total { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 10px; font-weight: 800; }
+.cf-row.total .cf-row-lbl { font-weight: 800; }
+.cf-row.grand { border-top: 2px solid var(--green-800); margin-top: var(--fs-3); padding-top: 12px; font-size: 15px; font-weight: 800; color: var(--green-800); }
+.cf-row.cf-empty { color: var(--text-faint); font-size: 12.5px; font-style: italic; }
+/* when a comparison column is shown, widen the row to three tracks */
+.cf-card.has-cmp .cf-row { grid-template-columns: 1fr 150px 130px; }
+.cf-warnbox { display: flex; align-items: center; gap: var(--fs-2); font-size: 12.5px; color: var(--warn); background: var(--warn-bg); border-radius: var(--r-sm); padding: 10px var(--fs-4); margin-top: var(--fs-3); }
+.cf-warnbox svg { flex-shrink: 0; }
+@media (max-width: 560px) {
+  .cf-row, .cf-card.has-cmp .cf-row { grid-template-columns: 1fr auto; }
+  .cf-prev, .cf-row.cf-colhead .cf-prev { display: none; }
+}

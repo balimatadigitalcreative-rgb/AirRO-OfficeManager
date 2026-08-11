@@ -14,6 +14,7 @@ router.use(requireAuth, requireCap('reports'));
 router.get('/trial-balance', ctrl.trialBalance);
 router.get('/balance-sheet', ctrl.balanceSheet);
 router.get('/income-statement', ctrl.incomeStatement);
+router.get('/cash-flow', ctrl.cashFlow);   // Arus Kas (operasi/investasi/pendanaan) — reconciles to real cash
 router.get('/general-ledger', ctrl.generalLedger);   // all accounts (trial-balance style summary)
 router.get('/ledger', ctrl.ledger);                  // ONE account — Buku Besar with running balance (?code=)
 router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging buckets)
