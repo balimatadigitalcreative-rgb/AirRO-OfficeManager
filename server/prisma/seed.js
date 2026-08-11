@@ -13,7 +13,10 @@ const prisma = require('../src/lib/prisma');
 // enabled (the default for local dev) it also seeds the original role accounts
 // with simple PINs for convenience. Never enable demo users on a public site.
 async function main() {
-  const seedDemo = process.env.SEED_DEMO_USERS !== 'false';
+  // Demo users (simple-PIN role accounts) are a LOCAL-DEV convenience only. They are HARD-BLOCKED in
+  // production regardless of the flag, so a prod deploy can never ship guessable demo accounts even if
+  // SEED_DEMO_USERS is left unset. In dev they stay on by default; set SEED_DEMO_USERS=false to opt out.
+  const seedDemo = process.env.NODE_ENV !== 'production' && process.env.SEED_DEMO_USERS !== 'false';
   const adminUser = process.env.SEED_OWNER_USERNAME || 'owner';
   let adminPass = process.env.SEED_OWNER_PASSWORD;
 

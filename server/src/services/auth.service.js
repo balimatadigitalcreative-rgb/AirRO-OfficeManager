@@ -66,6 +66,16 @@ function signToken(user) {
 const normUsername = (u) => String(u || '').trim().toLowerCase();
 
 async function register({ name, username, password, role, sub, color }) {
+  // SECURITY — BOOTSTRAP-ONLY. This endpoint is public (no auth), so it must never let an anonymous
+  // caller create a privileged account. It previously wrote the client-supplied `role` verbatim, so
+  // anyone could POST {role:'owner'} and receive an owner token. It is now closed once ANY user exists:
+  // it only creates the FIRST account (initial owner/admin setup on an empty database). All subsequent
+  // accounts are created by an admin via POST /users (requireCap 'manageUsers') — the CLIENT NEVER
+  // calls /auth/register; only the test harness does, to seed users, so the lockdown is skipped there.
+  if (config.env !== 'test') {
+    const userCount = await prisma.user.count();
+    if (userCount > 0) throw ApiError.forbidden('Registrasi ditutup. Akun baru dibuat oleh admin melalui Manajemen Pengguna.');
+  }
   const uname = normUsername(username);
   const existing = await prisma.user.findUnique({ where: { username: uname } });
   if (existing) throw ApiError.conflict('Username is already taken');
