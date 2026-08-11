@@ -3,6 +3,7 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const distribution = require('./distribution.service');   // gallon-purchase movement sync (intentional cash-flow ↔ distribusi link)
 const businessUnit = require('./businessUnit.service');   // Stage 3: unit label on each entry (default "Air")
+const period = require('./period.service');   // ACCOUNTING v2: reject edits in a closed period (flag-gated)
 const { unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor } = require('../lib/scope');   // per-user business-unit access (Stage A/B)
 
 // Build a Prisma `where` clause from validated list filters.
@@ -77,6 +78,7 @@ async function getById(id, user) {
 // request body, and the name/role are read from the DB at input time — so a client
 // cannot forge who created a record, and the snapshot reflects the real user then.
 async function create(data, actor) {
+  await period.assertPeriodOpen(data.date, 'menambah transaksi');   // closed period → 400 (flag-gated)
   const userId = actor && actor.id;
   const snap = { createdById: userId || null };
   if (userId) {
@@ -96,6 +98,8 @@ async function create(data, actor) {
 
 async function update(id, data, actor) {
   const cur = await getById(id, actor); // 404 if missing OR out of the actor's unit scope (Stage B)
+  await period.assertPeriodOpen(cur.date, 'mengubah transaksi');   // can't edit an entry in a closed period
+  if (data && data.date && data.date !== cur.date) await period.assertPeriodOpen(data.date, 'memindahkan transaksi');   // …nor move it into one
   // An inter-unit leg is half of a linked pair — editing it in isolation would desync the two
   // books. It must be voided (which reverses BOTH legs) and re-created, never patched.
   if (cur.interUnit) throw ApiError.badRequest('Transaksi antar-unit tidak bisa diedit — batalkan lalu buat ulang.');
@@ -121,6 +125,7 @@ async function update(id, data, actor) {
 
 async function remove(id) {
   const cur = await getById(id);
+  await period.assertPeriodOpen(cur.date, 'menghapus transaksi');   // can't delete an entry in a closed period
   await distribution.retractPurchaseMovement(id);   // pull back any gallon stock this entry added
   // Deleting one leg of an inter-unit transfer deletes BOTH (atomic), so a leg is never orphaned
   // — whether removed here or via the dedicated void endpoint.

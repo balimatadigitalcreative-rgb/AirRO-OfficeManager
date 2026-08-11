@@ -160,6 +160,45 @@ model JournalLine {
   @@index([chartAccountId])
 }
 
+// ACCOUNTING v2 — PERIOD CLOSE. One row per YYYY-MM once it is closed (absence = open by default).
+// A closed (ditutup) or locked (terkunci) period rejects cash-book edits/deletes at the API when the
+// accounting feature flag is on; only dated adjusting entries in an OPEN period are allowed. An owner
+// reopen requires a reason and is audited on the row.
+model AccountingPeriod {
+  id             String    @id @default(cuid())
+  periodKey      String    @unique // "YYYY-MM"
+  year           Int
+  month          Int
+  status         String    @default("terbuka") // terbuka | ditutup | terkunci
+  closedById     String?
+  closedByName   String?
+  closedAt       DateTime?
+  reopenReason   String?
+  reopenedById   String?
+  reopenedByName String?
+  reopenedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([status])
+}
+
+// ACCOUNTING v2 — BANK RECONCILIATION. One row marks a single book movement (an entry or a transfer)
+// as CLEARED on a bank account's statement. Absence = not yet reconciled. Reuses the Account model; the
+// cash book itself is never touched (marks live here). Cleared balance vs statement = running diff.
+model Reconciliation {
+  id            String   @id @default(cuid())
+  accountId     String
+  itemType      String // 'entry' | 'transfer'
+  itemId        String
+  statementRef  String   @default("")
+  clearedById   String?
+  clearedByName String?
+  clearedAt     DateTime @default(now())
+
+  @@unique([accountId, itemType, itemId])
+  @@index([accountId])
+}
+
 model Entry {
   id          String    @id @default(cuid())
   type        String // "income" | "expense"

@@ -1,7 +1,7 @@
 'use strict';
 const { Router } = require('express');
 const ctrl = require('../controllers/accounting.controller');
-const { requireAuth, requireCap } = require('../middleware/auth');
+const { requireAuth, requireCap, requireRole } = require('../middleware/auth');
 const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
 
@@ -20,5 +20,15 @@ router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging b
 router.get('/receivables', ctrl.receivables);
 router.get('/unmapped', ctrl.unmapped);
 router.post('/backfill', ctrl.backfill);   // owner-driven projection from the cash book
+
+// PERIOD CLOSE — list/checklist readable by any reports user; close is owner/GM-tier, reopen owner-only.
+router.get('/periods', ctrl.periods);
+router.get('/periods/checklist', ctrl.periodChecklist);
+router.post('/periods/close', requireRole('owner', 'gm'), ctrl.periodClose);
+router.post('/periods/reopen', requireRole('owner'), ctrl.periodReopen);
+
+// BANK RECONCILIATION — view an account's cleared/uncleared movements + running diff; mark items cleared.
+router.get('/reconciliation', ctrl.reconciliation);
+router.post('/reconciliation/mark', ctrl.reconcileMark);
 
 module.exports = router;
