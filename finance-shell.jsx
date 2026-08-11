@@ -83,6 +83,20 @@ const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'
 // Placeholder for accounting-v2 screens (Buku Besar · Rekonsiliasi · Tutup Buku) whose backend
 // (double-entry engine) is built but whose UI ships in a later stage. Keeps the workflow nav honest:
 // the section exists and explains what's coming, instead of a dead tab or a 404.
+// Build stamp — commit + build time embedded by build.mjs (window.__AIRRO_COMMIT__ / __AIRRO_BUILT_AT__).
+// Lets anyone confirm which bundle is live at a glance. 'dev' when served from an unbuilt working tree.
+function BuildStamp() {
+  const commit = (typeof window !== 'undefined' && window.__AIRRO_COMMIT__) || 'dev';
+  const at = (typeof window !== 'undefined' && window.__AIRRO_BUILT_AT__) || '';
+  let when = '';
+  try { if (at) when = new Date(at).toLocaleString(); } catch (e) { when = at; }
+  return (
+    <span className="build-stamp" title={`Build ${commit}${when ? ' · ' + when : ''}`} style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 10 }}>
+      build {String(commit).slice(0, 8)}{when ? ' · ' + when : ''}
+    </span>
+  );
+}
+
 function FinComingSoon({ icon, body }) {
   return (
     <div className="screen-enter fin-scope">
@@ -1778,6 +1792,8 @@ function FApp() {
 
           <footer className="app-footer">
             <span>© 2026 AirRO Reverse Osmosis · {tr('nav.cashbook')} · {user.name}</span>
+            {/* Build stamp — which bundle is live at a glance (commit + build time, embedded by build.mjs). */}
+            <BuildStamp />
           </footer>
         </div>
       </main>

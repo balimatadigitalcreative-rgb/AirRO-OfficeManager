@@ -141,7 +141,8 @@ rollback() {
     && ok "code back at ${SHA_BEFORE:0:8}" || { bad "git reset to $SHA_BEFORE FAILED"; return 1; }
   ( cd server && npm ci ) >>"$LOG" 2>&1 || info "npm ci during rollback failed — continuing with existing node_modules"
   ( cd server && npx prisma generate ) >>"$LOG" 2>&1 || info "prisma generate during rollback failed — continuing"
-  npm run build >>"$LOG" 2>&1 || info "frontend rebuild during rollback failed — serving committed dist/app.js"
+  npm install --no-audit --no-fund >>"$LOG" 2>&1 || info "root npm install during rollback failed — continuing"
+  npm run build >>"$LOG" 2>&1 || bad "frontend rebuild during rollback FAILED — dist/ is server-built (not committed), so the client bundle may now be stale; rebuild manually: npm run build"
   pm2 startOrReload deploy/ecosystem.config.js --update-env >>"$LOG" 2>&1 || bad "pm2 reload during rollback failed"
 
   # DB restore: only on the explicit flag AND only if this run applied migrations.
@@ -308,7 +309,24 @@ else
 fi
 
 log ""
-log "▸ GATE 4/6  Apply migrations"
+log "▸ GATE 4/6  Build frontend bundle"
+# Built BEFORE migrations so a broken build aborts while the DB is still untouched. dist/ is NOT in git
+# any more — the server is the ONLY place the bundle is produced, so it can never drift from source.
+npm install --no-audit --no-fund >>"$LOG" 2>&1 || abort "root npm install failed (needed for the build)"
+npm run build >>"$LOG" 2>&1 || abort "frontend build failed — dist/app.js not rebuilt"
+[ -f "$APP_DIR/dist/app.js" ] || abort "build reported success but dist/app.js is missing"
+# HARD GUARD against a silently-skipped build: the freshly-built bundle embeds the commit it was built
+# from (build.mjs → version.json.commit). It MUST equal the HEAD we just checked out, or we are about
+# to serve a stale client. This is the exact failure that started this: server deploys, client doesn't.
+BUILT_COMMIT="$(node -e "process.stdout.write(String((require('./version.json').commit)||''))" 2>/dev/null || echo '')"
+HEAD_SHORT="$(git rev-parse --short=12 HEAD 2>/dev/null || echo '')"
+if [ -z "$BUILT_COMMIT" ] || [ "$BUILT_COMMIT" != "$HEAD_SHORT" ]; then
+  abort "build stamp commit ('$BUILT_COMMIT') != deployed HEAD ('$HEAD_SHORT') — the bundle did NOT rebuild from HEAD. Client would be stale."
+fi
+ok "frontend built @ $BUILT_COMMIT ($(node -e "process.stdout.write(String((require('./version.json').builtAt)||''))" 2>/dev/null))"
+
+log ""
+log "▸ GATE 5/6  Apply migrations"
 ( cd server && unset DATABASE_URL && npx prisma generate ) >>"$LOG" 2>&1 || abort "prisma generate failed"
 MIG_OUT="$( cd server && unset DATABASE_URL && npx prisma migrate deploy 2>&1 )"; MIG_RC=$?
 echo "$MIG_OUT" >> "$LOG"
@@ -338,13 +356,6 @@ if ! echo "$STATUS_OUT" | grep -qiE 'up to date|database schema is up to date'; 
   abort "prisma migrate status is NOT clean — DB schema is behind/ahead of the code. Production untouched. Fix forward: cd server && npx prisma migrate status, then resolve/apply."
 fi
 ok "migrate status clean — DB schema matches the code"
-
-log ""
-log "▸ GATE 5/6  Build frontend bundle"
-npm install --no-audit --no-fund >>"$LOG" 2>&1 || abort "root npm install failed (needed for the build)"
-npm run build >>"$LOG" 2>&1 || abort "frontend build failed — dist/app.js not rebuilt"
-[ -f "$APP_DIR/dist/app.js" ] || abort "build reported success but dist/app.js is missing"
-ok "dist/app.js built"
 
 log ""
 log "▸ GATE 6/6  Restart backend"
