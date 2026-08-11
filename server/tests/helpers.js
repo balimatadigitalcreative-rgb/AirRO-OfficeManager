@@ -7,6 +7,9 @@ const businessUnit = require('../src/services/businessUnit.service');
 // Wipe mutable tables so each test file starts from a clean slate.
 async function resetDb() {
   // Order matters for FK constraints: children before parents.
+  // ACCOUNTING v2 journals are PROJECTIONS of the source rows; wipe them each suite so a backfill in
+  // one test file never leaks journals into the next (JournalLine cascades from JournalEntry).
+  await prisma.journalEntry.deleteMany();
   await prisma.entry.deleteMany();
   await prisma.transfer.deleteMany();
   await prisma.setoran.deleteMany();

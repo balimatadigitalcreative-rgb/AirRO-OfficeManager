@@ -19,6 +19,7 @@ const CHART = [
   ['2-0000', 'Kewajiban', 'liability', ''],
   ['2-1000', 'Utang Usaha', 'liability', '2-0000'],
   ['2-2000', 'Utang Gaji', 'liability', '2-0000'],
+  ['2-3000', 'Uang Muka Pelanggan', 'liability', '2-0000'],   // customer credit balance (overpaid bon → not negative AR)
   ['3-0000', 'Ekuitas', 'equity', ''],
   ['3-1000', 'Modal', 'equity', '3-0000'],
   ['3-2000', 'Laba Ditahan', 'equity', '3-0000'],
@@ -35,10 +36,13 @@ const CHART = [
   ['6-4000', 'Beban Pemeliharaan', 'expense', '6-0000'],
   ['6-5000', 'Beban Utilitas', 'expense', '6-0000'],
   ['6-6000', 'Beban Sewa', 'expense', '6-0000'],
+  ['6-7000', 'Beban Kerugian Piutang', 'expense', '6-0000'],   // bad-debt / dispute loss (kerugian) + write-offs
   ['6-9000', 'Beban Lain-lain', 'expense', '6-0000'],
 ];
 const AR = '1-1200', KAS = '1-1000', BANK = '1-1100', PERSEDIAAN = '1-1300';
 const REV_MAIN = '4-1000', REV_OTHER = '4-2000', EXP_OTHER = '6-9000';
+const UANG_MUKA = '2-3000', LOSS_AR = '6-7000';   // customer-credit liability · bad-debt/dispute loss
+const DISPUTE_DEDUCTS = ['tidak_diakui', 'kerugian'];   // mirror distribution.service DEDUCTS
 // Frontend cash-book category key → account code. UNMAPPED keys are REPORTED (unmappedCategories),
 // never silently guessed into a real account — they fall to REV_OTHER/EXP_OTHER and are flagged.
 const CAT_MAP = {
@@ -63,6 +67,12 @@ async function seedChart() {
   return byCode;
 }
 async function chartMap() { const rows = await prisma.chartAccount.findMany({ select: { id: true, code: true } }); const m = {}; rows.forEach((r) => { m[r.code] = r.id; }); return m; }
+// Remove a projected journal (used when a source no longer produces one — e.g. a customer's
+// overpayment reclass that is no longer needed after further collection/backfill).
+async function deleteJournal(sourceType, sourceId) {
+  const existing = await prisma.journalEntry.findFirst({ where: { sourceType, sourceId: sourceId || null } });
+  if (existing) await prisma.journalEntry.delete({ where: { id: existing.id } });
+}
 
 // The single balanced-journal writer. `lines` = [{ code, debit?, credit?, businessUnitId?, fleetId? }].
 // Idempotent per (sourceType, sourceId): re-posting replaces the previous journal, never duplicates.
@@ -101,16 +111,83 @@ async function postDistExpense(x, actor) {
   const amt = n(x.amount); if (!amt) return null;
   return postJournal({ sourceType: 'dist_expense', sourceId: x.id, date: x.date, description: 'Pengeluaran lapangan', actor, lines: [{ code: DIST_EXP_MAP[x.category] || EXP_OTHER, debit: amt, fleetId: x.fleetId || '' }, { code: KAS, credit: amt, fleetId: x.fleetId || '' }] });
 }
-// Distribution transaction → receivables. bon: Dr Piutang / Cr Pendapatan · lunas: Dr Kas / Cr Pendapatan
-// · pelunasan: Dr Kas / Cr Piutang. (Corrections/disputes/adjustments parity lands in the receivables
-// integration stage; this posts the base amount, which equals Sisa Bon for plain bon+pelunasan.)
+// Distribution transaction → receivables, posting the EFFECTIVE figure so the Piutang balance equals
+// Sisa Bon exactly (Part 3 receivables integration):
+//   • lunas     → Dr Kas / Cr Pendapatan (cash sale, no receivable)
+//   • pelunasan → Dr Kas / Cr Piutang (collection)
+//   • bon       → Dr Piutang(effective) / Cr Pendapatan, where effective = amount + Σ price-corrections
+//                 − capped disputes. A `tidak_diakui` dispute reverses revenue (Cr Pendapatan drops);
+//                 a `kerugian` dispute is a company loss (Dr Beban Kerugian Piutang), revenue stays.
+//                 Disputes are capped at the sale so the per-row receivable never goes below 0 — the
+//                 exact per-bon floor customerBonBalance applies (max(0, amount + priceδ − dd)).
 async function postDistTransaction(t, actor) {
-  const amt = n(t.amount); if (!amt) return null;
-  const f = t.fleetId || ''; let lines;
-  if (t.method === 'bon') lines = [{ code: AR, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }];
-  else if (t.method === 'pelunasan') lines = [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
-  else lines = [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }];   // lunas
-  return postJournal({ sourceType: 'dist_txn', sourceId: t.id, date: t.txnDate, description: `Distribusi ${t.method}`, actor, businessUnitId: t.businessUnitId || null, lines });
+  const f = t.fleetId || '';
+  const base = { sourceType: 'dist_txn', sourceId: t.id, date: t.txnDate, description: `Distribusi ${t.method}`, actor, businessUnitId: t.businessUnitId || null };
+  if (t.method === 'pelunasan') {
+    const amt = n(t.amount); if (!amt) return null;
+    return postJournal({ ...base, lines: [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }] });
+  }
+  if (t.method !== 'bon') {   // lunas — cash sale
+    const amt = n(t.amount); if (!amt) return null;
+    return postJournal({ ...base, lines: [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }] });
+  }
+  // bon — receivable at the effective figure
+  const corrs = t.corrections || await prisma.correction.findMany({ where: { transactionId: t.id, kind: 'price', active: true }, select: { deltaAmount: true, kind: true, active: true } });
+  const pdelta = (corrs || []).filter((c) => c.kind === 'price' && c.active).reduce((a, c) => a + Number(c.deltaAmount || 0), 0);
+  const disputes = await prisma.distTransactionDispute.findMany({ where: { transactionId: t.id, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { status: true, disputedAmount: true } });
+  let ddTidak = 0, ddRugi = 0;
+  disputes.forEach((d) => { const a = Number(d.disputedAmount || 0); if (d.status === 'kerugian') ddRugi += a; else ddTidak += a; });
+  const revenue = n(t.amount) + n(pdelta);          // amount + price corrections = revenue recognised
+  let cap = Math.max(0, revenue);                    // cap total dispute at the sale (per-bon floor at 0)
+  const tidak = Math.min(ddTidak, cap); cap -= tidak;
+  const rugi = Math.min(ddRugi, cap);
+  const arNet = revenue - tidak - rugi;              // = max(0, amount + priceδ − dd)
+  if (arNet <= 0 && revenue <= 0) { await deleteJournal('dist_txn', t.id); return null; }
+  const lines = [{ code: AR, debit: arNet, fleetId: f }, { code: REV_MAIN, credit: revenue - tidak, fleetId: f }];
+  if (rugi > 0) lines.push({ code: LOSS_AR, debit: rugi, fleetId: f });   // debits: arNet + rugi = revenue − tidak = credit ✓
+  return postJournal({ ...base, lines });
+}
+
+// Approved bon ADJUSTMENT (penyesuaian) → receivable. delta>0 recognises more receivable/income;
+// delta<0 writes the receivable down (bad debt). Mirrors approvedBonDelta in customerBonBalance.
+async function postDistAdjustment(a, actor) {
+  const d = n(a.delta); if (!d) { await deleteJournal('dist_adjustment', a.id); return null; }
+  const f = a.fleetId || '';
+  const lines = d > 0
+    ? [{ code: AR, debit: d, fleetId: f }, { code: REV_OTHER, credit: d, fleetId: f }]
+    : [{ code: LOSS_AR, debit: -d, fleetId: f }, { code: AR, credit: -d, fleetId: f }];
+  return postJournal({ sourceType: 'dist_adjustment', sourceId: a.id, date: (a.approvedAt ? new Date(a.approvedAt) : a.createdAt ? new Date(a.createdAt) : new Date(0)).toISOString().slice(0, 10), description: `Penyesuaian bon: ${a.reason}`, actor, lines });
+}
+
+// A customer's receivable BEFORE the final floor-at-zero: Σ effective bon − Σ pelunasan + Σ approved
+// bon adjustments. This is exactly what the per-txn + adjustment journals net to for the customer, so
+// when it is NEGATIVE (customer overpaid / holds a credit) the excess must move OFF Piutang into a
+// customer-credit LIABILITY — otherwise the receivable would read negative. sisaBon = max(0, raw).
+async function customerBonRaw(customerId) {
+  const txns = await prisma.distTransaction.findMany({ where: { customerId, status: { not: 'void' }, bonCounted: true, method: { in: ['bon', 'pelunasan'] } }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
+  const ids = txns.map((t) => t.id);
+  const disputes = ids.length ? await prisma.distTransactionDispute.findMany({ where: { transactionId: { in: ids }, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { transactionId: true, disputedAmount: true } }) : [];
+  const dd = {}; disputes.forEach((d) => { dd[d.transactionId] = (dd[d.transactionId] || 0) + Number(d.disputedAmount || 0); });
+  let bon = 0, pel = 0;
+  for (const t of txns) {
+    if (t.method === 'pelunasan') { pel += n(t.amount); continue; }
+    const pdelta = (t.corrections || []).filter((c) => c.kind === 'price' && c.active).reduce((s, c) => s + Number(c.deltaAmount || 0), 0);
+    bon += Math.max(0, n(t.amount) + n(pdelta) - (dd[t.id] || 0));
+  }
+  const adjRows = await prisma.distAdjustment.findMany({ where: { customerId, kind: 'bon', status: 'approved' }, select: { delta: true } });
+  const adj = adjRows.reduce((s, r) => s + Number(r.delta), 0);
+  return bon - pel + adj;
+}
+
+// Reclass a customer's overpayment (raw < 0) from Piutang to Uang Muka Pelanggan so the Piutang
+// balance never goes below their true Sisa Bon. Idempotent per customer; removed once raw ≥ 0.
+async function postReceivablesReclass(customerId, actor) {
+  const raw = await customerBonRaw(customerId);
+  if (raw >= 0) { await deleteJournal('ar_reclass', customerId); return false; }
+  const over = -raw;
+  const last = await prisma.distTransaction.findFirst({ where: { customerId, status: { not: 'void' }, method: { in: ['bon', 'pelunasan'] } }, orderBy: { txnDate: 'desc' }, select: { txnDate: true } });
+  await postJournal({ sourceType: 'ar_reclass', sourceId: customerId, date: (last && last.txnDate) || '1970-01-01', description: 'Saldo kredit pelanggan (uang muka)', actor, lines: [{ code: AR, debit: over }, { code: UANG_MUKA, credit: over }] });
+  return true;
 }
 
 // Backfill journals for existing records from a start date (ADDITIVE — source rows untouched).
@@ -122,8 +199,22 @@ async function backfill({ fromDate, actor } = {}) {
   for (const e of entries) { if (await postEntry(e, actor)) out.entry++; }
   const transfers = await prisma.transfer.findMany({ where: dGte ? { date: dGte } : {} });
   for (const t of transfers) { if (await postTransfer(t, actor)) out.transfer++; }
-  const txns = await prisma.distTransaction.findMany({ where: { method: { in: ['bon', 'lunas', 'pelunasan'] }, status: 'active', legacy: false, ...(dGte ? { txnDate: dGte } : {}) } });
-  for (const t of txns) { if (await postDistTransaction(t, actor)) out.dist_txn++; }
+  // RECEIVABLES (bon/pelunasan): a running BALANCE, so it is NOT date-limited — matches
+  // customerBonBalance's inclusion exactly (non-void, bonCounted, INCLUDING legacy). Corrections and
+  // disputes are folded into each bon's effective figure inside postDistTransaction.
+  const arTxns = await prisma.distTransaction.findMany({ where: { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
+  for (const t of arTxns) { if (await postDistTransaction(t, actor)) out.dist_txn++; }
+  // Cash sales (lunas) are a period FLOW → keep the fromDate window; active, non-legacy.
+  const lunas = await prisma.distTransaction.findMany({ where: { method: 'lunas', status: 'active', legacy: false, ...(dGte ? { txnDate: dGte } : {}) } });
+  for (const t of lunas) { if (await postDistTransaction(t, actor)) out.dist_txn++; }
+  // Approved bon adjustments (penyesuaian) move the receivable up/down.
+  const adjs = await prisma.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved' } });
+  out.dist_adjustment = 0;
+  for (const a of adjs) { if (await postDistAdjustment(a, actor)) out.dist_adjustment++; }
+  // Per-customer overpayment reclass (raw < 0 → Uang Muka Pelanggan) so Piutang == Σ Sisa Bon.
+  const custIds = [...new Set([...arTxns.map((t) => t.customerId), ...adjs.map((a) => a.customerId)])];
+  out.reclass = 0;
+  for (const cid of custIds) { if (await postReceivablesReclass(cid, actor)) out.reclass++; }
   const exps = await prisma.distExpense.findMany({ where: { status: 'active', ...(dGte ? { date: dGte } : {}) } });
   for (const x of exps) { if (await postDistExpense(x, actor)) out.dist_expense++; }
   return out;
@@ -171,6 +262,7 @@ async function incomeStatement(range) {
 }
 
 module.exports = {
-  CHART, CAT_MAP, seedChart, chartMap, postJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
-  backfill, unmappedCategories, categoryToCode, accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement,
+  CHART, CAT_MAP, seedChart, chartMap, postJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
+  postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, unmappedCategories, categoryToCode,
+  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement,
 };
