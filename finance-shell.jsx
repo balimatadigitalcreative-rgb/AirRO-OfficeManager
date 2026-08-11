@@ -83,16 +83,18 @@ const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'
 // Placeholder for accounting-v2 screens (Buku Besar · Rekonsiliasi · Tutup Buku) whose backend
 // (double-entry engine) is built but whose UI ships in a later stage. Keeps the workflow nav honest:
 // the section exists and explains what's coming, instead of a dead tab or a 404.
-// Build stamp — commit + build time embedded by build.mjs (window.__AIRRO_COMMIT__ / __AIRRO_BUILT_AT__).
-// Lets anyone confirm which bundle is live at a glance. 'dev' when served from an unbuilt working tree.
+// Build stamp — the RUNNING build hash (window.__AIRRO_BUILD__, the exact value the "new version"
+// banner compares against /api/v1/version), plus commit + build time. Lets anyone confirm which bundle
+// is live at a glance and read the hash the freshness check uses. 'dev' when served unbuilt.
 function BuildStamp() {
-  const commit = (typeof window !== 'undefined' && window.__AIRRO_COMMIT__) || 'dev';
+  const build = (typeof window !== 'undefined' && window.__AIRRO_BUILD__) || 'dev';
+  const commit = (typeof window !== 'undefined' && window.__AIRRO_COMMIT__) || '';
   const at = (typeof window !== 'undefined' && window.__AIRRO_BUILT_AT__) || '';
   let when = '';
   try { if (at) when = new Date(at).toLocaleString(); } catch (e) { when = at; }
   return (
-    <span className="build-stamp" title={`Build ${commit}${when ? ' · ' + when : ''}`} style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 10 }}>
-      build {String(commit).slice(0, 8)}{when ? ' · ' + when : ''}
+    <span className="build-stamp" title={`Build ${build}${commit ? ' · commit ' + commit : ''}${when ? ' · ' + when : ''}`} style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 10 }}>
+      build {String(build).slice(0, 12)}{when ? ' · ' + when : ''}
     </span>
   );
 }
@@ -540,10 +542,22 @@ function FApp() {
       fetch(base + '/version?_=' + Date.now(), { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (!alive || !d || !d.version) return;
-          if (d.version !== RUNNING_BUILD && verNotifiedRef.current !== d.version) {
-            verNotifiedRef.current = d.version;   // one prompt per distinct new version
-            setNewVer(d.version);
+          if (!alive || !d || !d.version) return;   // GUARD: no/blank version → NEVER prompt
+          if (d.version === RUNNING_BUILD) {         // running the deployed build → clear any banner + flag
+            try { localStorage.removeItem('airro_reloaded_for'); } catch (e) {}
+            if (verNotifiedRef.current) { verNotifiedRef.current = null; setNewVer(null); }
+            return;
+          }
+          // Mismatch. If we ALREADY reloaded for this exact version and the running build is STILL old,
+          // reloading didn't take (a cached bundle) — don't loop the normal prompt; show a distinct
+          // "force reload" message and log both values so the mismatch is visible.
+          let reloadedFor = null; try { reloadedFor = localStorage.getItem('airro_reloaded_for'); } catch (e) {}
+          const stuck = reloadedFor === d.version;
+          const key = d.version + (stuck ? ':stuck' : '');   // prompt once per (version, stuck) state — never loop
+          if (verNotifiedRef.current !== key) {
+            verNotifiedRef.current = key;
+            if (stuck) console.error('[version] running build', RUNNING_BUILD, '!= deployed', d.version, '— a cached bundle survived a reload. Force reload with Ctrl+Shift+R.');
+            setNewVer({ version: d.version, stuck });
           }
         })
         .catch(() => {});   // offline / API down → silently retry next tick
@@ -1811,10 +1825,12 @@ function FApp() {
 
       {toast && <FToast msg={toast} onDone={() => setToast(null)} />}
       {newVer && (
-        <div className="ver-banner" role="status" aria-live="polite">
+        <div className={`ver-banner ${newVer.stuck ? 'stuck' : ''}`} role="status" aria-live="polite">
           <IconRefresh s={16} />
-          <span className="ver-msg">{tr('ver.available')}</span>
-          <button className="ver-reload" onClick={() => location.reload()}>{tr('ver.reload')}</button>
+          <span className="ver-msg">{newVer.stuck ? tr('ver.force') : tr('ver.available')}</span>
+          {/* Record which build we're reloading FOR, so if the reload doesn't take (cached bundle) the
+              next load detects it's stuck and switches to the force-reload message instead of looping. */}
+          <button className="ver-reload" onClick={() => { try { localStorage.setItem('airro_reloaded_for', newVer.version); } catch (e) {} location.reload(); }}>{tr('ver.reload')}</button>
           <button className="ver-x" title={tr('ver.later')} aria-label={tr('ver.later')} onClick={() => setNewVer(null)}>×</button>
         </div>
       )}

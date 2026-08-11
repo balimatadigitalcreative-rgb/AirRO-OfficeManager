@@ -567,6 +567,12 @@ select.fld::-ms-expand { display: none; }
 /* "new version available" banner — non-blocking, above the bottom nav on mobile */
 .ver-banner { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 300; display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 24px); background: var(--green-800); color: #fff; padding: 10px 12px 10px 15px; border-radius: 999px; box-shadow: 0 16px 40px -12px rgba(6,51,79,.55); font-size: 13px; font-weight: 600; animation: jernihFade .2s ease both; }
 .ver-banner .ver-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* STUCK state — a reload didn't clear the mismatch (cached bundle). Visually distinct (amber, dark
+   text for contrast) and the longer instruction wraps instead of truncating. */
+.ver-banner.stuck { background: var(--sand); color: var(--green-900); border-radius: 14px; }
+.ver-banner.stuck svg { color: var(--green-900); }
+.ver-banner.stuck .ver-msg { white-space: normal; }
+.ver-banner.stuck .ver-x { color: var(--green-900); }
 .ver-reload { flex-shrink: 0; background: #fff; color: var(--green-800); border: none; border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 800; cursor: pointer; }
 .ver-reload:hover { background: var(--mint-100); }
 .ver-x { flex-shrink: 0; background: transparent; border: none; color: rgba(255,255,255,.75); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }

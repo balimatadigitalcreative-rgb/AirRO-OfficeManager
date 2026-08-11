@@ -313,8 +313,11 @@ log "▸ GATE 4/6  Build frontend bundle"
 # Built BEFORE migrations so a broken build aborts while the DB is still untouched. dist/ is NOT in git
 # any more — the server is the ONLY place the bundle is produced, so it can never drift from source.
 npm install --no-audit --no-fund >>"$LOG" 2>&1 || abort "root npm install failed (needed for the build)"
-npm run build >>"$LOG" 2>&1 || abort "frontend build failed — dist/app.js not rebuilt"
+npm run build >>"$LOG" 2>&1 || abort "frontend build failed (its version single-source-of-truth assertion may have tripped — see log)"
 [ -f "$APP_DIR/dist/app.js" ] || abort "build reported success but dist/app.js is missing"
+# The SERVED html (references the content-hashed bundle) must exist, or nginx would fall back to the
+# source index.html which points at a non-hashed path — defeating the cache-bust.
+[ -f "$APP_DIR/dist/index.html" ] || abort "build succeeded but dist/index.html (the cache-busted served HTML) is missing"
 # HARD GUARD against a silently-skipped build: the freshly-built bundle embeds the commit it was built
 # from (build.mjs → version.json.commit). It MUST equal the HEAD we just checked out, or we are about
 # to serve a stale client. This is the exact failure that started this: server deploys, client doesn't.
@@ -323,7 +326,11 @@ HEAD_SHORT="$(git rev-parse --short=12 HEAD 2>/dev/null || echo '')"
 if [ -z "$BUILT_COMMIT" ] || [ "$BUILT_COMMIT" != "$HEAD_SHORT" ]; then
   abort "build stamp commit ('$BUILT_COMMIT') != deployed HEAD ('$HEAD_SHORT') — the bundle did NOT rebuild from HEAD. Client would be stale."
 fi
-ok "frontend built @ $BUILT_COMMIT ($(node -e "process.stdout.write(String((require('./version.json').builtAt)||''))" 2>/dev/null))"
+# The version the bundle EMBEDS (dist/index.html → app.<hash>.js) must equal what /version will serve
+# (version.json.version). If these ever differ the "new version" banner loops forever — assert here.
+BUILT_VER="$(node -e "process.stdout.write(String((require('./version.json').version)||''))" 2>/dev/null || echo '')"
+grep -q "app\.$BUILT_VER\.js" "$APP_DIR/dist/index.html" 2>/dev/null || abort "version mismatch: dist/index.html does not reference app.$BUILT_VER.js — the freshness banner would loop"
+ok "frontend built @ $BUILT_COMMIT · version $BUILT_VER ($(node -e "process.stdout.write(String((require('./version.json').builtAt)||''))" 2>/dev/null))"
 
 log ""
 log "▸ GATE 5/6  Apply migrations"

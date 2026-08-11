@@ -7,6 +7,7 @@
       'sync.saving': 'Saving…', 'sync.saved': 'Saved', 'sync.error': 'Sync failed', 'sync.expired': 'Session ended',
       'sess.title': 'Session ended', 'sess.body': 'Your session has expired. Please sign in again — any unsaved changes are kept and will be sent once you sign back in.', 'sess.login': 'Sign in again',
       'ver.available': 'A new version is available', 'ver.reload': 'Reload', 'ver.later': 'Later',
+      'ver.force': 'Reload didn’t update the app — force reload: Ctrl+Shift+R (Cmd+Shift+R on Mac)',
       // nav
       'navgrp.overview': 'Overview', 'navgrp.finance': 'Finance', 'navgrp.hr': 'Human Resources', 'navgrp.distribusi': 'Distribution', 'navgrp.gudang': 'Warehouse', 'navgrp.admin': 'Administration',
       'nav.distDashboard': 'Dashboard', 'nav.distCustomers': 'Customers', 'nav.distTransactions': 'Transactions', 'nav.distGallon': 'Gallon Stock', 'nav.distIntegration': 'Cash Integration', 'nav.distPrices': 'Master Price', 'nav.distAudit': 'Audit Log', 'nav.distDeliveries': 'Deliveries', 'nav.distExpenses': 'Field Expenses', 'nav.gudang': 'Warehouse', 'nav.suppliers': 'Suppliers',
@@ -729,6 +730,7 @@
       'sync.saving': 'Menyimpan…', 'sync.saved': 'Tersimpan', 'sync.error': 'Gagal sinkron', 'sync.expired': 'Sesi berakhir',
       'sess.title': 'Sesi berakhir', 'sess.body': 'Sesi Anda telah berakhir. Silakan login kembali — perubahan yang belum tersimpan tetap disimpan dan akan dikirim setelah Anda masuk lagi.', 'sess.login': 'Login Kembali',
       'ver.available': 'Versi baru tersedia', 'ver.reload': 'Muat ulang', 'ver.later': 'Nanti',
+      'ver.force': 'Muat ulang belum memperbarui aplikasi — muat ulang paksa: Ctrl+Shift+R (Cmd+Shift+R di Mac)',
       'nav.cashbook': 'Dashboard', 'nav.overview': 'Arus Kas', 'nav.entries': 'Semua Catatan',
       // Alur kerja keuangan (redesign akuntansi) — Ringkasan · Transaksi · Buku Besar · Laporan · Rekonsiliasi · Tutup Buku · Pengaturan
       'nav.finSummary': 'Ringkasan', 'nav.finTransaksi': 'Transaksi', 'nav.finLedger': 'Buku Besar', 'nav.finRekon': 'Rekonsiliasi', 'nav.finClose': 'Tutup Buku',

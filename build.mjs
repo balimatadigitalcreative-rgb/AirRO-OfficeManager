@@ -17,7 +17,7 @@
 //         node build.mjs --no-minify
 
 import { transform } from 'esbuild';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -123,17 +123,44 @@ async function build() {
     genLine += countNL(end);
   }
 
-  out += '//# sourceMappingURL=app.js.map\n';
+  const bundleName = `app.${version}.js`;                 // CONTENT-HASHED filename → the cache-bust
+  const mapJson = JSON.stringify({ version: 3, sections });
+  const distDir = join(ROOT, 'dist');
+  await mkdir(distDir, { recursive: true });
 
-  await mkdir(join(ROOT, 'dist'), { recursive: true });
-  await writeFile(join(ROOT, 'dist', 'app.js'), out, 'utf8');
-  await writeFile(join(ROOT, 'dist', 'app.js.map'), JSON.stringify({ version: 3, sections }), 'utf8');
-  // Build stamp for the server (GET /api/v1/version) + the freshness check. Same value
-  // the bundle embeds. Committed alongside dist/ so it ships even without a rebuild.
+  // Remove stale hashed bundles so dist/ doesn't grow unbounded across deploys (app.js is overwritten).
+  for (const f of await readdir(distDir)) {
+    if (/^app\.[0-9a-f]+\.js(\.map)?$/.test(f)) await unlink(join(distDir, f)).catch(() => {});
+  }
+  // PRIMARY: the hashed bundle index.html points at. Its URL changes every deploy, so a reload of the
+  // (no-store) index.html always fetches the matching bundle and can never reuse a stale cached one.
+  await writeFile(join(distDir, bundleName), out + `//# sourceMappingURL=${bundleName}.map\n`, 'utf8');
+  await writeFile(join(distDir, bundleName + '.map'), mapJson, 'utf8');
+  // TRANSITION FALLBACK at the old stable path, for any index.html a browser cached before this change
+  // (served no-cache so it's never stale). Safe to drop after one release.
+  await writeFile(join(distDir, 'app.js'), out + '//# sourceMappingURL=app.js.map\n', 'utf8');
+  await writeFile(join(distDir, 'app.js.map'), mapJson, 'utf8');
+  // Build stamp the server serves at GET /api/v1/version + the client freshness check. SAME `version`.
   await writeFile(join(ROOT, 'version.json'), JSON.stringify({ version, commit: gitCommit, builtAt }) + '\n', 'utf8');
 
+  // SERVED index.html (dist/index.html) generated from the source, pointing the app <script> at the
+  // hashed bundle. The source index.html is NEVER modified (no git churn); nginx serves dist/index.html.
+  const srcHtml = await readFile(join(ROOT, 'index.html'), 'utf8');
+  const builtHtml = srcHtml.replace(/\/dist\/app(?:\.[0-9a-f]+)?\.js(?:\?v=[^"']*)?/g, `/dist/${bundleName}`);
+  if (!builtHtml.includes(`/dist/${bundleName}`)) throw new Error('build: could not rewrite the /dist/app.js <script src> in index.html');
+  await writeFile(join(distDir, 'index.html'), builtHtml, 'utf8');
+
+  // ASSERTION — single source of truth. The hash EMBEDDED in the bundle, written to version.json, and
+  // REFERENCED by index.html must all equal `version`. Any drift makes the "new version" banner loop,
+  // so fail the build loudly rather than ship it.
+  const embedded = (out.match(/window\.__AIRRO_BUILD__="([0-9a-f]+)"/) || [])[1];
+  const fromJson = JSON.parse(await readFile(join(ROOT, 'version.json'), 'utf8')).version;
+  if (embedded !== version || fromJson !== version || !builtHtml.includes(bundleName)) {
+    throw new Error(`build: version SOT mismatch — embedded=${embedded} version.json=${fromJson} indexRefsHashed=${builtHtml.includes(bundleName)} expected=${version}`);
+  }
+
   const bytes = Buffer.byteLength(out, 'utf8');
-  console.log(`built dist/app.js  (${FILES.length} files, ${(bytes / 1024).toFixed(0)} KB${MINIFY ? ', minified w/s+syntax' : ', unminified'}, build ${version}) in ${Date.now() - t0}ms`);
+  console.log(`built dist/${bundleName} + dist/index.html  (${FILES.length} files, ${(bytes / 1024).toFixed(0)} KB${MINIFY ? ', minified' : ', unminified'}, build ${version}) in ${Date.now() - t0}ms`);
 }
 
 build().catch((e) => { console.error('BUILD FAILED:', e); process.exit(1); });
