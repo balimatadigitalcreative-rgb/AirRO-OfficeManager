@@ -14,7 +14,9 @@ router.use(requireAuth, requireCap('reports'));
 router.get('/trial-balance', ctrl.trialBalance);
 router.get('/balance-sheet', ctrl.balanceSheet);
 router.get('/income-statement', ctrl.incomeStatement);
-router.get('/general-ledger', ctrl.generalLedger);
+router.get('/general-ledger', ctrl.generalLedger);   // all accounts (trial-balance style summary)
+router.get('/ledger', ctrl.ledger);                  // ONE account — Buku Besar with running balance (?code=)
+router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging buckets)
 router.get('/receivables', ctrl.receivables);
 router.get('/unmapped', ctrl.unmapped);
 router.post('/backfill', ctrl.backfill);   // owner-driven projection from the cash book

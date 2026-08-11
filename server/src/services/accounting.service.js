@@ -261,8 +261,73 @@ async function incomeStatement(range) {
   return { revenue, expense, profit: revenue - expense, margin: revenue ? +(((revenue - expense) / revenue) * 100).toFixed(1) : 0, rows: rows.filter((r) => r.type === 'revenue' || r.type === 'expense') };
 }
 
+// UMUR PIUTANG (AR aging). Standard FIFO: a customer's collections/write-downs pay their OLDEST bon
+// first; whatever remains of each bon is aged by its date vs `asOf` into 0-30 / 31-60 / 61-90 / 90+.
+// By construction Σ(all buckets) == Σ customer Sisa Bon == receivablesBalance — the same money, aged.
+function agingBucket(date, asOf) {
+  const days = Math.floor((new Date(asOf + 'T00:00') - new Date((date || asOf) + 'T00:00')) / 86400000);
+  return days <= 30 ? 'd0_30' : days <= 60 ? 'd31_60' : days <= 90 ? 'd61_90' : 'd90p';
+}
+async function agingReceivables({ asOf, fleetId, businessUnitId } = {}) {
+  const today = asOf || new Date().toISOString().slice(0, 10);
+  const where = { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true };
+  if (fleetId) where.fleetId = fleetId;
+  if (businessUnitId) where.businessUnitId = businessUnitId;
+  const txns = await prisma.distTransaction.findMany({ where, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } }, customer: { select: { id: true, name: true } } } });
+  const ids = txns.map((t) => t.id);
+  const disputes = ids.length ? await prisma.distTransactionDispute.findMany({ where: { transactionId: { in: ids }, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { transactionId: true, disputedAmount: true } }) : [];
+  const dd = {}; disputes.forEach((d) => { dd[d.transactionId] = (dd[d.transactionId] || 0) + Number(d.disputedAmount || 0); });
+  const byCust = {};
+  const custOf = (id, name) => (byCust[id] || (byCust[id] = { customerId: id, name: name || '', bons: [], credit: 0 }));
+  for (const t of txns) {
+    const c = custOf(t.customerId, t.customer && t.customer.name);
+    if (t.method === 'pelunasan') { c.credit += n(t.amount); continue; }
+    const pd = (t.corrections || []).filter((x) => x.kind === 'price' && x.active).reduce((a, x) => a + Number(x.deltaAmount || 0), 0);
+    const eff = Math.max(0, n(t.amount) + n(pd) - (dd[t.id] || 0));
+    if (eff > 0) c.bons.push({ date: t.txnDate, eff });
+  }
+  const adjs = await prisma.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved' }, select: { customerId: true, delta: true, approvedAt: true, createdAt: true } });
+  for (const a of adjs) {
+    const c = custOf(a.customerId); const d = Number(a.delta);
+    if (d > 0) { const when = a.approvedAt || a.createdAt; c.bons.push({ date: when ? new Date(when).toISOString().slice(0, 10) : today, eff: d }); }
+    else c.credit += -d;
+  }
+  const totals = { d0_30: 0, d31_60: 0, d61_90: 0, d90p: 0 };
+  const rows = [];
+  for (const c of Object.values(byCust)) {
+    c.bons.sort((a, b) => (a.date || '').localeCompare(b.date || ''));   // oldest first — FIFO
+    let credit = c.credit;
+    const r = { customerId: c.customerId, name: c.name, d0_30: 0, d31_60: 0, d61_90: 0, d90p: 0, total: 0 };
+    for (const b of c.bons) {
+      let rem = b.eff;
+      if (credit > 0) { const pay = Math.min(credit, rem); credit -= pay; rem -= pay; }
+      if (rem > 0) { const bk = agingBucket(b.date, today); r[bk] += rem; r.total += rem; totals[bk] += rem; }
+    }
+    if (r.total > 0) rows.push(r);
+  }
+  rows.sort((a, b) => b.total - a.total);
+  return { asOf: today, buckets: totals, total: totals.d0_30 + totals.d31_60 + totals.d61_90 + totals.d90p, rows };
+}
+
+// BUKU BESAR — one account's journal lines in date order with a RUNNING BALANCE (in the account's
+// normal-balance direction). `opening` is the balance carried in before dateFrom; `closing` reconciles
+// to accountBalances for that account. Each row keeps sourceType/sourceId for figure→journal→source.
+async function generalLedger({ code, dateFrom, dateTo } = {}) {
+  const acct = await prisma.chartAccount.findUnique({ where: { code } });
+  if (!acct) return null;
+  const sign = SIGN[acct.type];
+  const openLines = dateFrom ? await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, journalEntry: { date: { lt: dateFrom } } }, select: { debit: true, credit: true } }) : [];
+  const opening = openLines.reduce((s, l) => s + (Number(l.debit) - Number(l.credit)), 0) * sign;
+  const dw = {}; if (dateFrom) dw.gte = dateFrom; if (dateTo) dw.lte = dateTo;
+  const lines = await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, ...(Object.keys(dw).length ? { journalEntry: { date: dw } } : {}) }, include: { journalEntry: { select: { date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
+  lines.sort((a, b) => (a.journalEntry.date || '').localeCompare(b.journalEntry.date || '') || a.id.localeCompare(b.id));
+  let bal = opening;
+  const rows = lines.map((l) => { const dr = Number(l.debit), cr = Number(l.credit); bal += (dr - cr) * sign; return { date: l.journalEntry.date, ref: l.journalEntry.ref, description: l.journalEntry.description, sourceType: l.journalEntry.sourceType, sourceId: l.journalEntry.sourceId, debit: dr, credit: cr, balance: bal }; });
+  return { account: { code: acct.code, name: acct.name, type: acct.type }, opening, rows, closing: bal };
+}
+
 module.exports = {
   CHART, CAT_MAP, seedChart, chartMap, postJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
   postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, unmappedCategories, categoryToCode,
-  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement,
+  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger,
 };
