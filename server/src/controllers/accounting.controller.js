@@ -10,10 +10,12 @@ const balanceSheet = asyncHandler(async (req, res) => res.json({ data: await ser
 const incomeStatement = asyncHandler(async (req, res) => res.json({ data: await service.incomeStatement(range(req)) }));
 const cashFlow = asyncHandler(async (req, res) => res.json({ data: await service.cashFlow({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId }) }));
 const generalLedger = asyncHandler(async (req, res) => res.json({ data: await service.accountBalances(range(req)) }));
+const chart = asyncHandler(async (req, res) => res.json({ data: await service.chart() }));
 const receivables = asyncHandler(async (req, res) => res.json({ data: { balance: await service.receivablesBalance(range(req)) } }));
 const unmapped = asyncHandler(async (req, res) => res.json({ data: await service.unmappedCategories() }));
 const aging = asyncHandler(async (req, res) => res.json({ data: await service.agingReceivables({ asOf: req.query.asOf, fleetId: req.query.fleetId, businessUnitId: req.query.businessUnitId }) }));
-const ledger = asyncHandler(async (req, res) => res.json({ data: await service.generalLedger({ code: req.query.code, dateFrom: req.query.dateFrom, dateTo: req.query.dateTo }) }));
+const ledger = asyncHandler(async (req, res) => res.json({ data: await service.generalLedger({ code: req.query.code, dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId }) }));
+const journal = asyncHandler(async (req, res) => res.json({ data: await service.journalFor({ sourceType: req.query.sourceType, sourceId: req.query.sourceId }) }));
 const periods = asyncHandler(async (req, res) => res.json({ data: await period.listPeriods() }));
 const periodChecklist = asyncHandler(async (req, res) => res.json({ data: await period.closeChecklist(+req.query.year, +req.query.month) }));
 const periodClose = asyncHandler(async (req, res) => res.json({ data: await period.closePeriod({ year: +req.body.year, month: +req.body.month, lock: !!req.body.lock }, req.user) }));
@@ -22,4 +24,4 @@ const reconciliation = asyncHandler(async (req, res) => res.json({ data: await r
 const reconcileMark = asyncHandler(async (req, res) => res.json({ data: await recon.markCleared({ accountId: req.body.accountId, itemType: req.body.itemType, itemId: req.body.itemId, cleared: req.body.cleared, statementRef: req.body.statementRef }, req.user) }));
 const backfill = asyncHandler(async (req, res) => res.json({ data: await service.backfill({ fromDate: req.body && req.body.fromDate, actor: req.user }) }));
 
-module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, receivables, unmapped, backfill, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };
+module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };

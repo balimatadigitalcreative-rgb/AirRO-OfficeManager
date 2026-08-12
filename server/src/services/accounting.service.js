@@ -324,18 +324,32 @@ async function agingReceivables({ asOf, fleetId, businessUnitId } = {}) {
 // BUKU BESAR — one account's journal lines in date order with a RUNNING BALANCE (in the account's
 // normal-balance direction). `opening` is the balance carried in before dateFrom; `closing` reconciles
 // to accountBalances for that account. Each row keeps sourceType/sourceId for figure→journal→source.
-async function generalLedger({ code, dateFrom, dateTo } = {}) {
+async function generalLedger({ code, dateFrom, dateTo, businessUnitId, fleetId } = {}) {
   const acct = await prisma.chartAccount.findUnique({ where: { code } });
   if (!acct) return null;
   const sign = SIGN[acct.type];
-  const openLines = dateFrom ? await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, journalEntry: { date: { lt: dateFrom } } }, select: { debit: true, credit: true } }) : [];
+  const scope = {}; if (businessUnitId) scope.businessUnitId = businessUnitId; if (fleetId) scope.fleetId = fleetId;   // unit/armada filters
+  const openLines = dateFrom ? await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, ...scope, journalEntry: { date: { lt: dateFrom } } }, select: { debit: true, credit: true } }) : [];
   const opening = openLines.reduce((s, l) => s + (Number(l.debit) - Number(l.credit)), 0) * sign;
   const dw = {}; if (dateFrom) dw.gte = dateFrom; if (dateTo) dw.lte = dateTo;
-  const lines = await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, ...(Object.keys(dw).length ? { journalEntry: { date: dw } } : {}) }, include: { journalEntry: { select: { date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
+  const lines = await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, ...scope, ...(Object.keys(dw).length ? { journalEntry: { date: dw } } : {}) }, include: { journalEntry: { select: { date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
   lines.sort((a, b) => (a.journalEntry.date || '').localeCompare(b.journalEntry.date || '') || a.id.localeCompare(b.id));
   let bal = opening;
   const rows = lines.map((l) => { const dr = Number(l.debit), cr = Number(l.credit); bal += (dr - cr) * sign; return { date: l.journalEntry.date, ref: l.journalEntry.ref, description: l.journalEntry.description, sourceType: l.journalEntry.sourceType, sourceId: l.journalEntry.sourceId, debit: dr, credit: cr, balance: bal }; });
   return { account: { code: acct.code, name: acct.name, type: acct.type }, opening, rows, closing: bal };
+}
+
+// The full BALANCED journal a ledger line belongs to (both Dr and Cr sides), for figure → journal →
+// source drill-down. Read-only. `ref` carries the source record so the UI can point at the Entry /
+// DistTransaction / Setoran the projection came from.
+async function journalFor({ sourceType, sourceId } = {}) {
+  const je = await prisma.journalEntry.findFirst({ where: { sourceType, sourceId: sourceId || null }, include: { lines: { include: { chartAccount: { select: { code: true, name: true } } } } } });
+  if (!je) return null;
+  return {
+    id: je.id, date: je.date, ref: je.ref, description: je.description, sourceType: je.sourceType, sourceId: je.sourceId,
+    postedByName: je.postedByName || null, postedAt: je.postedAt || null,
+    lines: je.lines.map((l) => ({ code: l.chartAccount.code, name: l.chartAccount.name, debit: Number(l.debit), credit: Number(l.credit) })),
+  };
 }
 
 // ARUS KAS (cash flow statement) — INDIRECT method, computed from the journal. Chosen over a
@@ -389,8 +403,14 @@ async function cashFlow({ dateFrom, dateTo, businessUnitId, fleetId } = {}) {
   };
 }
 
+// Full chart of accounts (all rows, incl. zero-activity headers) for the Buku Besar account picker /
+// hierarchy. Read-only projection of ChartAccount — no business logic.
+async function chart() {
+  return prisma.chartAccount.findMany({ select: { id: true, code: true, name: true, type: true, subtype: true, parentId: true, sortOrder: true }, orderBy: { sortOrder: 'asc' } });
+}
+
 module.exports = {
-  CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, postJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
+  CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, chart, postJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
   postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, unmappedCategories, categoryToCode,
-  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, cashFlow,
+  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, journalFor, cashFlow,
 };

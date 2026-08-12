@@ -60,4 +60,31 @@ describe('Buku Besar (general ledger running balance)', () => {
     // every row carries its source for figure→journal→source drilling
     expect(gl.rows.every((r) => r.sourceType && (r.debit || r.credit))).toBe(true);
   });
+
+  it('opening + Σ movements == closing per account (the running-balance identity)', async () => {
+    for (const code of ['1-1200', '1-1000', '4-1000']) {
+      const gl = await acc.generalLedger({ code });
+      const rows = await acc.accountBalances();
+      const type = (rows.find((r) => r.code === code) || {}).type;
+      const sign = { asset: 1, expense: 1, liability: -1, equity: -1, revenue: -1 }[type];
+      const moved = gl.rows.reduce((s, r) => s + (r.debit - r.credit), 0) * sign;
+      expect(gl.opening + moved).toBe(gl.closing);
+    }
+  });
+
+  it('journalFor returns the full BALANCED journal a ledger row belongs to (drill target)', async () => {
+    const gl = await acc.generalLedger({ code: '1-1200' });
+    const src = gl.rows[0];
+    const j = await acc.journalFor({ sourceType: src.sourceType, sourceId: src.sourceId });
+    expect(j).toBeTruthy();
+    expect(j.lines.reduce((s, l) => s + l.debit, 0)).toBe(j.lines.reduce((s, l) => s + l.credit, 0));   // balanced
+    expect(j.lines.some((l) => l.code === '1-1200')).toBe(true);
+  });
+
+  it('chart() returns the account hierarchy (parentId) for the Buku Besar picker', async () => {
+    const c = await acc.chart();
+    expect(c.length).toBeGreaterThan(10);
+    expect(c.some((a) => a.code === '1-1200' && a.parentId)).toBe(true);   // leaf has a parent
+    expect(c.some((a) => a.code === '1-0000' && !a.parentId)).toBe(true);  // header is a root
+  });
 });

@@ -16,7 +16,9 @@ router.get('/balance-sheet', ctrl.balanceSheet);
 router.get('/income-statement', ctrl.incomeStatement);
 router.get('/cash-flow', ctrl.cashFlow);   // Arus Kas (operasi/investasi/pendanaan) — reconciles to real cash
 router.get('/general-ledger', ctrl.generalLedger);   // all accounts (trial-balance style summary)
+router.get('/chart', ctrl.chart);                    // full chart of accounts (hierarchy) for the Buku Besar picker
 router.get('/ledger', ctrl.ledger);                  // ONE account — Buku Besar with running balance (?code=)
+router.get('/journal', ctrl.journal);                // one source's full balanced journal (?sourceType=&sourceId=) — drill
 router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging buckets)
 router.get('/receivables', ctrl.receivables);
 router.get('/unmapped', ctrl.unmapped);

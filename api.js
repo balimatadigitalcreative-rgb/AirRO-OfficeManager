@@ -109,8 +109,20 @@
     // ACCOUNTING v2 (double-entry) reports — flag-gated server-side (404 when ACCOUNTING_V2 is off).
     accounting: {
       cashFlow: (p) => req('GET', '/accounting/cash-flow' + acctQs(p)),   // { dateFrom, dateTo, businessUnitId?, fleetId? }
-      ledger: (p) => req('GET', '/accounting/ledger' + acctQs(p)),        // { code, dateFrom?, dateTo? } — drill target
+      ledger: (p) => req('GET', '/accounting/ledger' + acctQs(p)),        // { code, dateFrom?, dateTo? } — Buku Besar (one account)
+      generalLedger: (p) => req('GET', '/accounting/general-ledger' + acctQs(p)),   // all accounts w/ balances
+      chart: () => req('GET', '/accounting/chart'),                       // full chart of accounts (hierarchy)
+      journal: (p) => req('GET', '/accounting/journal' + acctQs(p)),      // { sourceType, sourceId } — full balanced journal (drill)
+      trialBalance: (p) => req('GET', '/accounting/trial-balance' + acctQs(p)),
       aging: (p) => req('GET', '/accounting/aging' + acctQs(p)),
+      // Period close (Tutup Buku)
+      periods: () => req('GET', '/accounting/periods'),
+      periodChecklist: (p) => req('GET', '/accounting/periods/checklist' + acctQs(p)),   // { year, month }
+      periodClose: (b) => req('POST', '/accounting/periods/close', b),   // { year, month, lock? }
+      periodReopen: (b) => req('POST', '/accounting/periods/reopen', b), // { year, month, reason }
+      // Bank reconciliation (Rekonsiliasi)
+      reconciliation: (p) => req('GET', '/accounting/reconciliation' + acctQs(p)),   // { accountId, statementBalance? }
+      reconcileMark: (b) => req('POST', '/accounting/reconciliation/mark', b),        // { accountId, itemType, itemId, cleared, statementRef? }
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

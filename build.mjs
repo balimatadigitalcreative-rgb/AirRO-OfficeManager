@@ -60,6 +60,7 @@ const FILES = [
   'finance-settings.jsx',
   'finance-edit.jsx',
   'finance-reports.jsx',
+  'finance-accounting.jsx',
   'finance-hrd.jsx',
   'company.jsx',
   'finance-setoran.jsx',

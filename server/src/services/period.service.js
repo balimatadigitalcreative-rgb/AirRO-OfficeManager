@@ -65,6 +65,11 @@ async function closeChecklist(year, month) {
 
 async function closePeriod({ year, month, lock }, actor) {
   if (!year || !month || month < 1 || month > 12) throw ApiError.badRequest('Tahun/bulan tidak valid.');
+  // A period may not be closed while the books don't balance — the accounting equation must hold before
+  // the month is frozen. (The double-entry engine keeps the trial balance balanced by construction, so
+  // this only ever trips on a corrupted/hand-edited journal — but the guard makes the rule enforceable.)
+  const tb = await require('./accounting.service').trialBalance();
+  if (!tb.balanced) throw ApiError.badRequest('Neraca saldo tidak seimbang — tidak dapat menutup periode. Perbaiki jurnal terlebih dahulu.', { balanced: false });
   const key = keyOf(year, month);
   const status = lock ? 'terkunci' : 'ditutup';
   const stamp = { status, closedById: (actor && actor.id) || null, closedByName: await actorName(actor), closedAt: new Date(), reopenReason: null, reopenedById: null, reopenedByName: null, reopenedAt: null };

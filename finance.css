@@ -3948,3 +3948,67 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .cf-row, .cf-card.has-cmp .cf-row { grid-template-columns: 1fr auto; }
   .cf-prev, .cf-row.cf-colhead .cf-prev { display: none; }
 }
+
+/* ═══════════ ACCOUNTING v2 SCREENS — Buku Besar · Rekonsiliasi · Tutup Buku ═══════════ */
+.fin-head-actions .rep-controls { margin: 0; }
+
+/* ── Buku Besar (ledger) ── */
+.bb-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--fs-4); align-items: start; }
+.bb-picker { padding: var(--fs-4); position: sticky; top: 12px; }
+.bb-ledger { padding: 0; overflow: hidden; }
+.bb-tree-scroll { max-height: 60vh; overflow-y: auto; margin-top: var(--fs-2); }
+.bb-search { height: 34px; margin-bottom: var(--fs-2); }
+.bb-node { display: flex; align-items: center; gap: 4px; }
+.bb-node.lvl-1 { padding-left: 14px; } .bb-node.lvl-2 { padding-left: 28px; }
+.bb-caret { display: inline-flex; width: 18px; height: 22px; align-items: center; justify-content: center; border: none; background: none; color: var(--text-faint); cursor: pointer; transition: transform .12s; }
+.bb-caret.open { transform: rotate(90deg); }
+.bb-caret-spacer { width: 18px; display: inline-block; }
+.bb-head { font-size: 12.5px; font-weight: 800; color: var(--text-mut); padding: 5px 4px; }
+.bb-head b, .bb-acct b { color: var(--text-faint); font-weight: 700; font-size: 11px; margin-right: 5px; }
+.bb-acct { display: block; width: 100%; text-align: left; border: none; background: none; font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; cursor: pointer; color: var(--text); }
+.bb-acct:hover { background: var(--card-soft); }
+.bb-acct.on { background: var(--green-800); color: #fff; } .bb-acct.on b { color: rgba(255,255,255,.7); }
+.bb-table .fin-th, .bb-table .fin-td { padding-left: var(--fs-4); }
+.bb-ref { font-size: 11.5px; color: var(--text-mut); font-variant-numeric: tabular-nums; }
+.acct-src { margin-top: var(--fs-3); font-size: 12px; color: var(--text-mut); }
+.acct-src b { color: var(--green-800); }
+@media (max-width: 900px) { .bb-layout { grid-template-columns: 1fr; } .bb-picker { position: static; } .bb-tree-scroll { max-height: 40vh; } }
+
+/* ── Rekonsiliasi ── */
+.rc-stmt { padding: 6px 12px !important; width: 180px; } .rc-stmt input { font-size: 14px; }
+.rc-import { cursor: pointer; }
+.rc-diff { display: flex; align-items: center; gap: var(--fs-3); padding: 12px var(--fs-4); border-radius: var(--r-md); margin-bottom: var(--fs-4); }
+.rc-diff.ok { background: var(--pos-bg); color: var(--green-800); } .rc-diff.warn { background: var(--sand-soft); color: var(--warn); }
+.rc-diff-lbl { font-weight: 600; } .rc-diff-val { font-family: 'Poppins'; font-size: 22px; font-weight: 800; } .rc-diff-tag { margin-left: auto; font-weight: 800; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
+.rc-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--fs-3); margin-bottom: var(--fs-4); }
+.rc-panels { display: grid; grid-template-columns: 1fr 1fr; gap: var(--fs-4); }
+.rc-panel { padding: var(--fs-3) var(--fs-4); }
+.rc-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--fs-2); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); padding-bottom: var(--fs-2); border-bottom: 1px solid var(--border); margin-bottom: var(--fs-2); }
+.rc-list { display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto; }
+.rc-row { display: grid; grid-template-columns: auto 82px 1fr auto auto; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.rc-panel .rc-row { grid-template-columns: auto 82px 1fr auto auto; }
+.rc-row.cleared, .rc-row.has-suggest { grid-template-columns: 82px 1fr auto auto; }
+.rc-row-date { font-size: 11.5px; color: var(--text-faint); } .rc-row-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-row-amt { font-weight: 700; white-space: nowrap; } .rc-suggest { display: block; font-style: normal; font-size: 11px; color: var(--green-700); }
+.rc-nomatch, .rc-matched { font-size: 11.5px; color: var(--text-faint); } .rc-locked { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--warn); }
+@media (max-width: 900px) { .rc-summary { grid-template-columns: 1fr 1fr; } .rc-panels { grid-template-columns: 1fr; } }
+
+/* ── Tutup Buku ── */
+.tp-badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding: 2px 9px; border-radius: 999px; }
+.tp-badge.open { background: var(--mint-100); color: var(--green-800); } .tp-badge.closed { background: var(--sand-soft); color: var(--warn); } .tp-badge.locked { background: #EAF1F4; color: #5E7A88; }
+.tp-close { padding: var(--fs-4); margin-bottom: var(--fs-4); }
+.tp-close-head { display: flex; align-items: center; gap: var(--fs-3); flex-wrap: wrap; margin-bottom: var(--fs-3); }
+.tp-month { width: 160px; }
+.tp-checklist { display: flex; flex-direction: column; gap: 4px; }
+.tp-chk { display: flex; align-items: center; gap: 10px; padding: 9px var(--fs-3); border-radius: 10px; font-size: 13px; background: var(--card-soft); }
+.tp-chk-ic { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0; color: #fff; }
+.tp-chk.ok .tp-chk-ic { background: var(--green-700); } .tp-chk.warn .tp-chk-ic { background: var(--sand); color: var(--green-900); } .tp-chk.bad .tp-chk-ic { background: var(--neg); }
+.tp-chk-lbl { flex: 1; } .tp-chk-lbl em { font-style: normal; color: var(--warn); font-weight: 600; }
+.tp-chk .dist-link { margin-left: auto; }
+.tp-confirm { margin-top: var(--fs-4); padding-top: var(--fs-4); border-top: 1px dashed var(--border); max-width: 460px; }
+.tp-lockinfo { font-size: 12px; color: var(--text-mut); background: var(--card-soft); border-radius: var(--r-sm); padding: 10px var(--fs-3); margin: var(--fs-2) 0 var(--fs-3); line-height: 1.45; }
+.tp-list { padding: var(--fs-4); }
+.tp-audit-row td, .tp-reopen-row td { background: var(--card-soft); }
+.tp-audit { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-mut); }
+.tp-reopen { padding: 4px 0 8px; max-width: 520px; }
+@media (max-width: 900px) { .tp-close-head { align-items: flex-start; } }

@@ -25,10 +25,10 @@ function navForRole(p, role) {
   if (p.cashflow) items.push({ id: 'overview', label: tr('nav.finSummary'), icon: 'IconDashboard', grp: 'finance' });
   if (p.allEntries) items.push({ id: 'entries', label: tr('nav.finTransaksi'), icon: 'IconTx', grp: 'finance' });
   if (p.cashflow) items.push({ id: 'moneyspots', label: tr('nav.moneyspots'), icon: 'IconWallet', grp: 'finance' });
-  if (p.reports) items.push({ id: 'ledger', label: tr('nav.finLedger'), icon: 'IconInvoice', grp: 'finance', soon: true });
+  if (p.reports) items.push({ id: 'ledger', label: tr('nav.finLedger'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
-  if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'finance', soon: true });
-  if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'finance', soon: true });
+  if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'finance' });
+  if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'finance' });
   if (p.employees) items.push({ id: 'employees', label: tr('nav.employees'), icon: 'IconCustomers', grp: 'hr' });
   if (p.employees) items.push({ id: 'hrcalendar', label: tr('nav.hrcalendar'), icon: 'IconCalendar', grp: 'hr' });
   if (p.payroll) items.push({ id: 'orientation', label: tr('nav.orientation'), icon: 'IconUserCircle', grp: 'hr' });
@@ -1787,10 +1787,13 @@ function FApp() {
             <COMPANY.ThrScreen staff={scopedStaff} rates={hrdRates} setRates={applyRates} today={FIN.TODAY} posted={thrPosted} onPost={postThr} canPost={p.addEntry || p.payroll} canEdit={p.payroll} />
           )}
 
-          {/* Accounting-workflow sections whose UI ships in a later redesign stage (backend exists). */}
-          {screen === 'ledger' && p.reports && (<FinComingSoon icon="IconInvoice" body={tr('fin.ledgerSoon')} />)}
-          {screen === 'reconcile' && p.reports && (<FinComingSoon icon="IconRefresh" body={tr('fin.rekonSoon')} />)}
-          {screen === 'close' && p.reports && (<FinComingSoon icon="IconLock" body={tr('fin.closeSoon')} />)}
+          {/* ACCOUNTING v2 workflow screens (double-entry). Each fetches from the flag-gated /accounting
+              API and shows the informative "coming soon" card itself when the flag is off (404). */}
+          {screen === 'ledger' && p.reports && (
+            <ACCT.LedgerScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} onOpenEntry={() => go('entries')} />
+          )}
+          {screen === 'reconcile' && p.reports && (<ACCT.ReconcileScreen accounts={accounts} />)}
+          {screen === 'close' && p.reports && (<ACCT.CloseScreen isOwner={user.role === 'owner'} onNav={go} />)}
 
           {screen === 'payroll' && p.payroll && (
             <PAYROLL.PayrollScreen defaultUnit={unitDefaultForNew()} rates={hrdRates} setRates={applyRates} staff={scopedStaff} setStaff={applyStaff} monLabel={curPayLabel} onPost={postPayroll} canEdit={p.employees} cashbons={cashbons} monthKey={monthKey} departments={departments} positions={positions} setPositions={applyPositions} />
