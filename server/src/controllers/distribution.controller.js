@@ -114,6 +114,8 @@ const correctionSchema = z.object({
   // need no price cap; a price change in the SAME request still requires distribusiHargaMaster.
   method: z.enum(['lunas', 'bon']).optional(),
 });
+// Preview (dry-run) of a correction — same fields, but the reason is not required to preview.
+const correctionPreviewSchema = correctionSchema.extend({ reason: z.string().trim().max(1000).optional() });
 // VOID REQUEST — a mandatory reason. HARD DELETE — reason + typed confirmation (ref or "HAPUS") + password.
 const voidSchema = z.object({ reason: z.string().trim().min(1, 'reason is required').max(1000) });
 // Change-request inbox filter + the reject note (rejection requires a reason).
@@ -286,6 +288,9 @@ const createTransaction = asyncHandler(async (req, res) => { const t = await ser
 // distribusiVoid are now REQUEST rights). Approving them needs the separate distribusiApprove.
 const requestCorrection = asyncHandler(async (req, res) => { const r = await service.requestChange(req.params.id, 'correction', req.body, req.user); bcast('changereq', req.params.id); res.status(201).json({ data: r }); });
 const requestVoid = asyncHandler(async (req, res) => { const r = await service.requestChange(req.params.id, 'void', req.body, req.user); bcast('changereq', req.params.id); res.status(201).json({ data: r }); });
+// DRY-RUN preview of a correction (live nominal + sisa-bon impact) — persists nothing. Same cap as the
+// request itself; the reason is not required to preview, so it uses a reason-optional schema.
+const previewCorrection = asyncHandler(async (req, res) => { res.json({ data: await service.previewCorrection(req.params.id, req.body, req.user) }); });
 const listChangeRequests = asyncHandler(async (req, res) => res.json(await service.listChangeRequests(req.user, req.query)));
 const approveChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'approve', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
 const rejectChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'reject', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
@@ -418,7 +423,7 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
-  listTransactions, createTransaction, requestCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
+  listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, resetTotalPreview, resetTotalCommit, resetTotalRestore, openingRowsList, openingRowsBulkPreview, openingRowsBulk, openingRowsRestore, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
   openRun, closeRun, correctRun, listRuns,
@@ -427,5 +432,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };

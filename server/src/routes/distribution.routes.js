@@ -81,6 +81,7 @@ router.post('/transactions', requireCap('distribusiInput'), validate({ body: ctr
 // CORRECTION / VOID are now APPROVAL-GATED. distribusiKoreksi / distribusiVoid are REQUEST rights:
 // posting here creates a PENDING DistChangeRequest and does NOT change the transaction. It is applied
 // only when an approver (distribusiApprove) approves it — and a requester can never approve their own.
+router.post('/transactions/:id/corrections/preview', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionPreviewSchema }), ctrl.previewCorrection);
 router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.requestCorrection);
 router.post('/transactions/:id/void', requireCap('distribusiVoid'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.voidSchema }), ctrl.requestVoid);
 // Change-request inbox + decisions — approver-only (distribusiApprove), fleet-scoped, server-enforced.

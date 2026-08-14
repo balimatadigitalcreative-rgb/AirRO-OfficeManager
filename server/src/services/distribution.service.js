@@ -410,6 +410,12 @@ async function getCustomer(id, user) {
   // The transaction LIST includes legacy (archive) rows — flagged — because the printed statement
   // needs them; the STATS below (totalGalon / sisaBon) count only real (non-legacy) rows.
   const txns = await prisma.distTransaction.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' }, include: { corrections: true } });
+  // Pending correction/void requests (for the "Menunggu persetujuan" badge + inline approve/reject in
+  // the panel) and the actual per-row gallons (so the correction modal pre-fills real out/in figures).
+  const txnIds = txns.map((t) => t.id);
+  const pendBy = await pendingRequestsByTxn(txnIds);
+  const galMovs = txnIds.length ? await prisma.gallonMovement.findMany({ where: { transactionId: { in: txnIds }, active: true, type: { in: ['delivery_out', 'return_in'] } }, select: { transactionId: true, type: true, qty: true } }) : [];
+  const galBy = {}; galMovs.forEach((m) => { const g = galBy[m.transactionId] || (galBy[m.transactionId] = { gallonOut: 0, gallonIn: 0 }); if (m.type === 'delivery_out') g.gallonOut += m.qty; else g.gallonIn += m.qty; });
   // Disputes for this customer, grouped by transaction (oldest→newest so the reversal supersedes).
   const dispRows = await prisma.distTransactionDispute.findMany({ where: { customerId: id }, orderBy: { createdAt: 'asc' } });
   const dispByTxn = {}; dispRows.forEach((r) => { (dispByTxn[r.transactionId] || (dispByTxn[r.transactionId] = [])).push(disputeClient(r)); });
@@ -434,7 +440,9 @@ async function getCustomer(id, user) {
       else if (st === 'tidak_diakui' && deduction) { disputeSummary.tidak_diakui.n++; disputeSummary.tidak_diakui.amount += deduction; tidakDiakuiTotal += deduction; }
       else if (st === 'kerugian' && deduction) { disputeSummary.kerugian.n++; disputeSummary.kerugian.amount += deduction; kerugianTotal += deduction; }
     }
+    const g = galBy[t.id] || { gallonOut: 0, gallonIn: 0 };
     return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, actorId: t.actorId || null, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
+      gallonOut: g.gallonOut, gallonIn: g.gallonIn, pendingRequest: pendBy[t.id] || null,
       status: t.status || 'active', voided, voidReason: t.voidReason || null, voidedByName: t.voidedByName || null, voidedAt: t.voidedAt ? new Date(t.voidedAt).getTime() : null,
       dispute: ed ? { ...ed.latest, deducts: ed.deducts, trail: ed.trail } : null };
   });
@@ -898,8 +906,7 @@ async function listTransactions(q, user) {
   // "Menunggu persetujuan" badge and blocks a second request. Plus each sale's current galon out/in,
   // so the structured correction form can pre-fill the actual input values (not just qty).
   const ids = rows.map((r) => r.id);
-  const pendings = ids.length ? await prisma.distChangeRequest.findMany({ where: { transactionId: { in: ids }, status: 'pending' }, select: { transactionId: true, kind: true, requestedByName: true, createdAt: true } }) : [];
-  const pendBy = {}; pendings.forEach((p) => { pendBy[p.transactionId] = { kind: p.kind, requestedByName: p.requestedByName || null, createdAt: p.createdAt ? new Date(p.createdAt).getTime() : null }; });
+  const pendBy = await pendingRequestsByTxn(ids);
   const movs = ids.length ? await prisma.gallonMovement.findMany({ where: { transactionId: { in: ids }, active: true, type: { in: ['delivery_out', 'return_in'] } }, select: { transactionId: true, type: true, qty: true } }) : [];
   const galBy = {}; movs.forEach((m) => { const g = galBy[m.transactionId] || (galBy[m.transactionId] = { gallonOut: 0, gallonIn: 0 }); if (m.type === 'delivery_out') g.gallonOut += m.qty; else g.gallonIn += m.qty; });
   // READ-ONLY dispute status per row (same shape as getCustomer) so the list can show the
@@ -1469,6 +1476,63 @@ async function changeRequestClient(req, txnMaybe) {
     decidedBy: req.decidedByName ? { name: req.decidedByName, role: req.decidedByRole || null } : null,
     decisionNote: req.decisionNote || '', decidedAt: req.decidedAt ? new Date(req.decidedAt).getTime() : null,
     createdAt: req.createdAt ? new Date(req.createdAt).getTime() : null,
+  };
+}
+
+// Pending change requests keyed by transaction id — the row-level "Menunggu persetujuan" badge and
+// the inline approve/reject in the detail panel both read this. Carries enough of the request (id +
+// reason + who) that an approver can act on it, and see the full chain, without leaving the page.
+// SHARED by the transaction list and the customer detail so both surfaces show the same thing.
+async function pendingRequestsByTxn(ids) {
+  const out = {};
+  if (!ids || !ids.length) return out;
+  const rows = await prisma.distChangeRequest.findMany({
+    where: { transactionId: { in: ids }, status: 'pending' },
+    select: { id: true, transactionId: true, kind: true, reason: true, requestedByName: true, requestedByRole: true, requestedById: true, createdAt: true },
+  });
+  rows.forEach((p) => { out[p.transactionId] = {
+    id: p.id, kind: p.kind, reason: p.reason || '', requestedByName: p.requestedByName || null, requestedByRole: p.requestedByRole || null,
+    requestedById: p.requestedById || null, createdAt: p.createdAt ? new Date(p.createdAt).getTime() : null,
+  }; });
+  return out;
+}
+
+// DRY-RUN preview of a correction — the live "Nominal → · Sisa Bon →" impact, computed SERVER-side by
+// the very same normalizeCorrection + projectedRawBon the approval applies, so what the requester sees
+// is exactly what the books will do. Persists NOTHING. Mirrors requestChange's guards + field-level
+// price gate (a non-Harga-Master caller can never move the price, even in a preview).
+async function previewCorrection(txnId, body, actor) {
+  const txn = await prisma.distTransaction.findUnique({ where: { id: txnId }, include: { customer: { select: { name: true, code: true } } } });
+  if (!txn) throw ApiError.notFound('Transaction not found');
+  if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');
+  if (txn.status === 'void') throw ApiError.badRequest('Transaksi ini sudah dibatalkan.');
+  if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak masuk hitungan.');
+  const snap = await actorSnap(actor);
+  const norm = await normalizeCorrection(txn, body.payload || body, { canPrice: snap.canPrice });   // SAME fn apply uses
+  const sale = isGallonSale(txn);
+  const oldSisaBon = await customerBonBalance(txn.customerId);
+  // Δ sisa bon, computed exactly as decideChangeRequest applies it:
+  //  • gallon sale  → contribution = (method==='bon' ? amount : 0); Δ = newContrib − oldContrib
+  //  • pelunasan    → a bigger payment reduces the bon more → Δ = old amount − new amount
+  //  • opening bon  → a lump receivable typed directly → Δ = new amount − old amount
+  let bonDelta = 0, wouldGoNegative = false;
+  if (sale) {
+    const oldContrib = txn.method === 'bon' ? txn.amount : 0;
+    const newContrib = norm.fields.method === 'bon' ? norm.newAmount : 0;
+    bonDelta = newContrib - oldContrib;
+    if (bonDelta !== 0 || norm.fields.method !== txn.method) wouldGoNegative = (await projectedRawBon(txn, norm.fields.method, norm.newAmount)) < 0;
+  } else if (txn.method === 'pelunasan') {
+    bonDelta = txn.amount - norm.newAmount;
+  } else {
+    bonDelta = norm.newAmount - txn.amount;
+  }
+  const newSisaBon = Math.max(0, oldSisaBon + bonDelta);
+  return {
+    oldAmount: txn.amount, newAmount: norm.newAmount, delta: norm.newAmount - txn.amount,
+    method: txn.method, requestedMethod: norm.fields.method || txn.method, methodChanged: !!(sale && norm.fields.method !== txn.method),
+    oldSisaBon, newSisaBon, bonDelta, wouldGoNegative,
+    customerName: txn.customer ? txn.customer.name : '', customerCode: txn.customer ? txn.customer.code : '',
+    fields: norm.fields,
   };
 }
 
@@ -3716,7 +3780,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
-  requestChange, listChangeRequests, decideChangeRequest,
+  requestChange, previewCorrection, listChangeRequests, decideChangeRequest,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,

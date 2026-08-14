@@ -194,6 +194,8 @@
         // CORRECTION / VOID are APPROVAL-GATED. These now SUBMIT a pending request (they no longer
         // change the transaction). correct: structured input fields per method + reason; void: reason.
         correct: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections', data),   // { reason, qty?, unitPrice?, gallonOut?, gallonIn?, amount? }
+        // DRY-RUN preview of a correction (server-computed nominal + sisa-bon impact). No reason needed.
+        previewCorrect: (id, data) => req('POST', '/distribusi/transactions/' + id + '/corrections/preview', data),   // → { oldAmount, newAmount, oldSisaBon, newSisaBon, wouldGoNegative, ... }
         void: (id, data) => req('POST', '/distribusi/transactions/' + id + '/void', data),   // { reason }
         // ARCHIVE TOGGLE (cap distribusiLegacyImport) — flip active↔archive(legacy); reason required.
         setArchive: (id, data) => req('POST', '/distribusi/transactions/' + id + '/archive', data),   // { legacy, reason }

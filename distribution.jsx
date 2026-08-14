@@ -909,6 +909,168 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
   );
 }
 
+// ── SHARED correction / void REQUEST flow (approval-gated) ───────────────────────────────────────
+// The correction + void modals, their state, and the submit logic live HERE, once, so the Transaksi
+// page (DistTransactions) and the customer-detail panel (DistCustomers) reuse the SAME engine instead
+// of a duplicated second flow. The transaction is never touched on submit — a pending DistChangeRequest
+// is created and an approver (distribusiApprove) decides it. The live "Nominal → · Sisa Bon →" impact
+// is a SERVER dry-run (previewCorrect) — computed by the very function the approval applies, never in
+// the client. Returns { openCorrect, openVoid, modals } — the host renders {modals} and wires its
+// [Ajukan Koreksi]/[Ajukan Pembatalan] buttons to open*.
+//   canPrice — distribusiHargaMaster (may the price be edited); onDone — reload after a submit; flash.
+function useDistCorrection({ canPrice, onDone, flash }) {
+  const [corrTxn, setCorrTxn] = uSx(null);
+  const [corrReason, setCorrReason] = uSx('');
+  const [corrForm, setCorrForm] = uSx(null);   // STRUCTURED input fields, pre-filled from the txn
+  const [corrSaving, setCorrSaving] = uSx(false);
+  const [voidTxn, setVoidTxn] = uSx(null);
+  const [voidReason, setVoidReason] = uSx('');
+  const [voidSaving, setVoidSaving] = uSx(false);
+  const [preview, setPreview] = uSx(null);      // server dry-run { newAmount, oldSisaBon, newSisaBon, wouldGoNegative, ... }
+  const flashFn = flash || (() => {});
+  const done = () => { if (onDone) onDone(); };
+
+  // A real gallon SALE is corrected via qty/unitPrice/gallonOut/gallonIn (the total recomputes);
+  // a pelunasan or an opening/carry-over bon (amount typed directly) is corrected via the amount.
+  const isSaleTxn = (t) => t && (t.method === 'lunas' || t.method === 'bon') && !t.openingBon;
+  const openCorrect = (t) => {
+    setCorrTxn(t); setCorrReason(''); setPreview(null);
+    if (isSaleTxn(t)) setCorrForm({ qty: t.qty, unitPrice: t.unitPriceLocked, gallonOut: t.gallonOut != null ? t.gallonOut : t.qty, gallonIn: t.gallonIn || 0, method: t.method });
+    else setCorrForm({ amount: t.amount });
+  };
+  const openVoid = (t) => { setVoidTxn(t); setVoidReason(''); };
+
+  const corrSale = isSaleTxn(corrTxn);
+  const corrNewTotal = corrForm ? (corrSale ? (+corrForm.qty || 0) * (+corrForm.unitPrice || 0) : (+corrForm.amount || 0)) : 0;
+  const corrMethodChanged = corrSale && corrForm && corrForm.method !== corrTxn.method;
+  const corrFieldsValid = corrTxn && (corrSale ? ((+corrForm.qty || 0) > 0 && (+corrForm.unitPrice || 0) > 0) : (+corrForm.amount || 0) > 0);
+  const corrValid = corrFieldsValid && corrReason.trim();
+  // The price is capability-gated: without distribusiHargaMaster we always send the transaction's
+  // LOCKED price (the server re-checks against unitPriceLocked regardless). Method is only sent for a sale.
+  const corrPayload = () => corrSale
+    ? { qty: +corrForm.qty || 0, unitPrice: canPrice ? (+corrForm.unitPrice || 0) : corrTxn.unitPriceLocked, gallonOut: +corrForm.gallonOut || 0, gallonIn: +corrForm.gallonIn || 0, method: corrForm.method }
+    : { amount: +corrForm.amount || 0 };
+
+  // Debounced SERVER dry-run whenever the fields change — the projected Sisa Bon comes from the server,
+  // never computed here. Skipped until the inputs are valid (else the server would just 400).
+  uEx(() => {
+    if (!corrTxn || !corrForm || !corrFieldsValid) { setPreview(null); return; }
+    let alive = true;
+    const h = setTimeout(() => {
+      window.API.distribusi.transactions.previewCorrect(corrTxn.id, corrPayload())
+        .then((r) => { if (alive) setPreview(r.data || null); })
+        .catch(() => { if (alive) setPreview(null); });
+    }, 250);
+    return () => { alive = false; clearTimeout(h); };
+  }, [corrTxn && corrTxn.id, corrForm && JSON.stringify(corrForm), canPrice]);
+
+  const commitCorrect = () => {
+    if (!corrValid || corrSaving) return;
+    setCorrSaving(true);
+    // Submits a REQUEST (approval-gated) — the transaction is not changed until an approver approves.
+    window.API.distribusi.transactions.correct(corrTxn.id, { reason: corrReason.trim(), ...corrPayload() })
+      .then(() => { setCorrSaving(false); setCorrTxn(null); setCorrForm(null); setPreview(null); flashFn(trD('dist.corrReqSent')); done(); })
+      .catch((e) => { setCorrSaving(false); flashFn((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+  const doVoid = () => {
+    if (!voidTxn || !voidReason.trim() || voidSaving) return;
+    setVoidSaving(true);
+    // Submits a VOID REQUEST (approval-gated) — the transaction stays active until an approver approves.
+    window.API.distribusi.transactions.void(voidTxn.id, { reason: voidReason.trim() })
+      .then(() => { setVoidSaving(false); setVoidTxn(null); setVoidReason(''); flashFn(trD('dist.voidReqSent')); done(); })
+      .catch((e) => { setVoidSaving(false); flashFn((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+
+  // The recomputed nominal shown to the user prefers the SERVER value (preview.newAmount) once it has
+  // loaded, falling back to the instant client echo so the field never lags a keystroke.
+  const shownNewTotal = preview ? preview.newAmount : corrNewTotal;
+  const modals = (<>
+    {corrTxn && corrForm && (
+      <div className="modal-scrim" onClick={() => { setCorrTxn(null); setPreview(null); }} style={{ zIndex: 200 }}>
+        <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.korekT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(corrTxn.id)} · {corrTxn.customer ? corrTxn.customer.name : ''} · {methodLabel(corrTxn.method)}</div></div><button className="jp-icon" onClick={() => { setCorrTxn(null); setPreview(null); }}><IconClose s={18} /></button></div>
+          <div className="modal-body">
+            {/* This SUBMITS a request — the transaction changes only after an approver approves it. */}
+            <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.korekApprovalInfo')}</span></div>
+            {/* STRUCTURED, input-level fields (the total is recomputed, never typed directly). */}
+            {corrSale ? (<>
+              <div className="dist-form-row">
+                <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fQty')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.qty} onChange={(e) => setCorrForm({ ...corrForm, qty: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                {/* PRICE is capability-gated: editable only with distribusiHargaMaster; everyone
+                    else sees it locked (the server enforces this too, against unitPriceLocked). */}
+                <div style={{ flex: 1, minWidth: 130 }}>
+                  <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.hargaPerGalon')}{!canPrice && <IconLock s={11} style={{ marginLeft: 5, verticalAlign: '-1px' }} />}</label>
+                  {canPrice
+                    ? <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, unitPrice: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                    : <><div className="amt-input is-locked"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} readOnly disabled aria-readonly="true" /></div>
+                      <div className="dist-fieldhint dist-price-locked"><IconLock s={11} />{trD('dist.korekPriceLocked')}</div></>}
+                </div>
+              </div>
+              <div className="dist-form-row">
+                <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalOut')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonOut} onChange={(e) => setCorrForm({ ...corrForm, gallonOut: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+                <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalIn')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonIn} onChange={(e) => setCorrForm({ ...corrForm, gallonIn: e.target.value.replace(/[^0-9]/g, '') })} /></div>
+              </div>
+              {/* METHOD toggle (bon ↔ lunas), pre-set to the current method. No price cap needed. */}
+              <label className="fld-label">{trD('dist.fMethod')}</label>
+              <div className="cat-chips">
+                {['lunas', 'bon'].map((m) => <button key={m} type="button" className={`cat-chip ${corrForm.method === m ? 'on' : ''}`} onClick={() => setCorrForm({ ...corrForm, method: m })}>{methodLabel(m)}</button>)}
+              </div>
+            </>) : (
+              <><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.payAmount')}</label>
+              <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.amount ? (+corrForm.amount).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, amount: e.target.value.replace(/[^0-9]/g, '') })} /></div></>
+            )}
+            {/* Live preview: recomputed total + delta (nominal is SYSTEM-computed, never typed). */}
+            <div className="dist-korek-preview">
+              <div><span>{trD('dist.korekOld')}</span><b className="tnum">{rpFull(corrTxn.amount)}</b></div>
+              <div className="dist-korek-arrow"><IconCaret s={16} style={{ transform: 'rotate(-90deg)' }} /></div>
+              <div><span>{trD('dist.korekNew')}</span><b className="tnum">{rpFull(shownNewTotal)}</b></div>
+              <div className="dist-korek-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${shownNewTotal - corrTxn.amount < 0 ? 'amt-neg' : shownNewTotal - corrTxn.amount > 0 ? 'amt-pos' : ''}`}>{shownNewTotal - corrTxn.amount >= 0 ? '+' : ''}{rpFull(shownNewTotal - corrTxn.amount)}</b></div>
+            </div>
+            <div className="dist-korek-calcnote">{trD('dist.korekServerCalc')}</div>
+            {/* SERVER-computed sisa-bon impact (the same math the approval applies). */}
+            {preview && preview.bonDelta !== 0 && (
+              <div className="dist-korek-sisaline">
+                <span>{trD('dist.korekSisaBonImpact', { code: corrTxn.customer && corrTxn.customer.code ? corrTxn.customer.code : (preview.customerCode || '') })}</span>
+                <b className="tnum">{rpFull(preview.oldSisaBon)}</b>
+                <IconCaret s={13} style={{ transform: 'rotate(-90deg)', margin: '0 2px' }} />
+                <b className={`tnum ${preview.newSisaBon < preview.oldSisaBon ? 'amt-neg' : preview.newSisaBon > preview.oldSisaBon ? 'amt-pos' : ''}`}>{rpFull(preview.newSisaBon)}</b>
+              </div>
+            )}
+            {/* METHOD flip is called out explicitly (its sisa-bon direction is in the line above). */}
+            {corrMethodChanged && (
+              <div className="dist-korek-methodline">
+                <span className="dist-korek-methodflip">{methodLabel(corrTxn.method)} → <b>{methodLabel(corrForm.method)}</b></span>
+              </div>
+            )}
+            {preview && preview.wouldGoNegative && (
+              <div className="dist-warnbox" style={{ marginTop: 8 }}><IconWarn s={15} /><span>{trD('dist.korekNegWarn')}</span></div>
+            )}
+            <label className="fld-label">{trD('dist.korekReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <textarea className="fld" style={{ height: 62, padding: 12, resize: 'vertical' }} value={corrReason} placeholder={trD('dist.korekReasonPh')} onChange={(e) => setCorrReason(e.target.value)} />
+          </div>
+          <div className="modal-foot"><button className="btn btn-ghost" onClick={() => { setCorrTxn(null); setPreview(null); }}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrValid || corrSaving} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSubmit')}</button></div>
+        </div>
+      </div>
+    )}
+    {/* VOID (recorded cancellation) — the recommended everyday cancel. Reason required + approval. */}
+    {voidTxn && (
+      <div className="modal-scrim" onClick={() => setVoidTxn(null)} style={{ zIndex: 200 }}>
+        <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.voidT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(voidTxn.id)} · {voidTxn.customer ? voidTxn.customer.name : ''} · {rpFull(voidTxn.amount)}</div></div><button className="jp-icon" onClick={() => setVoidTxn(null)}><IconClose s={18} /></button></div>
+          <div className="modal-body">
+            <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.voidApprovalInfo')}</span></div>
+            <label className="fld-label">{trD('dist.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={voidReason} placeholder={trD('dist.voidReasonPh')} onChange={(e) => setVoidReason(e.target.value)} />
+          </div>
+          <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoidTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!voidReason.trim() || voidSaving} onClick={doVoid}>{voidSaving ? '…' : trD('dist.voidSubmit')}</button></div>
+        </div>
+      </div>
+    )}
+  </>);
+
+  return { openCorrect, openVoid, modals, corrTxn, voidTxn };
+}
+
 function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, canHapus, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName, canViewAll, canView7, canViewMonth, canViewSisaBon, maxLookback, nav, histTick }) {
   // ── VIEW-WINDOW (time restriction) — the UI HIDES presets outside what the server allows; the
   // server still enforces (this is convenience, not the guard). Mirror viewWindowFrom() client-side.
@@ -937,15 +1099,10 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
   const [saving, setSaving] = uSx(false);
   const [fErr, setFErr] = uSx('');
   const [payOpen, setPayOpen] = uSx(false);   // standalone Pelunasan Bon
-  // correction
-  const [corrTxn, setCorrTxn] = uSx(null);
-  const [corrReason, setCorrReason] = uSx('');
-  const [corrForm, setCorrForm] = uSx(null);   // STRUCTURED input fields, pre-filled from the txn
-  const [corrSaving, setCorrSaving] = uSx(false);
-  // void (recorded cancellation) + hard delete (owner-only, permanent)
-  const [voidTxn, setVoidTxn] = uSx(null);
-  const [voidReason, setVoidReason] = uSx('');
-  const [voidSaving, setVoidSaving] = uSx(false);
+  // correction + void — the shared approval-gated flow (state, both modals, submit) lives in the
+  // reusable useDistCorrection hook so this page and the customer-detail panel share ONE engine.
+  const corrFlow = useDistCorrection({ canPrice, flash: (m) => flash(m), onDone: () => { reload(); if (onChanged) onChanged(); } });
+  // hard delete (owner-only, permanent)
   const [delTxn, setDelTxn] = uSx(null);           // hard-delete danger modal
   const [delReason, setDelReason] = uSx('');
   const [delConfirm, setDelConfirm] = uSx('');
@@ -1049,14 +1206,6 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       .then(() => { setArchSaving(false); setArchTxn(null); setArchReason(''); flash(trD(archTxn.toLegacy ? 'dist.archDone' : 'dist.unarchDone')); reload(); if (onChanged) onChanged(); })
       .catch((e) => { setArchSaving(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
-  const doVoid = () => {
-    if (!voidTxn || !voidReason.trim() || voidSaving) return;
-    setVoidSaving(true);
-    // Submits a VOID REQUEST (approval-gated) — the transaction stays active until an approver approves.
-    window.API.distribusi.transactions.void(voidTxn.id, { reason: voidReason.trim() })
-      .then(() => { setVoidSaving(false); setVoidTxn(null); setVoidReason(''); flash(trD('dist.voidReqSent')); reload(); if (onChanged) onChanged(); })
-      .catch((e) => { setVoidSaving(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
-  };
   const doHardDelete = () => {
     if (!delTxn || !delReason.trim() || !delConfirm.trim() || !delPw || delSaving) return;
     setDelSaving(true); setDelErr('');
@@ -1147,39 +1296,6 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
         reload(); if (onChanged) onChanged(); })
       .catch((e) => { setSaving(false); setConfirmOpen(false); setFErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
-  // A real gallon SALE is corrected via qty/unitPrice/gallonOut/gallonIn (the total recomputes);
-  // a pelunasan or an opening/carry-over bon (amount typed directly) is corrected via the amount.
-  const isSaleTxn = (t) => t && (t.method === 'lunas' || t.method === 'bon') && !t.openingBon;
-  const openCorrect = (t) => {
-    setCorrTxn(t); setCorrReason('');
-    if (isSaleTxn(t)) setCorrForm({ qty: t.qty, unitPrice: t.unitPriceLocked, gallonOut: t.gallonOut != null ? t.gallonOut : t.qty, gallonIn: t.gallonIn || 0, method: t.method });
-    else setCorrForm({ amount: t.amount });
-  };
-  const corrSale = isSaleTxn(corrTxn);
-  const corrNewTotal = corrForm ? (corrSale ? (+corrForm.qty || 0) * (+corrForm.unitPrice || 0) : (+corrForm.amount || 0)) : 0;
-  // sisa-bon impact of a method change: a 'bon' row counts as receivable (its amount), a 'lunas' row
-  // does not. So Δsisa bon = (new bon-contribution) − (current bon-contribution).
-  const corrOldBonContrib = corrTxn && corrTxn.method === 'bon' ? corrTxn.amount : 0;
-  const corrNewBonContrib = corrForm && corrForm.method === 'bon' ? corrNewTotal : 0;
-  const corrBonImpact = corrSale ? (corrNewBonContrib - corrOldBonContrib) : 0;
-  const corrMethodChanged = corrSale && corrForm && corrForm.method !== corrTxn.method;
-  const corrValid = corrTxn && corrReason.trim() && (corrSale ? ((+corrForm.qty || 0) > 0 && (+corrForm.unitPrice || 0) > 0) : (+corrForm.amount || 0) > 0);
-  const commitCorrect = () => {
-    if (!corrValid || corrSaving) return;
-    // The price is capability-gated: without distribusiHargaMaster we always send the transaction's
-    // LOCKED price, so a staff correction can only move the total via qty. The server re-checks this
-    // against the stored unitPriceLocked regardless of what is sent here. Method (bon↔lunas) needs no
-    // price cap and is only sent for a gallon sale.
-    const payload = corrSale
-      ? { qty: +corrForm.qty || 0, unitPrice: canPrice ? (+corrForm.unitPrice || 0) : corrTxn.unitPriceLocked, gallonOut: +corrForm.gallonOut || 0, gallonIn: +corrForm.gallonIn || 0, method: corrForm.method }
-      : { amount: +corrForm.amount || 0 };
-    setCorrSaving(true);
-    // Submits a REQUEST (approval-gated) — the transaction is not changed until an approver approves.
-    window.API.distribusi.transactions.correct(corrTxn.id, { reason: corrReason.trim(), ...payload })
-      .then(() => { setCorrSaving(false); setCorrTxn(null); setCorrForm(null); flash(trD('dist.corrReqSent')); reload(); if (onChanged) onChanged(); })
-      .catch((e) => { setCorrSaving(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
-  };
-
   // ── Expense form/list helpers (same patterns as the transaction form: rupiah amount, chips, void). ──
   const expCatLabel = (c) => { const k = 'exp.cat_' + c; const t = trD(k); return t !== k ? t : c; };
   const viewExpPhoto = (id) => { if (id && window.UI && window.UI._viewProof) window.UI._viewProof({ ref: id, isImg: true, name: 'bukti.jpg' }); };
@@ -1853,7 +1969,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 
       {/* SLIDE-OVER detail panel + advanced filters + bulk-cancel — rendered outside the flow. */}
       {detailTxn && !detailTxn._exp && <TxDetailPanel txn={detailTxn} custById={custById} idx={detailIdx} total={txSorted.length} canKoreksi={canKoreksi} canVoid={canVoid} canArchive={canArchive} canHardDelete={canHardDelete} userName={userName}
-        onClose={closeSlide} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => openCorrect(t)} onVoid={(t) => { setVoidTxn(t); setVoidReason(''); }} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
+        onClose={closeSlide} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => corrFlow.openCorrect(t)} onVoid={(t) => corrFlow.openVoid(t)} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
       {advOpen && <TxAdvancedPanel onClose={() => setAdvOpen(false)} minAmt={minAmt} setMinAmt={setMinAmt} maxAmt={maxAmt} setMaxAmt={setMaxAmt} flagNote={flagNote} setFlagNote={setFlagNote} flagCorr={flagCorr} setFlagCorr={setFlagCorr} custFilter={custFilter} setCustFilter={setCustFilter} custOpts={custOpts} onClear={clearAll} anyFilter={anyFilter} />}
       {bulkVoid && <TxBulkModal action={bulkVoid.action} ids={bulkVoid.ids} onClose={() => setBulkVoid(null)} onDone={onBulkDone} />}
       {bulkUndo && (
@@ -1861,61 +1977,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
       )}
       {printFor2 && <PrintCenter customer={printFor2.custObj || (custById[printFor2.txn.customerId] || { id: printFor2.txn.customerId, name: nameOf(printFor2.txn), code: codeOf(printFor2.txn), phone: phoneOf(printFor2.txn), transactions: [printFor2.txn], sisaBon: 0 })} userName={userName} mode="nota" txn={printFor2.txn} onClose={() => setPrintFor2(null)} />}
 
-      {corrTxn && corrForm && (
-        <div className="modal-scrim" onClick={() => setCorrTxn(null)} style={{ zIndex: 200 }}>
-          <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.korekT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(corrTxn.id)} · {corrTxn.customer ? corrTxn.customer.name : ''} · {methodLabel(corrTxn.method)}</div></div><button className="jp-icon" onClick={() => setCorrTxn(null)}><IconClose s={18} /></button></div>
-            <div className="modal-body">
-              {/* This SUBMITS a request — the transaction changes only after an approver approves it. */}
-              <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.korekApprovalInfo')}</span></div>
-              {/* STRUCTURED, input-level fields (the total is recomputed, never typed directly). */}
-              {corrSale ? (<>
-                <div className="dist-form-row">
-                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.fQty')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.qty} onChange={(e) => setCorrForm({ ...corrForm, qty: e.target.value.replace(/[^0-9]/g, '') })} /></div>
-                  {/* PRICE is capability-gated: editable only with distribusiHargaMaster; everyone
-                      else sees it locked (the server enforces this too, against unitPriceLocked). */}
-                  <div style={{ flex: 1, minWidth: 130 }}>
-                    <label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.hargaPerGalon')}{!canPrice && <IconLock s={11} style={{ marginLeft: 5, verticalAlign: '-1px' }} />}</label>
-                    {canPrice
-                      ? <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, unitPrice: e.target.value.replace(/[^0-9]/g, '') })} /></div>
-                      : <><div className="amt-input is-locked"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.unitPrice ? (+corrForm.unitPrice).toLocaleString('id-ID') : ''} readOnly disabled aria-readonly="true" /></div>
-                        <div className="dist-fieldhint dist-price-locked"><IconLock s={11} />{trD('dist.korekPriceLocked')}</div></>}
-                  </div>
-                </div>
-                <div className="dist-form-row">
-                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalOut')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonOut} onChange={(e) => setCorrForm({ ...corrForm, gallonOut: e.target.value.replace(/[^0-9]/g, '') })} /></div>
-                  <div style={{ flex: 1, minWidth: 130 }}><label className="fld-label">{trD('dist.fGalIn')}</label><input className="fld tnum" inputMode="numeric" value={corrForm.gallonIn} onChange={(e) => setCorrForm({ ...corrForm, gallonIn: e.target.value.replace(/[^0-9]/g, '') })} /></div>
-                </div>
-                {/* METHOD toggle (bon ↔ lunas), pre-set to the current method. No price cap needed. */}
-                <label className="fld-label">{trD('dist.fMethod')}</label>
-                <div className="cat-chips">
-                  {['lunas', 'bon'].map((m) => <button key={m} type="button" className={`cat-chip ${corrForm.method === m ? 'on' : ''}`} onClick={() => setCorrForm({ ...corrForm, method: m })}>{methodLabel(m)}</button>)}
-                </div>
-              </>) : (
-                <><label className="fld-label" style={{ marginTop: 0 }}>{trD('dist.payAmount')}</label>
-                <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" value={corrForm.amount ? (+corrForm.amount).toLocaleString('id-ID') : ''} placeholder="0" onChange={(e) => setCorrForm({ ...corrForm, amount: e.target.value.replace(/[^0-9]/g, '') })} /></div></>
-              )}
-              {/* Live preview of the recomputed total + the delta before submitting. */}
-              <div className="dist-korek-preview">
-                <div><span>{trD('dist.korekOld')}</span><b className="tnum">{rpFull(corrTxn.amount)}</b></div>
-                <div className="dist-korek-arrow"><IconCaret s={16} style={{ transform: 'rotate(-90deg)' }} /></div>
-                <div><span>{trD('dist.korekNew')}</span><b className="tnum">{rpFull(corrNewTotal)}</b></div>
-                <div className="dist-korek-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${corrNewTotal - corrTxn.amount < 0 ? 'amt-neg' : corrNewTotal - corrTxn.amount > 0 ? 'amt-pos' : ''}`}>{corrNewTotal - corrTxn.amount >= 0 ? '+' : ''}{rpFull(corrNewTotal - corrTxn.amount)}</b></div>
-              </div>
-              {/* METHOD change → its effect on the customer's sisa bon, so the consequence is explicit. */}
-              {corrMethodChanged && (
-                <div className="dist-korek-methodline">
-                  <span className="dist-korek-methodflip">{methodLabel(corrTxn.method)} → <b>{methodLabel(corrForm.method)}</b></span>
-                  <span className={`dist-korek-bonimpact ${corrBonImpact < 0 ? 'amt-neg' : 'amt-pos'}`}>{trD('dist.korekSisaBon')} {corrBonImpact >= 0 ? '+' : '−'}{rpFull(Math.abs(corrBonImpact))}</span>
-                </div>
-              )}
-              <label className="fld-label">{trD('dist.korekReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <textarea className="fld" style={{ height: 62, padding: 12, resize: 'vertical' }} value={corrReason} placeholder={trD('dist.korekReasonPh')} onChange={(e) => setCorrReason(e.target.value)} />
-            </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCorrTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrValid || corrSaving} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSubmit')}</button></div>
-          </div>
-        </div>
-      )}
+      {corrFlow.modals}
       {/* ARCHIVE TOGGLE — active ↔ arsip (legacy). Reason required; recomputes bon/KPIs/gallon. */}
       {archTxn && (
         <div className="modal-scrim" onClick={() => setArchTxn(null)} style={{ zIndex: 200 }}>
@@ -1930,20 +1992,6 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
               <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={archReason} placeholder={trD('dist.archReasonPh')} onChange={(e) => setArchReason(e.target.value)} />
             </div>
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setArchTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!archReason.trim() || archSaving} onClick={doArchive}>{archSaving ? '…' : trD(archTxn.toLegacy ? 'dist.makeArchive' : 'dist.makeActive')}</button></div>
-          </div>
-        </div>
-      )}
-      {/* VOID (recorded cancellation) — the recommended everyday cancel. Reason required + confirm. */}
-      {voidTxn && (
-        <div className="modal-scrim" onClick={() => setVoidTxn(null)} style={{ zIndex: 200 }}>
-          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.voidT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(voidTxn.id)} · {voidTxn.customer ? voidTxn.customer.name : ''} · {rpFull(voidTxn.amount)}</div></div><button className="jp-icon" onClick={() => setVoidTxn(null)}><IconClose s={18} /></button></div>
-            <div className="modal-body">
-              <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.voidApprovalInfo')}</span></div>
-              <label className="fld-label">{trD('dist.voidReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
-              <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={voidReason} placeholder={trD('dist.voidReasonPh')} onChange={(e) => setVoidReason(e.target.value)} />
-            </div>
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoidTxn(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!voidReason.trim() || voidSaving} onClick={doVoid}>{voidSaving ? '…' : trD('dist.voidSubmit')}</button></div>
           </div>
         </div>
       )}
@@ -3353,7 +3401,7 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onOpenLoss, userName, nav, histTick }) {
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canVoid, canApprove, currentUserId, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onGoApprovals, onOpenLoss, userName, nav, histTick }) {
   const clParam0 = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
   const [view, setView] = uSx(() => (clParam0('c', '') ? 'detail' : 'list'));   // ?c=<id> in the URL → open that detail (deep-link / refresh)
   const [custs, setCusts] = uSx(null);
@@ -3428,6 +3476,31 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   const reverseDispute = (dId) => { if (!window.confirm(trD('disp.reverseConfirm'))) return; window.API.distribusi.customers.reverseDispute(dId)
     .then(() => { flash(trD('disp.reversed')); if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); })
     .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail'))); };
+  // ── CORRECTION / VOID (approval-gated) — the SAME shared engine the Transaksi page uses. The buttons
+  // live in each expanded transaction row (below); on submit the row shows "Menunggu persetujuan" and
+  // the transaction is untouched until an approver decides it.
+  const refreshDetail = () => { if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); };
+  const corrFlow = useDistCorrection({ canPrice, flash: (m) => flash(m), onDone: refreshDetail });
+  // Inline approve / reject of a pending request, so an approver never leaves the customer page. Reject
+  // needs a reason (server-enforced too). The server also forbids approving your OWN request; we hide
+  // the approve button for it as well. A negative-balance approve re-confirms (server double-checks).
+  const [crRejFor, setCrRejFor] = uSx(null);        // { id } — the request being rejected
+  const [crRejNote, setCrRejNote] = uSx('');
+  const [crBusy, setCrBusy] = uSx(false);
+  const approveChangeReq = (pr, confirmNegative) => {
+    if (crBusy) return; setCrBusy(true);
+    window.API.distribusi.changeRequests.approve(pr.id, confirmNegative ? { confirmNegative: true } : {})
+      .then(() => { setCrBusy(false); flash(trD('cr.approved')); refreshDetail(); })
+      .catch((e) => { setCrBusy(false); const err = e && e.body && e.body.error;
+        if (err && err.details && err.details.needsNegativeConfirm) { if (window.confirm(trD('cr.negativeConfirm'))) approveChangeReq(pr, true); return; }
+        flash((err && err.message) || trD('common.loadFail')); });
+  };
+  const submitReject = () => {
+    if (!crRejFor || !crRejNote.trim() || crBusy) return; setCrBusy(true);
+    window.API.distribusi.changeRequests.reject(crRejFor.id, crRejNote.trim())
+      .then(() => { setCrBusy(false); setCrRejFor(null); setCrRejNote(''); flash(trD('cr.rejected')); refreshDetail(); })
+      .catch((e) => { setCrBusy(false); flash((e && e.body && e.body.error && e.body.error.message) || trD('common.loadFail')); });
+  };
   // ── Detailed filter (server-side, AND logic). EMPTY_FILTER is the "nothing selected"
   // baseline; `fTotal` is the denominator for "Menampilkan X dari Y".
   const [flt, setFlt] = uSx(EMPTY_FILTER);
@@ -3908,7 +3981,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
             <span className="cd-txn-bar" style={{ background: struck ? '#dc2626' : barOf(t) }} />
             <span className="cd-txn-date"><b>{fmtDateShort(t.txnDate)}</b><small>{hhmm(t.createdAt)}</small></span>
             <span className="cd-txn-code">{txnCode(t)}<CopyBtn text={txnCode(t)} label={trD('cd.colKode')} /></span>
-            <span className="cd-txn-type"><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span>{t.voided && <span className="dist-badge rev">{trD('dist.voided') || 'Batal'}</span>}{t.corrected && <span className="dist-badge corr"><IconPencil s={9} />{trD('dist.corrected')}</span>}{dm && <span className={'dist-badge ' + dm.cls}>{trD(dm.label)}</span>}</span>
+            <span className="cd-txn-type"><span className={'dist-status ' + (METHOD_META[t.method] ? METHOD_META[t.method].cls : '')}>{methodLabel(t.method)}</span>{t.voided && <span className="dist-badge rev">{trD('dist.voided') || 'Batal'}</span>}{t.corrected && <span className="dist-badge corr"><IconPencil s={9} />{trD('dist.corrected')}</span>}{!t.voided && t.pendingRequest && <span className="dist-badge pending"><IconClock s={9} />{trD('dist.pendingBadge')}</span>}{dm && <span className={'dist-badge ' + dm.cls}>{trD(dm.label)}</span>}</span>
             <span className="cd-txn-gal tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</span>
             <span className="cd-txn-price tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</span>
             <span className="cd-txn-amt tnum">{struck ? <><s className="cd-amt-struck">{rpFull(amt)}</s> <span className="cd-amt-ack">→ {trD('disp.ack')} {rpFull(dsp.customerClaimAmount || 0)}</span></> : rpFull(amt)}</span>
@@ -3945,9 +4018,32 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   ))}
                 </div>
               )}
+              {/* PENDING correction/void request — the full chain (pengaju · alasan · waktu) and, for an
+                  approver, inline Setujui / Tolak so they never leave the customer page. The requester's
+                  own request shows but is not actionable (the server also forbids self-approval). */}
+              {!t.voided && t.pendingRequest && (
+                <div className="cd-pending-box">
+                  <div className="cd-pending-head"><IconClock s={13} />{trD(t.pendingRequest.kind === 'void' ? 'cd.pendVoidTitle' : 'cd.pendCorrTitle')}</div>
+                  <div className="cd-pending-meta">{trD('cr.requestedBy', { who: t.pendingRequest.requestedByName || '—' })}{t.pendingRequest.createdAt ? ' · ' + fmtDT(t.pendingRequest.createdAt) : ''}</div>
+                  {t.pendingRequest.reason ? <div className="cd-pending-reason"><IconInvoice s={12} />{t.pendingRequest.reason}</div> : null}
+                  {canApprove && (
+                    (t.pendingRequest.requestedById && currentUserId && t.pendingRequest.requestedById === currentUserId)
+                      ? <div className="cd-pending-own">{trD('cd.pendOwn')}</div>
+                      : <div className="cd-pending-act">
+                          <button type="button" className="btn btn-ghost btn-sm danger" disabled={crBusy} onClick={() => { setCrRejFor({ id: t.pendingRequest.id }); setCrRejNote(''); }}><IconClose s={13} />{trD('cr.reject')}</button>
+                          <button type="button" className="btn btn-primary btn-sm" disabled={crBusy} onClick={() => approveChangeReq(t.pendingRequest)}><IconCheck s={13} />{trD('cr.approve')}</button>
+                        </div>
+                  )}
+                </div>
+              )}
               <div className="cd-txn-detail-act">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(t)}><IconInvoice s={13} />{trD('cd.copyDetail')}</button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrintFor({ mode: 'nota', txn: t })}><IconDownload s={13} />{trD('cd.printNota')}</button>
+                {/* CORRECTION / VOID request — capability-gated (hidden, not disabled). Hidden while a
+                    request is already pending, and never on a voided/archive row. Reuses the shared
+                    engine; the modal needs the customer name/code, so pass them along with the row. */}
+                {canKoreksi && !t.voided && !t.legacy && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm" onClick={() => corrFlow.openCorrect({ ...t, customer: { name: d.name, code: d.code } })}><IconPencil s={13} />{trD('cd.korekBtn')}</button>}
+                {canVoid && !t.voided && !t.legacy && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => corrFlow.openVoid({ ...t, customer: { name: d.name, code: d.code } })}><IconClose s={13} />{trD('cd.voidBtn')}</button>}
                 {/* Dispute action — capability-gated (hidden, not disabled). Only when the row isn't
                     already under an active dispute and isn't voided/pelunasan-loss. */}
                 {canBonAdjust && !t.voided && !hasActive && t.method !== 'pelunasan' && <button type="button" className="btn btn-ghost btn-sm cd-disp-btn" onClick={() => setDisputeFor({ txn: t })}><IconWarn s={13} />{trD('disp.markBtn')}</button>}
@@ -4080,6 +4176,15 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
           {/* ── TAB: TRANSAKSI ── */}
           {cdTab === 'transaksi' && (
             <div className="cd-tabpanel">
+              {/* Pending correction/void requests for this customer — a banner links approvers to the
+                  inbox; the per-row panels below carry the inline Setujui/Tolak. */}
+              {(() => { const nPend = txAll.filter((t) => t.pendingRequest && !t.voided).length; if (!nPend) return null;
+                return (
+                  <div className="cd-pending-banner no-print">
+                    <IconClock s={15} /><span>{trD('cd.pendBanner', { n: nPend })}</span>
+                    {canApprove && onGoApprovals && <button type="button" className="dist-link" onClick={() => onGoApprovals()}>{trD('cd.pendBannerLink')}</button>}
+                  </div>
+                ); })()}
               <div className="cd-toolbar no-print">
                 <div className="cd-search"><IconSearch s={14} /><input aria-label={trD('cd.search')} placeholder={trD('cd.search')} value={cdSearch} onChange={(e) => setCdSearch(e.target.value)} />{cdSearch && <button type="button" aria-label="clear" onClick={() => setCdSearch('')}><IconClose s={13} /></button>}</div>
                 <div className="cd-chiprow">{[['all', trD('dist.fAll')], ['30', trD('cd.per30')], ['month', trD('cd.perThisMonth')], ['lastMonth', trD('cd.perLastMonth')], ['year', trD('cd.perThisYear')], ['range', trD('cd.perCustom')]].map(([k, l]) => <button key={k} type="button" className={'dist-chip ' + (cdPeriod === k ? 'on' : '')} onClick={() => setCdPeriod(k)}>{l}</button>)}</div>
@@ -4200,6 +4305,22 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
         {obFor && <OpeningBonModal customer={obFor} onClose={() => setObFor(null)} onSaved={(res) => { setObFor(null); flash(trD('dist.obSaved', { amt: rpFull(res.amount) })); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {adjustFor && <AdjustModal customer={adjustFor.customer} kind={adjustFor.kind} onClose={() => setAdjustFor(null)} onSaved={() => { setAdjustFor(null); flash(trD('adj.submitted')); openDetail(d.id); reload(); if (onChanged) onChanged(); }} />}
         {disputeFor && d && <DisputeModal txn={disputeFor.txn} customer={d} onClose={() => setDisputeFor(null)} onSubmit={submitDispute} />}
+        {/* Shared correction/void request modals (same engine as the Transaksi page). */}
+        {corrFlow.modals}
+        {/* Inline reject of a pending request — reason required (server-enforced too). */}
+        {crRejFor && (
+          <div className="modal-scrim" onClick={() => setCrRejFor(null)} style={{ zIndex: 210 }}>
+            <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('cr.rejectT')}</div><button className="jp-icon" onClick={() => setCrRejFor(null)}><IconClose s={18} /></button></div>
+              <div className="modal-body">
+                <div className="dist-infobox"><IconWarn s={16} /><span>{trD('cr.rejectInfo')}</span></div>
+                <label className="fld-label">{trD('cr.rejectReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+                <textarea className="fld" style={{ height: 74, padding: 12, resize: 'vertical' }} value={crRejNote} placeholder={trD('cr.rejectReasonPh')} onChange={(e) => setCrRejNote(e.target.value)} />
+              </div>
+              <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setCrRejFor(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!crRejNote.trim() || crBusy} onClick={submitReject}>{crBusy ? '…' : trD('cr.reject')}</button></div>
+            </div>
+          </div>
+        )}
         {renderForm()}
         {typesModal()}
         {delFor && <DeleteCustomerModal customer={delFor} busy={delBusy} onDeactivate={doDeactivate} onDelete={doDeletePermanent} onClose={() => setDelFor(null)} />}

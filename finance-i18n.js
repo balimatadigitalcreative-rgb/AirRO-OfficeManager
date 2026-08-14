@@ -159,6 +159,7 @@
       // Approval-gated corrections/voids — the request submits, an approver applies it.
       'dist.korekApprovalInfo': 'Edit the input fields; the total recomputes. This SUBMITS a request — the transaction changes only after an approver approves it.',
       'dist.korekDelta': 'Difference', 'dist.korekSubmit': 'Submit for approval', 'dist.corrReqSent': 'Correction submitted — awaiting approval.', 'dist.korekSisaBon': 'Sisa bon',
+      'dist.korekServerCalc': 'The new total is recomputed by the system — you never type it.', 'dist.korekSisaBonImpact': 'Sisa Bon {code}:', 'dist.korekNegWarn': 'This change would push the sisa bon below zero — an approver must confirm.',
       'dist.korekPriceLocked': 'Price locked — only Master Price holders may change it',
       'dist.voidApprovalInfo': 'This SUBMITS a cancellation request — the transaction stays active until an approver approves it. Bon & gallons reverse only on approval.',
       'dist.voidSubmit': 'Submit for approval', 'dist.voidReqSent': 'Cancellation submitted — awaiting approval.',
@@ -365,6 +366,8 @@
       'cd.srcManual': 'Manual', 'cd.srcImpor': 'Archive import', 'cd.srcAdj': 'Adjustment',
       'cd.search': 'Search code / note / amount', 'cd.showArchive': 'Show archive', 'cd.per30': '30 days', 'cd.perThisMonth': 'This month', 'cd.perLastMonth': 'Last month', 'cd.perThisYear': 'This year', 'cd.perCustom': 'Custom',
       'cd.monthSub': '{g} gallons · {v} · bon {b}', 'cd.expandBy': 'Created by', 'cd.expandSrc': 'Source', 'cd.expandNote': 'Note', 'cd.expandEvidence': 'Evidence', 'cd.expandBatch': 'Import batch', 'cd.printNota': 'Print receipt', 'cd.copyDetail': 'Copy details', 'cd.copied': 'Details copied.',
+      'cd.korekBtn': 'Request correction', 'cd.voidBtn': 'Request void', 'cd.pendCorrTitle': 'Correction awaiting approval', 'cd.pendVoidTitle': 'Void awaiting approval', 'cd.pendOwn': 'Your own request — you cannot approve it.',
+      'cd.pendBanner': '{n} correction/void request(s) awaiting approval', 'cd.pendBannerLink': 'Open approval inbox',
       'cd.contact': 'Contact', 'cd.pengiriman': 'Delivery', 'cd.hargaTipe': 'Price & Type', 'cd.ringkasanCard': 'Summary', 'cd.custSince': 'Customer since', 'cd.lifetimeGalon': 'Lifetime gallons', 'cd.totalSpend': 'Total spend', 'cd.avgMonth': 'Avg / month', 'cd.hariKirim': 'Delivery days', 'cd.rute': 'Route order', 'cd.locNote': 'Location note',
       'cd.pendingBanner': '{n} adjustment(s) awaiting approval', 'cd.activityTitle': 'Activity log', 'cd.actCreated': 'Customer created', 'cd.actImport': 'Archive import · {n} rows', 'cd.actAdjust': 'Adjustment ({kind})', 'cd.actAdjustApproved': 'Adjustment approved', 'cd.actReverse': 'Adjustment reversed', 'cd.actPrice': 'Price change', 'cd.actVoid': 'Transaction voided', 'cd.gmOnly': 'Visible to GM/Owner only.',
       'dist.aktif': 'Active', 'dist.voided': 'Voided', 'dist.address': 'Address', 'dist.fType': 'Type',
@@ -916,6 +919,7 @@
       // Koreksi/pembatalan lewat persetujuan — pengajuan dikirim, penyetuju yang menerapkan.
       'dist.korekApprovalInfo': 'Ubah kolom input; total dihitung ulang. Ini MENGAJUKAN permintaan — transaksi baru berubah setelah disetujui penyetuju.',
       'dist.korekDelta': 'Selisih', 'dist.korekSubmit': 'Ajukan persetujuan', 'dist.corrReqSent': 'Koreksi diajukan — menunggu persetujuan.', 'dist.korekSisaBon': 'Sisa bon',
+      'dist.korekServerCalc': 'Nominal baru dihitung ulang oleh sistem — Anda tidak mengetiknya.', 'dist.korekSisaBonImpact': 'Sisa Bon {code}:', 'dist.korekNegWarn': 'Perubahan ini membuat sisa bon jadi negatif — perlu konfirmasi penyetuju.',
       'dist.korekPriceLocked': 'Harga terkunci — hanya pemegang akses Harga Master',
       'dist.voidApprovalInfo': 'Ini MENGAJUKAN permintaan pembatalan — transaksi tetap aktif sampai disetujui. Bon & galon dibalik hanya setelah disetujui.',
       'dist.voidSubmit': 'Ajukan persetujuan', 'dist.voidReqSent': 'Pembatalan diajukan — menunggu persetujuan.',
@@ -1122,6 +1126,8 @@
       'cd.srcManual': 'Manual', 'cd.srcImpor': 'Impor (Arsip)', 'cd.srcAdj': 'Penyesuaian',
       'cd.search': 'Cari kode / catatan / nominal', 'cd.showArchive': 'Tampilkan arsip', 'cd.per30': '30 hari', 'cd.perThisMonth': 'Bulan ini', 'cd.perLastMonth': 'Bulan lalu', 'cd.perThisYear': 'Tahun ini', 'cd.perCustom': 'Rentang kustom',
       'cd.monthSub': '{g} galon · {v} · bon {b}', 'cd.expandBy': 'Dibuat oleh', 'cd.expandSrc': 'Sumber', 'cd.expandNote': 'Catatan', 'cd.expandEvidence': 'Bukti', 'cd.expandBatch': 'Batch impor', 'cd.printNota': 'Cetak Nota', 'cd.copyDetail': 'Salin Rincian', 'cd.copied': 'Rincian disalin.',
+      'cd.korekBtn': 'Ajukan Koreksi', 'cd.voidBtn': 'Ajukan Pembatalan', 'cd.pendCorrTitle': 'Koreksi menunggu persetujuan', 'cd.pendVoidTitle': 'Pembatalan menunggu persetujuan', 'cd.pendOwn': 'Pengajuan Anda sendiri — tidak bisa Anda setujui.',
+      'cd.pendBanner': '{n} pengajuan koreksi/pembatalan menunggu persetujuan', 'cd.pendBannerLink': 'Buka inbox persetujuan',
       'cd.contact': 'Kontak', 'cd.pengiriman': 'Pengiriman', 'cd.hargaTipe': 'Harga & Tipe', 'cd.ringkasanCard': 'Ringkasan', 'cd.custSince': 'Pelanggan sejak', 'cd.lifetimeGalon': 'Total galon seumur hidup', 'cd.totalSpend': 'Total belanja', 'cd.avgMonth': 'Rata-rata / bulan', 'cd.hariKirim': 'Hari kirim', 'cd.rute': 'Urutan rute', 'cd.locNote': 'Catatan lokasi',
       'cd.pendingBanner': '{n} penyesuaian menunggu persetujuan', 'cd.activityTitle': 'Log aktivitas', 'cd.actCreated': 'Pelanggan dibuat', 'cd.actImport': 'Impor arsip · {n} baris', 'cd.actAdjust': 'Penyesuaian ({kind})', 'cd.actAdjustApproved': 'Penyesuaian disetujui', 'cd.actReverse': 'Penyesuaian dibatalkan', 'cd.actPrice': 'Perubahan harga', 'cd.actVoid': 'Transaksi dibatalkan', 'cd.gmOnly': 'Hanya untuk GM/Owner.',
       'dist.aktif': 'Aktif', 'dist.voided': 'Dibatalkan', 'dist.address': 'Alamat', 'dist.fType': 'Tipe',

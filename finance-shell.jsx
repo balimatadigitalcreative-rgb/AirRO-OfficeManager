@@ -1613,12 +1613,13 @@ function FApp() {
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
-            <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canDelete={!!p.distribusiCustomerDelete}
+            <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canApprove={!!p.distribusiApprove} currentUserId={user && user.id} canDelete={!!p.distribusiCustomerDelete}
               canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} canPenyesuaian={!!p.distribusiPenyesuaian} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               nav={distNavRef.current} histTick={histTick}
               onGoHarga={() => go('dist-prices', !p.distribusi)} onChanged={() => setDistTick((t) => t + 1)}
+              onGoApprovals={p.distribusiApprove ? () => go('approvals', false) : null}
               onOpenLoss={p.distribusiBonAdjust ? () => go('dist-loss-report', false) : null} />
           )}
           {screen === 'dist-deliveries' && p.distribusiPengiriman && (

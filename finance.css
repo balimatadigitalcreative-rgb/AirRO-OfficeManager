@@ -2776,6 +2776,25 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .dist-korek-methodline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 2px; font-size: 12.5px; }
 .dist-korek-methodflip { font-weight: 700; }
 .dist-korek-bonimpact { font-weight: 800; }
+/* System-computed recompute note + the server-computed sisa-bon impact line (dry-run preview). */
+.dist-korek-calcnote { font-size: 11px; color: var(--text-mut); margin: 2px 0 6px; font-style: italic; }
+.dist-korek-sisaline { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 4px 0 2px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2, #f6f8f9); border: 1px solid var(--border-soft); font-size: 13px; }
+.dist-korek-sisaline > span { font-size: 11px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; }
+.dist-korek-sisaline b { font-size: 14px; }
+
+/* Customer-detail: pending correction/void request panel inside an expanded row. */
+.cd-pending-box { margin: 4px 0 10px; padding: 10px 13px; border-radius: 11px; background: #fff4e5; border: 1px solid #f6d9a6; }
+:root[data-theme="dark"] .cd-pending-box { background: rgba(255,180,60,.12); border-color: rgba(255,180,60,.28); }
+.cd-pending-head { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 12.5px; color: #b26a00; }
+:root[data-theme="dark"] .cd-pending-head { color: #ffcf8a; }
+.cd-pending-meta { font-size: 12px; color: var(--text-mut); margin-top: 3px; }
+.cd-pending-reason { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; margin-top: 5px; }
+.cd-pending-act { display: flex; gap: 8px; margin-top: 9px; }
+.cd-pending-own { margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--text-mut); }
+/* Banner at the top of the Transaksi tab summarising pending requests for this customer. */
+.cd-pending-banner { display: flex; align-items: center; gap: 9px; padding: 10px 14px; margin-bottom: 12px; border-radius: 11px; background: #fff4e5; border: 1px solid #f6d9a6; font-size: 13px; font-weight: 700; color: #b26a00; }
+:root[data-theme="dark"] .cd-pending-banner { background: rgba(255,180,60,.12); border-color: rgba(255,180,60,.28); color: #ffcf8a; }
+.cd-pending-banner .dist-link { margin-left: auto; }
 .cr-method { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 11px; border-radius: 9px; background: var(--surface-2, #f6f8f9); font-size: 12.5px; }
 .cr-method.warn { background: var(--warn-bg, #fff7ed); border: 1px solid var(--warn, #e59a4a); }
 .cr-method-flip { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; }
