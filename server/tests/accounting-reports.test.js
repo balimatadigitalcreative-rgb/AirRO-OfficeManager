@@ -42,9 +42,23 @@ describe('Umur Piutang (AR aging)', () => {
     expect(a.total).toBe(list.reduce((s, x) => s + (x.sisaBon || 0), 0));
   });
 
-  it('is served (flag on) and gated (flag off) at /api/v1/accounting/aging', async () => {
-    const off = await request(app).get('/api/v1/accounting/aging').set(auth(owner));
-    expect(off.status).toBe(404);   // ACCOUNTING_V2 defaults off → router 404s
+  it('is gated (flag OFF → 404) and served (flag ON → 200) at /api/v1/accounting/aging', async () => {
+    // Declare BOTH preconditions in the test body — don't rely on an ambient env default. The router
+    // reads config.accountingV2 per request, so flipping it exercises both doors deterministically.
+    const config = require('../src/config/env');
+    const original = config.accountingV2;
+    try {
+      config.accountingV2 = false;
+      const off = await request(app).get('/api/v1/accounting/aging').set(auth(owner));
+      expect(off.status).toBe(404);   // flag OFF → the whole accounting router 404s
+
+      config.accountingV2 = true;
+      const on = await request(app).get('/api/v1/accounting/aging').set(auth(owner));
+      expect(on.status).toBe(200);    // flag ON → served to an authorised (reports cap) user
+      expect(on.body.data.total).toBe(280000);
+    } finally {
+      config.accountingV2 = original;
+    }
   });
 });
 

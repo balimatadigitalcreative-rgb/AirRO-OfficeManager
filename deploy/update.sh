@@ -59,10 +59,11 @@ bad()  { log "   ❌ $*"; }
 info() { log "   ·  $*"; }
 
 # State tracked for the summary + rollback.
-SHA_BEFORE=""; SHA_AFTER=""; BACKUP_FILE=""; COUNTS_BEFORE=""; COUNTS_AFTER=""
+SHA_BEFORE=""; SHA_AFTER=""; TARGET_SHA=""; BACKUP_FILE=""; COUNTS_BEFORE=""; COUNTS_AFTER=""
 MIGRATIONS_APPLIED="no"; TESTS="skipped"; ROLLED_BACK="no"; DB_RESTORED="no"
 HEALTH_CODE="000"; READY_CODE="000"; READY_BODY=""; FAIL_REASON=""
 PUBLIC_HTTPS="not checked"; LISTEN_443="?"; CERT_DAYS="?"
+TEST_WT=""   # path to the throwaway test worktree (GATE 3), cleaned up on exit
 
 log ""
 log "════════════════════════════════════════════════════════════════════"
@@ -163,13 +164,43 @@ rollback() {
   else bad "ROLLBACK HEALTH CHECK FAILED (health=$HEALTH_CODE) — MANUAL INTERVENTION NEEDED"; fi
 }
 
+# PRE-RELOAD restore. If a gate fails AFTER the live working tree was advanced to the new commit
+# (only GATE 4 build / GATE 5 migrate can — GATE 3 advances the tree only once tests pass) but BEFORE
+# the GATE 6 pm2 reload, the on-disk source is new while the running pm2 process is still the old code:
+# the exact HALF-UPDATED state that made a failed deploy worse than either endpoint. This puts the tree
+# back on SHA_BEFORE and rebuilds, so disk matches the still-running old process, then proves health.
+# Idempotent: a no-op when the tree was never advanced (every abort before GATE 3's reset).
+restore_tree() {
+  [ -n "$SHA_BEFORE" ] || return 0
+  local now; now="$(git rev-parse HEAD 2>/dev/null)"
+  [ "$now" = "$SHA_BEFORE" ] && return 0     # tree never advanced — nothing to undo
+  log ""
+  log "↩︎  RESTORING working tree ${now:0:8} → ${SHA_BEFORE:0:8} (a gate failed after the tree advanced)"
+  ROLLED_BACK="yes"
+  if git reset --hard "$SHA_BEFORE" >>"$LOG" 2>&1; then ok "code restored to ${SHA_BEFORE:0:8}"
+  else bad "git reset to ${SHA_BEFORE:0:8} FAILED — MANUAL FIX NEEDED: git reset --hard ${SHA_BEFORE:0:8} && npm run build"; return 1; fi
+  SHA_AFTER="$SHA_BEFORE"     # report honestly: the server is left on the previous commit
+  ( cd server && npm ci ) >>"$LOG" 2>&1 || info "npm ci during restore failed — keeping existing node_modules"
+  ( cd server && unset DATABASE_URL && npx prisma generate ) >>"$LOG" 2>&1 || info "prisma generate during restore failed"
+  npm install --no-audit --no-fund >>"$LOG" 2>&1 || info "root npm install during restore failed"
+  if npm run build >>"$LOG" 2>&1; then ok "frontend rebuilt at ${SHA_BEFORE:0:8}"
+  else bad "rebuild during restore FAILED — dist/ may be stale; run: npm run build"; fi
+  # The pm2 process was never reloaded (GATE 6 not reached), so it is still serving the old code; after
+  # the reset the on-disk code matches it again. Prove the app is actually up before we report FAIL, so
+  # a restore that somehow left it broken is never silent.
+  if wait_health; then ok "health 200 after restore — production is on ${SHA_BEFORE:0:8} and serving"
+  else bad "HEALTH $HEALTH_CODE AFTER RESTORE — MANUAL INTERVENTION NEEDED (pm2 logs $PM2_APP --lines 40)"; fi
+}
+
 # Print the summary + exit. $1 = PASS|FAIL
 finish() {
   local verdict="$1"
+  local ACTUAL; ACTUAL="$(git rev-parse HEAD 2>/dev/null || echo '')"
   log ""
   log "──────────────────────── DEPLOY $verdict ────────────────────────"
   log "  commit before : ${SHA_BEFORE:0:8}"
   log "  commit after  : ${SHA_AFTER:0:8}${SHA_AFTER:+ }$([ "$ROLLED_BACK" = yes ] && echo '(rolled back)')"
+  log "  on-disk HEAD  : ${ACTUAL:0:8}   (what the server is ACTUALLY left on)"
   log "  tests         : $TESTS"
   log "  migrations    : $MIGRATIONS_APPLIED"
   log "  health (local): $HEALTH_CODE"
@@ -182,6 +213,14 @@ finish() {
   log "  rollback      : $ROLLED_BACK   db restored: $DB_RESTORED"
   log "  backup        : ${BACKUP_FILE:-none}"
   [ -n "$FAIL_REASON" ] && log "  reason        : $FAIL_REASON"
+  # HONESTY GUARD — a FAILED deploy must leave the tree exactly where it started. If the on-disk HEAD
+  # is anything other than SHA_BEFORE, the box is HALF-UPDATED (new source, stale build / unapplied
+  # migrations): shout, with the exact hand-fix. This is the state the whole rewrite exists to prevent.
+  if [ "$verdict" = "FAIL" ] && [ -n "$SHA_BEFORE" ] && [ -n "$ACTUAL" ] && [ "$ACTUAL" != "$SHA_BEFORE" ]; then
+    log ""
+    log "  ⚠️  HALF-UPDATED STATE: the tree is on ${ACTUAL:0:8} but the deploy FAILED — it should be on"
+    log "      ${SHA_BEFORE:0:8}. Restore it NOW:  git reset --hard ${SHA_BEFORE:0:8} && npm run build && pm2 reload $PM2_APP"
+  fi
   log "─────────────────────────────────────────────────────────────────"
   if [ "$verdict" = "PASS" ]; then
     log "✅ Deploy OK — https://airrooffice.com is running ${SHA_AFTER:0:8}"
@@ -191,7 +230,19 @@ finish() {
   exit 1
 }
 
-abort() { FAIL_REASON="$1"; bad "$1"; finish "FAIL"; }
+# On abort, first put the working tree back if a gate advanced it (GATE 4/5) — production is never
+# left half-updated — then print an honest summary and exit non-zero.
+abort() { FAIL_REASON="$1"; bad "$1"; restore_tree; finish "FAIL"; }
+
+# Clean up the throwaway test worktree on ANY exit (normal, abort, or Ctrl-C), so a stale linked
+# worktree never accumulates under the temp dir or in `git worktree list`.
+cleanup() {
+  if [ -n "${TEST_WT:-}" ] && [ -d "$TEST_WT" ]; then
+    git worktree remove --force "$TEST_WT" >/dev/null 2>&1 || rm -rf "$TEST_WT"
+  fi
+  git worktree prune >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. PRE-FLIGHT — nothing is touched until all of this passes
@@ -279,34 +330,48 @@ fi
 ok "backup: $(basename "$BACKUP_FILE")$([ "$SKIP_OFFSITE" = 1 ] && echo ' (offsite SKIPPED)' || echo ' (local + offsite)')"
 
 log ""
-log "▸ GATE 2/6  Pull latest code"
+log "▸ GATE 2/6  Fetch latest code  (the live working tree is NOT touched here)"
+# Fetch only — no reset. The live tree stays on SHA_BEFORE until the tests (GATE 3) pass, so a failing
+# test can never leave production on new source. This is the fix for the half-updated-deploy incident.
 git fetch origin >>"$LOG" 2>&1 || abort "git fetch failed"
-git reset --hard origin/master >>"$LOG" 2>&1 || abort "git reset --hard origin/master failed"
-SHA_AFTER="$(git rev-parse HEAD)"
-if [ "$SHA_AFTER" = "$SHA_BEFORE" ]; then ok "already at ${SHA_AFTER:0:8} (no new commits)"
-else ok "${SHA_BEFORE:0:8} → ${SHA_AFTER:0:8}"; fi
+TARGET_SHA="$(git rev-parse origin/master 2>/dev/null)"
+[ -n "$TARGET_SHA" ] || abort "cannot resolve origin/master after fetch"
+if [ "$TARGET_SHA" = "$SHA_BEFORE" ]; then ok "already at ${TARGET_SHA:0:8} (no new commits) — will re-verify + rebuild"
+else ok "target: ${SHA_BEFORE:0:8} → ${TARGET_SHA:0:8}  (fetched, NOT yet applied to the live tree)"; fi
 
 log ""
-log "▸ GATE 3/6  Install dependencies + run tests"
-# NOTE: full install (NOT --omit=dev) on purpose — jest/supertest/prisma-CLI are
-# devDependencies, so the test gate and `prisma migrate deploy` need them present.
-( cd server && npm ci ) >>"$LOG" 2>&1 || abort "npm ci failed (see deploy/deploy.log)"
-ok "server dependencies installed"
+log "▸ GATE 3/6  Test the FETCHED code in an ISOLATED worktree, THEN advance the live tree"
+# THE ORDERING THAT MATTERS: the target commit is tested inside a throwaway `git worktree`, and the
+# LIVE tree is advanced (git reset --hard) ONLY after the tests pass. A failed test therefore leaves
+# production exactly where it started — the half-updated state (new source + stale build + unapplied
+# migrations) is now structurally impossible.
 if [ "$SKIP_TESTS" = "1" ]; then
   TESTS="SKIPPED (--skip-tests)"
   log "   ⚠️  test gate SKIPPED by flag — you are deploying unverified code"
 else
-  # `npm test` pins NODE_ENV=test + DATABASE_URL=file:./test.db, so the suite can
-  # never touch prod.db. Unset any stray DATABASE_URL first so nothing leaks in.
-  TEST_OUT="$( cd server && unset DATABASE_URL && npm test 2>&1 )"; TEST_RC=$?
+  TEST_WT="$(mktemp -d "${TMPDIR:-/tmp}/airro-deploytest.XXXXXX")" || abort "cannot create a temp dir for the test worktree"
+  git worktree add --detach "$TEST_WT" "$TARGET_SHA" >>"$LOG" 2>&1 || abort "git worktree add for the test checkout failed"
+  ok "isolated test checkout at ${TARGET_SHA:0:8} (temp worktree — prod tree untouched)"
+  # Full install (incl. devDeps: jest/supertest/prisma-CLI) + the suite, entirely inside the temp
+  # checkout. `npm test` pins NODE_ENV=test + DATABASE_URL=file:./test.db (its OWN test.db in the
+  # worktree) — prod.db and the live node_modules are never touched. Unset any stray DATABASE_URL too.
+  TEST_OUT="$( cd "$TEST_WT/server" && unset DATABASE_URL && npm ci >>"$LOG" 2>&1 && npm test 2>&1 )"; TEST_RC=$?
   echo "$TEST_OUT" >> "$LOG"
+  git worktree remove --force "$TEST_WT" >>"$LOG" 2>&1 && TEST_WT="" || rm -rf "$TEST_WT"
   if [ "$TEST_RC" -ne 0 ]; then
     echo "$TEST_OUT" | grep -E '✕|●|Tests:|Suites:|FAIL' | head -20 | sed 's/^/        /' | tee -a "$LOG"
-    abort "tests FAILED — deploy aborted, production untouched"
+    abort "tests FAILED on ${TARGET_SHA:0:8} — deploy aborted, production untouched (still on ${SHA_BEFORE:0:8})"
   fi
   TESTS="$(echo "$TEST_OUT" | grep -E '^Tests:' | head -1 | sed 's/Tests:[[:space:]]*//')"
-  ok "tests passed: ${TESTS:-all}"
+  ok "tests passed on ${TARGET_SHA:0:8}: ${TESTS:-all}"
 fi
+
+# Tests are green (or skipped) → NOW it is safe to advance the LIVE working tree to the target.
+git reset --hard "$TARGET_SHA" >>"$LOG" 2>&1 || abort "git reset --hard to ${TARGET_SHA:0:8} failed"
+SHA_AFTER="$(git rev-parse HEAD)"
+( cd server && npm ci ) >>"$LOG" 2>&1 || abort "npm ci on the live tree failed (see deploy/deploy.log)"
+if [ "$SHA_AFTER" = "$SHA_BEFORE" ]; then ok "re-verified ${SHA_AFTER:0:8} + server deps installed"
+else ok "live tree advanced ${SHA_BEFORE:0:8} → ${SHA_AFTER:0:8} + server deps installed"; fi
 
 log ""
 log "▸ GATE 4/6  Build frontend bundle"

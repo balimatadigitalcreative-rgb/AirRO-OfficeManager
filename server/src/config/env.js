@@ -1,8 +1,13 @@
 'use strict';
-// override:true makes .env authoritative over any stray/inherited environment
-// variables (e.g. a leftover DATABASE_URL from another setup). Skipped under
-// test so the test runner's explicit DATABASE_URL/NODE_ENV still win.
-require('dotenv').config({ override: process.env.NODE_ENV !== 'test' });
+// SINGLE RULE for how .env is loaded: outside test it is authoritative (override:true beats any
+// stray/inherited variable, e.g. a leftover DATABASE_URL); under NODE_ENV=test it is NOT loaded AT
+// ALL. The old `override:false` still LOADED keys that were merely absent from process.env, so a
+// production flag in .env (e.g. ACCOUNTING_V2=true on the deploy box) leaked into every test run and
+// tests ended up asserting an ambient default that isn't the code's real default. Under test the only
+// environment is what the runner + tests/jest.setup.js set explicitly — the suite is hermetic.
+if (process.env.NODE_ENV !== 'test') {
+  require('dotenv').config({ override: true });
+}
 
 function required(name, fallback) {
   const v = process.env[name] ?? fallback;
