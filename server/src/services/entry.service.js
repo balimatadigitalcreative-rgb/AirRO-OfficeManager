@@ -1,6 +1,8 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const config = require('../config/env');            // ACCOUNTING v2 flag — live journal posting
+const acc = require('./accounting.service');        // the double-entry posting service
 const distribution = require('./distribution.service');   // gallon-purchase movement sync (intentional cash-flow ↔ distribusi link)
 const businessUnit = require('./businessUnit.service');   // Stage 3: unit label on each entry (default "Air")
 const period = require('./period.service');   // ACCOUNTING v2: reject edits in a closed period (flag-gated)
@@ -90,7 +92,13 @@ async function create(data, actor) {
   // unspecified unit lands in their first allowed unit instead of the "Air" default.
   const businessUnitId = writableUnitFor(actor, data.businessUnitId, await businessUnit.resolveUnitId(data.businessUnitId));
   await businessUnit.assertModuleEnabledForUser(actor, businessUnitId, 'finance');   // module toggle (full-access users bypass)
-  const entry = await prisma.entry.create({ data: { ...data, businessUnitId, ...snap } });
+  // LIVE POSTING: the cash-book entry AND its double-entry journal are written in ONE transaction, so
+  // a source can never exist without its journal and a failure rolls back both (flag-gated).
+  const entry = await prisma.$transaction(async (tx) => {
+    const e = await tx.entry.create({ data: { ...data, businessUnitId, ...snap } });
+    if (config.accountingV2) await acc.postEntry(e, actor, tx);
+    return e;
+  });
   // A "Pembelian Galon" expense mirrors into the gallon ledger (purchase movement).
   if (entry.type === 'expense' && +entry.gallonQty > 0) await distribution.syncPurchaseMovement(entry.id, entry.gallonQty, actor);
   return shapeCreator(entry);
@@ -116,7 +124,13 @@ async function update(id, data, actor) {
   // Module toggle: no finance write to a unit where finance is off (the target unit — the new one if
   // the edit moves it, else the entry's current unit).
   await businessUnit.assertModuleEnabledForUser(actor, safe.businessUnitId !== undefined ? safe.businessUnitId : cur.businessUnitId, 'finance');
-  const entry = await prisma.entry.update({ where: { id }, data: safe });
+  // An edited entry re-projects its journal in the SAME transaction. A cash-book entry is a directly
+  // MUTABLE record (unlike an immutable dist txn), so its journal is replaced in place to stay in sync.
+  const entry = await prisma.$transaction(async (tx) => {
+    const e = await tx.entry.update({ where: { id }, data: safe });
+    if (config.accountingV2) { await acc.deleteJournal('entry', e.id, tx); await acc.postEntry(e, actor, tx); }
+    return e;
+  });
   // Re-sync the gallon purchase movement (replace-on-change) so an edit never leaves
   // stock out of step; a non-gallon or income entry clears any prior movement.
   await distribution.syncPurchaseMovement(entry.id, (entry.type === 'expense' ? entry.gallonQty : 0), actor || { id: entry.createdById });
@@ -128,12 +142,18 @@ async function remove(id) {
   await period.assertPeriodOpen(cur.date, 'menghapus transaksi');   // can't delete an entry in a closed period
   await distribution.retractPurchaseMovement(id);   // pull back any gallon stock this entry added
   // Deleting one leg of an inter-unit transfer deletes BOTH (atomic), so a leg is never orphaned
-  // — whether removed here or via the dedicated void endpoint.
-  if (cur.interUnit && cur.transferGroupId) {
-    await prisma.entry.deleteMany({ where: { transferGroupId: cur.transferGroupId, interUnit: true } });
-  } else {
-    await prisma.entry.delete({ where: { id } });
-  }
+  // — whether removed here or via the dedicated void endpoint. The journal(s) go with them, in the
+  // same transaction, so a deleted source can never leave an orphan journal behind.
+  await prisma.$transaction(async (tx) => {
+    if (cur.interUnit && cur.transferGroupId) {
+      const legs = await tx.entry.findMany({ where: { transferGroupId: cur.transferGroupId, interUnit: true }, select: { id: true } });
+      if (config.accountingV2) for (const l of legs) await acc.deleteJournal('entry', l.id, tx);
+      await tx.entry.deleteMany({ where: { transferGroupId: cur.transferGroupId, interUnit: true } });
+    } else {
+      if (config.accountingV2) await acc.deleteJournal('entry', id, tx);
+      await tx.entry.delete({ where: { id } });
+    }
+  });
 }
 
 module.exports = { list, getById, create, update, remove };

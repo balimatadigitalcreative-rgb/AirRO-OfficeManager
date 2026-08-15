@@ -65,63 +65,95 @@ const categoryToCode = (cat, type) => (CAT_MAP[type] && CAT_MAP[type][cat]) || n
 const acctCode = (acct) => (/^(cash|tunai|kas)$/i.test(String(acct || '')) ? KAS : BANK);
 const n = (v) => Math.round(Number(v) || 0);
 
-async function seedChart() {
+async function seedChart(db = prisma) {
   for (let i = 0; i < CHART.length; i++) {
     const [code, name, type, parent, subtype] = CHART[i];
-    const existing = await prisma.chartAccount.findUnique({ where: { code } });
-    if (!existing) await prisma.chartAccount.create({ data: { code, name, type, subtype: subtype || '', sortOrder: i, businessUnitId: null } });
-    else if ((existing.subtype || '') !== (subtype || '')) await prisma.chartAccount.update({ where: { code }, data: { subtype: subtype || '' } });   // backfill subtype on rows seeded before cash-flow
+    const existing = await db.chartAccount.findUnique({ where: { code } });
+    if (!existing) await db.chartAccount.create({ data: { code, name, type, subtype: subtype || '', sortOrder: i, businessUnitId: null } });
+    else if ((existing.subtype || '') !== (subtype || '')) await db.chartAccount.update({ where: { code }, data: { subtype: subtype || '' } });   // backfill subtype on rows seeded before cash-flow
   }
   // fill parentId now that all rows exist (kept loose to avoid seeding-order FK issues)
-  const rows = await prisma.chartAccount.findMany({ select: { id: true, code: true } });
+  const rows = await db.chartAccount.findMany({ select: { id: true, code: true } });
   const byCode = {}; rows.forEach((r) => { byCode[r.code] = r.id; });
-  for (const [code, , , parent] of CHART) { if (parent && byCode[parent]) await prisma.chartAccount.update({ where: { code }, data: { parentId: byCode[parent] } }); }
+  for (const [code, , , parent] of CHART) { if (parent && byCode[parent]) await db.chartAccount.update({ where: { code }, data: { parentId: byCode[parent] } }); }
   return byCode;
 }
-async function chartMap() { const rows = await prisma.chartAccount.findMany({ select: { id: true, code: true } }); const m = {}; rows.forEach((r) => { m[r.code] = r.id; }); return m; }
-// Remove a projected journal (used when a source no longer produces one — e.g. a customer's
-// overpayment reclass that is no longer needed after further collection/backfill).
-async function deleteJournal(sourceType, sourceId) {
-  const existing = await prisma.journalEntry.findFirst({ where: { sourceType, sourceId: sourceId || null } });
-  if (existing) await prisma.journalEntry.delete({ where: { id: existing.id } });
+async function chartMap(db = prisma) { const rows = await db.chartAccount.findMany({ select: { id: true, code: true } }); const m = {}; rows.forEach((r) => { m[r.code] = r.id; }); return m; }
+// Remove a projected journal (used only where a projection is genuinely MUTABLE — the per-customer
+// overpayment reclass, whose figure changes as the balance moves. Immutable source journals are never
+// deleted; corrections/voids append a reversing entry instead — see reconcileDistTxn / reverseJournal).
+async function deleteJournal(sourceType, sourceId, db = prisma) {
+  const existing = await db.journalEntry.findFirst({ where: { sourceType, sourceId: sourceId || null } });
+  if (existing) await db.journalEntry.delete({ where: { id: existing.id } });
 }
 
 // The single balanced-journal writer. `lines` = [{ code, debit?, credit?, businessUnitId?, fleetId? }].
-// Idempotent per (sourceType, sourceId): re-posting replaces the previous journal, never duplicates.
-async function postJournal({ sourceType, sourceId, date, ref, description, actor, businessUnitId, lines }) {
+// `db` is the prisma client OR a caller's interactive-transaction client, so a journal can be written
+// in the SAME transaction as its source record (LIVE posting) — a source can never exist without its
+// journal, and a rollback drops both. Defaults to the module client for standalone use (backfill).
+//
+// IDEMPOTENCY: a source posts EXACTLY ONCE. If a journal for (sourceType, sourceId) already exists we
+// return it unchanged — so re-running backfill never duplicates, and a repeated live post is a no-op
+// (belt-and-suspenders behind the @@unique([sourceType, sourceId]) constraint). Immutable by default;
+// pass `replace:true` ONLY for a genuinely mutable projection (the AR reclass) to overwrite in place.
+async function postJournal({ sourceType, sourceId, date, ref, description, actor, businessUnitId, reversalOf, lines, replace }, db = prisma) {
   const debit = lines.reduce((a, l) => a + n(l.debit), 0);
   const credit = lines.reduce((a, l) => a + n(l.credit), 0);
-  if (debit !== credit) throw new Error(`Journal not balanced (${sourceType}:${sourceId}): debit ${debit} != credit ${credit}`);   // HARD INVARIANT
-  const cm = await chartMap();
+  if (debit !== credit) throw new Error(`Journal not balanced (${sourceType}:${sourceId}): debit ${debit} != credit ${credit}`);   // HARD INVARIANT — fail the write, never warn
+  let cm = await chartMap(db);
+  // SELF-HEAL: the chart of accounts is reference data usually seeded at boot, but if a live post runs
+  // before that (flag flipped without a restart, a fresh test), seed it in THIS transaction so posting
+  // never fails for a missing account. Idempotent; only ever does real work once.
+  if (lines.some((l) => !cm[l.code])) { await seedChart(db); cm = await chartMap(db); }
   for (const l of lines) if (!cm[l.code]) throw new Error(`Unknown account code ${l.code} (${sourceType}:${sourceId})`);
-  const existing = await prisma.journalEntry.findFirst({ where: { sourceType, sourceId: sourceId || null } });
-  if (existing) await prisma.journalEntry.delete({ where: { id: existing.id } });
-  return prisma.journalEntry.create({ data: {
-    sourceType, sourceId: sourceId || null, date, ref: ref || '', description: (description || '').slice(0, 500),
+  if (sourceId != null) {
+    const existing = await db.journalEntry.findFirst({ where: { sourceType, sourceId }, select: { id: true } });
+    // Already posted → do nothing and return null (NOT the existing entry), so callers that count
+    // "newly posted" (backfill) see a true no-op on a re-run. `replace` overwrites (the mutable reclass).
+    if (existing) { if (!replace) return null; await db.journalEntry.delete({ where: { id: existing.id } }); }
+  }
+  return db.journalEntry.create({ data: {
+    sourceType, sourceId: sourceId || null, date, ref: ref || '', description: (description || '').slice(0, 500), reversalOf: reversalOf || null,
     postedById: (actor && actor.id) || null, postedByName: (actor && actor.name) || null,
     lines: { create: lines.filter((l) => n(l.debit) || n(l.credit)).map((l) => ({ chartAccountId: cm[l.code], debit: BigInt(n(l.debit)), credit: BigInt(n(l.credit)), businessUnitId: l.businessUnitId || businessUnitId || null, fleetId: l.fleetId || '' })) },
   } });
 }
 
-// ── Per-source posters — each PROJECTS one source record into a balanced journal. ──
-async function postEntry(e, actor) {
+// Append a REVERSING entry for an existing source's journal — swap each line's debit/credit, link via
+// reversalOf, never touch the original. Balanced by construction (the swap of a balanced entry is
+// balanced). Idempotent on (reversalSourceType, reversalSourceId). Used for a plain full reversal.
+async function reverseJournal({ sourceType, sourceId, reversalSourceType, reversalSourceId, date, description, actor }, db = prisma) {
+  const orig = await db.journalEntry.findFirst({ where: { sourceType, sourceId }, include: { lines: true } });
+  if (!orig) return null;
+  const already = await db.journalEntry.findFirst({ where: { sourceType: reversalSourceType, sourceId: reversalSourceId }, select: { id: true } });
+  if (already) return already;
+  return db.journalEntry.create({ data: {
+    sourceType: reversalSourceType, sourceId: reversalSourceId, date, ref: orig.ref || '', description: (description || '').slice(0, 500), reversalOf: orig.id,
+    postedById: (actor && actor.id) || null, postedByName: (actor && actor.name) || null,
+    lines: { create: orig.lines.map((l) => ({ chartAccountId: l.chartAccountId, debit: l.credit, credit: l.debit, businessUnitId: l.businessUnitId || null, fleetId: l.fleetId || '' })) },
+  } });
+}
+
+// ── Per-source posters — each PROJECTS one source record into a balanced journal. All take an
+// optional `db` (the caller's transaction client) so the journal posts in the SAME transaction. ──
+async function postEntry(e, actor, db = prisma) {
   const amt = n(e.amount); if (!amt) return null;
   const cash = acctCode(e.acct); const bu = e.businessUnitId || null;
   let lines;
   if (e.type === 'income') lines = [{ code: cash, debit: amt }, { code: categoryToCode(e.category, 'income') || REV_OTHER, credit: amt }];
   else if (e.gallonQty > 0 || /pembelian\s*galon/i.test(e.note || '')) lines = [{ code: PERSEDIAAN, debit: amt }, { code: cash, credit: amt }];   // gallon purchase → INVENTORY, not expense
   else lines = [{ code: categoryToCode(e.category, 'expense') || EXP_OTHER, debit: amt }, { code: cash, credit: amt }];
-  return postJournal({ sourceType: 'entry', sourceId: e.id, date: e.date, description: e.note, actor, businessUnitId: bu, lines });
+  return postJournal({ sourceType: 'entry', sourceId: e.id, date: e.date, description: e.note, actor, businessUnitId: bu, lines }, db);
 }
-async function postTransfer(t, actor) {
+async function postTransfer(t, actor, db = prisma) {
   const amt = n(t.amount); if (!amt) return null;
-  const [from, to] = await Promise.all([prisma.account.findUnique({ where: { id: t.fromId } }), prisma.account.findUnique({ where: { id: t.toId } })]);
+  const [from, to] = await Promise.all([db.account.findUnique({ where: { id: t.fromId } }), db.account.findUnique({ where: { id: t.toId } })]);
   const code = (a) => (a && a.type === 'cash' ? KAS : BANK);
-  return postJournal({ sourceType: 'transfer', sourceId: t.id, date: t.date, description: t.note || 'Transfer', actor, lines: [{ code: code(to), debit: amt }, { code: code(from), credit: amt }] });
+  return postJournal({ sourceType: 'transfer', sourceId: t.id, date: t.date, description: t.note || 'Transfer', actor, lines: [{ code: code(to), debit: amt }, { code: code(from), credit: amt }] }, db);
 }
-async function postDistExpense(x, actor) {
+async function postDistExpense(x, actor, db = prisma) {
   const amt = n(x.amount); if (!amt) return null;
-  return postJournal({ sourceType: 'dist_expense', sourceId: x.id, date: x.date, description: 'Pengeluaran lapangan', actor, lines: [{ code: DIST_EXP_MAP[x.category] || EXP_OTHER, debit: amt, fleetId: x.fleetId || '' }, { code: KAS, credit: amt, fleetId: x.fleetId || '' }] });
+  return postJournal({ sourceType: 'dist_expense', sourceId: x.id, date: x.date, description: 'Pengeluaran lapangan', actor, lines: [{ code: DIST_EXP_MAP[x.category] || EXP_OTHER, debit: amt, fleetId: x.fleetId || '' }, { code: KAS, credit: amt, fleetId: x.fleetId || '' }] }, db);
 }
 // Distribution transaction → receivables, posting the EFFECTIVE figure so the Piutang balance equals
 // Sisa Bon exactly (Part 3 receivables integration):
@@ -132,53 +164,83 @@ async function postDistExpense(x, actor) {
 //                 a `kerugian` dispute is a company loss (Dr Beban Kerugian Piutang), revenue stays.
 //                 Disputes are capped at the sale so the per-row receivable never goes below 0 — the
 //                 exact per-bon floor customerBonBalance applies (max(0, amount + priceδ − dd)).
-async function postDistTransaction(t, actor) {
+// The lines a distribution transaction PROJECTS to at its CURRENT effective figure (or [] when it
+// nets to nothing — e.g. a void, or a fully-disputed bon). Pure projection; no writes.
+//   • lunas     → Dr Kas / Cr Pendapatan (cash sale, no receivable)
+//   • pelunasan → Dr Kas / Cr Piutang (collection)
+//   • bon       → Dr Piutang(effective) / Cr Pendapatan, effective = amount + Σ price-corrections
+//                 − capped disputes; a `kerugian` dispute is a company loss (Dr Beban Kerugian Piutang),
+//                 a `tidak_diakui` reverses revenue. Capped at the sale (per-bon floor at 0).
+async function distTxnLines(t, db = prisma) {
+  if (t.status === 'void') return [];
   const f = t.fleetId || '';
-  const base = { sourceType: 'dist_txn', sourceId: t.id, date: t.txnDate, description: `Distribusi ${t.method}`, actor, businessUnitId: t.businessUnitId || null };
-  if (t.method === 'pelunasan') {
-    const amt = n(t.amount); if (!amt) return null;
-    return postJournal({ ...base, lines: [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }] });
-  }
-  if (t.method !== 'bon') {   // lunas — cash sale
-    const amt = n(t.amount); if (!amt) return null;
-    return postJournal({ ...base, lines: [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }] });
-  }
-  // bon — receivable at the effective figure
-  const corrs = t.corrections || await prisma.correction.findMany({ where: { transactionId: t.id, kind: 'price', active: true }, select: { deltaAmount: true, kind: true, active: true } });
+  if (t.method === 'pelunasan') { const amt = n(t.amount); return amt ? [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }] : []; }
+  if (t.method !== 'bon') { const amt = n(t.amount); return amt ? [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }] : []; }
+  const corrs = t.corrections || await db.correction.findMany({ where: { transactionId: t.id, kind: 'price', active: true }, select: { deltaAmount: true, kind: true, active: true } });
   const pdelta = (corrs || []).filter((c) => c.kind === 'price' && c.active).reduce((a, c) => a + Number(c.deltaAmount || 0), 0);
-  const disputes = await prisma.distTransactionDispute.findMany({ where: { transactionId: t.id, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { status: true, disputedAmount: true } });
+  const disputes = await db.distTransactionDispute.findMany({ where: { transactionId: t.id, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { status: true, disputedAmount: true } });
   let ddTidak = 0, ddRugi = 0;
   disputes.forEach((d) => { const a = Number(d.disputedAmount || 0); if (d.status === 'kerugian') ddRugi += a; else ddTidak += a; });
-  const revenue = n(t.amount) + n(pdelta);          // amount + price corrections = revenue recognised
-  let cap = Math.max(0, revenue);                    // cap total dispute at the sale (per-bon floor at 0)
+  const revenue = n(t.amount) + n(pdelta);
+  let cap = Math.max(0, revenue);
   const tidak = Math.min(ddTidak, cap); cap -= tidak;
   const rugi = Math.min(ddRugi, cap);
-  const arNet = revenue - tidak - rugi;              // = max(0, amount + priceδ − dd)
-  if (arNet <= 0 && revenue <= 0) { await deleteJournal('dist_txn', t.id); return null; }
+  const arNet = revenue - tidak - rugi;
+  if (arNet <= 0 && revenue <= 0) return [];
   const lines = [{ code: AR, debit: arNet, fleetId: f }, { code: REV_MAIN, credit: revenue - tidak, fleetId: f }];
-  if (rugi > 0) lines.push({ code: LOSS_AR, debit: rugi, fleetId: f });   // debits: arNet + rugi = revenue − tidak = credit ✓
-  return postJournal({ ...base, lines });
+  if (rugi > 0) lines.push({ code: LOSS_AR, debit: rugi, fleetId: f });   // debits arNet + rugi = revenue − tidak = credit ✓
+  return lines;
+}
+// LIVE post / backfill of a distribution transaction — INSERT-only under (dist_txn, id). At creation
+// there are no corrections/disputes yet, so this is the original figure; for a historical backfill it
+// is the effective figure (corrections already folded in). Later mutations do NOT re-post here (that
+// would no-op on the idempotency guard) — they APPEND an adjusting entry via reconcileDistTxn.
+async function postDistTransaction(t, actor, db = prisma) {
+  const lines = await distTxnLines(t, db);
+  if (!lines.length) return null;
+  return postJournal({ sourceType: 'dist_txn', sourceId: t.id, date: t.txnDate, description: `Distribusi ${t.method}`, actor, businessUnitId: t.businessUnitId || null, lines }, db);
+}
+// APPEND-ONLY reconciliation for a mutated transaction (correction approved, void applied, dispute
+// decided). Computes the DELTA between where the txn's journals currently sit (its original 'dist_txn'
+// entry + any prior 'dist_txn_adj' entries) and where they SHOULD sit (distTxnLines of the current
+// row), and posts that delta as a new adjusting entry — never editing or deleting the original. A void
+// yields desired=[] so the delta fully reverses it; an already-reconciled txn posts nothing. Balanced
+// by construction (both sides net to zero, so the delta does too). `eventKey` makes it idempotent per
+// event (the correction id, 'void', or dispute id).
+async function reconcileDistTxn(t, eventKey, actor, db = prisma) {
+  const cm = await chartMap(db);
+  const idToCode = {}; Object.entries(cm).forEach(([c, id]) => { idToCode[id] = c; });
+  const desired = await distTxnLines(t, db);
+  const entries = await db.journalEntry.findMany({ where: { OR: [{ sourceType: 'dist_txn', sourceId: t.id }, { sourceType: 'dist_txn_adj', ref: t.id }] }, include: { lines: true } });
+  const orig = entries.find((e) => e.sourceType === 'dist_txn');
+  const posted = {}; entries.forEach((e) => e.lines.forEach((l) => { const c = idToCode[l.chartAccountId]; if (c) posted[c] = (posted[c] || 0) + Number(l.debit) - Number(l.credit); }));
+  const want = {}; desired.forEach((l) => { want[l.code] = (want[l.code] || 0) + n(l.debit) - n(l.credit); });
+  const f = t.fleetId || '';
+  const lines = [];
+  new Set([...Object.keys(posted), ...Object.keys(want)]).forEach((c) => { const d = (want[c] || 0) - (posted[c] || 0); if (d > 0) lines.push({ code: c, debit: d, fleetId: f }); else if (d < 0) lines.push({ code: c, credit: -d, fleetId: f }); });
+  if (!lines.length) return null;   // already reconciled — nothing to append
+  return postJournal({ sourceType: 'dist_txn_adj', sourceId: `${t.id}:${eventKey}`, ref: t.id, date: t.txnDate, description: `Penyesuaian jurnal (${eventKey})`, actor, reversalOf: orig ? orig.id : null, lines }, db);
 }
 
 // Approved bon ADJUSTMENT (penyesuaian) → receivable. delta>0 recognises more receivable/income;
 // delta<0 writes the receivable down (bad debt). Mirrors approvedBonDelta in customerBonBalance.
-async function postDistAdjustment(a, actor) {
-  const d = n(a.delta); if (!d) { await deleteJournal('dist_adjustment', a.id); return null; }
+async function postDistAdjustment(a, actor, db = prisma) {
+  const d = n(a.delta); if (!d) return null;
   const f = a.fleetId || '';
   const lines = d > 0
     ? [{ code: AR, debit: d, fleetId: f }, { code: REV_OTHER, credit: d, fleetId: f }]
     : [{ code: LOSS_AR, debit: -d, fleetId: f }, { code: AR, credit: -d, fleetId: f }];
-  return postJournal({ sourceType: 'dist_adjustment', sourceId: a.id, date: (a.approvedAt ? new Date(a.approvedAt) : a.createdAt ? new Date(a.createdAt) : new Date(0)).toISOString().slice(0, 10), description: `Penyesuaian bon: ${a.reason}`, actor, lines });
+  return postJournal({ sourceType: 'dist_adjustment', sourceId: a.id, date: (a.approvedAt ? new Date(a.approvedAt) : a.createdAt ? new Date(a.createdAt) : new Date(0)).toISOString().slice(0, 10), description: `Penyesuaian bon: ${a.reason}`, actor, lines }, db);
 }
 
 // A customer's receivable BEFORE the final floor-at-zero: Σ effective bon − Σ pelunasan + Σ approved
 // bon adjustments. This is exactly what the per-txn + adjustment journals net to for the customer, so
 // when it is NEGATIVE (customer overpaid / holds a credit) the excess must move OFF Piutang into a
 // customer-credit LIABILITY — otherwise the receivable would read negative. sisaBon = max(0, raw).
-async function customerBonRaw(customerId) {
-  const txns = await prisma.distTransaction.findMany({ where: { customerId, status: { not: 'void' }, bonCounted: true, method: { in: ['bon', 'pelunasan'] } }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
+async function customerBonRaw(customerId, db = prisma) {
+  const txns = await db.distTransaction.findMany({ where: { customerId, status: { not: 'void' }, bonCounted: true, method: { in: ['bon', 'pelunasan'] } }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
   const ids = txns.map((t) => t.id);
-  const disputes = ids.length ? await prisma.distTransactionDispute.findMany({ where: { transactionId: { in: ids }, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { transactionId: true, disputedAmount: true } }) : [];
+  const disputes = ids.length ? await db.distTransactionDispute.findMany({ where: { transactionId: { in: ids }, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { transactionId: true, disputedAmount: true } }) : [];
   const dd = {}; disputes.forEach((d) => { dd[d.transactionId] = (dd[d.transactionId] || 0) + Number(d.disputedAmount || 0); });
   let bon = 0, pel = 0;
   for (const t of txns) {
@@ -186,50 +248,93 @@ async function customerBonRaw(customerId) {
     const pdelta = (t.corrections || []).filter((c) => c.kind === 'price' && c.active).reduce((s, c) => s + Number(c.deltaAmount || 0), 0);
     bon += Math.max(0, n(t.amount) + n(pdelta) - (dd[t.id] || 0));
   }
-  const adjRows = await prisma.distAdjustment.findMany({ where: { customerId, kind: 'bon', status: 'approved' }, select: { delta: true } });
+  const adjRows = await db.distAdjustment.findMany({ where: { customerId, kind: 'bon', status: 'approved' }, select: { delta: true } });
   const adj = adjRows.reduce((s, r) => s + Number(r.delta), 0);
   return bon - pel + adj;
 }
 
 // Reclass a customer's overpayment (raw < 0) from Piutang to Uang Muka Pelanggan so the Piutang
-// balance never goes below their true Sisa Bon. Idempotent per customer; removed once raw ≥ 0.
-async function postReceivablesReclass(customerId, actor) {
-  const raw = await customerBonRaw(customerId);
-  if (raw >= 0) { await deleteJournal('ar_reclass', customerId); return false; }
+// balance never goes below their true Sisa Bon. This is the ONE genuinely MUTABLE projection (the
+// credit shrinks/grows as the balance moves), so it posts with replace:true. Called after every write
+// that changes a customer's receivable, in that write's transaction, so Piutang == Σ Sisa Bon always.
+async function postReceivablesReclass(customerId, actor, db = prisma) {
+  const raw = await customerBonRaw(customerId, db);
+  if (raw >= 0) { await deleteJournal('ar_reclass', customerId, db); return false; }
   const over = -raw;
-  const last = await prisma.distTransaction.findFirst({ where: { customerId, status: { not: 'void' }, method: { in: ['bon', 'pelunasan'] } }, orderBy: { txnDate: 'desc' }, select: { txnDate: true } });
-  await postJournal({ sourceType: 'ar_reclass', sourceId: customerId, date: (last && last.txnDate) || '1970-01-01', description: 'Saldo kredit pelanggan (uang muka)', actor, lines: [{ code: AR, debit: over }, { code: UANG_MUKA, credit: over }] });
+  const last = await db.distTransaction.findFirst({ where: { customerId, status: { not: 'void' }, method: { in: ['bon', 'pelunasan'] } }, orderBy: { txnDate: 'desc' }, select: { txnDate: true } });
+  await postJournal({ sourceType: 'ar_reclass', sourceId: customerId, date: (last && last.txnDate) || '1970-01-01', description: 'Saldo kredit pelanggan (uang muka)', actor, replace: true, lines: [{ code: AR, debit: over }, { code: UANG_MUKA, credit: over }] }, db);
   return true;
 }
 
-// Backfill journals for existing records from a start date (ADDITIVE — source rows untouched).
-async function backfill({ fromDate, actor } = {}) {
-  await seedChart();
+// Backfill journals for existing records from a start date (ADDITIVE — source rows untouched). Now a
+// ONE-TIME MIGRATION, not the ongoing mechanism: live posting keeps new sources journalled, and
+// postJournal is skip-if-exists, so re-running backfill posts NOTHING new (it never duplicates).
+// `dryRun` returns the same per-source counts of what WOULD be posted, writing nothing — by running
+// the real backfill inside a transaction that is then rolled back (so the preview is exact).
+function DryRunAbort() {}
+async function backfill({ fromDate, actor, dryRun } = {}) {
+  await seedChart();   // reference data — safe to persist even on a dry run
+  if (dryRun) {
+    let res = null;
+    await prisma.$transaction(async (tx) => { res = await runBackfill({ fromDate, actor }, tx); throw new DryRunAbort(); }, { timeout: 120000 })
+      .catch((e) => { if (!(e instanceof DryRunAbort)) throw e; });
+    return { dryRun: true, ...res };
+  }
+  return runBackfill({ fromDate, actor }, prisma);
+}
+async function runBackfill({ fromDate, actor }, db = prisma) {
   const dGte = fromDate ? { gte: fromDate } : undefined;
   const out = { entry: 0, transfer: 0, dist_txn: 0, dist_expense: 0 };
-  const entries = await prisma.entry.findMany({ where: { status: { not: 'Failed' }, ...(dGte ? { date: dGte } : {}) } });
-  for (const e of entries) { if (await postEntry(e, actor)) out.entry++; }
-  const transfers = await prisma.transfer.findMany({ where: dGte ? { date: dGte } : {} });
-  for (const t of transfers) { if (await postTransfer(t, actor)) out.transfer++; }
+  const entries = await db.entry.findMany({ where: { status: { not: 'Failed' }, ...(dGte ? { date: dGte } : {}) } });
+  for (const e of entries) { if (await postEntry(e, actor, db)) out.entry++; }
+  const transfers = await db.transfer.findMany({ where: dGte ? { date: dGte } : {} });
+  for (const t of transfers) { if (await postTransfer(t, actor, db)) out.transfer++; }
   // RECEIVABLES (bon/pelunasan): a running BALANCE, so it is NOT date-limited — matches
   // customerBonBalance's inclusion exactly (non-void, bonCounted, INCLUDING legacy). Corrections and
   // disputes are folded into each bon's effective figure inside postDistTransaction.
-  const arTxns = await prisma.distTransaction.findMany({ where: { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
-  for (const t of arTxns) { if (await postDistTransaction(t, actor)) out.dist_txn++; }
+  const arTxns = await db.distTransaction.findMany({ where: { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
+  for (const t of arTxns) { if (await postDistTransaction(t, actor, db)) out.dist_txn++; }
   // Cash sales (lunas) are a period FLOW → keep the fromDate window; active, non-legacy.
-  const lunas = await prisma.distTransaction.findMany({ where: { method: 'lunas', status: 'active', legacy: false, ...(dGte ? { txnDate: dGte } : {}) } });
-  for (const t of lunas) { if (await postDistTransaction(t, actor)) out.dist_txn++; }
+  const lunas = await db.distTransaction.findMany({ where: { method: 'lunas', status: 'active', legacy: false, ...(dGte ? { txnDate: dGte } : {}) } });
+  for (const t of lunas) { if (await postDistTransaction(t, actor, db)) out.dist_txn++; }
   // Approved bon adjustments (penyesuaian) move the receivable up/down.
-  const adjs = await prisma.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved' } });
+  const adjs = await db.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved' } });
   out.dist_adjustment = 0;
-  for (const a of adjs) { if (await postDistAdjustment(a, actor)) out.dist_adjustment++; }
+  for (const a of adjs) { if (await postDistAdjustment(a, actor, db)) out.dist_adjustment++; }
   // Per-customer overpayment reclass (raw < 0 → Uang Muka Pelanggan) so Piutang == Σ Sisa Bon.
   const custIds = [...new Set([...arTxns.map((t) => t.customerId), ...adjs.map((a) => a.customerId)])];
   out.reclass = 0;
-  for (const cid of custIds) { if (await postReceivablesReclass(cid, actor)) out.reclass++; }
-  const exps = await prisma.distExpense.findMany({ where: { status: 'active', ...(dGte ? { date: dGte } : {}) } });
-  for (const x of exps) { if (await postDistExpense(x, actor)) out.dist_expense++; }
+  for (const cid of custIds) { if (await postReceivablesReclass(cid, actor, db)) out.reclass++; }
+  const exps = await db.distExpense.findMany({ where: { status: 'active', ...(dGte ? { date: dGte } : {}) } });
+  for (const x of exps) { if (await postDistExpense(x, actor, db)) out.dist_expense++; }
   return out;
+}
+
+// DRIFT DETECTOR — the source↔journal integrity check surfaced in Tutup Buku + a dedicated card.
+// Returns sources that SHOULD have a journal but don't (missing), and journals whose source row is
+// gone (orphan). With live posting both lists should always be empty; anything here is real drift.
+async function integrityCheck({ fromDate } = {}) {
+  const dGte = fromDate ? { gte: fromDate } : undefined;
+  const has = async (sourceType, sourceId) => !!(await prisma.journalEntry.findFirst({ where: { sourceType, sourceId }, select: { id: true } }));
+  const missing = [];
+  const entries = await prisma.entry.findMany({ where: { status: { not: 'Failed' }, ...(dGte ? { date: dGte } : {}) }, select: { id: true, note: true, date: true, amount: true } });
+  for (const e of entries) if (n(e.amount) && !(await has('entry', e.id))) missing.push({ sourceType: 'entry', sourceId: e.id, date: e.date, label: e.note || 'Transaksi kas' });
+  const transfers = await prisma.transfer.findMany({ where: dGte ? { date: dGte } : {}, select: { id: true, date: true, amount: true } });
+  for (const t of transfers) if (n(t.amount) && !(await has('transfer', t.id))) missing.push({ sourceType: 'transfer', sourceId: t.id, date: t.date, label: 'Transfer' });
+  const exps = await prisma.distExpense.findMany({ where: { status: 'active', ...(dGte ? { date: dGte } : {}) }, select: { id: true, date: true, amount: true } });
+  for (const x of exps) if (n(x.amount) && !(await has('dist_expense', x.id))) missing.push({ sourceType: 'dist_expense', sourceId: x.id, date: x.date, label: 'Pengeluaran lapangan' });
+  // Distribution txns that PROJECT a non-empty journal but have none (skip those that net to nothing).
+  const dtx = await prisma.distTransaction.findMany({ where: { status: { not: 'void' }, OR: [{ method: { in: ['bon', 'pelunasan'] }, bonCounted: true }, { method: 'lunas', legacy: false }] }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
+  for (const t of dtx) { if ((await distTxnLines(t)).length && !(await has('dist_txn', t.id))) missing.push({ sourceType: 'dist_txn', sourceId: t.id, date: t.txnDate, label: `Distribusi ${t.method}` }); }
+  // Orphan journals: sourceId present but the source row no longer exists (for the types we can check).
+  const orphan = [];
+  const journ = await prisma.journalEntry.findMany({ where: { sourceId: { not: null } }, select: { id: true, sourceType: true, sourceId: true, date: true } });
+  const existsById = { entry: (id) => prisma.entry.findUnique({ where: { id }, select: { id: true } }), transfer: (id) => prisma.transfer.findUnique({ where: { id }, select: { id: true } }), dist_expense: (id) => prisma.distExpense.findUnique({ where: { id }, select: { id: true } }), dist_txn: (id) => prisma.distTransaction.findUnique({ where: { id }, select: { id: true } }), dist_adjustment: (id) => prisma.distAdjustment.findUnique({ where: { id }, select: { id: true } }) };
+  for (const j of journ) {
+    const chk = existsById[j.sourceType]; if (!chk) continue;   // synthetic types (ar_reclass, dist_txn_adj:*) — not row-backed
+    if (!(await chk(j.sourceId))) orphan.push({ sourceType: j.sourceType, sourceId: j.sourceId, journalId: j.id, date: j.date });
+  }
+  return { ok: missing.length === 0 && orphan.length === 0, missing, orphan, missingCount: missing.length, orphanCount: orphan.length };
 }
 
 // Category keys used by entries that have NO chart mapping — REPORTED so an admin fixes the map
@@ -410,7 +515,7 @@ async function chart() {
 }
 
 module.exports = {
-  CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, chart, postJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
-  postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, unmappedCategories, categoryToCode,
+  CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, chart, postJournal, reverseJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
+  distTxnLines, reconcileDistTxn, postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, integrityCheck, unmappedCategories, categoryToCode,
   accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, journalFor, cashFlow,
 };

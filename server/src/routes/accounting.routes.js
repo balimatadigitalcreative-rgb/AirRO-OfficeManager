@@ -22,7 +22,8 @@ router.get('/journal', ctrl.journal);                // one source's full balanc
 router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging buckets)
 router.get('/receivables', ctrl.receivables);
 router.get('/unmapped', ctrl.unmapped);
-router.post('/backfill', ctrl.backfill);   // owner-driven projection from the cash book
+router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
+router.post('/backfill', ctrl.backfill);   // owner-driven projection from the cash book (?dryRun for a preview)
 
 // PERIOD CLOSE — list/checklist readable by any reports user; close is owner/GM-tier, reopen owner-only.
 router.get('/periods', ctrl.periods);

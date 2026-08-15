@@ -52,6 +52,11 @@ async function closeChecklist(year, month) {
   ]);
   let bank = { total: 0, count: 0 };
   try { bank = await require('./reconciliation.service').unreconciledBankTotal(); } catch (e) { /* bank rec optional */ }
+  // JOURNAL INTEGRITY — sources with no journal / journals with no source, for this period onward. A
+  // clean close requires zero drift (live posting keeps it zero; anything here means a source didn't post).
+  let integrity = { ok: true, missingCount: 0, orphanCount: 0 };
+  try { integrity = await require('./accounting.service').integrityCheck({ fromDate: from }); } catch (e) { /* accounting optional */ }
+  const journalDrift = (integrity.missingCount || 0) + (integrity.orphanCount || 0);
   const pending = pendingApprovals + (distPending || 0);
   return {
     periodKey: key,
@@ -59,7 +64,9 @@ async function closeChecklist(year, month) {
     pendingApprovals: pending,
     unreconciledBank: bank.count,
     gallonIntegrity: 'ok',
-    clean: uncategorised === 0 && pending === 0 && bank.count === 0,
+    journalIntegrity: integrity.ok ? 'ok' : 'drift',
+    journalDrift,
+    clean: uncategorised === 0 && pending === 0 && bank.count === 0 && journalDrift === 0,
   };
 }
 

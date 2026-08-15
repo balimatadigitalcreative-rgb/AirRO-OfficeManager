@@ -1,6 +1,8 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const config = require('../config/env');            // ACCOUNTING v2 flag — live journal posting
+const acc = require('./accounting.service');        // the double-entry posting service
 const { unitWhere, canAccessUnit, unitScopeOf } = require('../lib/scope');   // per-user business-unit access (Stage B)
 const businessUnit = require('./businessUnit.service');   // module toggle (finance)
 
@@ -59,12 +61,20 @@ async function create(data, user) {
   }
   // Module toggle: a transfer is a finance action — the PAYING account's unit must have finance on.
   if (from) await businessUnit.assertModuleEnabledForUser(user, from.businessUnitId, 'finance');
-  return prisma.transfer.create({ data: { ...data, createdById: (user && user.id) || null } });
+  // LIVE POSTING: the transfer and its Dr/Cr journal (Kas/Bank) are written in one transaction.
+  return prisma.$transaction(async (tx) => {
+    const t = await tx.transfer.create({ data: { ...data, createdById: (user && user.id) || null } });
+    if (config.accountingV2) await acc.postTransfer(t, user, tx);
+    return t;
+  });
 }
 
 async function remove(id, user) {
   await getById(id, user);   // 404 if the transfer touches none of the caller's units
-  await prisma.transfer.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    if (config.accountingV2) await acc.deleteJournal('transfer', id, tx);
+    await tx.transfer.delete({ where: { id } });
+  });
 }
 
 module.exports = { list, getById, create, remove };

@@ -22,6 +22,10 @@ const periodClose = asyncHandler(async (req, res) => res.json({ data: await peri
 const periodReopen = asyncHandler(async (req, res) => res.json({ data: await period.reopenPeriod({ year: +req.body.year, month: +req.body.month, reason: req.body.reason }, req.user) }));
 const reconciliation = asyncHandler(async (req, res) => res.json({ data: await recon.reconcileView({ accountId: req.query.accountId, statementBalance: req.query.statementBalance }) }));
 const reconcileMark = asyncHandler(async (req, res) => res.json({ data: await recon.markCleared({ accountId: req.body.accountId, itemType: req.body.itemType, itemId: req.body.itemId, cleared: req.body.cleared, statementRef: req.body.statementRef }, req.user) }));
-const backfill = asyncHandler(async (req, res) => res.json({ data: await service.backfill({ fromDate: req.body && req.body.fromDate, actor: req.user }) }));
+// Backfill supports a DRY-RUN (?dryRun / body.dryRun) — the preview screen shows what WOULD post,
+// per source type, writing nothing.
+const backfill = asyncHandler(async (req, res) => res.json({ data: await service.backfill({ fromDate: req.body && req.body.fromDate, dryRun: !!(req.body && req.body.dryRun), actor: req.user }) }));
+// INTEGRITY / drift detector — sources with no journal + journals with no source.
+const integrity = asyncHandler(async (req, res) => res.json({ data: await service.integrityCheck({ fromDate: req.query.fromDate }) }));
 
-module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };
+module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, integrity, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };

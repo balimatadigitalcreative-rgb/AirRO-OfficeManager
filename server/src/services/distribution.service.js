@@ -13,6 +13,8 @@ const ApiError = require('../utils/ApiError');
 const { normalizePhone } = require('../utils/phone');
 const { resolvePerms, viewWindowFrom, VIEW_CAPS } = require('../config/permissions');
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
+const config = require('../config/env');           // ACCOUNTING v2 flag — live journal posting
+const acc = require('./accounting.service');       // the double-entry posting service (transaction-aware)
 const { resolveUnitId } = require('./businessUnit.service');   // business-unit label (defaults to 'air')
 const { resilientFindMany } = require('../lib/resilientFind');   // one bad row must not blank a whole list
 
@@ -1021,8 +1023,14 @@ async function approveAdjustment(id, actor) {
   if (!fleetAllows(actor, adj.fleetId)) throw ApiError.notFound('Penyesuaian tidak ditemukan.');
   if (adj.status !== 'pending') throw ApiError.badRequest('Penyesuaian ini sudah diputuskan.');
   const snap = await actorSnap(actor);
-  const updated = await prisma.distAdjustment.update({ where: { id }, data: { status: 'approved', approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date() } });
-  await applyAdjustmentEffect(updated, snap);
+  // LIVE POSTING: an approved BON adjustment posts its receivable delta (Dr/Cr Piutang) + the AR
+  // reclass in the same transaction (kind 'galon' has no journal — gallon ledger only, flag-gated).
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.distAdjustment.update({ where: { id }, data: { status: 'approved', approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date() } });
+    if (config.accountingV2 && u.kind === 'bon') { await acc.postDistAdjustment(u, actor, tx); await acc.postReceivablesReclass(u.customerId, actor, tx); }
+    return u;
+  });
+  await applyAdjustmentEffect(updated, snap);   // gallon-kind ledger movement (bon: no-op)
   await logAudit('koreksi', `Setujui penyesuaian ${adj.kind}: ${adj.customer ? adj.customer.name : ''}`, `${adj.before} → ${adj.after} · ${adj.reason}`, snap, adj.fleetId);
   return adjustmentClient(updated);
 }
@@ -1044,15 +1052,20 @@ async function reverseAdjustment(id, actor) {
     await logAudit('koreksi', `Batalkan penyesuaian (pending) ${adj.kind}: ${adj.customer ? adj.customer.name : ''}`, `${adj.before} → ${adj.after}`, snap, adj.fleetId);
     return adjustmentClient(updated);
   }
-  // approved → create the opposite approved record and link them.
-  const reversal = await prisma.distAdjustment.create({ data: {
-    customerId: adj.customerId, fleetId: adj.fleetId || '', kind: adj.kind, mode: 'delta',
-    before: adj.after, delta: -adj.delta, after: adj.before, reason: adj.reason, note: `Pembalikan penyesuaian`,
-    status: 'approved', reversalOf: adj.id,
-    createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
-    approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
-  } });
-  await prisma.distAdjustment.update({ where: { id: adj.id }, data: { reversedById: reversal.id } });
+  // approved → create the opposite approved record and link them. Its opposite receivable delta posts
+  // its own journal (immutable, append-only) + the AR reclass, in one transaction (flag-gated).
+  const reversal = await prisma.$transaction(async (tx) => {
+    const rev = await tx.distAdjustment.create({ data: {
+      customerId: adj.customerId, fleetId: adj.fleetId || '', kind: adj.kind, mode: 'delta',
+      before: adj.after, delta: -adj.delta, after: adj.before, reason: adj.reason, note: `Pembalikan penyesuaian`,
+      status: 'approved', reversalOf: adj.id,
+      createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
+      approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
+    } });
+    await tx.distAdjustment.update({ where: { id: adj.id }, data: { reversedById: rev.id } });
+    if (config.accountingV2 && rev.kind === 'bon') { await acc.postDistAdjustment(rev, actor, tx); await acc.postReceivablesReclass(rev.customerId, actor, tx); }
+    return rev;
+  });
   await applyAdjustmentEffect(reversal, snap);   // opposite galon movement (bon: no ledger)
   await logAudit('koreksi', `Batalkan penyesuaian ${adj.kind}: ${adj.customer ? adj.customer.name : ''}`, `kembalikan ${adj.after} → ${adj.before} · ${adj.reason}`, snap, adj.fleetId);
   return adjustmentClient(reversal);
@@ -1184,11 +1197,21 @@ async function approveDispute(id, body, actor) {
   if (resolution === 'investigasi') throw ApiError.badRequest('Pilih penyelesaian (staf atau perusahaan) sebelum menyetujui.');
   const status = resolution === 'staf' ? 'tidak_diakui' : 'kerugian';
   const snap = await actorSnap(actor);
-  const updated = await prisma.distTransactionDispute.update({ where: { id }, data: {
-    status, resolution, approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
-    // The dispute record IS the loss/liability record (no separate table) — self-link for the trail.
-    staffLiabilityId: resolution === 'staf' ? id : null, lossId: resolution === 'perusahaan' ? id : null,
-  }, include: { customer: { select: { name: true, code: true } } } });
+  // LIVE POSTING: an approved dispute changes the parent bon's EFFECTIVE figure (a `tidak_diakui`
+  // reverses revenue; a `kerugian` moves it to Beban Kerugian Piutang), so re-project that txn with an
+  // append-only adjusting entry + the AR reclass, in the same transaction (flag-gated).
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.distTransactionDispute.update({ where: { id }, data: {
+      status, resolution, approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
+      // The dispute record IS the loss/liability record (no separate table) — self-link for the trail.
+      staffLiabilityId: resolution === 'staf' ? id : null, lossId: resolution === 'perusahaan' ? id : null,
+    }, include: { customer: { select: { name: true, code: true } } } });
+    if (config.accountingV2) {
+      const parent = await tx.distTransaction.findUnique({ where: { id: d.transactionId } });
+      if (parent) { await acc.reconcileDistTxn(parent, `disp:${d.id}`, actor, tx); await acc.postReceivablesReclass(d.customerId, actor, tx); }
+    }
+    return u;
+  });
   await logAudit('koreksi', `Setujui sengketa (${status}): ${d.customer ? d.customer.name : ''}`, `selisih ${d.disputedAmount} · ${resolution}${d.staffName ? ' · staf ' + d.staffName : ''}`, snap, d.fleetId);
   return disputeClient(updated);
 }
@@ -1204,15 +1227,24 @@ async function reverseDispute(id, actor) {
   if (d.reversalOf) throw ApiError.badRequest('Pembalikan tidak bisa dibalik lagi.');
   if (d.reversedById || d.status === 'diakui_kembali') throw ApiError.badRequest('Sengketa ini sudah dibatalkan.');
   const snap = await actorSnap(actor);
-  const reversal = await prisma.distTransactionDispute.create({ data: {
-    transactionId: d.transactionId, customerId: d.customerId, fleetId: d.fleetId || '',
-    status: 'diakui_kembali', resolution: 'investigasi', reason: d.reason,
-    disputedAmount: 0, customerClaimAmount: 0, note: 'Pembalikan sengketa — transaksi diakui kembali',
-    reversalOf: d.id, staffUserId: d.staffUserId, staffName: d.staffName,
-    raisedById: snap.actorId, raisedByName: snap.actorName, raisedByRole: snap.actorRole,
-    approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
-  } });
-  await prisma.distTransactionDispute.update({ where: { id: d.id }, data: { reversedById: reversal.id } });
+  // Reversing a dispute restores the parent bon to its full figure → re-project it (append-only) + the
+  // AR reclass, in the same transaction as the reversal record (flag-gated).
+  const reversal = await prisma.$transaction(async (tx) => {
+    const rev = await tx.distTransactionDispute.create({ data: {
+      transactionId: d.transactionId, customerId: d.customerId, fleetId: d.fleetId || '',
+      status: 'diakui_kembali', resolution: 'investigasi', reason: d.reason,
+      disputedAmount: 0, customerClaimAmount: 0, note: 'Pembalikan sengketa — transaksi diakui kembali',
+      reversalOf: d.id, staffUserId: d.staffUserId, staffName: d.staffName,
+      raisedById: snap.actorId, raisedByName: snap.actorName, raisedByRole: snap.actorRole,
+      approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
+    } });
+    await tx.distTransactionDispute.update({ where: { id: d.id }, data: { reversedById: rev.id } });
+    if (config.accountingV2) {
+      const parent = await tx.distTransaction.findUnique({ where: { id: d.transactionId } });
+      if (parent) { await acc.reconcileDistTxn(parent, `disprev:${rev.id}`, actor, tx); await acc.postReceivablesReclass(d.customerId, actor, tx); }
+    }
+    return rev;
+  });
   await logAudit('koreksi', `Batalkan sengketa: ${d.customer ? d.customer.name : ''}`, `kembalikan selisih ${d.disputedAmount} · transaksi diakui kembali`, snap, d.fleetId);
   const withCust = await prisma.distTransactionDispute.findUnique({ where: { id: reversal.id }, include: { customer: { select: { name: true, code: true } } } });
   return disputeClient(withCust);
@@ -1240,10 +1272,16 @@ async function createTransaction(body, actor) {
     const payMethod = (body.payMethod === 'transfer') ? 'Transfer' : 'Cash';
     const snap = await actorSnap(actor);
     const note = [(body.note || '').trim(), payMethod].filter(Boolean).join(' · ');
-    const txn = await prisma.distTransaction.create({ data: {
-      customerId: customer.id, fleetId, qty: 0, unitPriceLocked: 0, amount: payAmount, method: 'pelunasan', note,
-      txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
-    } });
+    // LIVE POSTING: the pelunasan (Dr Kas / Cr Piutang) and the per-customer AR reclass post in the
+    // SAME transaction as the row, so the Piutang balance always equals Σ Sisa Bon (flag-gated).
+    const txn = await prisma.$transaction(async (tx) => {
+      const t = await tx.distTransaction.create({ data: {
+        customerId: customer.id, fleetId, qty: 0, unitPriceLocked: 0, amount: payAmount, method: 'pelunasan', note,
+        txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+      } });
+      if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); await acc.postReceivablesReclass(customer.id, actor, tx); }
+      return t;
+    });
     await logAudit('input', `Pelunasan bon: ${customer.name}`, `bayar ${payAmount} (${payMethod}) · sisa bon ${Math.max(0, sisaBon - payAmount)}`, snap, fleetId);
     return { ...txn, gallonOut: 0, gallonIn: 0, gallonsHeld: await gallonBalanceOf(customer.id), sisaBon: Math.max(0, sisaBon - payAmount), isPayment: true };
   }
@@ -1256,10 +1294,16 @@ async function createTransaction(body, actor) {
   if (overCeiling(amount) || overCeiling(unitPriceLocked)) throw ApiError.badRequest(ceilingMsg, { amount, qty, unitPriceLocked });
   const snap = await actorSnap(actor);
   const deliveryRunId = await openRunIdFor(fleetId);   // tag the sale to the fleet's open rit (if any)
-  const txn = await prisma.distTransaction.create({ data: {
-    customerId: customer.id, fleetId, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
-    txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, deliveryRunId,
-  } });
+  // LIVE POSTING: the sale row and its journal (lunas → Dr Kas/Cr Pendapatan; bon → Dr Piutang/Cr
+  // Pendapatan) post together; a bon also runs the AR reclass so Piutang == Σ Sisa Bon (flag-gated).
+  const txn = await prisma.$transaction(async (tx) => {
+    const t = await tx.distTransaction.create({ data: {
+      customerId: customer.id, fleetId, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
+      txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, deliveryRunId,
+    } });
+    if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); if (method === 'bon') await acc.postReceivablesReclass(customer.id, actor, tx); }
+    return t;
+  });
   // Gallon flow (loan/exchange): out = full gallons delivered (default = qty sold),
   // in = empty gallons returned. Recorded as append-only movements → customer balance.
   const gOut = body.gallonOut != null ? Math.max(0, int(body.gallonOut)) : qty;
@@ -1295,11 +1339,17 @@ async function createOpeningBon(customerId, body, actor) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(txnDate)) throw ApiError.badRequest('Tanggal bon tidak valid.');
   const snap = await actorSnap(actor);
   const before = await customerBonBalance(customer.id);
-  const txn = await prisma.distTransaction.create({ data: {
-    customerId: customer.id, fleetId: customer.armada || '', qty: 0, unitPriceLocked: 0,
-    amount, method: 'bon', openingBon: true, legacy: false, note,
-    txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
-  } });
+  // LIVE POSTING: an opening/carry-over bon posts like any bon (Dr Piutang / Cr Pendapatan — the same
+  // projection backfill uses) + the AR reclass, in one transaction (flag-gated).
+  const txn = await prisma.$transaction(async (tx) => {
+    const t = await tx.distTransaction.create({ data: {
+      customerId: customer.id, fleetId: customer.armada || '', qty: 0, unitPriceLocked: 0,
+      amount, method: 'bon', openingBon: true, legacy: false, note,
+      txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    } });
+    if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); await acc.postReceivablesReclass(customer.id, actor, tx); }
+    return t;
+  });
   await logAudit('input', `Bon awal: ${customer.name}`, `${amount} per ${txnDate} · ${note} · sisa bon ${before} → ${before + amount}`, snap, customer.armada || '');
   return { ...txn, isOpeningBon: true, sisaBon: before + amount, sisaBonBefore: before };
 }
@@ -1341,9 +1391,13 @@ async function voidTransaction(txnId, body, actor) {
   const updated = await prisma.$transaction(async (tx) => {
     // Reverse the gallon movements this sale produced (append-only ledger → deactivate, not delete).
     await tx.gallonMovement.updateMany({ where: { transactionId: txnId, active: true }, data: { active: false } });
-    return tx.distTransaction.update({ where: { id: txnId }, data: {
+    const row = await tx.distTransaction.update({ where: { id: txnId }, data: {
       status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedByRole: snap.actorRole, voidedAt: new Date(), voidReason: reason,
     } });
+    // LIVE POSTING: a void APPENDS an adjusting journal that fully reverses this txn (desired = []),
+    // never editing the original, plus the AR reclass — same transaction (flag-gated).
+    if (config.accountingV2) { await acc.reconcileDistTxn(row, 'void', actor, tx); await acc.postReceivablesReclass(txn.customerId, actor, tx); }
+    return row;
   });
   await logAudit('batal', `Batalkan transaksi: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${txn.method} ${txn.amount} · ${reason}`, snap, txn.fleetId);
   return { ...updated, voided: true, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
@@ -1659,6 +1713,14 @@ async function decideChangeRequest(id, decision, body, actor) {
     await db.distChangeRequest.update({ where: { id }, data: {
       status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(),
     } });
+    // LIVE POSTING: an approved correction/void APPENDS an adjusting journal that moves this txn's
+    // journals to its new effective figure (a void → fully reversed) — the original entry is never
+    // edited — plus the customer's AR reclass, all in this same transaction (flag-gated).
+    if (config.accountingV2) {
+      const updatedTxn = await db.distTransaction.findUnique({ where: { id: txn.id } });
+      await acc.reconcileDistTxn(updatedTxn, req.id, actor, db);
+      await acc.postReceivablesReclass(txn.customerId, actor, db);
+    }
   });
   // A price change is called out explicitly (old → new) so the audit reads without decoding the JSON.
   const priceLine = (req.kind === 'correction' && oldVals && newVals && newVals.unitPrice != null && oldVals.unitPrice !== newVals.unitPrice)
@@ -3644,12 +3706,17 @@ async function createExpense(body, actor) {
   const businessUnitId = await resolveUnitId(body.businessUnitId);
   const snap = await actorSnap(actor);
   const method = body.method === 'transfer' ? 'transfer' : 'tunai';
-  const e = await prisma.distExpense.create({ data: {
-    date, fleetId, amount, category, note: String(body.note || '').slice(0, 300),
-    method, recipient: String(body.recipient || '').slice(0, 120),
-    photoId: body.photoId ? String(body.photoId).slice(0, 60) : null, businessUnitId,
-    createdById: snap.actorId, createdByName: snap.actorName,
-  } });
+  // LIVE POSTING: the field expense and its journal (Dr Beban / Cr Kas) post in one transaction.
+  const e = await prisma.$transaction(async (tx) => {
+    const row = await tx.distExpense.create({ data: {
+      date, fleetId, amount, category, note: String(body.note || '').slice(0, 300),
+      method, recipient: String(body.recipient || '').slice(0, 120),
+      photoId: body.photoId ? String(body.photoId).slice(0, 60) : null, businessUnitId,
+      createdById: snap.actorId, createdByName: snap.actorName,
+    } });
+    if (config.accountingV2) await acc.postDistExpense(row, actor, tx);
+    return row;
+  });
   await logAudit('input', `Pengeluaran lapangan: ${fleetId}`, `${category} ${amount}${e.note ? ' · ' + e.note : ''} · ${date}`, snap, fleetId);
   return expenseClient(e);
 }
@@ -3663,9 +3730,15 @@ async function voidExpense(id, body, actor) {
   const reason = String(body.reason || '').trim();
   if (!reason) throw ApiError.badRequest('Alasan pembatalan wajib diisi.');
   const snap = await actorSnap(actor);
-  const upd = await prisma.distExpense.update({ where: { id }, data: {
-    status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedAt: new Date(), voidReason: reason,
-  } });
+  // Voiding appends a REVERSING journal (Dr Kas / Cr Beban) — the original entry is never edited —
+  // in the same transaction as the status flip (flag-gated).
+  const upd = await prisma.$transaction(async (tx) => {
+    const row = await tx.distExpense.update({ where: { id }, data: {
+      status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedAt: new Date(), voidReason: reason,
+    } });
+    if (config.accountingV2) await acc.reverseJournal({ sourceType: 'dist_expense', sourceId: id, reversalSourceType: 'dist_expense_void', reversalSourceId: id, date: row.date, description: `Pembatalan pengeluaran: ${reason}`, actor }, tx);
+    return row;
+  });
   await logAudit('koreksi', `Batalkan pengeluaran: ${e.fleetId}`, `${e.category} ${e.amount} · ${reason}`, snap, e.fleetId);
   return expenseClient(upd);
 }
