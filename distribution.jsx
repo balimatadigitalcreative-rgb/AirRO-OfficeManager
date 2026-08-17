@@ -918,7 +918,7 @@ function LocPhoto({ custId, photoId, byName, at, canEdit, onChanged, compact }) 
 // the client. Returns { openCorrect, openVoid, modals } — the host renders {modals} and wires its
 // [Ajukan Koreksi]/[Ajukan Pembatalan] buttons to open*.
 //   canPrice — distribusiHargaMaster (may the price be edited); onDone — reload after a submit; flash.
-function useDistCorrection({ canPrice, onDone, flash }) {
+function useDistCorrection({ canPrice, onDone, flash, onFindBatch }) {
   const [corrTxn, setCorrTxn] = uSx(null);
   const [corrReason, setCorrReason] = uSx('');
   const [corrForm, setCorrForm] = uSx(null);   // STRUCTURED input fields, pre-filled from the txn
@@ -988,10 +988,13 @@ function useDistCorrection({ canPrice, onDone, flash }) {
     {corrTxn && corrForm && (
       <div className="modal-scrim" onClick={() => { setCorrTxn(null); setPreview(null); }} style={{ zIndex: 200 }}>
         <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
-          <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.korekT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(corrTxn.id)} · {corrTxn.customer ? corrTxn.customer.name : ''} · {methodLabel(corrTxn.method)}</div></div><button className="jp-icon" onClick={() => { setCorrTxn(null); setPreview(null); }}><IconClose s={18} /></button></div>
+          <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD(corrTxn.legacy ? 'dist.korekTArsip' : 'dist.korekT')}{corrTxn.legacy && <span className="dist-badge arsip" style={{ marginLeft: 8, verticalAlign: '2px' }}><IconInvoice s={10} />{trD('dist.arsip')}</span>}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{shortRef(corrTxn.id)} · {corrTxn.customer ? corrTxn.customer.name : ''} · {methodLabel(corrTxn.method)}</div></div><button className="jp-icon" onClick={() => { setCorrTxn(null); setPreview(null); }}><IconClose s={18} /></button></div>
           <div className="modal-body">
             {/* This SUBMITS a request — the transaction changes only after an approver approves it. */}
             <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.korekApprovalInfo')}</span></div>
+            {/* Archive rows change HISTORICAL figures — remind the approver, and (if from an import
+                batch) make the sibling rows easy to find; a single wrong archive row is rarely alone. */}
+            {corrTxn.legacy && <div className="dist-infobox dist-arsip-note"><IconInvoice s={15} /><span>{trD('dist.korekArsipNote')}{corrTxn.importBatchId ? <> · <b>{corrTxn.importBatchId}</b>{onFindBatch && <> · <button type="button" className="dist-link" onClick={() => { onFindBatch(corrTxn.importBatchId); setCorrTxn(null); setPreview(null); }}>{trD('dist.korekFindBatch')}</button></>}</> : null}</span></div>}
             {/* STRUCTURED, input-level fields (the total is recomputed, never typed directly). */}
             {corrSale ? (<>
               <div className="dist-form-row">
@@ -1027,14 +1030,22 @@ function useDistCorrection({ canPrice, onDone, flash }) {
               <div className="dist-korek-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${shownNewTotal - corrTxn.amount < 0 ? 'amt-neg' : shownNewTotal - corrTxn.amount > 0 ? 'amt-pos' : ''}`}>{shownNewTotal - corrTxn.amount >= 0 ? '+' : ''}{rpFull(shownNewTotal - corrTxn.amount)}</b></div>
             </div>
             <div className="dist-korek-calcnote">{trD('dist.korekServerCalc')}</div>
-            {/* SERVER-computed sisa-bon impact (the same math the approval applies). */}
-            {preview && preview.bonDelta !== 0 && (
+            {/* SERVER-computed sisa-bon impact (the same math the approval applies). When it changes,
+                note how many LATER rows re-run their running balance; when it doesn't (e.g. a lunas
+                archive row), say so plainly so the approver knows exactly what they're approving. */}
+            {preview && (preview.bonDelta !== 0 ? (
               <div className="dist-korek-sisaline">
                 <span>{trD('dist.korekSisaBonImpact', { code: corrTxn.customer && corrTxn.customer.code ? corrTxn.customer.code : (preview.customerCode || '') })}</span>
                 <b className="tnum">{rpFull(preview.oldSisaBon)}</b>
                 <IconCaret s={13} style={{ transform: 'rotate(-90deg)', margin: '0 2px' }} />
                 <b className={`tnum ${preview.newSisaBon < preview.oldSisaBon ? 'amt-neg' : preview.newSisaBon > preview.oldSisaBon ? 'amt-pos' : ''}`}>{rpFull(preview.newSisaBon)}</b>
+                {preview.laterRowsCount > 0 && <span className="dist-korek-later">{trD('dist.korekLater', { n: preview.laterRowsCount })}</span>}
               </div>
+            ) : (
+              <div className="dist-korek-sisaline"><span>{trD('dist.korekSisaBonImpact', { code: corrTxn.customer && corrTxn.customer.code ? corrTxn.customer.code : (preview.customerCode || '') })}</span><b className="tnum dist-korek-same">{trD('dist.korekSisaSame')}</b></div>
+            ))}
+            {preview && preview.invoice && (
+              <div className="dist-warnbox" style={{ marginTop: 8 }}><IconWarn s={15} /><span>{trD('dist.korekInvoiceBlock', { inv: preview.invoice })}</span></div>
             )}
             {/* METHOD flip is called out explicitly (its sisa-bon direction is in the line above). */}
             {corrMethodChanged && (
@@ -1048,7 +1059,7 @@ function useDistCorrection({ canPrice, onDone, flash }) {
             <label className="fld-label">{trD('dist.korekReason')} <span style={{ color: 'var(--neg)' }}>*</span></label>
             <textarea className="fld" style={{ height: 62, padding: 12, resize: 'vertical' }} value={corrReason} placeholder={trD('dist.korekReasonPh')} onChange={(e) => setCorrReason(e.target.value)} />
           </div>
-          <div className="modal-foot"><button className="btn btn-ghost" onClick={() => { setCorrTxn(null); setPreview(null); }}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrValid || corrSaving} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSubmit')}</button></div>
+          <div className="modal-foot"><button className="btn btn-ghost" onClick={() => { setCorrTxn(null); setPreview(null); }}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={!corrValid || corrSaving || !!(preview && preview.invoice)} onClick={commitCorrect}>{corrSaving ? '…' : trD('dist.korekSubmit')}</button></div>
         </div>
       </div>
     )}
@@ -2068,8 +2079,10 @@ function TxDetailPanel({ txn, custById, idx, total, canKoreksi, canVoid, canArch
   const ccode = (t.customer && t.customer.code) || cust.code || '';
   const amt = t.effectiveAmount != null ? t.effectiveAmount : t.amount;
   const corrections = (t.corrections || []).filter((x) => x.kind !== 'price');
-  const showKoreksi = canKoreksi && !voided && !t.legacy && !pending;
-  const showVoid = canVoid && !voided && !t.legacy && !pending;
+  // Archive (legacy) rows ARE correctable/voidable now — they feed Sisa Bon, so a mistyped archive row
+  // must be fixable. The server enforces the real guards (issued-invoice block, caps, fleet, self-approve).
+  const showKoreksi = canKoreksi && !voided && !pending;
+  const showVoid = canVoid && !voided && !pending;
   const copy = () => copyText([txnCode(t), fmtDateShort(t.txnDate) + ' ' + hhmm(t.createdAt), cname, methodLabel(t.method), t.method === 'pelunasan' ? rpFull(amt) : (numX(t.qty) + ' × ' + rpFull(t.unitPriceLocked) + ' = ' + rpFull(amt)), t.actorName || '', t.note || ''].join(' · '), () => flash(trD('cd.copied')));
   const kv = (k, v) => <div className="tx-dp-kv"><span>{k}</span><b>{v}</b></div>;
   return (
@@ -3480,7 +3493,10 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   // live in each expanded transaction row (below); on submit the row shows "Menunggu persetujuan" and
   // the transaction is untouched until an approver decides it.
   const refreshDetail = () => { if (detail) openDetail(detail.id); reload(); if (onChanged) onChanged(); };
-  const corrFlow = useDistCorrection({ canPrice, flash: (m) => flash(m), onDone: refreshDetail });
+  // A wrong archive row often has siblings from the same import — "Lihat semua baris dari impor ini"
+  // filters the Transaksi tab to that batch (archive shown) so they're easy to find (never auto-corrected).
+  const findBatch = (batchId) => { if (!batchId) return; setCdTab('transaksi'); setCdArchive(true); setCdSearch(String(batchId)); };
+  const corrFlow = useDistCorrection({ canPrice, flash: (m) => flash(m), onDone: refreshDetail, onFindBatch: findBatch });
   // Inline approve / reject of a pending request, so an approver never leaves the customer page. Reject
   // needs a reason (server-enforced too). The server also forbids approving your OWN request; we hide
   // the approve button for it as well. A negative-balance approve re-confirms (server double-checks).
@@ -3931,7 +3947,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     const pb = periodBounds();
     const inPeriod = (t) => !pb || ((t.txnDate || '') >= pb.from && (t.txnDate || '') <= pb.to);
     const q = cdSearch.trim().toLowerCase();
-    const matchSearch = (t) => !q || [txnCode(t), t.note, String(t.amount), String(t.effectiveAmount != null ? t.effectiveAmount : '')].some((x) => String(x || '').toLowerCase().includes(q));
+    const matchSearch = (t) => !q || [txnCode(t), t.note, String(t.amount), String(t.effectiveAmount != null ? t.effectiveAmount : ''), t.importBatchId].some((x) => String(x || '').toLowerCase().includes(q));
     const dispStatusOf = (t) => (t.dispute ? t.dispute.status : null);
     const isLossed = (t) => dispStatusOf(t) === 'tidak_diakui' || dispStatusOf(t) === 'kerugian';
     const base0 = txAll.filter((t) => (cdArchive || !t.legacy) && inPeriod(t) && matchSearch(t));
@@ -4040,10 +4056,11 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(t)}><IconInvoice s={13} />{trD('cd.copyDetail')}</button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPrintFor({ mode: 'nota', txn: t })}><IconDownload s={13} />{trD('cd.printNota')}</button>
                 {/* CORRECTION / VOID request — capability-gated (hidden, not disabled). Hidden while a
-                    request is already pending, and never on a voided/archive row. Reuses the shared
-                    engine; the modal needs the customer name/code, so pass them along with the row. */}
-                {canKoreksi && !t.voided && !t.legacy && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm" onClick={() => corrFlow.openCorrect({ ...t, customer: { name: d.name, code: d.code } })}><IconPencil s={13} />{trD('cd.korekBtn')}</button>}
-                {canVoid && !t.voided && !t.legacy && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => corrFlow.openVoid({ ...t, customer: { name: d.name, code: d.code } })}><IconClose s={13} />{trD('cd.voidBtn')}</button>}
+                    request is already pending. ARCHIVE rows ARE correctable/voidable now (they feed Sisa
+                    Bon); the server enforces the real guards. Reuses the shared engine; the modal needs
+                    the customer name/code, so pass them along with the row. */}
+                {canKoreksi && !t.voided && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm" onClick={() => corrFlow.openCorrect({ ...t, customer: { name: d.name, code: d.code } })}><IconPencil s={13} />{trD(t.legacy ? 'cd.korekBtnArsip' : 'cd.korekBtn')}</button>}
+                {canVoid && !t.voided && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => corrFlow.openVoid({ ...t, customer: { name: d.name, code: d.code } })}><IconClose s={13} />{trD('cd.voidBtn')}</button>}
                 {/* Dispute action — capability-gated (hidden, not disabled). Only when the row isn't
                     already under an active dispute and isn't voided/pelunasan-loss. */}
                 {canBonAdjust && !t.voided && !hasActive && t.method !== 'pelunasan' && <button type="button" className="btn btn-ghost btn-sm cd-disp-btn" onClick={() => setDisputeFor({ txn: t })}><IconWarn s={13} />{trD('disp.markBtn')}</button>}

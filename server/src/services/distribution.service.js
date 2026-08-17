@@ -1375,6 +1375,17 @@ async function addCorrection(txnId, body, actor, isStaff) {
 // typed-confirmation token for a hard delete and in audit lines.
 const shortRefServer = (id) => String(id || '').slice(-6).toUpperCase();
 
+// The issued-invoice number a transaction sits inside, or null. LEGACY rows used to be blocked from
+// correction/void outright ("arsip tidak masuk hitungan") — but archive bon/pelunasan DO feed Sisa Bon
+// (customerBonBalance's BON_TXN has no legacy filter), so a mistyped archive row corrupts a real
+// receivable and MUST be fixable. The only remaining hard block is an ISSUED INVOICE: a row printed on
+// one can't change underneath it — re-issue the invoice first.
+async function invoiceOf(txnId) { const m = await invoiceNumbersForTxns(new Set([txnId])); return m[txnId] || null; }
+async function assertNotInvoiced(txnId) {
+  const inv = await invoiceOf(txnId);
+  if (inv) throw ApiError.badRequest(`Transaksi ini ada di invoice ${inv} yang sudah diterbitkan — batalkan atau terbitkan ulang invoice itu dulu.`, { invoice: inv });
+}
+
 // ── VOID (recorded cancellation) — the everyday cancel path (cap: distribusiVoid) ──────────────
 // The record STAYS (status='void', shown "Dibatalkan", still filterable) but is excluded from
 // EVERY aggregate — LIVE_TXN drops it from sisa bon / receivables / KPIs, and its gallon movements
@@ -1384,7 +1395,7 @@ async function voidTransaction(txnId, body, actor) {
   if (!txn) throw ApiError.notFound('Transaction not found');
   if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');   // out of fleet scope
   if (txn.status === 'void') throw ApiError.badRequest('Transaksi ini sudah dibatalkan.');
-  if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak masuk hitungan — tak perlu dibatalkan.');
+  await assertNotInvoiced(txnId);   // legacy IS voidable now (it feeds Sisa Bon); only an issued invoice blocks it
   const reason = String(body.reason || '').trim();
   if (!reason) throw ApiError.badRequest('Alasan pembatalan wajib diisi.');
   const snap = await actorSnap(actor);
@@ -1441,6 +1452,12 @@ async function projectedRawBon(txn, newMethod, newAmount) {
 // Returns { fields, newAmount }. Throws ApiError on any invalid input.
 async function normalizeCorrection(txn, payload, opts) {
   const p = payload || {};
+  // OPTIONAL metadata edits, allowed on ANY row (active or archive): tanggal (txnDate) and catatan
+  // (note). Moving a row's date reorders it, so every later row's running balance recomputes — the
+  // preview surfaces that. Both are folded into `fields` and applied on approve alongside the amount.
+  const meta = {};
+  if (p.txnDate != null && String(p.txnDate) !== '') { if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.txnDate))) throw ApiError.badRequest('Tanggal tidak valid.'); meta.txnDate = String(p.txnDate); }
+  if (p.note != null) meta.note = String(p.note).slice(0, 300);
   // FIELD-LEVEL GATE: qty / gallonOut / gallonIn are editable by anyone who may request a correction
   // (distribusiKoreksi). The PRICE is not — only distribusiHargaMaster may change it. Enforced here,
   // server-side, against the transaction's STORED unitPriceLocked (the client's value is never
@@ -1470,7 +1487,7 @@ async function normalizeCorrection(txn, payload, opts) {
       if (m !== 'lunas' && m !== 'bon') throw ApiError.badRequest("Metode hanya bisa 'lunas' atau 'bon'.");
       method = m;
     }
-    return { fields: { qty, unitPrice, gallonOut, gallonIn, method }, newAmount };
+    return { fields: { qty, unitPrice, gallonOut, gallonIn, method, ...meta }, newAmount };
   }
   // Amount-only: a pelunasan (payment) or an opening/carry-over bon (lump receivable typed directly).
   // Method is NOT changeable here — reject a request that tries to (per the guard).
@@ -1486,7 +1503,7 @@ async function normalizeCorrection(txn, payload, opts) {
     const maxPay = (await customerBonBalance(txn.customerId)) + txn.amount;
     if (amount > maxPay) throw ApiError.badRequest(`Pembayaran (${amount}) melebihi sisa bon (${maxPay}).`, { maxPay });
   }
-  return { fields: { amount }, newAmount: amount };
+  return { fields: { amount, ...meta }, newAmount: amount };
 }
 
 // Enrich a request row into the client shape: current vs requested inputs + the recomputed delta.
@@ -1560,7 +1577,10 @@ async function previewCorrection(txnId, body, actor) {
   if (!txn) throw ApiError.notFound('Transaction not found');
   if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');
   if (txn.status === 'void') throw ApiError.badRequest('Transaksi ini sudah dibatalkan.');
-  if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak masuk hitungan.');
+  // Legacy rows are previewable — they feed Sisa Bon. Preview never throws on an issued invoice (it is
+  // informational); it RETURNS the invoice number so the UI can show the block reason. The submit/apply
+  // (requestChange/decideChangeRequest) is what actually refuses an invoiced row.
+  const invoice = await invoiceOf(txnId);
   const snap = await actorSnap(actor);
   const norm = await normalizeCorrection(txn, body.payload || body, { canPrice: snap.canPrice });   // SAME fn apply uses
   const sale = isGallonSale(txn);
@@ -1581,10 +1601,19 @@ async function previewCorrection(txnId, body, actor) {
     bonDelta = norm.newAmount - txn.amount;
   }
   const newSisaBon = Math.max(0, oldSisaBon + bonDelta);
+  // How many of THIS customer's later bon/pelunasan rows have their running balance (Sisa Bon Berjalan)
+  // shifted by this change — correcting a July archive row moves every subsequent row. The final Sisa
+  // Bon after all of them is exactly `newSisaBon` (== the KPI after approval), which the UI asserts.
+  let laterRowsCount = 0;
+  if (bonDelta !== 0) {
+    const rows = await prisma.distTransaction.findMany({ where: { customerId: txn.customerId, ...BON_TXN }, select: { id: true, txnDate: true, createdAt: true } });
+    const after = (a, b) => (a.txnDate || '').localeCompare(b.txnDate || '') || (new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+    laterRowsCount = rows.filter((r) => r.id !== txn.id && after(r, txn) > 0).length;
+  }
   return {
     oldAmount: txn.amount, newAmount: norm.newAmount, delta: norm.newAmount - txn.amount,
     method: txn.method, requestedMethod: norm.fields.method || txn.method, methodChanged: !!(sale && norm.fields.method !== txn.method),
-    oldSisaBon, newSisaBon, bonDelta, wouldGoNegative,
+    oldSisaBon, newSisaBon, bonDelta, wouldGoNegative, laterRowsCount, legacy: !!txn.legacy, invoice,
     customerName: txn.customer ? txn.customer.name : '', customerCode: txn.customer ? txn.customer.code : '',
     fields: norm.fields,
   };
@@ -1597,7 +1626,7 @@ async function requestChange(txnId, kind, body, actor) {
   if (!txn) throw ApiError.notFound('Transaction not found');
   if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');   // out of scope
   if (txn.status === 'void') throw ApiError.badRequest('Transaksi ini sudah dibatalkan.');
-  if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak masuk hitungan — tak perlu dikoreksi/dibatalkan.');
+  await assertNotInvoiced(txnId);   // legacy IS correctable/voidable now; only an issued invoice blocks it
   const reason = String(body.reason || '').trim();
   if (!reason) throw ApiError.badRequest('Alasan wajib diisi.');
   const already = await prisma.distChangeRequest.findFirst({ where: { transactionId: txnId, status: 'pending' } });
@@ -1612,8 +1641,9 @@ async function requestChange(txnId, kind, body, actor) {
     payload: JSON.stringify(payloadObj), reason,
     requestedById: snap.actorId, requestedByName: snap.actorName, requestedByRole: snap.actorRole,
   } });
+  const arsip = txn.legacy ? ' (ARSIP)' : '';   // archive corrections change historical figures — flag them
   const what = kind === 'void' ? 'pembatalan' : 'koreksi ' + JSON.stringify(payloadObj);
-  await logAudit('koreksi', `Pengajuan ${kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${what} · ${reason}`, snap, txn.fleetId);
+  await logAudit('koreksi', `Pengajuan ${kind === 'void' ? 'pembatalan' : 'koreksi'}${arsip}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)}${arsip} · ${what} · ${reason}`, snap, txn.fleetId);
   return changeRequestClient(req, txn);
 }
 
@@ -1654,7 +1684,7 @@ async function decideChangeRequest(id, decision, body, actor) {
 
   // approve → apply. The txn must still be applyable.
   if (txn.status === 'void') throw ApiError.badRequest('Transaksi sudah dibatalkan.');
-  if (txn.legacy) throw ApiError.badRequest('Baris arsip tidak bisa diubah.');
+  await assertNotInvoiced(txn.id);   // an invoice issued AFTER the request was filed still blocks the apply
   let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
   // A request that CHANGES THE PRICE can only be applied by an approver who also holds
   // distribusiHargaMaster. Approving is what actually rewrites the price, so the same field-level
@@ -1690,19 +1720,27 @@ async function decideChangeRequest(id, decision, body, actor) {
       } });
     } else if (isGallonSale(txn)) {
       // Rewrite this sale's gallon movements to the corrected out/in (append-only: deactivate + add).
-      await db.gallonMovement.updateMany({ where: { transactionId: txn.id, active: true, type: { in: ['delivery_out', 'return_in'] } }, data: { active: false } });
-      const base = { customerId: txn.customerId, transactionId: txn.id, fleetId: txn.fleetId || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, active: true };
-      if (norm.fields.gallonOut > 0) await db.gallonMovement.create({ data: { ...base, type: 'delivery_out', qty: norm.fields.gallonOut, note: 'Galon keluar (koreksi)' } });
-      if (norm.fields.gallonIn > 0) await db.gallonMovement.create({ data: { ...base, type: 'return_in', qty: norm.fields.gallonIn, note: 'Galon masuk (koreksi)' } });
+      // ARCHIVE rows never had a gallon ledger (legacy import creates NO movements), so skip that entirely
+      // for them — otherwise we'd inject phantom stock. Their receivable (amount/method) still updates.
+      if (!txn.legacy) {
+        await db.gallonMovement.updateMany({ where: { transactionId: txn.id, active: true, type: { in: ['delivery_out', 'return_in'] } }, data: { active: false } });
+        const base = { customerId: txn.customerId, transactionId: txn.id, fleetId: txn.fleetId || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, active: true };
+        if (norm.fields.gallonOut > 0) await db.gallonMovement.create({ data: { ...base, type: 'delivery_out', qty: norm.fields.gallonOut, note: 'Galon keluar (koreksi)' } });
+        if (norm.fields.gallonIn > 0) await db.gallonMovement.create({ data: { ...base, type: 'return_in', qty: norm.fields.gallonIn, note: 'Galon masuk (koreksi)' } });
+      }
       // METHOD flip: bonCounted mirrors the method so the receivable math is unambiguous — a 'bon'
       // row counts toward sisa bon, a 'lunas' row does not. Every downstream aggregate reads `method`
       // (+ bonCounted for BON_TXN) live, so sisa bon / dashboard money-in / cash all recompute here.
       await db.distTransaction.update({ where: { id: txn.id }, data: {
         qty: norm.fields.qty, unitPriceLocked: norm.fields.unitPrice, amount: norm.newAmount,
         method: norm.fields.method, bonCounted: norm.fields.method === 'bon',
+        ...(norm.fields.txnDate ? { txnDate: norm.fields.txnDate } : {}), ...(norm.fields.note !== undefined ? { note: norm.fields.note } : {}),
       } });
     } else {
-      await db.distTransaction.update({ where: { id: txn.id }, data: { amount: norm.newAmount } });
+      await db.distTransaction.update({ where: { id: txn.id }, data: {
+        amount: norm.newAmount,
+        ...(norm.fields.txnDate ? { txnDate: norm.fields.txnDate } : {}), ...(norm.fields.note !== undefined ? { note: norm.fields.note } : {}),
+      } });
     }
     if (req.kind === 'correction') {
       // Record the applied correction (kind 'manual' → the "Dikoreksi" badge + the old→new trail).
@@ -1728,8 +1766,9 @@ async function decideChangeRequest(id, decision, body, actor) {
   // …and a method flip likewise, with its sisa-bon direction, so the trail is reconstructable.
   const methodLine = (req.kind === 'correction' && oldVals && newVals && newVals.method && oldVals.method !== newVals.method)
     ? ` · METODE ${oldVals.method} → ${newVals.method} (sisa bon ${newVals.method === 'bon' ? '+' : '−'}${Math.abs(newVals.method === 'bon' ? newVals.amount : oldVals.amount)})` : '';
+  const arsip = txn.legacy ? ' (ARSIP)' : '';   // archive corrections change historical figures — flag them
   const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}${priceLine}${methodLine}`;
-  await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${detail} · ${req.reason} · oleh ${snap.actorName}`, snap, req.fleetId);
+  await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}${arsip}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)}${arsip} · ${detail} · ${req.reason} · oleh ${snap.actorName}`, snap, req.fleetId);
   const fresh = await prisma.distChangeRequest.findUnique({ where: { id } });
   const out = await changeRequestClient(fresh);
   return { ...out, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };

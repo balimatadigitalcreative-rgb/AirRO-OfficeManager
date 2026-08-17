@@ -88,7 +88,11 @@ describe('opening bon — creation + guards', () => {
   });
 
   it('is correctable/voidable through the approval flow (structured amount edit; audited, not deleted)', async () => {
-    const row = await prisma.distTransaction.findFirst({ where: { customerId: custId, openingBon: true } });
+    // A FRESH customer so this opening bon isn't inside the invoice the "is billable" test issued above —
+    // an invoiced row is now (correctly) blocked from correction, so we test on an un-invoiced one.
+    const fresh = (await request(app).post('/api/v1/distribusi/customers').set(auth(gm)).send({ name: 'Bu Koreksi', masterPrice: 6000 })).body.data.id;
+    await openingBon(gm, fresh, { amount: 500000, txnDate: '2025-12-31', note: 'carry-over' });
+    const row = await prisma.distTransaction.findFirst({ where: { customerId: fresh, openingBon: true } });
     // an opening bon stores its amount directly (qty 0) → it is corrected like a pelunasan: amount only.
     const c = await request(app).post(`/api/v1/distribusi/transactions/${row.id}/corrections`).set(auth(gm)).send({ reason: 'salah nominal', amount: 250000 });
     expect(c.status).toBe(201);
@@ -96,7 +100,7 @@ describe('opening bon — creation + guards', () => {
     // gm can't approve their own request → owner approves
     const ap = await request(app).post(`/api/v1/distribusi/change-requests/${c.body.data.id}/approve`).set(auth(owner)).send({});
     expect(ap.status).toBe(200);
-    const d = await detail(gm, custId);
+    const d = await detail(gm, fresh);
     expect(d.transactions.find((x) => x.id === row.id).corrected).toBe(true);
     const audit = await request(app).get('/api/v1/distribusi/audit').set(auth(gm));
     expect(audit.body.data.some((a) => /Bon awal/i.test(a.title || ''))).toBe(true);          // creation audited

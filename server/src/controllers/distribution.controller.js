@@ -113,6 +113,9 @@ const correctionSchema = z.object({
   // become a payment; the service also rejects it on a pelunasan/opening-bon row. Method-only changes
   // need no price cap; a price change in the SAME request still requires distribusiHargaMaster.
   method: z.enum(['lunas', 'bon']).optional(),
+  // Metadata edits allowed on any row (incl. archive): tanggal (reorders the running balance) + catatan.
+  txnDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'txnDate must be YYYY-MM-DD').optional(),
+  note: z.string().max(300).optional(),
 });
 // Preview (dry-run) of a correction — same fields, but the reason is not required to preview.
 const correctionPreviewSchema = correctionSchema.extend({ reason: z.string().trim().max(1000).optional() });
