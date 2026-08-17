@@ -174,7 +174,15 @@ async function postDistExpense(x, actor, db = prisma) {
 async function distTxnLines(t, db = prisma) {
   if (t.status === 'void') return [];
   const f = t.fleetId || '';
-  if (t.method === 'pelunasan') { const amt = n(t.amount); return amt ? [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }] : []; }
+  if (t.method === 'pelunasan') {
+    const amt = n(t.amount); if (!amt) return [];
+    // PAYMENT NOT RECEIVED: the customer paid (their bon drops → Cr Piutang) but the money never
+    // reached the company — a staff took it — so it is a LOSS (Dr Beban Kerugian Piutang), never cash.
+    // This keeps accounting cash == the cash book (which also excludes it) while Piutang still falls,
+    // so Piutang == Σ Sisa Bon holds (customerBonRaw counts a PNR row as an ordinary pelunasan).
+    if (t.paymentNotReceived) return [{ code: LOSS_AR, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
+    return [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
+  }
   if (t.method !== 'bon') { const amt = n(t.amount); return amt ? [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }] : []; }
   const corrs = t.corrections || await db.correction.findMany({ where: { transactionId: t.id, kind: 'price', active: true }, select: { deltaAmount: true, kind: true, active: true } });
   const pdelta = (corrs || []).filter((c) => c.kind === 'price' && c.active).reduce((a, c) => a + Number(c.deltaAmount || 0), 0);

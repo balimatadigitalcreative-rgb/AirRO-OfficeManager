@@ -22,11 +22,12 @@ const login = (u, p) => request(app).post('/api/v1/auth/login').send({ username:
 const sum = (lines, k) => lines.reduce((s, l) => s + l[k], 0);
 const custList = async (t) => (await request(app).get('/api/v1/distribusi/customers').set(auth(t))).body.data;
 
-let owner, staff, staffId, cid;
+let owner, boss, staff, staffId, cid;
 beforeAll(async () => {
   await resetDb();
   await acc.seedChart();
-  owner = (await reg({ name: 'Boss', username: 'lp_own', password: 'secret123', role: 'gm' })).token;   // gm holds addEntry + distribusiApprove + reports
+  owner = (await reg({ name: 'GM', username: 'lp_own', password: 'secret123', role: 'gm' })).token;   // gm holds addEntry + distribusiInput + distribusiApprove + bonAdjust + reports
+  boss = (await reg({ name: 'Boss', username: 'lp_boss', password: 'secret123', role: 'owner' })).token;   // owner-tier: distribusiHardDelete (gm lacks it)
   const s = await reg({ name: 'Staf', username: 'lp_staff', password: 'secret123', role: 'finance' });
   staffId = s.user.id;
   await request(app).patch(`/api/v1/users/${staffId}`).set(auth(owner)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiVoid: true, distribusiApprove: false } });
@@ -144,6 +145,37 @@ describe('adjustments post live and keep AR exact', () => {
     const arBal = await acc.receivablesBalance();
     const list = await custList(owner);
     expect(arBal).toBe(list.reduce((s, x) => s + (x.sisaBon || 0), 0));
+    expect((await acc.trialBalance()).balanced).toBe(true);
+  });
+});
+
+describe('deferred paths now wired: payment-not-received + hard delete', () => {
+  it('a payment-not-received posts a LOSS (Dr Beban Kerugian / Cr Piutang), never cash, and AR stays exact', async () => {
+    // a fresh customer with a bon, then the money is "collected" but never reaches the company
+    const c2 = (await request(app).post('/api/v1/distribusi/customers').set(auth(owner)).send({ name: 'Toko PNR', type: 'reguler', masterPrice: 10000, armada: 'Merah' })).body.data.id;
+    const bon = (await request(app).post('/api/v1/distribusi/transactions').set(auth(owner)).send({ customerId: c2, qty: 4, method: 'bon', txnDate: '2026-08-12', gallonOut: 4 })).body.data;   // 40.000
+    const bal = async (code) => { const r = (await acc.accountBalances()).find((x) => x.code === code); return r ? r.balance : 0; };
+    const kasBefore = await bal('1-1000');
+    const pnr = (await request(app).post('/api/v1/distribusi/transactions/payment-not-received').set(auth(owner)).send({ customerId: c2, amount: 40000, responsibleName: 'Sopir X', lossReason: 'uang dibawa sopir, tidak disetor', txnDate: '2026-08-13' })).body.data;
+    const j = await acc.journalFor({ sourceType: 'dist_txn', sourceId: pnr.id });
+    expect(j).toBeTruthy();
+    expect(j.lines.find((l) => l.code === '6-7000').debit).toBe(40000);   // Beban Kerugian Piutang — a loss
+    expect(j.lines.find((l) => l.code === '1-1200').credit).toBe(40000);  // Piutang cleared
+    expect(j.lines.some((l) => l.code === '1-1000')).toBe(false);         // NEVER Kas — no money arrived
+    expect(await bal('1-1000')).toBe(kasBefore);   // cash untouched
+    const list = await custList(owner);
+    expect(await acc.receivablesBalance()).toBe(list.reduce((s, x) => s + (x.sisaBon || 0), 0));   // AR == Σ Sisa Bon
+    expect((await acc.trialBalance()).balanced).toBe(true);
+  });
+
+  it('a hard delete removes the source AND its journals — no orphan, integrity stays clean', async () => {
+    const bon = (await request(app).post('/api/v1/distribusi/transactions').set(auth(owner)).send({ customerId: cid, qty: 1, method: 'lunas', txnDate: '2026-08-14', gallonOut: 1 })).body.data;
+    expect(await acc.journalFor({ sourceType: 'dist_txn', sourceId: bon.id })).toBeTruthy();
+    // owner-tier hard delete (typed confirm + own password) — gm cannot hard-delete
+    const r = await request(app).delete(`/api/v1/distribusi/transactions/${bon.id}`).set(auth(boss)).send({ reason: 'salah input', confirm: 'HAPUS', password: 'secret123' });
+    expect(r.status).toBe(200);
+    expect(await acc.journalFor({ sourceType: 'dist_txn', sourceId: bon.id })).toBeFalsy();   // journal gone with the source
+    expect((await acc.integrityCheck()).ok).toBe(true);   // no orphan journal, no missing source
     expect((await acc.trialBalance()).balanced).toBe(true);
   });
 });

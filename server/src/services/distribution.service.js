@@ -1772,15 +1772,22 @@ async function createPaymentNotReceived(body, actor) {
   }
   if (!responsibleName) throw ApiError.badRequest('Staf yang bertanggung jawab wajib dipilih.');
   const snap = await actorSnap(actor);
-  const txn = await prisma.distTransaction.create({ data: {
-    customerId: customer.id, fleetId: customer.armada || '', qty: 0, unitPriceLocked: 0, amount,
-    method: 'pelunasan', bonCounted: true, paymentNotReceived: true,
-    // `note` PRINTS on the customer statement → keep it clean. The reason goes to lossReason.
-    note: (body.note || '').trim(),
-    responsibleUserId, responsibleName: responsibleName.slice(0, 120), lossReason: lossReason.slice(0, 500),
-    lossPhotoId: body.lossPhotoId ? String(body.lossPhotoId).slice(0, 60) : null,
-    txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
-  } });
+  // LIVE POSTING: the customer's bon drops (Cr Piutang) but the money never arrived, so it posts as a
+  // LOSS (Dr Beban Kerugian Piutang), NOT cash — distTxnLines special-cases paymentNotReceived — plus
+  // the AR reclass, in one transaction (flag-gated).
+  const txn = await prisma.$transaction(async (tx) => {
+    const t = await tx.distTransaction.create({ data: {
+      customerId: customer.id, fleetId: customer.armada || '', qty: 0, unitPriceLocked: 0, amount,
+      method: 'pelunasan', bonCounted: true, paymentNotReceived: true,
+      // `note` PRINTS on the customer statement → keep it clean. The reason goes to lossReason.
+      note: (body.note || '').trim(),
+      responsibleUserId, responsibleName: responsibleName.slice(0, 120), lossReason: lossReason.slice(0, 500),
+      lossPhotoId: body.lossPhotoId ? String(body.lossPhotoId).slice(0, 60) : null,
+      txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    } });
+    if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); await acc.postReceivablesReclass(customer.id, actor, tx); }
+    return t;
+  });
   await logAudit('koreksi', `Pelunasan tidak diterima: ${customer.name}`,
     `${shortRefServer(txn.id)} · ${amount} · penanggung jawab ${responsibleName} · ${lossReason}`, snap, customer.armada || '');
   return { ...txn, sisaBon: Math.max(0, sisaBon - amount), gallonsHeld: await gallonBalanceOf(customer.id), isPayment: true };
@@ -2091,11 +2098,15 @@ async function hardDeleteTransaction(txnId, body, actor) {
   const snap = await actorSnap(actor);
   // AUDIT FIRST — the row is about to disappear; the trace must not.
   await logAudit('hapus', `Hapus permanen transaksi: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${txn.method} ${txn.amount} · ${reason} · tidak bisa dikembalikan`, snap, txn.fleetId);
-  await prisma.$transaction([
-    prisma.gallonMovement.deleteMany({ where: { transactionId: txnId } }),
-    prisma.correction.deleteMany({ where: { transactionId: txnId } }),
-    prisma.distTransaction.delete({ where: { id: txnId } }),
-  ]);
+  // The source is permanently removed → its journals (original + any adjustments) are deleted with it
+  // in the same transaction (no orphan journal), then the customer's AR reclasses (flag-gated).
+  await prisma.$transaction(async (tx) => {
+    if (config.accountingV2) await tx.journalEntry.deleteMany({ where: { OR: [{ sourceType: 'dist_txn', sourceId: txnId }, { sourceType: 'dist_txn_adj', ref: txnId }] } });
+    await tx.gallonMovement.deleteMany({ where: { transactionId: txnId } });
+    await tx.correction.deleteMany({ where: { transactionId: txnId } });
+    await tx.distTransaction.delete({ where: { id: txnId } });
+    if (config.accountingV2) await acc.postReceivablesReclass(txn.customerId, actor, tx);
+  });
   return { deleted: true, id: txnId, ref: shortRefServer(txnId), sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
 }
 
@@ -2187,22 +2198,29 @@ async function bulkExecuteTransactions(ids, action, body, actor) {
         await prisma.$transaction(async (tx) => {
           await tx.gallonMovement.updateMany({ where: { transactionId: id, active: true }, data: { active: false } });
           await tx.distTransaction.update({ where: { id }, data: { status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedByRole: snap.actorRole, voidedAt: new Date(), voidReason: reason || note } });
+          // LIVE POSTING: same append-only full reversal as a single void, + AR reclass (flag-gated).
+          if (config.accountingV2) { await acc.reconcileDistTxn({ ...t, status: 'void' }, 'void', actor, tx); await acc.postReceivablesReclass(t.customerId, actor, tx); }
         });
         snapshots.push({ id, action: 'batal' });
       } else if (action === 'arsip') {
         // Archive = hide from default/customer views but KEEP counted (bonCounted stays, gallon
-        // movements untouched) → NO balance change, exactly as the confirm dialog promises.
+        // movements untouched) → NO balance change, exactly as the confirm dialog promises. The journal
+        // is deliberately UNTOUCHED for the same reason (backfill also leaves already-posted rows).
         await prisma.distTransaction.update({ where: { id }, data: { legacy: true } });
         snapshots.push({ id, action: 'arsip' });
       } else {
         const movements = await prisma.gallonMovement.findMany({ where: { transactionId: id } });
         const corrections = await prisma.correction.findMany({ where: { transactionId: id } });
         snapshots.push({ id, action: 'hapus', row: { ...t, customer: undefined, corrections: undefined }, movements, corrections });
-        await prisma.$transaction([
-          prisma.gallonMovement.deleteMany({ where: { transactionId: id } }),
-          prisma.correction.deleteMany({ where: { transactionId: id } }),
-          prisma.distTransaction.delete({ where: { id } }),
-        ]);
+        // A hard delete removes the SOURCE permanently → its journals (original + any adjustments) go
+        // with it in the same transaction, so no orphan journal is left, then the customer AR reclasses.
+        await prisma.$transaction(async (tx) => {
+          if (config.accountingV2) await tx.journalEntry.deleteMany({ where: { OR: [{ sourceType: 'dist_txn', sourceId: id }, { sourceType: 'dist_txn_adj', ref: id }] } });
+          await tx.gallonMovement.deleteMany({ where: { transactionId: id } });
+          await tx.correction.deleteMany({ where: { transactionId: id } });
+          await tx.distTransaction.delete({ where: { id } });
+          if (config.accountingV2) await acc.postReceivablesReclass(t.customerId, actor, tx);
+        });
       }
       affectedCustomers.add(t.customerId); fleetTag = fleetTag || t.fleetId;
       results.push({ id, ref: shortRefServer(id), ok: true, customerId: t.customerId });
@@ -2235,19 +2253,25 @@ async function restoreBulk(batchId, actor) {
         const t = await prisma.distTransaction.findUnique({ where: { id: s.id } }); if (!t || t.status !== 'void') continue;
         await prisma.$transaction(async (tx) => {
           await tx.gallonMovement.updateMany({ where: { transactionId: s.id, active: false }, data: { active: true } });
-          await tx.distTransaction.update({ where: { id: s.id }, data: { status: 'active', voidedById: null, voidedByName: null, voidedByRole: null, voidedAt: null, voidReason: null } });
+          const row = await tx.distTransaction.update({ where: { id: s.id }, data: { status: 'active', voidedById: null, voidedByName: null, voidedByRole: null, voidedAt: null, voidReason: null } });
+          // Un-void → append an adjusting entry that restores the txn's journals to its live figure (the
+          // prior void reversal stays; this cancels it) + AR reclass (flag-gated).
+          if (config.accountingV2) { await acc.reconcileDistTxn(row, 'unvoid', actor, tx); await acc.postReceivablesReclass(row.customerId, actor, tx); }
         });
         restored.push(s.id);
       } else if (s.action === 'arsip') {
         const t = await prisma.distTransaction.findUnique({ where: { id: s.id } }); if (!t) continue;
-        await prisma.distTransaction.update({ where: { id: s.id }, data: { legacy: false } }); restored.push(s.id);
+        await prisma.distTransaction.update({ where: { id: s.id }, data: { legacy: false } }); restored.push(s.id);   // journal untouched (archive was a ledger no-op)
       } else if (s.action === 'hapus' && s.row) {
         const exists = await prisma.distTransaction.findUnique({ where: { id: s.id } }); if (exists) continue;
         const r = s.row; const { corrections, customer, ...rowData } = r;
         await prisma.$transaction(async (tx) => {
-          await tx.distTransaction.create({ data: { ...rowData, amount: B(rowData.amount), unitPriceLocked: B(rowData.unitPriceLocked), createdAt: rowData.createdAt ? new Date(rowData.createdAt) : undefined, voidedAt: rowData.voidedAt ? new Date(rowData.voidedAt) : null } });
+          const row = await tx.distTransaction.create({ data: { ...rowData, amount: B(rowData.amount), unitPriceLocked: B(rowData.unitPriceLocked), createdAt: rowData.createdAt ? new Date(rowData.createdAt) : undefined, voidedAt: rowData.voidedAt ? new Date(rowData.voidedAt) : null } });
           for (const g of (s.movements || [])) { const { id: gid, ...gd } = g; await tx.gallonMovement.create({ data: { ...gd, createdAt: gd.createdAt ? new Date(gd.createdAt) : undefined } }); }
           for (const c of (s.corrections || [])) { const { id: cid, ...cd } = c; await tx.correction.create({ data: { ...cd, deltaAmount: B(cd.deltaAmount), createdAt: cd.createdAt ? new Date(cd.createdAt) : undefined } }); }
+          // Re-post the recreated source's journal (skip-if-exists → fresh, since the delete removed it)
+          // + AR reclass (flag-gated).
+          if (config.accountingV2 && row.status !== 'void') { await acc.postDistTransaction(row, actor, tx); await acc.postReceivablesReclass(row.customerId, actor, tx); }
         });
         restored.push(s.id);
       }
