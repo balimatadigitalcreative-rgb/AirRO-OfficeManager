@@ -222,6 +222,7 @@ function FApp() {
   const [deliveryAlerts, setDeliveryAlerts] = uSh([]);   // AlertBell: extra orders on today's board for the user's fleet
   const [resetAlerts, setResetAlerts] = uSh([]);         // AlertBell: pending forgot-password requests (owner/GM)
   const [changeReqAlerts, setChangeReqAlerts] = uSh([]); // AlertBell: pending distribusi correction/void requests (approvers)
+  const [acctAlerts, setAcctAlerts] = uSh([]);           // AlertBell: unmapped categories / journal drift (reports users, flag on)
   const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
   const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
@@ -626,6 +627,21 @@ function FApp() {
     }).catch(() => { if (live) setChangeReqAlerts([]); });
     return () => { live = false; };
   }, [user, p.distribusiApprove, screen, distTick]);
+  // Accounting workflow attention (AlertBell) — unmapped categories or journal drift. Gated on
+  // reports + the flag: when accounting v2 is off, /accounting/status 404s → no alert.
+  uEh(() => {
+    if (!user || !p.reports || !(window.API && window.API.accounting && window.API.accounting.status)) { setAcctAlerts([]); return; }
+    let live = true;
+    window.API.accounting.status({ asOf: FIN.TODAY }).then((r) => {
+      if (!live) return; const s = (r && r.data) || {};
+      const drift = s.integrity ? ((s.integrity.missing || 0) + (s.integrity.orphan || 0)) : 0;
+      const a = [];
+      if (s.unmappedCount > 0) a.push({ id: 'acctunmapped', level: 'med', icon: 'IconWarn', title: tr('map.alertTitle'), msg: tr('map.alertMsg', { n: s.unmappedCount }), screen: 'acct-mapping' });
+      if (drift > 0) a.push({ id: 'acctdrift', level: 'high', icon: 'IconWarn', title: tr('flow.driftTitle'), msg: tr('flow.driftMsg', { n: drift }), screen: 'acct-backfill' });
+      setAcctAlerts(a);
+    }).catch(() => { if (live) setAcctAlerts([]); });
+    return () => { live = false; };
+  }, [user, p.reports, screen, distTick]);
   const catMap = uMh(() => FS.buildMap(cats), [cats]);
 
   // ── Setoran: REST per-record (create/update/delete one record at a time) ──
@@ -1587,7 +1603,7 @@ function FApp() {
                 </span>
               )}
               <AUTH.LangToggle lang={lang} onLang={changeLang} />
-              {(p.seeMoney || p.distribusiPengiriman || resetAlerts.length > 0 || changeReqAlerts.length > 0) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts, ...resetAlerts, ...changeReqAlerts]} />}
+              {(p.seeMoney || p.distribusiPengiriman || resetAlerts.length > 0 || changeReqAlerts.length > 0 || acctAlerts.length > 0) && <ALERTS.AlertBell alerts={[...(p.seeMoney ? alerts : []), ...deliveryAlerts, ...resetAlerts, ...changeReqAlerts, ...acctAlerts]} />}
               <AUTH.ProfileMenu user={user} lang={lang} onLang={changeLang} alerts={p.seeMoney ? alerts : []} activity={myActivity}
                 onChangePassword={openPw} onLogout={logout} onNavigate={go} shortcuts={pmShortcuts} onUpdateProfile={updateProfile} />
             </div>
@@ -1685,6 +1701,9 @@ function FApp() {
           {screen === 'overview' && p.cashflow && (
             <div className="screen-enter">
               {p.seeMoney && <ALERTS.AlertBanner alerts={alerts} />}
+              {/* ALUR KERJA — accounting workflow map (Record → Journal → Trial balance → Reconcile →
+                  Close), each a link with a status dot. Renders only when accounting v2 is live. */}
+              {p.reports && ACCT.WorkflowPanel && <ACCT.WorkflowPanel onNav={go} />}
               {/* Dashboard Keuangan — KPI cards (each states its period scope + drills to the ledger),
                   cash position per account, P&L month-vs-last, 12-month trend, ratios. All over the
                   cash-book figures the shell already computes; AR/liabilities gated to the engine. */}

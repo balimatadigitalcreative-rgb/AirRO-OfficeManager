@@ -31,5 +31,7 @@ const integrity = asyncHandler(async (req, res) => res.json({ data: await servic
 const mappings = asyncHandler(async (req, res) => res.json({ data: await service.listCategoryMappings() }));
 const setMapping = asyncHandler(async (req, res) => res.json({ data: await service.setCategoryMapping({ categoryKey: req.body.categoryKey, type: req.body.type, chartCode: req.body.chartCode }, req.user) }));
 const clearMapping = asyncHandler(async (req, res) => res.json({ data: await service.clearCategoryMapping({ categoryKey: req.body.categoryKey, type: req.body.type }) }));
+// STATUS roll-up for the workflow panel + report headers (last-posted, balance, drift/unmapped counts).
+const status = asyncHandler(async (req, res) => res.json({ data: await service.accountingStatus({ asOf: req.query.asOf }) }));
 
-module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, integrity, mappings, setMapping, clearMapping, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };
+module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };

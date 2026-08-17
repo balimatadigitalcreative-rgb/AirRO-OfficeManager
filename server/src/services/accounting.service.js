@@ -419,6 +419,35 @@ async function clearCategoryMapping({ categoryKey, type }) {
   return { cleared: true };
 }
 
+// One roll-up that powers the "Alur Kerja" workflow panel + every report screen's header line: when
+// journals were last posted, whether the books balance, drift/unmapped/unreconciled counts, and
+// whether the month BEFORE `asOf` (the one that should be closed) is closed.
+async function accountingStatus({ asOf } = {}) {
+  const [last, journalCount, integrity, unmapped] = await Promise.all([
+    prisma.journalEntry.findFirst({ orderBy: { postedAt: 'desc' }, select: { postedAt: true } }),
+    prisma.journalEntry.count(),
+    integrityCheck(),
+    unmappedCategories(),
+  ]);
+  let unreconciled = 0, trialBalanced = true;
+  try { unreconciled = (await require('./reconciliation.service').unreconciledBankTotal()).count || 0; } catch (e) { /* bank rec optional */ }
+  try { trialBalanced = (await trialBalance()).balanced === true; } catch (e) { /* empty ledger balances */ }
+  let priorMonth = null, priorClosed = false;
+  const base = /^\d{4}-\d{2}/.test(String(asOf || '')) ? String(asOf) : null;
+  if (base) {
+    const y = +base.slice(0, 4), m = +base.slice(5, 7);
+    const pm = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
+    priorMonth = `${pm.y}-${String(pm.m).padStart(2, '0')}`;
+    const per = await prisma.accountingPeriod.findUnique({ where: { periodKey: priorMonth }, select: { status: true } }).catch(() => null);
+    priorClosed = !!(per && (per.status === 'ditutup' || per.status === 'terkunci'));
+  }
+  return {
+    lastPostedAt: last ? last.postedAt : null, journalCount, trialBalanced,
+    integrity: { ok: integrity.ok, missing: integrity.missingCount, orphan: integrity.orphanCount },
+    unmappedCount: unmapped.length, unreconciled, priorMonth, priorClosed,
+  };
+}
+
 // ── Reports (read the journal, never the cash book). ──
 const SIGN = { asset: 1, expense: 1, liability: -1, equity: -1, revenue: -1 };   // normal-balance sign for (debit − credit)
 async function accountBalances({ dateFrom, dateTo } = {}) {
@@ -592,6 +621,6 @@ async function chart() {
 module.exports = {
   CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, chart, postJournal, reverseJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
   distTxnLines, reconcileDistTxn, postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, integrityCheck, unmappedCategories, categoryToCode, resolveCategoryCode,
-  listCategoryMappings, setCategoryMapping, clearCategoryMapping, postableAccounts,
+  listCategoryMappings, setCategoryMapping, clearCategoryMapping, postableAccounts, accountingStatus,
   accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, journalFor, cashFlow,
 };

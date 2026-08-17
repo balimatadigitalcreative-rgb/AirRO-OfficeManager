@@ -14,6 +14,7 @@
   const todayISO = () => (window.FIN ? FIN.TODAY : new Date().toISOString().slice(0, 10));
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   const monthKey = (d) => String(d || '').slice(0, 7);
+  const fmtWhen = (iso) => { const d = new Date(iso); if (isNaN(d)) return ''; const p = (x) => String(x).padStart(2, '0'); return d.getDate() + ' ' + MON[d.getMonth()] + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
 
   // Generic SpreadsheetML (.xls) export — same self-contained approach as the shipped report exports.
   function exportXLS(sheetName, matrix, filename) {
@@ -66,6 +67,54 @@
       </div>
     );
   }
+  // Report-screen header (Part 2 #1): what the screen answers + a live context line — the period it
+  // covers, whether it is closed, and when the underlying journals were last posted. One shared status
+  // fetch; tone turns amber when the books don't balance or a source hasn't posted. `periodLabel` /
+  // `closed` are passed by screens that have a period concept.
+  function ReportHeader({ answers, periodLabel, closed }) {
+    const q = useAcct(() => ACC().status({ asOf: todayISO() }), []);
+    const s = (q.state === 'ready' && q.data) || {};
+    const parts = [];
+    if (periodLabel) parts.push(trA('rep.periodIs', { p: periodLabel }) + (closed === true ? ' · ' + trA('rep.periodClosed') : closed === false ? ' · ' + trA('rep.periodOpen') : ''));
+    if (q.state === 'ready') parts.push(s.lastPostedAt ? trA('rep.lastPosted', { when: fmtWhen(s.lastPostedAt) }) : trA('rep.noJournals'));
+    const warn = q.state === 'ready' && (s.trialBalanced === false || (s.integrity && s.integrity.ok === false) || s.unmappedCount > 0);
+    return <ScreenIntro answers={answers} meta={parts.join(' · ')} tone={warn ? 'warn' : 'info'} />;
+  }
+
+  // ALUR KERJA (Part 2 #5) — the workflow map on the Ringkasan: Record → Auto-journal → Trial balance →
+  // Reconcile → Close. Each step is a link with a status dot (ok / needs-attention), so it is obvious
+  // what to do next and in what order. Hidden entirely when accounting v2 is off (status 404s).
+  function WorkflowPanel({ onNav }) {
+    const q = useAcct(() => ACC().status({ asOf: todayISO() }), []);
+    if (q.state === 'gated' || q.state === 'error') return null;   // don't clutter the dashboard when it isn't live
+    const s = q.data || {};
+    const loading = q.state === 'loading';
+    const drift = s.integrity ? ((s.integrity.missing || 0) + (s.integrity.orphan || 0)) : 0;
+    const steps = [
+      { k: 'record', tone: 'done', to: 'entries', label: trA('flow.record'), sub: trA('flow.recordSub') },
+      { k: 'journal', to: s.unmappedCount ? 'acct-mapping' : 'acct-backfill', label: trA('flow.journal'),
+        tone: (s.integrity && s.integrity.ok && !s.unmappedCount) ? 'ok' : 'warn',
+        sub: s.unmappedCount ? trA('flow.journalUnmapped', { n: s.unmappedCount }) : drift ? trA('flow.journalDrift', { n: drift }) : (s.lastPostedAt ? trA('flow.journalOk', { when: fmtWhen(s.lastPostedAt) }) : trA('flow.journalNone')) },
+      { k: 'tb', to: 'reports', label: trA('flow.tb'), tone: s.trialBalanced ? 'ok' : 'warn', sub: s.trialBalanced ? trA('flow.tbOk') : trA('flow.tbBad') },
+      { k: 'recon', to: 'reconcile', label: trA('flow.recon'), tone: (s.unreconciled || 0) === 0 ? 'ok' : 'warn', sub: (s.unreconciled || 0) === 0 ? trA('flow.reconOk') : trA('flow.reconN', { n: s.unreconciled }) },
+      { k: 'close', to: 'close', label: trA('flow.close'), tone: s.priorClosed ? 'ok' : 'warn', sub: s.priorMonth ? (s.priorClosed ? trA('flow.closeOk', { m: s.priorMonth }) : trA('flow.closeTodo', { m: s.priorMonth })) : trA('flow.closeSub') },
+    ];
+    return (
+      <div className="card fin-scope flow-card">
+        <div className="flow-head"><span className="flow-hic">{IcA('IconDashboard', { s: 15 })}</span>{trA('flow.title')}<span className="flow-hsub">{trA('flow.subtitle')}</span></div>
+        <div className="flow-steps">
+          {steps.map((st, i) => (
+            <button key={st.k} type="button" className={`flow-step flow-${loading ? 'load' : st.tone}`} onClick={() => onNav && onNav(st.to)} disabled={loading}>
+              <span className="flow-n">{i + 1}</span>
+              <span className="flow-body"><span className="flow-label">{st.label}<span className="flow-dot" /></span><span className="flow-sub">{loading ? '…' : st.sub}</span></span>
+              <span className="flow-caret">{IcA('IconCaret', { s: 13 })}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // Actionable empty state (Part 2 #2) — never a blank table. Title + guidance + an optional CTA.
   function EmptyState({ title, body, actionLabel, onAction, icon }) {
     return (
@@ -234,6 +283,7 @@
             <button className="btn btn-primary" disabled={!data} onClick={() => window.print()}>{IcA('IconReport', { s: 16 })}<span className="fin-btn-lbl">{trA('rep.print')}</span></button>
           </div>
         </div>
+        <div className="no-print"><ReportHeader answers={trA('rep.ledgerAnswers')} /></div>
 
         <div className="bb-layout">
           <div className="card bb-picker">
@@ -344,6 +394,7 @@
             <label className="btn btn-ghost rc-import">{IcA('IconDownload', { s: 16 })}<span className="fin-btn-lbl">{trA('rc.importCsv')}</span><input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => e.target.files[0] && importCSV(e.target.files[0])} /></label>
           </div>
         </div>
+        <div className="no-print"><ReportHeader answers={trA('rep.reconAnswers')} /></div>
 
         {rec.state === 'loading' && <div className="card fin-scope"><Skeleton n={8} /></div>}
         {rec.state === 'error' && <ErrorCard onRetry={rec.reload} />}
@@ -469,6 +520,7 @@
         <div className="fin-head">
           <div className="fin-head-titles"><h2>{trA('t.finClose')}</h2><div className="fin-head-scope">{trA('s.finClose')}</div></div>
         </div>
+        <ReportHeader answers={trA('rep.closeAnswers')} periodLabel={target} closed={targetStatus !== 'terbuka'} />
 
         {/* CLOSE a period — checklist gates the button */}
         <div className="card tp-close">
@@ -680,5 +732,5 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen };
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel };
 })();

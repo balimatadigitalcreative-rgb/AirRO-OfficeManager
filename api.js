@@ -125,6 +125,7 @@
       reconcileMark: (b) => req('POST', '/accounting/reconciliation/mark', b),        // { accountId, itemType, itemId, cleared, statementRef? }
       // Integrity (drift), Pemetaan Akun (category mapping), and Backfill (with dry-run preview)
       integrity: (p) => req('GET', '/accounting/integrity' + acctQs(p)),             // { missing[], orphan[], ok }
+      status: (p) => req('GET', '/accounting/status' + acctQs(p)),                   // { lastPostedAt, trialBalanced, integrity, unmappedCount, unreconciled, priorMonth, priorClosed }
       mappings: () => req('GET', '/accounting/mappings'),                             // { items[], accounts{income,expense}, unmappedCount }
       setMapping: (b) => req('POST', '/accounting/mappings', b),                      // { categoryKey, type, chartCode }
       clearMapping: (b) => req('DELETE', '/accounting/mappings', b),                  // { categoryKey, type }

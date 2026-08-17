@@ -23,6 +23,7 @@ router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging b
 router.get('/receivables', ctrl.receivables);
 router.get('/unmapped', ctrl.unmapped);
 router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
+router.get('/status', ctrl.status);        // workflow-panel + report-header roll-up (?asOf=YYYY-MM-DD)
 // PEMETAAN AKUN — read for any reports user; map/unmap is owner/GM-tier (a config change).
 router.get('/mappings', ctrl.mappings);
 router.post('/mappings', requireRole('owner', 'gm'), ctrl.setMapping);

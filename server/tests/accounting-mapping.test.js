@@ -70,3 +70,16 @@ describe('Pemetaan Akun — unmapped detection + live re-mapping', () => {
     expect((await request(app).delete('/api/v1/accounting/mappings').set(auth(staff)).send({ categoryKey: 'Katering', type: 'expense' })).status).toBe(403);
   });
 });
+
+describe('Status roll-up (workflow panel + report headers)', () => {
+  it('reports journals-posted, balance, integrity, unmapped count and the prior month', async () => {
+    const s = (await request(app).get('/api/v1/accounting/status?asOf=2026-08-16').set(auth(gm))).body.data;
+    expect(s.journalCount).toBeGreaterThan(0);          // live posting has journalled the entries
+    expect(s.lastPostedAt).toBeTruthy();
+    expect(s.trialBalanced).toBe(true);                 // the cash-book entries balance
+    expect(s.integrity).toMatchObject({ ok: true });    // no drift with live posting
+    expect(typeof s.unmappedCount).toBe('number');
+    expect(s.priorMonth).toBe('2026-07');               // the month before asOf — the one that should close
+    expect(s.priorClosed).toBe(false);                  // nothing closed in this test
+  });
+});
