@@ -685,20 +685,47 @@
   function BackfillScreen({ canRun }) {
     const [from, setFrom] = aS('');
     const [preview, setPreview] = aS(null);
-    const [result, setResult] = aS(null);
+    const [job, setJob] = aS(null);       // async job: { jobId, status, processed, total, posted, failed, result, errors }
     const [busy, setBusy] = aS('');
     const [err, setErr] = aS('');
     const [gated, setGated] = aS(false);
-    const call = async (dryRun) => {
-      setBusy(dryRun ? 'preview' : 'run'); setErr(''); if (dryRun) setResult(null);
-      try { const r = await ACC().backfill({ fromDate: from || undefined, dryRun }); const data = (r && r.data) || r; if (dryRun) setPreview(data); else { setResult(data); setPreview(null); } }
-      catch (e) { const g = e && (e.status === 404 || /404|disabled/i.test(String((e && e.message) || ''))); if (g) setGated(true); else setErr(errMsg(e)); }
-      finally { setBusy(''); }
+    const pollRef = aRf(null);
+    const LS = 'acct_backfill_job';
+    const isGated = (e) => e && (e.status === 404 || /404|disabled/i.test(String((e && e.message) || '')));
+    const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+    // Poll the async job's status; stop (and forget the persisted id) once it's no longer running.
+    const poll = (jobId) => {
+      stopPoll();
+      const tick = async () => {
+        try { const r = await ACC().backfillStatus(jobId); const s = (r && r.data) || r; setJob(s);
+          if (s.status !== 'running') { stopPoll(); try { localStorage.removeItem(LS); } catch (e) {} } }
+        catch (e) { if (e && e.status === 404) { stopPoll(); try { localStorage.removeItem(LS); } catch (er) {} setJob(null); } }
+      };
+      tick(); pollRef.current = setInterval(tick, 1200);
     };
+    // Resume a running job across a page refresh (the id is persisted in localStorage).
+    aEf(() => { let saved = null; try { saved = localStorage.getItem(LS); } catch (e) {} if (saved) poll(saved); return stopPoll; }, []);
+
+    const doPreview = async () => {
+      setBusy('preview'); setErr('');
+      try { const r = await ACC().backfill({ fromDate: from || undefined, dryRun: true }); setPreview((r && r.data) || r); }
+      catch (e) { if (isGated(e)) setGated(true); else setErr(errMsg(e)); } finally { setBusy(''); }
+    };
+    const doRun = async () => {
+      setBusy('run'); setErr('');
+      try { const r = await ACC().backfill({ fromDate: from || undefined }); const d = (r && r.data) || r;
+        try { localStorage.setItem(LS, d.jobId); } catch (e) {}
+        setPreview(null); setJob({ jobId: d.jobId, status: 'running', processed: 0, total: d.total || 0, posted: 0, failed: 0 }); poll(d.jobId); }
+      catch (e) { if (isGated(e)) setGated(true); else setErr(errMsg(e)); } finally { setBusy(''); }
+    };
+
     if (gated) return <GatedCard icon="IconRefresh" body={trA('fin.backfillSoon')} />;
     const SRC = [['entry', 'bf.srcEntry'], ['transfer', 'bf.srcTransfer'], ['dist_txn', 'bf.srcDistTxn'], ['dist_expense', 'bf.srcExpense'], ['dist_adjustment', 'bf.srcAdjust'], ['reclass', 'bf.srcReclass']];
-    const counts = (o) => SRC.map(([k, lbl]) => ({ k, lbl, n: (o && o[k]) || 0 })).filter((r) => r.n > 0);
+    const cells = (o) => SRC.map(([k, lbl]) => ({ k, lbl, n: (o && o[k]) || 0 })).filter((r) => r.n > 0);
     const totalOf = (o) => SRC.reduce((s, [k]) => s + ((o && o[k]) || 0), 0);
+    const running = job && job.status === 'running';
+    const pct = job && job.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
+    const rc = job && job.result && job.result.counts;
     return (
       <div className="screen-enter fin-scope">
         <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finBackfill')}</h2><div className="fin-head-scope">{trA('s.finBackfill')}</div></div></div>
@@ -707,28 +734,53 @@
           <div className="bf-controls">
             <label className="fld-label" style={{ marginTop: 0 }}>{trA('bf.fromDate')}</label>
             <div className="bf-row">
-              <input type="date" className="fld bf-date" value={from} max={todayISO()} onChange={(e) => setFrom(e.target.value)} />
-              <button className="btn btn-ghost" disabled={!!busy} onClick={() => call(true)}>{IcA('IconInvoice', { s: 15 })}{busy === 'preview' ? trA('bf.previewing') : trA('bf.preview')}</button>
+              <input type="date" className="fld bf-date" value={from} max={todayISO()} disabled={running} onChange={(e) => setFrom(e.target.value)} />
+              <button className="btn btn-ghost" disabled={!!busy || running} onClick={doPreview}>{IcA('IconInvoice', { s: 15 })}{busy === 'preview' ? trA('bf.previewing') : trA('bf.preview')}</button>
             </div>
             <div className="bf-hint">{trA('bf.fromHint')}</div>
           </div>
           {err && <div className="add-err" style={{ marginTop: 10 }}><IconClose s={14} />{err}</div>}
-          {preview && (
+
+          {/* PREVIEW (dry-run) — shown only when there's no active/finished job to display. */}
+          {preview && !job && (
             <div className="bf-preview">
               <div className="bf-preview-head">{IcA('IconInvoice', { s: 15 })}{trA('bf.wouldPost', { n: totalOf(preview) })}</div>
               {totalOf(preview) === 0
                 ? <div className="fin-empty-s">{trA('bf.nothingNew')}</div>
                 : (<>
-                  <div className="bf-grid">{counts(preview).map((r) => <div key={r.k} className="bf-cell"><span className="bf-cell-n tnum">{r.n}</span><span className="bf-cell-l">{trA(r.lbl)}</span></div>)}</div>
-                  {canRun && <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={busy === 'run'} onClick={() => call(false)}>{IcA('IconRefresh', { s: 16 })}{busy === 'run' ? trA('bf.running') : trA('bf.commit', { n: totalOf(preview) })}</button>}
-                  {!canRun && <div className="bf-hint" style={{ marginTop: 10 }}>{trA('bf.ownerOnly')}</div>}
+                  <div className="bf-grid">{cells(preview).map((r) => <div key={r.k} className="bf-cell"><span className="bf-cell-n tnum">{r.n}</span><span className="bf-cell-l">{trA(r.lbl)}</span></div>)}</div>
+                  {canRun ? <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={busy === 'run'} onClick={doRun}>{IcA('IconRefresh', { s: 16 })}{busy === 'run' ? trA('bf.starting') : trA('bf.commit', { n: totalOf(preview) })}</button>
+                    : <div className="bf-hint" style={{ marginTop: 10 }}>{trA('bf.ownerOnly')}</div>}
                 </>)}
             </div>
           )}
-          {result && (
-            <div className="bf-result">
-              <div className="bf-preview-head ok">{IcA('IconCheck', { s: 15 })}{trA('bf.done', { n: totalOf(result) })}</div>
-              <div className="bf-grid">{counts(result).map((r) => <div key={r.k} className="bf-cell"><span className="bf-cell-n tnum">{r.n}</span><span className="bf-cell-l">{trA(r.lbl)}</span></div>)}</div>
+
+          {/* ASYNC JOB — progress while running, a sound-books summary when done, guidance if it fails. */}
+          {job && (
+            <div className={`bf-job ${job.status}`}>
+              {running && (<>
+                <div className="bf-preview-head">{IcA('IconRefresh', { s: 15 })}{trA('bf.progress', { done: job.processed || 0, total: job.total || 0 })}</div>
+                <div className="bf-bar"><div className="bf-bar-fill" style={{ width: pct + '%' }} /></div>
+                <div className="bf-hint" style={{ marginTop: 6 }}>{trA('bf.runningHint')}{job.failed ? ' · ' + trA('bf.failedN', { n: job.failed }) : ''}</div>
+              </>)}
+              {job.status === 'done' && (<>
+                <div className="bf-preview-head ok">{IcA('IconCheck', { s: 15 })}{trA('bf.done', { n: job.posted || 0 })}</div>
+                {rc && <div className="bf-grid">{cells(rc).map((r) => <div key={r.k} className="bf-cell"><span className="bf-cell-n tnum">{r.n}</span><span className="bf-cell-l">{trA(r.lbl)}</span></div>)}</div>}
+                {job.result && (
+                  <div className="bf-checks">
+                    <div className={`bf-check ${job.result.trialBalanced ? 'ok' : 'bad'}`}>{IcA(job.result.trialBalanced ? 'IconCheck' : 'IconWarn', { s: 14 })}{trA(job.result.trialBalanced ? 'bf.tbOk' : 'bf.tbBad')}</div>
+                    <div className={`bf-check ${job.result.integrity && job.result.integrity.ok ? 'ok' : 'bad'}`}>{IcA(job.result.integrity && job.result.integrity.ok ? 'IconCheck' : 'IconWarn', { s: 14 })}{job.result.integrity && job.result.integrity.ok ? trA('bf.integrityOk') : trA('bf.integrityBad', { m: (job.result.integrity && job.result.integrity.missing) || 0, o: (job.result.integrity && job.result.integrity.orphan) || 0 })}</div>
+                    {job.failed > 0 && <div className="bf-check bad">{IcA('IconWarn', { s: 14 })}{trA('bf.failedN', { n: job.failed })}</div>}
+                  </div>
+                )}
+                {canRun && <button className="btn btn-ghost" style={{ marginTop: 12 }} onClick={() => { setJob(null); setPreview(null); }}>{trA('bf.again')}</button>}
+              </>)}
+              {job.status === 'failed' && (<>
+                <div className="bf-preview-head bad">{IcA('IconClose', { s: 15 })}{trA('bf.jobFailed')}</div>
+                <div className="dist-warnbox" style={{ marginTop: 8 }}><IconWarn s={15} /><span>{trA('bf.jobFailedHint', { n: job.posted || 0 })}</span></div>
+                {(job.errors || []).slice(0, 3).map((e, i) => <div key={i} className="bf-err-line">{e.message}</div>)}
+                {canRun && <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={doRun}>{IcA('IconRefresh', { s: 16 })}{trA('bf.resume')}</button>}
+              </>)}
             </div>
           )}
         </div>

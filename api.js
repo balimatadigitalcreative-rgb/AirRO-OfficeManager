@@ -129,7 +129,8 @@
       mappings: () => req('GET', '/accounting/mappings'),                             // { items[], accounts{income,expense}, unmappedCount }
       setMapping: (b) => req('POST', '/accounting/mappings', b),                      // { categoryKey, type, chartCode }
       clearMapping: (b) => req('DELETE', '/accounting/mappings', b),                  // { categoryKey, type }
-      backfill: (b) => req('POST', '/accounting/backfill', b || {}),                  // { fromDate?, dryRun? }
+      backfill: (b) => req('POST', '/accounting/backfill', b || {}),                  // dryRun → preview counts; else → { jobId, total } (async job)
+      backfillStatus: (jobId) => req('GET', '/accounting/backfill/status/' + jobId),  // { processed, total, posted, failed, status, result, errors[] }
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

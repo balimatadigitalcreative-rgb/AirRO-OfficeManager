@@ -288,48 +288,152 @@ async function postReceivablesReclass(customerId, actor, db = prisma) {
   return true;
 }
 
-// Backfill journals for existing records from a start date (ADDITIVE — source rows untouched). Now a
-// ONE-TIME MIGRATION, not the ongoing mechanism: live posting keeps new sources journalled, and
-// postJournal is skip-if-exists, so re-running backfill posts NOTHING new (it never duplicates).
-// `dryRun` returns the same per-source counts of what WOULD be posted, writing nothing — by running
-// the real backfill inside a transaction that is then rolled back (so the preview is exact).
-function DryRunAbort() {}
-async function backfill({ fromDate, actor, dryRun } = {}) {
-  await seedChart();   // reference data — safe to persist even on a dry run
-  if (dryRun) {
-    let res = null;
-    await prisma.$transaction(async (tx) => { res = await runBackfill({ fromDate, actor }, tx); throw new DryRunAbort(); }, { timeout: 120000 })
-      .catch((e) => { if (!(e instanceof DryRunAbort)) throw e; });
-    return { dryRun: true, ...res };
-  }
-  return runBackfill({ fromDate, actor }, prisma);
-}
-async function runBackfill({ fromDate, actor }, db = prisma) {
+// ── BACKFILL — a ONE-TIME migration that projects existing records into journals (ADDITIVE; source
+// rows untouched). Live posting keeps new sources journalled, so this only fills the pre-flag history.
+// It is STREAMED + CHUNKED + IDEMPOTENT so a large dataset can't time out or duplicate:
+//   • idempotent — postJournal is skip-if-exists behind @@unique([sourceType, sourceId]); an
+//     interrupted run is simply RE-RUN and continues where it stopped (never a duplicate);
+//   • streamed — each source table is paged by id cursor, so the whole table never loads into memory;
+//   • chunked — each page is one transaction; if a page fails, it retries source-by-source to isolate
+//     the bad row instead of aborting the whole run;
+//   • async — startBackfillJob returns a jobId immediately and the work runs in the background (below),
+//     so nginx never waits on the long write. The old blocking path is what returned 502.
+const BACKFILL_CHUNK = 200;
+
+// Total sources to examine — cheap COUNTs, drives the progress bar. Never loads rows.
+async function computeBackfillTotal({ fromDate } = {}) {
   const dGte = fromDate ? { gte: fromDate } : undefined;
-  const out = { entry: 0, transfer: 0, dist_txn: 0, dist_expense: 0 };
-  const entries = await db.entry.findMany({ where: { status: { not: 'Failed' }, ...(dGte ? { date: dGte } : {}) } });
-  for (const e of entries) { if (await postEntry(e, actor, db)) out.entry++; }
-  const transfers = await db.transfer.findMany({ where: dGte ? { date: dGte } : {} });
-  for (const t of transfers) { if (await postTransfer(t, actor, db)) out.transfer++; }
-  // RECEIVABLES (bon/pelunasan): a running BALANCE, so it is NOT date-limited — matches
-  // customerBonBalance's inclusion exactly (non-void, bonCounted, INCLUDING legacy). Corrections and
-  // disputes are folded into each bon's effective figure inside postDistTransaction.
-  const arTxns = await db.distTransaction.findMany({ where: { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true }, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } });
-  for (const t of arTxns) { if (await postDistTransaction(t, actor, db)) out.dist_txn++; }
-  // Cash sales (lunas) are a period FLOW → keep the fromDate window; active, non-legacy.
-  const lunas = await db.distTransaction.findMany({ where: { method: 'lunas', status: 'active', legacy: false, ...(dGte ? { txnDate: dGte } : {}) } });
-  for (const t of lunas) { if (await postDistTransaction(t, actor, db)) out.dist_txn++; }
-  // Approved bon adjustments (penyesuaian) move the receivable up/down.
-  const adjs = await db.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved' } });
-  out.dist_adjustment = 0;
-  for (const a of adjs) { if (await postDistAdjustment(a, actor, db)) out.dist_adjustment++; }
-  // Per-customer overpayment reclass (raw < 0 → Uang Muka Pelanggan) so Piutang == Σ Sisa Bon.
-  const custIds = [...new Set([...arTxns.map((t) => t.customerId), ...adjs.map((a) => a.customerId)])];
-  out.reclass = 0;
-  for (const cid of custIds) { if (await postReceivablesReclass(cid, actor, db)) out.reclass++; }
-  const exps = await db.distExpense.findMany({ where: { status: 'active', ...(dGte ? { date: dGte } : {}) } });
-  for (const x of exps) { if (await postDistExpense(x, actor, db)) out.dist_expense++; }
+  const [entry, transfer, ar, lunas, adj, exp] = await Promise.all([
+    prisma.entry.count({ where: { status: { not: 'Failed' }, ...(dGte ? { date: dGte } : {}) } }),
+    prisma.transfer.count({ where: dGte ? { date: dGte } : {} }),
+    prisma.distTransaction.count({ where: { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true } }),
+    prisma.distTransaction.count({ where: { method: 'lunas', status: 'active', legacy: false, ...(dGte ? { txnDate: dGte } : {}) } }),
+    prisma.distAdjustment.count({ where: { kind: 'bon', status: 'approved' } }),
+    prisma.distExpense.count({ where: { status: 'active', ...(dGte ? { date: dGte } : {}) } }),
+  ]);
+  const reclass = (await reclassCustomerIds()).length;
+  return { entry, transfer, dist_txn: ar + lunas, ar, lunas, dist_adjustment: adj, reclass, dist_expense: exp, total: entry + transfer + ar + lunas + adj + reclass + exp };
+}
+// Distinct customers whose receivable might need a credit reclass (bon/pelunasan or approved bon adj).
+async function reclassCustomerIds() {
+  const [a, b] = await Promise.all([
+    prisma.distTransaction.findMany({ where: { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true }, select: { customerId: true }, distinct: ['customerId'] }),
+    prisma.distAdjustment.findMany({ where: { kind: 'bon', status: 'approved' }, select: { customerId: true }, distinct: ['customerId'] }),
+  ]);
+  return [...new Set([...a.map((r) => r.customerId), ...b.map((r) => r.customerId)])];
+}
+
+// DRY-RUN preview — what a run WOULD create per source type, writing nothing and never timing out
+// (cheap counts only, no per-source poster work). ≈ sources minus what is already journalled per type.
+async function backfillPreview({ fromDate } = {}) {
+  await seedChart();
+  const t = await computeBackfillTotal({ fromDate });
+  const grouped = await prisma.journalEntry.groupBy({ by: ['sourceType'], _count: { _all: true } });
+  const have = {}; grouped.forEach((g) => { have[g.sourceType] = g._count._all; });
+  const rem = (n, type) => Math.max(0, (n || 0) - (have[type] || 0));
+  return { dryRun: true,
+    entry: rem(t.entry, 'entry'), transfer: rem(t.transfer, 'transfer'),
+    dist_txn: Math.max(0, t.dist_txn - (have.dist_txn || 0)),
+    dist_adjustment: rem(t.dist_adjustment, 'dist_adjustment'), dist_expense: rem(t.dist_expense, 'dist_expense'),
+    reclass: rem(t.reclass, 'ar_reclass'), total: t.total };
+}
+
+// Stream a model id-ordered in chunks; post each (idempotent). Page = one transaction; on page failure,
+// retry each source alone so one bad row is isolated. onChunk(seen, posted, failed, errs) → progress.
+async function backfillStream({ fetchPage, postOne, onChunk }) {
+  let cursor = null;
+  for (;;) {
+    const rows = await fetchPage(cursor, BACKFILL_CHUNK);
+    if (!rows.length) break;
+    let posted = 0, failed = 0; const errs = [];
+    try {
+      await prisma.$transaction(async (tx) => { for (const r of rows) { if (await postOne(r, tx)) posted++; } }, { timeout: 120000 });
+    } catch (chunkErr) {
+      posted = 0;   // the whole page rolled back — replay it source-by-source to find the bad one
+      for (const r of rows) {
+        try { if (await prisma.$transaction((tx) => postOne(r, tx), { timeout: 30000 })) posted++; }
+        catch (e) { failed++; if (errs.length < 50) errs.push({ id: r.id, message: String((e && e.message) || e).slice(0, 200) }); }
+      }
+    }
+    cursor = rows[rows.length - 1].id;
+    if (onChunk) await onChunk(rows.length, posted, failed, errs);
+    if (rows.length < BACKFILL_CHUNK) break;
+  }
+}
+
+// The streamed worker. onProgress(seen, posted, failed) fires once per chunk so a job row can be
+// updated. Returns per-type posted counts + failures. Used by the sync `backfill` and the async job.
+async function runBackfillStreamed({ fromDate, actor, onProgress } = {}) {
+  await seedChart();
+  const dGte = fromDate ? { gte: fromDate } : undefined;
+  const out = { entry: 0, transfer: 0, dist_txn: 0, dist_adjustment: 0, reclass: 0, dist_expense: 0, failed: 0, errors: [] };
+  const bump = async (type, seen, posted, failed, errs) => {
+    out[type] += posted; out.failed += failed;
+    if (errs && errs.length) out.errors.push(...errs.slice(0, Math.max(0, 50 - out.errors.length)).map((e) => ({ sourceType: type, sourceId: e.id, message: e.message })));
+    if (onProgress) await onProgress(seen, posted, failed);
+  };
+  const page = (model, where, extra) => (cursor, take) => prisma[model].findMany({ where, orderBy: { id: 'asc' }, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), take, ...(extra || {}) });
+
+  await backfillStream({ fetchPage: page('entry', { status: { not: 'Failed' }, ...(dGte ? { date: dGte } : {}) }), postOne: (r, tx) => postEntry(r, actor, tx), onChunk: (s, p, f, e) => bump('entry', s, p, f, e) });
+  await backfillStream({ fetchPage: page('transfer', dGte ? { date: dGte } : {}), postOne: (r, tx) => postTransfer(r, actor, tx), onChunk: (s, p, f, e) => bump('transfer', s, p, f, e) });
+  // Receivables (bon/pelunasan): a running BALANCE, so NOT date-limited — corrections/disputes are
+  // folded into each bon's effective figure inside postDistTransaction.
+  await backfillStream({ fetchPage: page('distTransaction', { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true }, { include: { corrections: { select: { deltaAmount: true, kind: true, active: true } } } }), postOne: (r, tx) => postDistTransaction(r, actor, tx), onChunk: (s, p, f, e) => bump('dist_txn', s, p, f, e) });
+  await backfillStream({ fetchPage: page('distTransaction', { method: 'lunas', status: 'active', legacy: false, ...(dGte ? { txnDate: dGte } : {}) }), postOne: (r, tx) => postDistTransaction(r, actor, tx), onChunk: (s, p, f, e) => bump('dist_txn', s, p, f, e) });
+  await backfillStream({ fetchPage: page('distAdjustment', { kind: 'bon', status: 'approved' }), postOne: (r, tx) => postDistAdjustment(r, actor, tx), onChunk: (s, p, f, e) => bump('dist_adjustment', s, p, f, e) });
+  // Per-customer overpayment reclass (raw < 0 → Uang Muka Pelanggan) so Piutang == Σ Sisa Bon. Chunked.
+  const custIds = await reclassCustomerIds();
+  for (let i = 0; i < custIds.length; i += BACKFILL_CHUNK) {
+    const slice = custIds.slice(i, i + BACKFILL_CHUNK);
+    let posted = 0, failed = 0; const errs = [];
+    try { await prisma.$transaction(async (tx) => { for (const cid of slice) { if (await postReceivablesReclass(cid, actor, tx)) posted++; } }, { timeout: 120000 }); }
+    catch (e) { posted = 0; for (const cid of slice) { try { if (await prisma.$transaction((tx) => postReceivablesReclass(cid, actor, tx))) posted++; } catch (er) { failed++; if (errs.length < 50) errs.push({ id: cid, message: String((er && er.message) || er).slice(0, 200) }); } } }
+    await bump('reclass', slice.length, posted, failed, errs);
+  }
+  await backfillStream({ fetchPage: page('distExpense', { status: 'active', ...(dGte ? { date: dGte } : {}) }), postOne: (r, tx) => postDistExpense(r, actor, tx), onChunk: (s, p, f, e) => bump('dist_expense', s, p, f, e) });
   return out;
+}
+
+// Public entry: dry-run → fast preview; otherwise the streamed run (synchronous — used by tests + the
+// async job worker). The HTTP endpoint uses startBackfillJob instead so it returns immediately.
+async function backfill({ fromDate, actor, dryRun } = {}) {
+  if (dryRun) return backfillPreview({ fromDate });
+  return runBackfillStreamed({ fromDate, actor });
+}
+
+// ── ASYNC JOB ── create a BackfillJob row, launch the streamed run in the background, return the id.
+async function startBackfillJob({ fromDate, actor } = {}) {
+  await seedChart();
+  const t = await computeBackfillTotal({ fromDate });
+  const job = await prisma.backfillJob.create({ data: { status: 'running', fromDate: fromDate || null, total: t.total, startedById: (actor && actor.id) || null, startedByName: (actor && actor.name) || null } });
+  setImmediate(() => { runBackfillJob(job.id, { fromDate, actor }).catch(() => {}); });   // fire-and-forget
+  return { jobId: job.id, total: t.total };
+}
+// The background worker: stream the run, update the job each chunk, then run the integrity check + trial
+// balance so the finished job reports whether the books are sound.
+async function runBackfillJob(jobId, { fromDate, actor } = {}) {
+  try {
+    let processed = 0;
+    const res = await runBackfillStreamed({ fromDate, actor, onProgress: async (seen, posted, failed) => {
+      processed += seen;
+      await prisma.backfillJob.update({ where: { id: jobId }, data: { processed, posted: { increment: posted }, failed: { increment: failed } } }).catch(() => {});
+    } });
+    const integrity = await integrityCheck({ fromDate }).catch(() => ({ ok: null, missingCount: null, orphanCount: null }));
+    let trialBalanced = null; try { trialBalanced = (await trialBalance()).balanced === true; } catch (e) { /* empty ledger */ }
+    await prisma.backfillJob.update({ where: { id: jobId }, data: {
+      status: 'done', finishedAt: new Date(), errors: JSON.stringify((res.errors || []).slice(0, 50)),
+      result: JSON.stringify({ counts: { entry: res.entry, transfer: res.transfer, dist_txn: res.dist_txn, dist_adjustment: res.dist_adjustment, reclass: res.reclass, dist_expense: res.dist_expense }, failed: res.failed, integrity: { ok: integrity.ok, missing: integrity.missingCount, orphan: integrity.orphanCount }, trialBalanced }),
+    } });
+  } catch (e) {
+    await prisma.backfillJob.update({ where: { id: jobId }, data: { status: 'failed', finishedAt: new Date(), errors: JSON.stringify([{ message: String((e && e.message) || e).slice(0, 300) }]) } }).catch(() => {});
+  }
+}
+async function backfillJobStatus(jobId) {
+  const j = await prisma.backfillJob.findUnique({ where: { id: jobId } });
+  if (!j) return null;
+  let errors = []; try { errors = JSON.parse(j.errors || '[]'); } catch (e) {}
+  let result = null; try { result = j.result ? JSON.parse(j.result) : null; } catch (e) {}
+  return { jobId: j.id, status: j.status, total: j.total, processed: j.processed, posted: j.posted, failed: j.failed, startedByName: j.startedByName || null, startedAt: j.startedAt, finishedAt: j.finishedAt, errors, result };
 }
 
 // DRIFT DETECTOR — the source↔journal integrity check surfaced in Tutup Buku + a dedicated card.
@@ -620,7 +724,7 @@ async function chart() {
 
 module.exports = {
   CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, chart, postJournal, reverseJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
-  distTxnLines, reconcileDistTxn, postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, integrityCheck, unmappedCategories, categoryToCode, resolveCategoryCode,
+  distTxnLines, reconcileDistTxn, postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, startBackfillJob, runBackfillJob, backfillJobStatus, computeBackfillTotal, integrityCheck, unmappedCategories, categoryToCode, resolveCategoryCode,
   listCategoryMappings, setCategoryMapping, clearCategoryMapping, postableAccounts, accountingStatus,
   accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, journalFor, cashFlow,
 };

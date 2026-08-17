@@ -3823,6 +3823,14 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .bf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 9px; }
 .bf-cell { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border-soft); }
 .bf-cell-n { font-size: 19px; font-weight: 800; } .bf-cell-l { font-size: 11.5px; color: var(--text-mut); }
+.bf-job { margin-top: 14px; padding: 13px 15px; border-radius: 12px; border: 1px solid var(--border-soft); background: var(--surface-2, #f6f8f9); }
+.bf-preview-head.bad { color: #b42318; }
+.bf-bar { height: 10px; border-radius: 999px; background: var(--card-soft); overflow: hidden; margin-top: 10px; }
+.bf-bar-fill { height: 100%; border-radius: 999px; background: var(--sky-500, #2b8ac4); transition: width .4s ease; }
+.bf-checks { display: flex; flex-direction: column; gap: 5px; margin-top: 11px; }
+.bf-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; }
+.bf-check.ok { color: var(--green-800, #1f7a4d); } .bf-check.bad { color: #b42318; }
+.bf-err-line { font-size: 11.5px; color: var(--text-mut); font-family: ui-monospace, monospace; margin-top: 4px; word-break: break-word; }
 
 /* Alur Kerja (workflow map) on the Ringkasan */
 .flow-card { padding: 14px 16px; margin-bottom: 14px; }

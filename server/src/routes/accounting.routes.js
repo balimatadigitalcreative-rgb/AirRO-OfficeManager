@@ -28,7 +28,8 @@ router.get('/status', ctrl.status);        // workflow-panel + report-header rol
 router.get('/mappings', ctrl.mappings);
 router.post('/mappings', requireRole('owner', 'gm'), ctrl.setMapping);
 router.delete('/mappings', requireRole('owner', 'gm'), ctrl.clearMapping);
-router.post('/backfill', requireRole('owner', 'gm'), ctrl.backfill);   // owner/GM projection from the cash book (?dryRun for a preview)
+router.post('/backfill', requireRole('owner', 'gm'), ctrl.backfill);   // owner/GM projection from the cash book (dryRun = preview; else starts an async job → { jobId })
+router.get('/backfill/status/:jobId', ctrl.backfillStatus);           // poll async backfill progress { processed, total, status, result }
 
 // PERIOD CLOSE — list/checklist readable by any reports user; close is owner/GM-tier, reopen owner-only.
 router.get('/periods', ctrl.periods);

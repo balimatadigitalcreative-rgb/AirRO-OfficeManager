@@ -142,6 +142,25 @@ model CategoryMapping {
   @@index([type])
 }
 
+// An ASYNC backfill run. The HTTP endpoint returns a jobId immediately and the work streams in the
+// background in idempotent chunks, updating this row so the UI can poll progress and survive a refresh.
+model BackfillJob {
+  id            String    @id @default(cuid())
+  status        String    @default("running")   // running | done | failed
+  fromDate      String?
+  total         Int       @default(0)            // sources to examine (for the progress bar)
+  processed     Int       @default(0)            // sources examined so far (posted or skipped)
+  posted        Int       @default(0)            // journals actually created (new)
+  failed        Int       @default(0)
+  errors        String    @default("[]")         // JSON [{ sourceType, sourceId, message }]
+  result        String?                          // JSON: per-type counts + integrity + trialBalanced
+  startedById   String?
+  startedByName String?
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  @@index([status])
+}
+
 model JournalEntry {
   id           String   @id @default(cuid())
   date         String            // YYYY-MM-DD (business date, mirrors the source)
