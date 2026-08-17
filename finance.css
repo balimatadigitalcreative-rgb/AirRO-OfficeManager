@@ -3790,6 +3790,34 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-coming-ic { background: var(--mint-100); color: var(--green-800); }
 .fin-empty-t, .fin-coming-t { font-size: 15px; font-weight: 700; color: var(--text); }
 .fin-empty-s, .fin-coming-s { font-size: 12.5px; color: var(--text-faint); max-width: 380px; }
+
+/* ── Part 2: self-explanatory accounting — one-line intro, mapping + backfill screens ── */
+.fin-intro { display: flex; align-items: flex-start; gap: 9px; padding: 11px 14px; border-radius: 12px; margin-bottom: 14px; border: 1px solid var(--border-soft); background: var(--surface-2, #f6f8f9); }
+.fin-intro-ic { flex-shrink: 0; display: grid; place-items: center; margin-top: 1px; color: var(--text-mut); }
+.fin-intro-answers { font-size: 13.5px; font-weight: 700; color: var(--text); line-height: 1.35; }
+.fin-intro-meta { font-size: 12px; color: var(--text-mut); margin-top: 2px; }
+.fin-intro-warn { background: #fff7ed; border-color: #f6d9a6; } .fin-intro-warn .fin-intro-ic { color: #b26a00; }
+.fin-intro-ok { background: var(--mint-50, #eefaf3); border-color: var(--mint-200, #bfe8d0); } .fin-intro-ok .fin-intro-ic { color: var(--green-800, #1f7a4d); }
+:root[data-theme="dark"] .fin-intro-warn { background: rgba(255,180,60,.10); border-color: rgba(255,180,60,.28); } :root[data-theme="dark"] .fin-intro-warn .fin-intro-ic { color: #ffcf8a; }
+
+/* Pemetaan Akun */
+.map-row.map-bad { background: #fff7ed; } :root[data-theme="dark"] .map-row.map-bad { background: rgba(255,180,60,.08); }
+.map-type { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--card-soft); color: var(--text-mut); }
+.map-type-income { background: var(--mint-100, #d9f2e4); color: var(--green-800, #1f7a4d); }
+.map-type-expense { background: #fde8e8; color: #b42318; }
+:root[data-theme="dark"] .map-type-income { background: rgba(60,200,120,.16); color: #8fe0b0; } :root[data-theme="dark"] .map-type-expense { background: rgba(255,90,90,.16); color: #f5a3a3; }
+.map-pick { height: 34px; padding: 4px 8px; font-size: 12.5px; max-width: 100%; }
+.map-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.map-badge.bad { background: #fde8e8; color: #b42318; } .map-badge.custom { background: var(--mint-100, #d9f2e4); color: var(--green-800, #1f7a4d); } .map-badge.default { background: var(--card-soft); color: var(--text-mut); }
+
+/* Backfill */
+.bf-controls { margin-bottom: 6px; } .bf-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .bf-date { max-width: 190px; }
+.bf-hint { font-size: 12px; color: var(--text-mut); margin-top: 6px; }
+.bf-preview, .bf-result { margin-top: 14px; padding: 13px 15px; border-radius: 12px; border: 1px solid var(--border-soft); background: var(--surface-2, #f6f8f9); }
+.bf-preview-head { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 13.5px; margin-bottom: 10px; } .bf-preview-head.ok { color: var(--green-800, #1f7a4d); }
+.bf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 9px; }
+.bf-cell { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border-soft); }
+.bf-cell-n { font-size: 19px; font-weight: 800; } .bf-cell-l { font-size: 11.5px; color: var(--text-mut); }
 .fin-error { color: var(--neg); }
 .fin-error-ic { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 15px; background: var(--neg-bg); color: var(--neg); }
 .fin-badge-soon { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--green-800); background: var(--mint-100); border-radius: 999px; padding: 1px 7px; margin-left: 6px; }

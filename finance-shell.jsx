@@ -28,7 +28,11 @@ function navForRole(p, role) {
   if (p.reports) items.push({ id: 'ledger', label: tr('nav.finLedger'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
   if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'finance' });
+  if (p.reports) items.push({ id: 'acct-mapping', label: tr('nav.finMap'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'finance' });
+  // Backfill is a one-time owner/GM migration tool (the server also enforces owner/GM), so it only
+  // shows for them — everyone else never needs it once live posting is on.
+  if (p.reports && (role === 'owner' || role === 'gm')) items.push({ id: 'acct-backfill', label: tr('nav.finBackfill'), icon: 'IconRefresh', grp: 'finance' });
   if (p.employees) items.push({ id: 'employees', label: tr('nav.employees'), icon: 'IconCustomers', grp: 'hr' });
   if (p.employees) items.push({ id: 'hrcalendar', label: tr('nav.hrcalendar'), icon: 'IconCalendar', grp: 'hr' });
   if (p.payroll) items.push({ id: 'orientation', label: tr('nav.orientation'), icon: 'IconUserCircle', grp: 'hr' });
@@ -1794,6 +1798,8 @@ function FApp() {
             <ACCT.LedgerScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} onOpenEntry={() => go('entries')} />
           )}
           {screen === 'reconcile' && p.reports && (<ACCT.ReconcileScreen accounts={accounts} />)}
+          {screen === 'acct-mapping' && p.reports && (<ACCT.MappingScreen canEdit={user.role === 'owner' || user.role === 'gm'} />)}
+          {screen === 'acct-backfill' && p.reports && (user.role === 'owner' || user.role === 'gm') && (<ACCT.BackfillScreen canRun={user.role === 'owner' || user.role === 'gm'} />)}
           {screen === 'close' && p.reports && (<ACCT.CloseScreen isOwner={user.role === 'owner'} onNav={go} />)}
 
           {screen === 'payroll' && p.payroll && (

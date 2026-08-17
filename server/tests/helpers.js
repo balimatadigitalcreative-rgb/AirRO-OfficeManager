@@ -12,6 +12,7 @@ async function resetDb() {
   await prisma.journalEntry.deleteMany();
   await prisma.accountingPeriod.deleteMany();
   await prisma.reconciliation.deleteMany();
+  await prisma.categoryMapping.deleteMany();
   await prisma.entry.deleteMany();
   await prisma.transfer.deleteMany();
   await prisma.setoran.deleteMany();

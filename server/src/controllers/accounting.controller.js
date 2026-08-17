@@ -27,5 +27,9 @@ const reconcileMark = asyncHandler(async (req, res) => res.json({ data: await re
 const backfill = asyncHandler(async (req, res) => res.json({ data: await service.backfill({ fromDate: req.body && req.body.fromDate, dryRun: !!(req.body && req.body.dryRun), actor: req.user }) }));
 // INTEGRITY / drift detector — sources with no journal + journals with no source.
 const integrity = asyncHandler(async (req, res) => res.json({ data: await service.integrityCheck({ fromDate: req.query.fromDate }) }));
+// PEMETAAN AKUN — category → account mapping (list / set / clear).
+const mappings = asyncHandler(async (req, res) => res.json({ data: await service.listCategoryMappings() }));
+const setMapping = asyncHandler(async (req, res) => res.json({ data: await service.setCategoryMapping({ categoryKey: req.body.categoryKey, type: req.body.type, chartCode: req.body.chartCode }, req.user) }));
+const clearMapping = asyncHandler(async (req, res) => res.json({ data: await service.clearCategoryMapping({ categoryKey: req.body.categoryKey, type: req.body.type }) }));
 
-module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, integrity, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };
+module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, integrity, mappings, setMapping, clearMapping, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };

@@ -53,6 +53,31 @@
   function Skeleton({ n }) { return <div className="fin-skel">{Array.from({ length: n || 8 }).map((_, i) => <div key={i} className="fin-skel-row"><span className="fin-skel-bar" style={{ width: (45 + (i * 13) % 50) + '%' }} /></div>)}</div>; }
   function ErrorCard({ onRetry }) { return <div className="card fin-scope"><div className="fin-error"><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div>{onRetry && <button className="btn btn-ghost" onClick={onRetry} style={{ marginTop: 8 }}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button>}</div></div>; }
 
+  // One-line "what this screen answers" header (Part 2 #1/#6) — the plain-language purpose plus a
+  // context line (period · closed? · journals last posted, or a status note), colour-toned to draw the
+  // eye when something needs attention. Reused by the mapping/backfill screens and the report headers.
+  function ScreenIntro({ answers, extra, meta, tone }) {
+    const ic = tone === 'warn' ? 'IconWarn' : tone === 'ok' ? 'IconCheck' : 'IconInvoice';
+    const bits = [extra, meta].filter(Boolean).join(' · ');
+    return (
+      <div className={`fin-intro fin-intro-${tone || 'info'}`}>
+        <span className="fin-intro-ic">{IcA(ic, { s: 15 })}</span>
+        <div className="fin-intro-body"><div className="fin-intro-answers">{answers}</div>{bits && <div className="fin-intro-meta">{bits}</div>}</div>
+      </div>
+    );
+  }
+  // Actionable empty state (Part 2 #2) — never a blank table. Title + guidance + an optional CTA.
+  function EmptyState({ title, body, actionLabel, onAction, icon }) {
+    return (
+      <div className="fin-empty">
+        <span className="fin-empty-ic">{IcA(icon || 'IconInvoice', { s: 22 })}</span>
+        <div className="fin-empty-t">{title}</div>
+        {body && <div className="fin-empty-s">{body}</div>}
+        {actionLabel && onAction && <button className="btn btn-ghost" style={{ marginTop: 10 }} onClick={onAction}>{actionLabel}</button>}
+      </div>
+    );
+  }
+
   // ── Period selector (presets + custom), shared by all three screens. value = {preset,start,end,label} ──
   function presetRange(preset) {
     const t = todayISO(); const y = +t.slice(0, 4), m = +t.slice(5, 7);
@@ -420,6 +445,7 @@
       { key: 'uncat', ok: (chk.uncategorised || 0) === 0, label: trA('tp.chkUncat'), fix: 'entries', val: chk.uncategorised ? String(chk.uncategorised) : '' },
       { key: 'appr', ok: (chk.pendingApprovals || 0) === 0, label: trA('tp.chkAppr'), fix: 'approvals', val: chk.pendingApprovals ? String(chk.pendingApprovals) : '' },
       { key: 'galon', ok: chk.gallonIntegrity === 'ok', label: trA('tp.chkGalon'), fix: 'dist-gallon', val: chk.gallonIntegrity === 'ok' ? '' : trA('tp.chkGalonBad') },
+      { key: 'journal', ok: chk.journalIntegrity !== 'drift', label: trA('tp.chkJournal'), fix: 'acct-backfill', val: chk.journalDrift ? trA('tp.chkJournalBad', { n: chk.journalDrift }) : '' },
     ];
     const targetStatus = (periods.find((p) => p.periodKey === target) || {}).status || 'terbuka';
     const canClose = balanced && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
@@ -526,5 +552,133 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen };
+  const errMsg = (e) => (e && e.body && e.body.error && e.body.error.message) || (e && e.message) || trA('acct.saveFail');
+
+  // ── PEMETAAN AKUN — map each cash-book category to a chart account. Unmapped categories (no built-in
+  // default and no override) are shown first, highlighted, because they fall to the Lain-lain bucket
+  // until mapped. Owner/GM may edit; everyone with reports may view. ──
+  function MappingScreen({ canEdit }) {
+    const q = useAcct(() => ACC().mappings(), []);
+    const [busy, setBusy] = aS('');      // "categoryKey|type" currently saving
+    const [err, setErr] = aS('');
+    if (q.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('fin.mapSoon')} />;
+    const d = q.data || { items: [], accounts: { income: [], expense: [] }, unmappedCount: 0 };
+    const items = d.items || [];
+    const nUnmapped = items.filter((i) => i.source === 'none').length;
+    const apply = async (categoryKey, type, chartCode) => {
+      setBusy(categoryKey + '|' + type); setErr('');
+      try {
+        if (chartCode) await ACC().setMapping({ categoryKey, type, chartCode });
+        else await ACC().clearMapping({ categoryKey, type });
+        q.reload();
+      } catch (e) { setErr(errMsg(e)); } finally { setBusy(''); }
+    };
+    const Row = (it) => {
+      const opts = (d.accounts && d.accounts[it.type]) || [];
+      const key = it.category + '|' + it.type;
+      const srcCls = it.source === 'none' ? 'bad' : (it.source === 'custom' ? 'custom' : 'default');
+      return (
+        <tr key={key} className={`fin-trow map-row map-${srcCls}`}>
+          <td className="fin-td"><b>{it.category}</b>{it.count ? <span className="fin-td-sub">{trA('map.entriesN', { n: it.count })}</span> : null}</td>
+          <td className="fin-td"><span className={`map-type map-type-${it.type}`}>{trA(it.type === 'income' ? 'map.income' : 'map.expense')}</span></td>
+          <td className="fin-td">
+            {canEdit ? (
+              <select className="fld map-pick" value={it.source === 'custom' ? it.code : ''} disabled={busy === key}
+                onChange={(e) => apply(it.category, it.type, e.target.value)} aria-label={trA('map.pickAccount')}>
+                <option value="">{it.source === 'default' ? trA('map.useDefault', { code: it.code }) : trA('map.choose')}</option>
+                {opts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+              </select>
+            ) : (<span className="tnum">{it.code ? it.code + ' · ' + (it.name || '') : trA('map.none')}</span>)}
+          </td>
+          <td className="fin-td">
+            {it.source === 'none' ? <span className="map-badge bad">{IcA('IconWarn', { s: 12 })} {trA('map.unmapped')}</span>
+              : it.source === 'custom' ? <span className="map-badge custom">{trA('map.custom')}</span>
+              : <span className="map-badge default">{trA('map.builtin')}</span>}
+          </td>
+          <td className="fin-td fin-r">{canEdit && it.source === 'custom' && <button className="btn btn-ghost btn-xs" disabled={busy === key} onClick={() => apply(it.category, it.type, '')}>{trA('map.reset')}</button>}</td>
+        </tr>
+      );
+    };
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finMap')}</h2><div className="fin-head-scope">{trA('s.finMap')}</div></div></div>
+        <ScreenIntro answers={trA('map.answers')} extra={nUnmapped > 0 ? trA('map.nUnmapped', { n: nUnmapped }) : trA('map.allMapped')} tone={nUnmapped > 0 ? 'warn' : 'ok'} />
+        <div className="card">
+          {q.state === 'loading' && <Skeleton n={6} />}
+          {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
+          {q.state === 'ready' && (items.length === 0
+            ? <EmptyState title={trA('map.emptyT')} body={trA('map.emptyB')} />
+            : (<>
+              {err && <div className="add-err" style={{ margin: '4px 0 10px' }}><IconClose s={14} />{err}</div>}
+              <div className="fin-tablewrap">
+                <table className="fin-table">
+                  <colgroup><col /><col style={{ width: '110px' }} /><col style={{ width: '260px' }} /><col style={{ width: '130px' }} /><col style={{ width: '90px' }} /></colgroup>
+                  <thead><tr><th className="fin-th">{trA('map.colCat')}</th><th className="fin-th">{trA('map.colType')}</th><th className="fin-th">{trA('map.colAccount')}</th><th className="fin-th">{trA('map.colSource')}</th><th className="fin-th" /></tr></thead>
+                  <tbody>{items.map(Row)}</tbody>
+                </table>
+              </div>
+            </>))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── BACKFILL — owner/GM one-time migration: project existing cash-book + distribusi records into
+  // journals. A DRY-RUN preview (writes nothing) shows exactly what WOULD post per source type before
+  // committing. Live posting keeps things current afterward, so this is a migration tool, not routine. ──
+  function BackfillScreen({ canRun }) {
+    const [from, setFrom] = aS('');
+    const [preview, setPreview] = aS(null);
+    const [result, setResult] = aS(null);
+    const [busy, setBusy] = aS('');
+    const [err, setErr] = aS('');
+    const [gated, setGated] = aS(false);
+    const call = async (dryRun) => {
+      setBusy(dryRun ? 'preview' : 'run'); setErr(''); if (dryRun) setResult(null);
+      try { const r = await ACC().backfill({ fromDate: from || undefined, dryRun }); const data = (r && r.data) || r; if (dryRun) setPreview(data); else { setResult(data); setPreview(null); } }
+      catch (e) { const g = e && (e.status === 404 || /404|disabled/i.test(String((e && e.message) || ''))); if (g) setGated(true); else setErr(errMsg(e)); }
+      finally { setBusy(''); }
+    };
+    if (gated) return <GatedCard icon="IconRefresh" body={trA('fin.backfillSoon')} />;
+    const SRC = [['entry', 'bf.srcEntry'], ['transfer', 'bf.srcTransfer'], ['dist_txn', 'bf.srcDistTxn'], ['dist_expense', 'bf.srcExpense'], ['dist_adjustment', 'bf.srcAdjust'], ['reclass', 'bf.srcReclass']];
+    const counts = (o) => SRC.map(([k, lbl]) => ({ k, lbl, n: (o && o[k]) || 0 })).filter((r) => r.n > 0);
+    const totalOf = (o) => SRC.reduce((s, [k]) => s + ((o && o[k]) || 0), 0);
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finBackfill')}</h2><div className="fin-head-scope">{trA('s.finBackfill')}</div></div></div>
+        <ScreenIntro answers={trA('bf.answers')} extra={trA('bf.oneTime')} tone="info" />
+        <div className="card">
+          <div className="bf-controls">
+            <label className="fld-label" style={{ marginTop: 0 }}>{trA('bf.fromDate')}</label>
+            <div className="bf-row">
+              <input type="date" className="fld bf-date" value={from} max={todayISO()} onChange={(e) => setFrom(e.target.value)} />
+              <button className="btn btn-ghost" disabled={!!busy} onClick={() => call(true)}>{IcA('IconInvoice', { s: 15 })}{busy === 'preview' ? trA('bf.previewing') : trA('bf.preview')}</button>
+            </div>
+            <div className="bf-hint">{trA('bf.fromHint')}</div>
+          </div>
+          {err && <div className="add-err" style={{ marginTop: 10 }}><IconClose s={14} />{err}</div>}
+          {preview && (
+            <div className="bf-preview">
+              <div className="bf-preview-head">{IcA('IconInvoice', { s: 15 })}{trA('bf.wouldPost', { n: totalOf(preview) })}</div>
+              {totalOf(preview) === 0
+                ? <div className="fin-empty-s">{trA('bf.nothingNew')}</div>
+                : (<>
+                  <div className="bf-grid">{counts(preview).map((r) => <div key={r.k} className="bf-cell"><span className="bf-cell-n tnum">{r.n}</span><span className="bf-cell-l">{trA(r.lbl)}</span></div>)}</div>
+                  {canRun && <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={busy === 'run'} onClick={() => call(false)}>{IcA('IconRefresh', { s: 16 })}{busy === 'run' ? trA('bf.running') : trA('bf.commit', { n: totalOf(preview) })}</button>}
+                  {!canRun && <div className="bf-hint" style={{ marginTop: 10 }}>{trA('bf.ownerOnly')}</div>}
+                </>)}
+            </div>
+          )}
+          {result && (
+            <div className="bf-result">
+              <div className="bf-preview-head ok">{IcA('IconCheck', { s: 15 })}{trA('bf.done', { n: totalOf(result) })}</div>
+              <div className="bf-grid">{counts(result).map((r) => <div key={r.k} className="bf-cell"><span className="bf-cell-n tnum">{r.n}</span><span className="bf-cell-l">{trA(r.lbl)}</span></div>)}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen };
 })();

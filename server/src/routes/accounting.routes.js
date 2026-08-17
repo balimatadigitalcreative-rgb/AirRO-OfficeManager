@@ -23,7 +23,11 @@ router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging b
 router.get('/receivables', ctrl.receivables);
 router.get('/unmapped', ctrl.unmapped);
 router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
-router.post('/backfill', ctrl.backfill);   // owner-driven projection from the cash book (?dryRun for a preview)
+// PEMETAAN AKUN — read for any reports user; map/unmap is owner/GM-tier (a config change).
+router.get('/mappings', ctrl.mappings);
+router.post('/mappings', requireRole('owner', 'gm'), ctrl.setMapping);
+router.delete('/mappings', requireRole('owner', 'gm'), ctrl.clearMapping);
+router.post('/backfill', requireRole('owner', 'gm'), ctrl.backfill);   // owner/GM projection from the cash book (?dryRun for a preview)
 
 // PERIOD CLOSE — list/checklist readable by any reports user; close is owner/GM-tier, reopen owner-only.
 router.get('/periods', ctrl.periods);

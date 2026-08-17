@@ -124,6 +124,24 @@ model ChartAccount {
   @@index([parentId])
 }
 
+// Runtime override of the hardcoded cash-book category → account map (CAT_MAP in accounting.service).
+// A row here maps a category key (per income/expense type) to a ChartAccount code; absent keys fall
+// back to the built-in defaults, and a key mapped by neither is what /unmapped surfaces. Lets an admin
+// fix an unmapped category (e.g. a user-created one) WITHOUT a code change.
+model CategoryMapping {
+  id            String   @id @default(cuid())
+  categoryKey   String   // the cash-book category key (e.g. "Refill", "Supplies", or a user-created key)
+  type          String   // "income" | "expense" — a key can resolve differently per type
+  chartCode     String   // target ChartAccount.code (e.g. "6-3000")
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([categoryKey, type])
+  @@index([type])
+}
+
 model JournalEntry {
   id           String   @id @default(cuid())
   date         String            // YYYY-MM-DD (business date, mirrors the source)

@@ -61,7 +61,21 @@ const CAT_MAP = {
   expense: { Fuel: '6-2000', Supplies: '6-3000', Salaries: '6-1000', Orientation: '6-1000', Maintenance: '6-4000', Utilities: '6-5000', Rent: '6-6000', OtherOut: EXP_OTHER },
 };
 const DIST_EXP_MAP = { bensin: '6-2000', makan: EXP_OTHER, parkir: EXP_OTHER, lainnya: EXP_OTHER };
-const categoryToCode = (cat, type) => (CAT_MAP[type] && CAT_MAP[type][cat]) || null;   // null = unmapped
+const categoryToCode = (cat, type) => (CAT_MAP[type] && CAT_MAP[type][cat]) || null;   // null = unmapped (built-in only)
+// Runtime overrides (CategoryMapping table) layered OVER the built-in CAT_MAP. Loaded per posting run.
+async function categoryOverrides(db = prisma) {
+  const rows = await db.categoryMapping.findMany({ select: { categoryKey: true, type: true, chartCode: true } });
+  const m = { income: {}, expense: {} };
+  rows.forEach((r) => { (m[r.type] || (m[r.type] = {}))[r.categoryKey] = r.chartCode; });
+  return m;
+}
+// Effective account code for a category: an admin override wins, else the built-in default, else null
+// (unmapped → the caller falls back to REV_OTHER/EXP_OTHER and it is surfaced by unmappedCategories).
+async function resolveCategoryCode(cat, type, db = prisma) {
+  if (cat == null || cat === '') return null;
+  const ov = await db.categoryMapping.findUnique({ where: { categoryKey_type: { categoryKey: String(cat), type } }, select: { chartCode: true } }).catch(() => null);
+  return (ov && ov.chartCode) || categoryToCode(cat, type);
+}
 const acctCode = (acct) => (/^(cash|tunai|kas)$/i.test(String(acct || '')) ? KAS : BANK);
 const n = (v) => Math.round(Number(v) || 0);
 
@@ -140,9 +154,9 @@ async function postEntry(e, actor, db = prisma) {
   const amt = n(e.amount); if (!amt) return null;
   const cash = acctCode(e.acct); const bu = e.businessUnitId || null;
   let lines;
-  if (e.type === 'income') lines = [{ code: cash, debit: amt }, { code: categoryToCode(e.category, 'income') || REV_OTHER, credit: amt }];
+  if (e.type === 'income') lines = [{ code: cash, debit: amt }, { code: (await resolveCategoryCode(e.category, 'income', db)) || REV_OTHER, credit: amt }];
   else if (e.gallonQty > 0 || /pembelian\s*galon/i.test(e.note || '')) lines = [{ code: PERSEDIAAN, debit: amt }, { code: cash, credit: amt }];   // gallon purchase → INVENTORY, not expense
-  else lines = [{ code: categoryToCode(e.category, 'expense') || EXP_OTHER, debit: amt }, { code: cash, credit: amt }];
+  else lines = [{ code: (await resolveCategoryCode(e.category, 'expense', db)) || EXP_OTHER, debit: amt }, { code: cash, credit: amt }];
   return postJournal({ sourceType: 'entry', sourceId: e.id, date: e.date, description: e.note, actor, businessUnitId: bu, lines }, db);
 }
 async function postTransfer(t, actor, db = prisma) {
@@ -348,8 +362,61 @@ async function integrityCheck({ fromDate } = {}) {
 // Category keys used by entries that have NO chart mapping — REPORTED so an admin fixes the map
 // rather than the code guessing. (They still post to REV_OTHER/EXP_OTHER so journals stay balanced.)
 async function unmappedCategories() {
-  const grouped = await prisma.entry.groupBy({ by: ['category', 'type'], where: { status: { not: 'Failed' }, category: { not: null } } });
-  return grouped.filter((g) => g.category && !categoryToCode(g.category, g.type)).map((g) => ({ category: g.category, type: g.type }));
+  const grouped = await prisma.entry.groupBy({ by: ['category', 'type'], where: { status: { not: 'Failed' }, category: { not: null } }, _count: { _all: true } });
+  const ov = await categoryOverrides();
+  // Unmapped = a category resolved by NEITHER an admin override NOR a built-in default.
+  return grouped.filter((g) => g.category && !((ov[g.type] && ov[g.type][g.category]) || categoryToCode(g.category, g.type)))
+    .map((g) => ({ category: g.category, type: g.type, count: (g._count && g._count._all) || 0 }));
+}
+
+// POSTABLE accounts (leaf, non-header) grouped for the mapping picker: income categories map to a
+// revenue account, expense categories to an expense/COGS account.
+async function postableAccounts() {
+  const rows = await prisma.chartAccount.findMany({ where: { subtype: { not: 'header' } }, select: { code: true, name: true, type: true }, orderBy: { sortOrder: 'asc' } });
+  return {
+    income: rows.filter((r) => r.type === 'revenue'),
+    expense: rows.filter((r) => r.type === 'expense'),
+  };
+}
+
+// Category → account mapping management for the "Pemetaan Akun" screen.
+//  • list: every category seen on an entry, its EFFECTIVE account (override › default › unmapped), the
+//    source (custom/default/none), and the postable-account options for the picker.
+async function listCategoryMappings() {
+  const grouped = await prisma.entry.groupBy({ by: ['category', 'type'], where: { status: { not: 'Failed' }, category: { not: null } }, _count: { _all: true } });
+  const overrides = await prisma.categoryMapping.findMany({ select: { categoryKey: true, type: true, chartCode: true } });
+  const ovMap = {}; overrides.forEach((o) => { ovMap[o.type + ' ' + o.categoryKey] = o.chartCode; });
+  const accounts = await postableAccounts();
+  const nameOf = {}; [...accounts.income, ...accounts.expense].forEach((a) => { nameOf[a.code] = a.name; });
+  const items = grouped.filter((g) => g.category).map((g) => {
+    const override = ovMap[g.type + ' ' + g.category] || null;
+    const def = categoryToCode(g.category, g.type);
+    const code = override || def || null;
+    return { category: g.category, type: g.type, count: (g._count && g._count._all) || 0, code, name: code ? (nameOf[code] || code) : null,
+      source: override ? 'custom' : (def ? 'default' : 'none') };
+  }).sort((a, b) => (a.source === 'none' ? -1 : 1) - (b.source === 'none' ? -1 : 1) || a.type.localeCompare(b.type) || String(a.category).localeCompare(String(b.category)));
+  return { items, accounts, unmappedCount: items.filter((i) => i.source === 'none').length };
+}
+async function setCategoryMapping({ categoryKey, type, chartCode }, actor) {
+  const key = String(categoryKey || '').trim(); const t = type === 'income' ? 'income' : 'expense';
+  if (!key) throw ApiError.badRequest('Kategori wajib diisi.');
+  const acct = await prisma.chartAccount.findUnique({ where: { code: String(chartCode || '') } });
+  if (!acct) throw ApiError.badRequest('Akun tidak ditemukan.');
+  if ((acct.subtype || '') === 'header') throw ApiError.badRequest('Pilih akun rincian, bukan akun induk.');
+  // Keep the sides sane: income (a credit) maps to revenue, expense (a debit) to an expense/COGS account.
+  const okType = t === 'income' ? acct.type === 'revenue' : (acct.type === 'expense');
+  if (!okType) throw ApiError.badRequest(t === 'income' ? 'Pemasukan harus dipetakan ke akun Pendapatan.' : 'Pengeluaran harus dipetakan ke akun Beban/HPP.');
+  const row = await prisma.categoryMapping.upsert({
+    where: { categoryKey_type: { categoryKey: key, type: t } },
+    update: { chartCode: acct.code, createdById: (actor && actor.id) || null, createdByName: (actor && actor.name) || null },
+    create: { categoryKey: key, type: t, chartCode: acct.code, createdById: (actor && actor.id) || null, createdByName: (actor && actor.name) || null },
+  });
+  return { categoryKey: row.categoryKey, type: row.type, chartCode: row.chartCode, name: acct.name };
+}
+async function clearCategoryMapping({ categoryKey, type }) {
+  const t = type === 'income' ? 'income' : 'expense';
+  await prisma.categoryMapping.deleteMany({ where: { categoryKey: String(categoryKey || ''), type: t } });   // reverts to the built-in default (or unmapped)
+  return { cleared: true };
 }
 
 // ── Reports (read the journal, never the cash book). ──
@@ -524,6 +591,7 @@ async function chart() {
 
 module.exports = {
   CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, chart, postJournal, reverseJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
-  distTxnLines, reconcileDistTxn, postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, integrityCheck, unmappedCategories, categoryToCode,
+  distTxnLines, reconcileDistTxn, postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, integrityCheck, unmappedCategories, categoryToCode, resolveCategoryCode,
+  listCategoryMappings, setCategoryMapping, clearCategoryMapping, postableAccounts,
   accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, journalFor, cashFlow,
 };
