@@ -4,6 +4,7 @@ const ApiError = require('../utils/ApiError');
 const service = require('../services/accounting.service');
 const period = require('../services/period.service');
 const recon = require('../services/reconciliation.service');
+const bill = require('../services/bill.service');
 const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
 
 const trialBalance = asyncHandler(async (req, res) => res.json({ data: await service.trialBalance(range(req)) }));
@@ -40,4 +41,17 @@ const clearMapping = asyncHandler(async (req, res) => res.json({ data: await ser
 // STATUS roll-up for the workflow panel + report headers (last-posted, balance, drift/unmapped counts).
 const status = asyncHandler(async (req, res) => res.json({ data: await service.accountingStatus({ asOf: req.query.asOf }) }));
 
-module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark };
+// ACCOUNTS PAYABLE (Utang Usaha) — bills + payments + AP aging + due-this-week. The bill.service
+// validates; handlers just pass through.
+const billsList = asyncHandler(async (req, res) => res.json(await bill.listBills(req.query, req.user)));
+const billGet = asyncHandler(async (req, res) => res.json({ data: await bill.getBill(req.params.id) }));
+const billCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await bill.createBill(req.body, req.user) }));
+const billUpdate = asyncHandler(async (req, res) => res.json({ data: await bill.updateBill(req.params.id, req.body, req.user) }));
+const billIssue = asyncHandler(async (req, res) => res.json({ data: await bill.issueBill(req.params.id, req.user) }));
+const billPay = asyncHandler(async (req, res) => res.json({ data: await bill.recordBillPayment(req.params.id, req.body, req.user) }));
+const billVoid = asyncHandler(async (req, res) => res.json({ data: await bill.voidBill(req.params.id, req.body, req.user) }));
+const apAging = asyncHandler(async (req, res) => res.json({ data: await bill.agingPayables({ asOf: req.query.asOf, businessUnitId: req.query.businessUnitId }) }));
+const apDue = asyncHandler(async (req, res) => res.json({ data: await bill.payablesDue({ asOf: req.query.asOf, days: req.query.days ? +req.query.days : 7 }) }));
+
+module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
+  billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue };

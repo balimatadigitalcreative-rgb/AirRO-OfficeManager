@@ -18,6 +18,7 @@ const CHART = [
   ['1-1200', 'Piutang Usaha', 'asset', '1-0000', 'receivable'],
   ['1-1300', 'Persediaan Galon', 'asset', '1-0000', 'inventory'],
   ['1-1400', 'Peralatan', 'asset', '1-0000', 'fixed_asset'],
+  ['1-1500', 'PPN Masukan', 'asset', '1-0000', 'prepaid'],   // recoverable input VAT on a bill (Accounts Payable tax)
   ['2-0000', 'Kewajiban', 'liability', '', 'header'],
   ['2-1000', 'Utang Usaha', 'liability', '2-0000', 'payable'],
   ['2-2000', 'Utang Gaji', 'liability', '2-0000', 'payable'],
@@ -45,7 +46,7 @@ const CHART = [
 // here (and isn't 'cash'/'header') is REPORTED as unclassified, never silently folded into Operasi.
 const CF_SECTION = {
   cash: 'cash', header: 'header',
-  receivable: 'operasi', inventory: 'operasi', payable: 'operasi', deferred_income: 'operasi', revenue: 'operasi', expense: 'operasi', cogs: 'operasi',
+  receivable: 'operasi', inventory: 'operasi', prepaid: 'operasi', payable: 'operasi', deferred_income: 'operasi', revenue: 'operasi', expense: 'operasi', cogs: 'operasi',
   fixed_asset: 'investasi',
   capital: 'pendanaan', retained: 'pendanaan', drawing: 'pendanaan',
 };
@@ -561,7 +562,7 @@ async function accountBalances({ dateFrom, dateTo } = {}) {
   const lines = await prisma.journalLine.findMany({ where: Object.keys(jWhere).length ? { journalEntry: jWhere } : {}, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, type: true } } } });
   const acc = {};
   for (const l of lines) { const c = l.chartAccount.code; if (!acc[c]) acc[c] = { code: c, name: l.chartAccount.name, type: l.chartAccount.type, debit: 0, credit: 0 }; acc[c].debit += Number(l.debit); acc[c].credit += Number(l.credit); }
-  return Object.values(acc).sort((a, b) => a.code.localeCompare(b.code)).map((a) => ({ ...a, balance: (a.debit - a.credit) * SIGN[a.type] }));
+  return Object.values(acc).sort((a, b) => a.code.localeCompare(b.code)).map((a) => ({ ...a, balance: ((a.debit - a.credit) * SIGN[a.type]) || 0 }));   // `|| 0` normalises -0 → 0
 }
 async function trialBalance(range) {
   const rows = await accountBalances(range);

@@ -21,6 +21,18 @@ router.get('/ledger', ctrl.ledger);                  // ONE account — Buku Bes
 router.get('/journal', ctrl.journal);                // one source's full balanced journal (?sourceType=&sourceId=) — drill
 router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging buckets)
 router.get('/receivables', ctrl.receivables);
+
+// ACCOUNTS PAYABLE (Utang Usaha) — bills accrue an expense when incurred; payments (partial ok) settle
+// them. AP aging mirrors AR; "payables-due" is the jatuh-tempo-minggu-ini card. All under the flag gate.
+router.get('/bills', ctrl.billsList);
+router.get('/aging-payable', ctrl.apAging);          // Umur Utang (AP aging) — BEFORE :id
+router.get('/payables-due', ctrl.apDue);             // jatuh tempo minggu ini
+router.get('/bills/:id', ctrl.billGet);
+router.post('/bills', ctrl.billCreate);
+router.patch('/bills/:id', ctrl.billUpdate);         // draft only
+router.post('/bills/:id/issue', ctrl.billIssue);     // draft → terbuka (posts the accrual journal)
+router.post('/bills/:id/payments', ctrl.billPay);    // partial payment (posts Dr Utang / Cr Kas/Bank)
+router.post('/bills/:id/void', ctrl.billVoid);
 router.get('/unmapped', ctrl.unmapped);
 router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
 router.get('/status', ctrl.status);        // workflow-panel + report-header roll-up (?asOf=YYYY-MM-DD)

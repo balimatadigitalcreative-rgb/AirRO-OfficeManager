@@ -124,6 +124,65 @@ model ChartAccount {
   @@index([parentId])
 }
 
+// ACCOUNTS PAYABLE (Utang Usaha) — accrual: a Bill recognises the expense/asset when INCURRED (posts
+// Dr expense/asset / Cr Utang Usaha), independent of when it is paid. Payments (Dr Utang Usaha / Cr
+// Kas/Bank) can be partial; status derives from Σ paid. Reuses the existing Supplier model.
+model Bill {
+  id             String    @id @default(cuid())
+  supplierId     String
+  billNumber     String    @default("")           // the supplier's invoice number (free text)
+  billDate       String                            // YYYY-MM-DD (when incurred — drives the P&L period + aging)
+  dueDate        String?                           // YYYY-MM-DD (drives "jatuh tempo minggu ini")
+  description    String    @default("")
+  subtotal       BigInt    @default(0)
+  tax            BigInt    @default(0)
+  total          BigInt    @default(0)             // subtotal + tax
+  status         String    @default("draft")       // draft | terbuka | sebagian | lunas | batal
+  businessUnitId String?
+  periodId       String?
+  createdById    String?
+  createdByName  String?
+  voidReason     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  supplier Supplier      @relation(fields: [supplierId], references: [id])
+  lines    BillLine[]
+  payments BillPayment[]
+  @@index([supplierId])
+  @@index([status])
+  @@index([billDate])
+  @@index([dueDate])
+}
+model BillLine {
+  id             String @id @default(cuid())
+  billId         String
+  chartAccountId String                            // the expense/asset account debited
+  description    String @default("")
+  qty            Int    @default(1)
+  unitPrice      BigInt @default(0)
+  amount         BigInt @default(0)                // qty * unitPrice (server-computed)
+  fleetId        String @default("")
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  @@index([billId])
+}
+model BillPayment {
+  id             String   @id @default(cuid())
+  billId         String
+  date           String                            // YYYY-MM-DD
+  amount         BigInt
+  accountId      String?                           // the cash/bank Account paid from
+  method         String   @default("")             // cash | transfer (informational)
+  reference      String   @default("")
+  recordedById   String?
+  recordedByName String?
+  createdAt      DateTime @default(now())
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  @@index([billId])
+}
+
 // Runtime override of the hardcoded cash-book category → account map (CAT_MAP in accounting.service).
 // A row here maps a category key (per income/expense type) to a ChartAccount code; absent keys fall
 // back to the built-in defaults, and a key mapped by neither is what /unmapped surfaces. Lets an admin
@@ -1218,6 +1277,7 @@ model Supplier {
   deactivatedByName String?                        // audit: who deactivated it
   deactivatedAt DateTime?
 
+  bills Bill[]
   @@index([active])
 }
 

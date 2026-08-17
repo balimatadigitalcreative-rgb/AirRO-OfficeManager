@@ -131,6 +131,16 @@
       clearMapping: (b) => req('DELETE', '/accounting/mappings', b),                  // { categoryKey, type }
       backfill: (b) => req('POST', '/accounting/backfill', b || {}),                  // dryRun → preview counts; else → { jobId, total } (async job)
       backfillStatus: (jobId) => req('GET', '/accounting/backfill/status/' + jobId),  // { processed, total, posted, failed, status, result, errors[] }
+      // ACCOUNTS PAYABLE (Utang Usaha)
+      bills: (p) => req('GET', '/accounting/bills' + acctQs(p)),                       // { status?, supplierId?, dateFrom?, dateTo? } → { data, summary }
+      bill: (id) => req('GET', '/accounting/bills/' + id),
+      billCreate: (b) => req('POST', '/accounting/bills', b),                          // { supplierId, billDate, dueDate?, lines[], tax?, ... } (draft)
+      billUpdate: (id, b) => req('PATCH', '/accounting/bills/' + id, b),               // draft only
+      billIssue: (id) => req('POST', '/accounting/bills/' + id + '/issue', {}),        // draft → terbuka (posts accrual)
+      billPay: (id, b) => req('POST', '/accounting/bills/' + id + '/payments', b),     // { date, amount, accountId?, method?, reference? }
+      billVoid: (id, b) => req('POST', '/accounting/bills/' + id + '/void', b),        // { reason }
+      agingPayable: (p) => req('GET', '/accounting/aging-payable' + acctQs(p)),        // Umur Utang (AP aging buckets)
+      payablesDue: (p) => req('GET', '/accounting/payables-due' + acctQs(p)),          // jatuh tempo minggu ini
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes
