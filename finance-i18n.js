@@ -679,6 +679,8 @@
       // Arus Kas (cash flow statement)
       'cf.title': 'Cash Flow', 'cf.gated': 'The cash flow statement runs on the double-entry engine — enable ACCOUNTING_V2 to view it.', 'cf.vs': 'vs {p}',
       'cf.kasAwal': 'opening cash +', 'cf.net': 'net cash flow', 'cf.kasAkhir': 'closing cash', 'cf.reconciled': 'reconciles to cash', 'cf.mismatch': 'MISMATCH {d}',
+      'cf.answers': 'Where the cash actually came from and went — split into operating, investing and financing.',
+      'cf.operasiTip': 'Cash from day-to-day business: sales collected, expenses and salaries paid.', 'cf.investasiTip': 'Cash for/from long-term assets: buying or selling equipment.', 'cf.pendanaanTip': 'Cash between the business and its owner: capital put in, or drawings taken out.',
       'cf.operasi': 'Operating activities', 'cf.labaBersih': 'Net income', 'cf.operasiTotal': 'Net cash from operating',
       'cf.investasi': 'Investing activities', 'cf.investasiTotal': 'Net cash from investing',
       'cf.pendanaan': 'Financing activities', 'cf.pendanaanTotal': 'Net cash from financing',
@@ -1434,6 +1436,8 @@
       // Arus Kas (laporan arus kas)
       'cf.title': 'Arus Kas', 'cf.gated': 'Laporan arus kas berjalan di mesin pembukuan berpasangan — aktifkan ACCOUNTING_V2 untuk melihatnya.', 'cf.vs': 'vs {p}',
       'cf.kasAwal': 'kas awal +', 'cf.net': 'arus kas bersih', 'cf.kasAkhir': 'kas akhir', 'cf.reconciled': 'sesuai dengan kas', 'cf.mismatch': 'SELISIH {d}',
+      'cf.answers': 'Dari mana kas benar-benar datang dan ke mana perginya — dibagi operasi, investasi, pendanaan.',
+      'cf.operasiTip': 'Kas dari kegiatan sehari-hari: penjualan tertagih, beban & gaji dibayar.', 'cf.investasiTip': 'Kas untuk/dari aset jangka panjang: beli atau jual peralatan.', 'cf.pendanaanTip': 'Kas antara usaha dan pemilik: modal disetor, atau prive diambil.',
       'cf.operasi': 'Aktivitas operasi', 'cf.labaBersih': 'Laba bersih', 'cf.operasiTotal': 'Kas bersih dari operasi',
       'cf.investasi': 'Aktivitas investasi', 'cf.investasiTotal': 'Kas bersih dari investasi',
       'cf.pendanaan': 'Aktivitas pendanaan', 'cf.pendanaanTotal': 'Kas bersih dari pendanaan',

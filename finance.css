@@ -3792,6 +3792,8 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-empty-s, .fin-coming-s { font-size: 12.5px; color: var(--text-faint); max-width: 380px; }
 
 /* ── Part 2: self-explanatory accounting — one-line intro, mapping + backfill screens ── */
+.fin-infodot { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-left: 5px; border-radius: 999px; border: 1px solid var(--border-soft); background: var(--card-soft); color: var(--text-mut); font-size: 10px; font-weight: 800; line-height: 1; cursor: help; vertical-align: middle; }
+.fin-infodot:hover, .fin-infodot:focus { background: var(--sky-100, #e3f0f8); color: var(--sky-700, #1668a6); outline: none; }
 .fin-intro { display: flex; align-items: flex-start; gap: 9px; padding: 11px 14px; border-radius: 12px; margin-bottom: 14px; border: 1px solid var(--border-soft); background: var(--surface-2, #f6f8f9); }
 .fin-intro-ic { flex-shrink: 0; display: grid; place-items: center; margin-top: 1px; color: var(--text-mut); }
 .fin-intro-answers { font-size: 13.5px; font-weight: 700; color: var(--text); line-height: 1.35; }

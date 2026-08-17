@@ -388,6 +388,10 @@ function CashFlowReport({ range, label, prevRange, prevLabel, unitLabel, fleetId
     <div className="cf-row total"><span className="cf-row-lbl">{t}</span><span className="tnum cf-amt">{FIN.fmtS(total)}</span>{prevTotals && <span className="tnum cf-prev">{FIN.fmtS(prevTotal)}</span>}</div>
   );
 
+  // Shared accounting header + info-dot (defined in finance-accounting.jsx → window.ACCT). Referenced
+  // at render time, so load order doesn't matter. Capitalised locals so they're valid JSX tags.
+  const RH = window.ACCT && window.ACCT.ReportHeader;
+  const Info = window.ACCT && window.ACCT.InfoDot;
   return (
     <div className="screen-enter fin-scope" id="report-area">
       <div className="fin-print-head print-only">
@@ -405,6 +409,7 @@ function CashFlowReport({ range, label, prevRange, prevLabel, unitLabel, fleetId
           <button className="btn btn-primary" style={{ height: 42 }} onClick={() => window.print()}><IconReport s={17} /><span className="fin-btn-lbl">{trR('rep.print')}</span></button>
         </div>
       </div>
+      {RH && <div className="no-print"><RH answers={trR('cf.answers')} /></div>}
 
       {/* HARD RECONCILIATION — kas awal + arus kas bersih == kas akhir, from the real cash balances. */}
       <div className={`cf-recon ${data.reconciles ? 'ok' : 'bad'}`}>
@@ -416,16 +421,16 @@ function CashFlowReport({ range, label, prevRange, prevLabel, unitLabel, fleetId
       <div className={`card fin-scope cf-card ${prevTotals ? 'has-cmp' : ''}`}>
         {prevTotals && <div className="cf-row cf-colhead"><span /><span className="cf-amt">{label}</span><span className="cf-prev">{prevLabel}</span></div>}
         {/* OPERASI (indirect): laba bersih + working-capital changes */}
-        <div className="cf-sec-title">{trR('cf.operasi')}</div>
+        <div className="cf-sec-title">{trR('cf.operasi')}{Info && <Info tip={trR('cf.operasiTip')} />}</div>
         <Line name={trR('cf.labaBersih')} amount={data.operasi.netIncome} />
         {data.operasi.workingCapital.map((r) => <Line key={r.code} code={r.code} name={r.name} amount={r.amount} drillable />)}
         <SectionTotal label={trR('cf.operasiTotal')} total={data.operasi.total} prevTotal={prevTotals && prevTotals.operasi} />
         {/* INVESTASI */}
-        <div className="cf-sec-title">{trR('cf.investasi')}</div>
+        <div className="cf-sec-title">{trR('cf.investasi')}{Info && <Info tip={trR('cf.investasiTip')} />}</div>
         {data.investasi.rows.length ? data.investasi.rows.map((r) => <Line key={r.code} code={r.code} name={r.name} amount={r.amount} drillable />) : <div className="cf-row cf-empty">{trR('cf.none')}</div>}
         <SectionTotal label={trR('cf.investasiTotal')} total={data.investasi.total} prevTotal={prevTotals && prevTotals.investasi} />
         {/* PENDANAAN */}
-        <div className="cf-sec-title">{trR('cf.pendanaan')}</div>
+        <div className="cf-sec-title">{trR('cf.pendanaan')}{Info && <Info tip={trR('cf.pendanaanTip')} />}</div>
         {data.pendanaan.rows.length ? data.pendanaan.rows.map((r) => <Line key={r.code} code={r.code} name={r.name} amount={r.amount} drillable />) : <div className="cf-row cf-empty">{trR('cf.none')}</div>}
         <SectionTotal label={trR('cf.pendanaanTotal')} total={data.pendanaan.total} prevTotal={prevTotals && prevTotals.pendanaan} />
         {/* UNCLASSIFIED — surfaced, never hidden in Operasi */}

@@ -115,6 +115,10 @@
     );
   }
 
+  // Small "?" info dot with a plain-language tooltip (Part 2 #6) — used to explain accounting terms
+  // (Neraca Saldo, Buku Besar, Piutang Usaha, Arus Kas sections) to a non-accountant reader.
+  function InfoDot({ tip }) { return <span className="fin-infodot" tabIndex={0} title={tip} aria-label={tip}>{IcA('IconInfo', { s: 11 }) || '?'}</span>; }
+
   // Actionable empty state (Part 2 #2) — never a blank table. Title + guidance + an optional CTA.
   function EmptyState({ title, body, actionLabel, onAction, icon }) {
     return (
@@ -732,5 +736,5 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel };
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, ReportHeader, ScreenIntro, InfoDot };
 })();
