@@ -141,6 +141,13 @@
       billVoid: (id, b) => req('POST', '/accounting/bills/' + id + '/void', b),        // { reason }
       agingPayable: (p) => req('GET', '/accounting/aging-payable' + acctQs(p)),        // Umur Utang (AP aging buckets)
       payablesDue: (p) => req('GET', '/accounting/payables-due' + acctQs(p)),          // jatuh tempo minggu ini
+      // ACCRUAL MECHANICS — accrued expenses (reversing) + prepaid amortisation
+      accruals: (p) => req('GET', '/accounting/accruals' + acctQs(p)),
+      accrualCreate: (b) => req('POST', '/accounting/accruals', b),                    // { chartCode, amount, date, reverseDate?, description? }
+      accrualVoid: (id, b) => req('POST', '/accounting/accruals/' + id + '/void', b),  // { reason }
+      amortSchedules: (p) => req('GET', '/accounting/amortization-schedules' + acctQs(p)),
+      amortScheduleCreate: (b) => req('POST', '/accounting/amortization-schedules', b),// { chartCode, total, months, startDate, description? }
+      amortize: (b) => req('POST', '/accounting/amortize', b || {}),                   // { asOf? } → posts every due month
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

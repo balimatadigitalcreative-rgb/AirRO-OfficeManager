@@ -155,17 +155,59 @@ model Bill {
   @@index([dueDate])
 }
 model BillLine {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   billId         String
   chartAccountId String                            // the expense/asset account debited
-  description    String @default("")
-  qty            Int    @default(1)
-  unitPrice      BigInt @default(0)
-  amount         BigInt @default(0)                // qty * unitPrice (server-computed)
-  fleetId        String @default("")
+  description    String  @default("")
+  qty            Int     @default(1)
+  unitPrice      BigInt  @default(0)
+  amount         BigInt  @default(0)               // qty * unitPrice (server-computed)
+  fleetId        String  @default("")
+  amortizeMonths Int     @default(0)               // >0 → PREPAID: capitalise (Dr 1-1600) + amortise over N months
+  amortizeStart  String?                           // YYYY-MM-DD — first amortisation month (defaults to billDate)
 
   bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
   @@index([billId])
+}
+
+// PREPAID amortisation (Beban Dibayar Di Muka): a capitalised cost spread monthly into an expense
+// account (Dr expense · Cr 1-1600) over `months` from `startDate`. `postedThrough` = last YYYY-MM
+// posted; postAmortization() catches every month up to a cut-off, idempotently.
+model AmortizationSchedule {
+  id             String   @id @default(cuid())
+  sourceType     String                            // 'bill' (a prepaid bill line) | 'manual'
+  sourceId       String                            // the bill id (or a manual id)
+  chartAccountId String                            // the EXPENSE account amortised INTO
+  prepaidCode    String   @default("1-1600")       // the prepaid asset credited
+  startDate      String                            // YYYY-MM-DD (first month)
+  months         Int
+  monthlyAmount  BigInt
+  total          BigInt   @default(0)
+  postedThrough  String?                           // YYYY-MM (last month posted) — null = none yet
+  description    String   @default("")
+  businessUnitId String?
+  fleetId        String   @default("")
+  createdAt      DateTime @default(now())
+  @@index([sourceType, sourceId])
+}
+
+// ACCRUED expense (Beban Yang Masih Harus Dibayar) via REVERSING ENTRIES: the accrual is booked in the
+// period it belongs to (Dr expense · Cr 2-4000) and auto-reversed on `reverseDate` (next period start),
+// so the real bill next period is counted once, not twice.
+model Accrual {
+  id             String   @id @default(cuid())
+  chartAccountId String                            // the EXPENSE account accrued
+  amount         BigInt
+  date           String                            // YYYY-MM-DD — when the expense is recognised
+  reverseDate    String                            // YYYY-MM-DD — when the accrual reverses (next period)
+  description    String   @default("")
+  businessUnitId String?
+  fleetId        String   @default("")
+  status         String   @default("aktif")        // aktif | batal
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime @default(now())
+  @@index([date])
 }
 model BillPayment {
   id             String   @id @default(cuid())

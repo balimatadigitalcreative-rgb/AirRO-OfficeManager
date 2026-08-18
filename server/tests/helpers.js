@@ -17,6 +17,8 @@ async function resetDb() {
   await prisma.billPayment.deleteMany();
   await prisma.billLine.deleteMany();
   await prisma.bill.deleteMany();
+  await prisma.amortizationSchedule.deleteMany();
+  await prisma.accrual.deleteMany();
   await prisma.entry.deleteMany();
   await prisma.transfer.deleteMany();
   await prisma.setoran.deleteMany();

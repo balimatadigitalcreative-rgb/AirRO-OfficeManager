@@ -5,6 +5,7 @@ const service = require('../services/accounting.service');
 const period = require('../services/period.service');
 const recon = require('../services/reconciliation.service');
 const bill = require('../services/bill.service');
+const accrual = require('../services/accrual.service');
 const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
 
 const trialBalance = asyncHandler(async (req, res) => res.json({ data: await service.trialBalance(range(req)) }));
@@ -53,5 +54,14 @@ const billVoid = asyncHandler(async (req, res) => res.json({ data: await bill.vo
 const apAging = asyncHandler(async (req, res) => res.json({ data: await bill.agingPayables({ asOf: req.query.asOf, businessUnitId: req.query.businessUnitId }) }));
 const apDue = asyncHandler(async (req, res) => res.json({ data: await bill.payablesDue({ asOf: req.query.asOf, days: req.query.days ? +req.query.days : 7 }) }));
 
+// ACCRUAL MECHANICS — accrued expenses (reversing entries) + prepaid amortisation.
+const accrualsList = asyncHandler(async (req, res) => res.json(await accrual.listAccruals(req.query)));
+const accrualCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await accrual.createAccrual(req.body, req.user) }));
+const accrualVoid = asyncHandler(async (req, res) => res.json({ data: await accrual.voidAccrual(req.params.id, req.body, req.user) }));
+const schedulesList = asyncHandler(async (req, res) => res.json(await accrual.listSchedules(req.query)));
+const scheduleCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await accrual.createManualSchedule(req.body, req.user) }));
+const amortize = asyncHandler(async (req, res) => res.json({ data: await accrual.postAmortization({ asOf: req.body && req.body.asOf }, req.user) }));
+
 module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
-  billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue };
+  billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue,
+  accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize };

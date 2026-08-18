@@ -33,6 +33,14 @@ router.patch('/bills/:id', ctrl.billUpdate);         // draft only
 router.post('/bills/:id/issue', ctrl.billIssue);     // draft → terbuka (posts the accrual journal)
 router.post('/bills/:id/payments', ctrl.billPay);    // partial payment (posts Dr Utang / Cr Kas/Bank)
 router.post('/bills/:id/void', ctrl.billVoid);
+
+// ACCRUAL MECHANICS — accrued expenses (reversing entries) + prepaid amortisation schedules.
+router.get('/accruals', ctrl.accrualsList);
+router.post('/accruals', ctrl.accrualCreate);        // Dr Beban · Cr 2-4000 now; auto-reversed next period
+router.post('/accruals/:id/void', ctrl.accrualVoid);
+router.get('/amortization-schedules', ctrl.schedulesList);
+router.post('/amortization-schedules', ctrl.scheduleCreate);   // manual standalone prepaid
+router.post('/amortize', ctrl.amortize);             // post every due month up to { asOf } (idempotent)
 router.get('/unmapped', ctrl.unmapped);
 router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
 router.get('/status', ctrl.status);        // workflow-panel + report-header roll-up (?asOf=YYYY-MM-DD)

@@ -7,9 +7,11 @@ const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const config = require('../config/env');
 const acc = require('./accounting.service');
+const accrual = require('./accrual.service');
 
 const PAYABLE = '2-1000';   // Utang Usaha
 const PPN_IN = '1-1500';    // PPN Masukan (recoverable input VAT)
+const PREPAID_EXP = '1-1600';   // Beban Dibayar Di Muka (a prepaid line capitalises here, then amortises)
 const KAS = '1-1000', BANK = '1-1100';
 const n = (v) => Math.round(Number(v) || 0);
 const int = (v) => Math.max(0, Math.round(Number(v) || 0));
@@ -55,7 +57,10 @@ async function normalizeLines(lines, db = prisma) {
     const qty = Math.max(1, int(l.qty || 1)); const unitPrice = int(l.unitPrice);
     const amount = l.amount != null ? int(l.amount) : qty * unitPrice;
     if (amount <= 0) throw ApiError.badRequest('Nominal baris harus lebih dari 0.');
-    return { chartAccountId: a.id, chartCode: a.code, description: String(l.description || '').slice(0, 200), qty, unitPrice, amount, fleetId: String(l.fleetId || '').slice(0, 40) };
+    // PREPAID: a line covering a future period is amortised over N months — capitalised on issue.
+    const amortizeMonths = Math.max(0, int(l.amortizeMonths || 0));
+    const amortizeStart = (amortizeMonths > 0 && isDate(l.amortizeStart)) ? l.amortizeStart : null;
+    return { chartAccountId: a.id, chartCode: a.code, description: String(l.description || '').slice(0, 200), qty, unitPrice, amount, fleetId: String(l.fleetId || '').slice(0, 40), amortizeMonths, amortizeStart };
   });
 }
 
@@ -73,7 +78,7 @@ async function createBill(body, actor) {
     supplierId: supplier.id, billNumber: String(body.billNumber || '').slice(0, 60), billDate: body.billDate, dueDate: body.dueDate || null,
     description: String(body.description || '').slice(0, 500), subtotal: BigInt(subtotal), tax: BigInt(tax), total: BigInt(total),
     status: 'draft', businessUnitId, createdById: (actor && actor.id) || null, createdByName: (actor && actor.name) || null,
-    lines: { create: lines.map((l) => ({ chartAccountId: l.chartAccountId, description: l.description, qty: l.qty, unitPrice: BigInt(l.unitPrice), amount: BigInt(l.amount), fleetId: l.fleetId })) },
+    lines: { create: lines.map((l) => ({ chartAccountId: l.chartAccountId, description: l.description, qty: l.qty, unitPrice: BigInt(l.unitPrice), amount: BigInt(l.amount), fleetId: l.fleetId, amortizeMonths: l.amortizeMonths, amortizeStart: l.amortizeStart })) },
   }, include: { lines: true, supplier: { select: { name: true } } } });
   return billClient(bill, 0);
 }
@@ -91,17 +96,18 @@ async function updateBill(id, body, actor) {
       billNumber: String(body.billNumber || '').slice(0, 60), billDate: isDate(body.billDate) ? body.billDate : bill.billDate, dueDate: body.dueDate || null,
       description: String(body.description || '').slice(0, 500), subtotal: BigInt(subtotal), tax: BigInt(tax), total: BigInt(total),
       businessUnitId: body.businessUnitId ? String(body.businessUnitId) : null,
-      lines: { create: lines.map((l) => ({ chartAccountId: l.chartAccountId, description: l.description, qty: l.qty, unitPrice: BigInt(l.unitPrice), amount: BigInt(l.amount), fleetId: l.fleetId })) },
+      lines: { create: lines.map((l) => ({ chartAccountId: l.chartAccountId, description: l.description, qty: l.qty, unitPrice: BigInt(l.unitPrice), amount: BigInt(l.amount), fleetId: l.fleetId, amortizeMonths: l.amortizeMonths, amortizeStart: l.amortizeStart })) },
     }, include: { lines: true, supplier: { select: { name: true } } } });
   });
   return billClient(updated, 0);
 }
 
-// The accrual journal: Dr each line's account + Dr PPN Masukan (tax) · Cr Utang Usaha (total).
+// The accrual journal: Dr each line's account (a PREPAID line capitalises to 1-1600 instead of its
+// expense account) + Dr PPN Masukan (tax) · Cr Utang Usaha (total).
 async function billAccrualLines(bill, db = prisma) {
   const accts = await db.chartAccount.findMany({ where: { id: { in: bill.lines.map((l) => l.chartAccountId) } }, select: { id: true, code: true } });
   const code = {}; accts.forEach((a) => { code[a.id] = a.code; });
-  const lines = bill.lines.map((l) => ({ code: code[l.chartAccountId], debit: n(l.amount), fleetId: l.fleetId || '' }));
+  const lines = bill.lines.map((l) => ({ code: (l.amortizeMonths > 0 ? PREPAID_EXP : code[l.chartAccountId]), debit: n(l.amount), fleetId: l.fleetId || '' }));
   if (n(bill.tax) > 0) lines.push({ code: PPN_IN, debit: n(bill.tax) });
   lines.push({ code: PAYABLE, credit: n(bill.total) });
   return lines;
@@ -117,6 +123,11 @@ async function issueBill(id, actor) {
   const out = await prisma.$transaction(async (tx) => {
     const b = await tx.bill.update({ where: { id }, data: { status: 'terbuka', periodId: bill.periodId }, include: { lines: true, supplier: { select: { name: true } } } });
     if (config.accountingV2) await acc.postJournal({ sourceType: 'bill', sourceId: b.id, date: b.billDate, description: `Tagihan ${b.supplier ? b.supplier.name : ''} ${b.billNumber || ''}`.trim(), actor, businessUnitId: b.businessUnitId || null, lines: await billAccrualLines(b, tx) }, tx);
+    // PREPAID lines: capitalised above (Dr 1-1600); create their amortisation schedules so the expense
+    // is spread monthly by postAmortization(). One schedule per prepaid line.
+    for (const l of b.lines) {
+      if (l.amortizeMonths > 0) await accrual.createSchedule({ sourceType: 'bill', sourceId: b.id, chartAccountId: l.chartAccountId, startDate: l.amortizeStart || b.billDate, months: l.amortizeMonths, total: n(l.amount), description: `${b.billNumber || ''} ${l.description || ''}`.trim(), businessUnitId: b.businessUnitId, fleetId: l.fleetId }, tx);
+    }
     return b;
   });
   return billClient(out, 0);

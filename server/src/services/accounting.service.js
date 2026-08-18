@@ -19,10 +19,12 @@ const CHART = [
   ['1-1300', 'Persediaan Galon', 'asset', '1-0000', 'inventory'],
   ['1-1400', 'Peralatan', 'asset', '1-0000', 'fixed_asset'],
   ['1-1500', 'PPN Masukan', 'asset', '1-0000', 'prepaid'],   // recoverable input VAT on a bill (Accounts Payable tax)
+  ['1-1600', 'Beban Dibayar Di Muka', 'asset', '1-0000', 'prepaid'],   // prepaid expense — capitalised, amortised monthly
   ['2-0000', 'Kewajiban', 'liability', '', 'header'],
   ['2-1000', 'Utang Usaha', 'liability', '2-0000', 'payable'],
   ['2-2000', 'Utang Gaji', 'liability', '2-0000', 'payable'],
   ['2-3000', 'Uang Muka Pelanggan', 'liability', '2-0000', 'deferred_income'],   // customer credit balance (overpaid bon → not negative AR)
+  ['2-4000', 'Beban Yang Masih Harus Dibayar', 'liability', '2-0000', 'accrued'],   // accrued expense (recognised before the bill arrives)
   ['3-0000', 'Ekuitas', 'equity', '', 'header'],
   ['3-1000', 'Modal', 'equity', '3-0000', 'capital'],
   ['3-2000', 'Laba Ditahan', 'equity', '3-0000', 'retained'],
@@ -46,7 +48,7 @@ const CHART = [
 // here (and isn't 'cash'/'header') is REPORTED as unclassified, never silently folded into Operasi.
 const CF_SECTION = {
   cash: 'cash', header: 'header',
-  receivable: 'operasi', inventory: 'operasi', prepaid: 'operasi', payable: 'operasi', deferred_income: 'operasi', revenue: 'operasi', expense: 'operasi', cogs: 'operasi',
+  receivable: 'operasi', inventory: 'operasi', prepaid: 'operasi', payable: 'operasi', accrued: 'operasi', deferred_income: 'operasi', revenue: 'operasi', expense: 'operasi', cogs: 'operasi',
   fixed_asset: 'investasi',
   capital: 'pendanaan', retained: 'pendanaan', drawing: 'pendanaan',
 };
