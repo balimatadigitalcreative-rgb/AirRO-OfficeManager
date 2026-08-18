@@ -41,6 +41,17 @@ router.post('/accruals/:id/void', ctrl.accrualVoid);
 router.get('/amortization-schedules', ctrl.schedulesList);
 router.post('/amortization-schedules', ctrl.scheduleCreate);   // manual standalone prepaid
 router.post('/amortize', ctrl.amortize);             // post every due month up to { asOf } (idempotent)
+
+// RECURRING SUBSCRIPTIONS — a recurring bill template; running it generates the due Bills (idempotent).
+router.get('/subscriptions', ctrl.subsList);
+router.post('/subscriptions/run', ctrl.subRun);      // generate due bills up to { asOf } — BEFORE :id
+router.get('/subscriptions/:id', ctrl.subGet);
+router.post('/subscriptions', ctrl.subCreate);
+router.patch('/subscriptions/:id', ctrl.subUpdate);
+router.post('/subscriptions/:id/pause', ctrl.subPause);
+router.post('/subscriptions/:id/resume', ctrl.subResume);
+router.post('/subscriptions/:id/cancel', ctrl.subCancel);
+router.post('/subscriptions/:id/skip', ctrl.subSkip);   // skip the next cycle (no bill)
 router.get('/unmapped', ctrl.unmapped);
 router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
 router.get('/status', ctrl.status);        // workflow-panel + report-header roll-up (?asOf=YYYY-MM-DD)

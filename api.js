@@ -148,6 +148,16 @@
       amortSchedules: (p) => req('GET', '/accounting/amortization-schedules' + acctQs(p)),
       amortScheduleCreate: (b) => req('POST', '/accounting/amortization-schedules', b),// { chartCode, total, months, startDate, description? }
       amortize: (b) => req('POST', '/accounting/amortize', b || {}),                   // { asOf? } → posts every due month
+      // RECURRING SUBSCRIPTIONS — a recurring bill template
+      subscriptions: (p) => req('GET', '/accounting/subscriptions' + acctQs(p)),       // → { data, summary }
+      subscription: (id) => req('GET', '/accounting/subscriptions/' + id),
+      subscriptionCreate: (b) => req('POST', '/accounting/subscriptions', b),          // { supplierId, name, chartCode, amount, cadence, startDate, ... }
+      subscriptionUpdate: (id, b) => req('PATCH', '/accounting/subscriptions/' + id, b),
+      subscriptionPause: (id) => req('POST', '/accounting/subscriptions/' + id + '/pause', {}),
+      subscriptionResume: (id) => req('POST', '/accounting/subscriptions/' + id + '/resume', {}),
+      subscriptionCancel: (id) => req('POST', '/accounting/subscriptions/' + id + '/cancel', {}),
+      subscriptionSkip: (id) => req('POST', '/accounting/subscriptions/' + id + '/skip', {}),
+      subscriptionsRun: (b) => req('POST', '/accounting/subscriptions/run', b || {}),  // { asOf? } → generates due bills
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

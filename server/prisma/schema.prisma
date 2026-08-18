@@ -1319,8 +1319,53 @@ model Supplier {
   deactivatedByName String?                        // audit: who deactivated it
   deactivatedAt DateTime?
 
-  bills Bill[]
+  bills         Bill[]
+  subscriptions Subscription[]
   @@index([active])
+}
+
+// RECURRING SUBSCRIPTION — a recurring supplier cost (software, rent, internet…) defined once, then
+// auto-generating a Bill (Accounts Payable) each cycle so it is never forgotten. Firing reuses the AP
+// engine: each due cycle creates a Bill (optionally auto-issued → posts the accrual). A SubscriptionRun
+// per cycle makes generation idempotent (re-running the job never duplicates).
+model Subscription {
+  id             String   @id @default(cuid())
+  supplierId     String
+  name           String
+  description    String   @default("")
+  chartAccountId String                             // expense account for the generated bill line
+  amount         BigInt                             // per-cycle subtotal (one line)
+  tax            BigInt   @default(0)
+  cadence        String                             // monthly | quarterly | yearly
+  interval       Int      @default(1)               // every N cadence units
+  startDate      String                             // YYYY-MM-DD — first cycle
+  nextRunDate    String                             // YYYY-MM-DD — next cycle to generate
+  endDate        String?                            // stop after this date
+  dueDays        Int      @default(0)               // generated bill due = cycle date + dueDays
+  autoIssue      Boolean  @default(true)            // issue the generated bill (post accrual) or leave draft
+  status         String   @default("aktif")         // aktif | jeda | selesai | batal
+  businessUnitId String?
+  fleetId        String   @default("")
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  supplier Supplier          @relation(fields: [supplierId], references: [id])
+  runs     SubscriptionRun[]
+  @@index([status])
+  @@index([nextRunDate])
+}
+model SubscriptionRun {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  cycleDate      String                             // the cycle this run covers (YYYY-MM-DD)
+  billId         String?                            // the generated bill (null = a skipped cycle)
+  createdAt      DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  @@unique([subscriptionId, cycleDate])             // one run per cycle → idempotent generation
+  @@index([subscriptionId])
 }
 
 // ── DATA WIPE AUDIT ──────────────────────────────────────────────────────────

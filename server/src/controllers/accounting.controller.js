@@ -6,6 +6,7 @@ const period = require('../services/period.service');
 const recon = require('../services/reconciliation.service');
 const bill = require('../services/bill.service');
 const accrual = require('../services/accrual.service');
+const subscription = require('../services/subscription.service');
 const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
 
 const trialBalance = asyncHandler(async (req, res) => res.json({ data: await service.trialBalance(range(req)) }));
@@ -62,6 +63,18 @@ const schedulesList = asyncHandler(async (req, res) => res.json(await accrual.li
 const scheduleCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await accrual.createManualSchedule(req.body, req.user) }));
 const amortize = asyncHandler(async (req, res) => res.json({ data: await accrual.postAmortization({ asOf: req.body && req.body.asOf }, req.user) }));
 
+// RECURRING SUBSCRIPTIONS — a recurring bill template that auto-generates a Bill each cycle.
+const subsList = asyncHandler(async (req, res) => res.json(await subscription.listSubscriptions(req.query)));
+const subGet = asyncHandler(async (req, res) => res.json({ data: await subscription.getSubscription(req.params.id) }));
+const subCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await subscription.createSubscription(req.body, req.user) }));
+const subUpdate = asyncHandler(async (req, res) => res.json({ data: await subscription.updateSubscription(req.params.id, req.body, req.user) }));
+const subPause = asyncHandler(async (req, res) => res.json({ data: await subscription.pauseSubscription(req.params.id) }));
+const subResume = asyncHandler(async (req, res) => res.json({ data: await subscription.resumeSubscription(req.params.id) }));
+const subCancel = asyncHandler(async (req, res) => res.json({ data: await subscription.cancelSubscription(req.params.id) }));
+const subSkip = asyncHandler(async (req, res) => res.json({ data: await subscription.skipCycle(req.params.id) }));
+const subRun = asyncHandler(async (req, res) => res.json({ data: await subscription.runSubscriptions({ asOf: req.body && req.body.asOf }, req.user) }));
+
 module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
   billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue,
-  accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize };
+  accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize,
+  subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun };
