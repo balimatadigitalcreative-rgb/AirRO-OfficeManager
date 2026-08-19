@@ -788,5 +788,328 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, ReportHeader, ScreenIntro, InfoDot };
+  // ── Shared pickers for the AP / accrual / subscription forms ──
+  const rpInput = (v, set, ph) => <div className="amt-input"><span className="amt-rp">Rp</span><input inputMode="numeric" placeholder={ph || '0'} value={v ? (+v).toLocaleString('id-ID') : ''} onChange={(e) => set(e.target.value.replace(/\D/g, ''))} /></div>;
+  // Postable expense/asset accounts (leaf, non-header) for a bill/accrual line, fetched once.
+  function useChart() { const q = useAcct(() => ACC().chart(), []); const rows = (q.state === 'ready' && q.data) || []; return rows.filter((a) => a.subtype !== 'header'); }
+  function AcctSelect({ value, onChange, kinds }) {
+    const accts = useChart();
+    const opts = accts.filter((a) => !kinds || kinds.includes(a.type));
+    return <select className="fld" value={value || ''} onChange={(e) => onChange(e.target.value)}><option value="">{trA('ap.pickAccount')}</option>{opts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}</select>;
+  }
+  function SupplierSelect({ value, onChange }) {
+    const q = useAcct(() => ACC().apSuppliers(), []);
+    const [adding, setAdding] = aS(''); const [busy, setBusy] = aS(false);
+    const list = (q.state === 'ready' && q.data && q.data.data) || [];
+    const add = async () => { if (!adding.trim() || busy) return; setBusy(true); try { const r = await ACC().apSupplierCreate({ name: adding.trim() }); const s = (r && r.data) || r; q.reload(); onChange(s.id); setAdding(''); } catch (e) {} finally { setBusy(false); } };
+    return (
+      <div className="ap-suppick">
+        <select className="fld" value={value || ''} onChange={(e) => onChange(e.target.value)}><option value="">{trA('ap.pickSupplier')}</option>{list.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        <div className="ap-suppick-add"><input className="fld" placeholder={trA('ap.newSupplier')} value={adding} onChange={(e) => setAdding(e.target.value)} /><button className="btn btn-ghost btn-sm" disabled={!adding.trim() || busy} onClick={add}>{IcA('IconPlus', { s: 14 }) || '+'}{trA('ap.addSupplier')}</button></div>
+      </div>
+    );
+  }
+  const APBADGE = { draft: 'default', terbuka: 'warn', sebagian: 'warn', lunas: 'ok', batal: 'bad' };
+  function ApStatus({ s }) { return <span className={`ap-badge ${APBADGE[s] || 'default'}`}>{trA('ap.st_' + s)}</span>; }
+
+  // ═══════════ UTANG USAHA (Accounts Payable) — bills, payments, aging, due-this-week ═══════════
+  function PayablesScreen({ canRun, accounts }) {
+    const [tab, setTab] = aS('bills');
+    const [status, setStatus] = aS('');
+    const [form, setForm] = aS(null);      // create-bill modal
+    const [detail, setDetail] = aS(null);  // bill id opened
+    const billsQ = useAcct(() => ACC().bills(status ? { status } : {}), [status]);
+    const dueQ = useAcct(() => ACC().payablesDue(), []);
+    const agingQ = useAcct(() => ACC().agingPayable(), []);
+    if (billsQ.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('ap.soon')} />;
+    const bills = (billsQ.data && billsQ.data.data) || [];
+    const summary = (billsQ.data && billsQ.data.summary) || { open: 0, overdue: 0 };
+    const due = dueQ.data || { rows: [], total: 0 };
+    const reloadAll = () => { billsQ.reload(); dueQ.reload(); agingQ.reload(); };
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finAP')}</h2><div className="fin-head-scope">{trA('s.finAP')}</div></div>
+          {canRun && <div className="fin-head-actions"><button className="btn btn-primary" onClick={() => setForm({ supplierId: '', billDate: todayISO(), dueDate: '', tax: '', lines: [{ chartCode: '', description: '', qty: 1, unitPrice: '', amortizeMonths: 0, amortizeStart: '' }], issue: true })}>{IcA('IconPlus', { s: 16 })}{trA('ap.newBill')}</button></div>}
+        </div>
+        <ScreenIntro answers={trA('ap.answers')} extra={trA('ap.openN', { v: moneyS(summary.open) }) + (summary.overdue ? ' · ' + trA('ap.overdueN', { v: moneyS(summary.overdue) }) : '')} tone={summary.overdue ? 'warn' : 'info'} />
+
+        {/* Jatuh tempo minggu ini */}
+        {due.rows.length > 0 && (
+          <div className="card ap-due">
+            <div className="ap-due-head">{IcA('IconClock', { s: 15 })}{trA('ap.dueThisWeek', { n: due.rows.length, v: moneyS(due.total) })}</div>
+            <div className="ap-due-list">{due.rows.slice(0, 8).map((r) => <button key={r.id} type="button" className={`ap-due-row ${r.overdue ? 'over' : ''}`} onClick={() => setDetail(r.id)}><span className="ap-due-sup">{r.supplierName}</span><span className="ap-due-date">{r.dueDate}{r.overdue ? ' · ' + trA('ap.overdue') : ''}</span><b className="tnum">{money(r.outstanding)}</b></button>)}</div>
+          </div>
+        )}
+
+        <div className="rep-tabs" style={{ marginBottom: 12 }}>
+          <button className={`rep-tab ${tab === 'bills' ? 'on' : ''}`} onClick={() => setTab('bills')}>{IcA('IconInvoice', { s: 15 })}{trA('ap.tabBills')}</button>
+          <button className={`rep-tab ${tab === 'aging' ? 'on' : ''}`} onClick={() => setTab('aging')}>{IcA('IconReport', { s: 15 })}{trA('ap.tabAging')}</button>
+        </div>
+
+        {tab === 'bills' && (
+          <div className="card">
+            <div className="ap-filter">{['', 'terbuka', 'sebagian', 'lunas', 'draft', 'batal'].map((s) => <button key={s || 'all'} className={`dist-chip ${status === s ? 'on' : ''}`} onClick={() => setStatus(s)}>{s ? trA('ap.st_' + s) : trA('ap.all')}</button>)}</div>
+            {billsQ.state === 'loading' && <Skeleton n={6} />}
+            {billsQ.state === 'error' && <ErrorCard onRetry={billsQ.reload} />}
+            {billsQ.state === 'ready' && (bills.length === 0
+              ? <EmptyState title={trA('ap.emptyT')} body={trA('ap.emptyB')} actionLabel={canRun ? trA('ap.newBill') : null} onAction={canRun ? () => setForm({ supplierId: '', billDate: todayISO(), dueDate: '', tax: '', lines: [{ chartCode: '', description: '', qty: 1, unitPrice: '', amortizeMonths: 0, amortizeStart: '' }], issue: true }) : null} />
+              : (<div className="fin-tablewrap"><table className="fin-table">
+                  <thead><tr><th className="fin-th">{trA('ap.colDate')}</th><th className="fin-th">{trA('ap.colSupplier')}</th><th className="fin-th">{trA('ap.colDue')}</th><th className="fin-th fin-r">{trA('ap.colTotal')}</th><th className="fin-th fin-r">{trA('ap.colOutstanding')}</th><th className="fin-th">{trA('ap.colStatus')}</th></tr></thead>
+                  <tbody>{bills.map((b) => <tr key={b.id} className="fin-trow ap-row" onClick={() => setDetail(b.id)}><td className="fin-td tnum">{b.billDate}</td><td className="fin-td">{b.supplierName}{b.billNumber ? <span className="fin-td-sub">{b.billNumber}</span> : ''}</td><td className="fin-td tnum">{b.dueDate || '—'}</td><td className="fin-td fin-r tnum">{money(b.total)}</td><td className="fin-td fin-r tnum">{money(b.outstanding)}</td><td className="fin-td"><ApStatus s={b.status} /></td></tr>)}</tbody>
+                </table></div>))}
+          </div>
+        )}
+        {tab === 'aging' && <AgingTable q={agingQ} colName={trA('ap.colSupplier')} />}
+
+        {form && <BillForm form={form} setForm={setForm} onDone={() => { setForm(null); reloadAll(); }} />}
+        {detail && <BillDetail id={detail} accounts={accounts} canRun={canRun} onClose={() => setDetail(null)} onChanged={reloadAll} />}
+      </div>
+    );
+  }
+
+  // Reusable 4-bucket aging table (AR or AP).
+  function AgingTable({ q, colName }) {
+    if (q.state === 'loading') return <div className="card"><Skeleton n={6} /></div>;
+    if (q.state === 'error') return <ErrorCard onRetry={q.reload} />;
+    const d = q.data || { buckets: {}, rows: [], total: 0 };
+    if (!d.rows.length) return <EmptyState title={trA('ap.agingEmpty')} />;
+    const B = d.buckets;
+    return (
+      <div className="card"><div className="fin-tablewrap"><table className="fin-table">
+        <thead><tr><th className="fin-th">{colName}</th><th className="fin-th fin-r">0–30</th><th className="fin-th fin-r">31–60</th><th className="fin-th fin-r">61–90</th><th className="fin-th fin-r">90+</th><th className="fin-th fin-r">{trA('ap.colTotal')}</th></tr></thead>
+        <tbody>{d.rows.map((r) => <tr key={r.supplierId || r.customerId} className="fin-trow"><td className="fin-td">{r.name}</td><td className="fin-td fin-r tnum">{money(r.d0_30)}</td><td className="fin-td fin-r tnum">{money(r.d31_60)}</td><td className="fin-td fin-r tnum">{money(r.d61_90)}</td><td className="fin-td fin-r tnum">{money(r.d90p)}</td><td className="fin-td fin-r tnum"><b>{money(r.total)}</b></td></tr>)}</tbody>
+        <tfoot><tr className="fin-trow subtotal"><td className="fin-td">{trA('ap.total')}</td><td className="fin-td fin-r tnum">{money(B.d0_30)}</td><td className="fin-td fin-r tnum">{money(B.d31_60)}</td><td className="fin-td fin-r tnum">{money(B.d61_90)}</td><td className="fin-td fin-r tnum">{money(B.d90p)}</td><td className="fin-td fin-r tnum"><b>{money(d.total)}</b></td></tr></tfoot>
+      </table></div></div>
+    );
+  }
+
+  // Create-bill modal — supplier + line items (with optional prepaid amortisation) + tax → draft, then
+  // optionally issue (posts the accrual).
+  function BillForm({ form, setForm, onDone }) {
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS('');
+    const set = (k, v) => setForm({ ...form, [k]: v });
+    const setLine = (i, k, v) => set('lines', form.lines.map((l, j) => j === i ? { ...l, [k]: v } : l));
+    const addLine = () => set('lines', [...form.lines, { chartCode: '', description: '', qty: 1, unitPrice: '', amortizeMonths: 0, amortizeStart: '' }]);
+    const delLine = (i) => set('lines', form.lines.filter((_, j) => j !== i));
+    const subtotal = form.lines.reduce((s, l) => s + (Math.max(1, +l.qty || 1) * (+l.unitPrice || 0)), 0);
+    const total = subtotal + (+form.tax || 0);
+    const valid = form.supplierId && form.billDate && form.lines.every((l) => l.chartCode && (+l.unitPrice > 0));
+    const submit = async () => {
+      if (!valid || busy) return; setBusy(true); setErr('');
+      try {
+        const body = { supplierId: form.supplierId, billDate: form.billDate, dueDate: form.dueDate || undefined, tax: +form.tax || 0,
+          lines: form.lines.map((l) => ({ chartCode: l.chartCode, description: l.description, qty: Math.max(1, +l.qty || 1), unitPrice: +l.unitPrice || 0, amortizeMonths: +l.amortizeMonths || 0, amortizeStart: l.amortizeStart || undefined })) };
+        const r = await ACC().billCreate(body); const bill = (r && r.data) || r;
+        if (form.issue) await ACC().billIssue(bill.id);
+        onDone();
+      } catch (e) { setErr((e && e.body && e.body.error && e.body.error.message) || (e && e.message) || trA('acct.saveFail')); } finally { setBusy(false); }
+    };
+    return (
+      <div className="modal-scrim" onClick={() => setForm(null)} style={{ zIndex: 200 }}>
+        <div className="modal-card" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('ap.newBill')}</div><button className="jp-icon" onClick={() => setForm(null)}><IconClose s={18} /></button></div>
+          <div className="modal-body">
+            <label className="fld-label" style={{ marginTop: 0 }}>{trA('ap.supplier')} *</label>
+            <SupplierSelect value={form.supplierId} onChange={(v) => set('supplierId', v)} />
+            <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('ap.billDate')} *</label><input type="date" className="fld" value={form.billDate} max={todayISO()} onChange={(e) => set('billDate', e.target.value)} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('ap.dueDate')}</label><input type="date" className="fld" value={form.dueDate} onChange={(e) => set('dueDate', e.target.value)} /></div></div>
+            <label className="fld-label">{trA('ap.lines')}</label>
+            {form.lines.map((l, i) => (
+              <div key={i} className="ap-line">
+                <div className="ap-line-main"><AcctSelect value={l.chartCode} onChange={(v) => setLine(i, 'chartCode', v)} kinds={['expense', 'asset']} /><input className="fld" placeholder={trA('ap.lineDesc')} value={l.description} onChange={(e) => setLine(i, 'description', e.target.value)} /></div>
+                <div className="ap-line-num"><input className="fld tnum" style={{ width: 56 }} inputMode="numeric" value={l.qty} onChange={(e) => setLine(i, 'qty', e.target.value.replace(/\D/g, ''))} title={trA('ap.qty')} />{rpInput(l.unitPrice, (v) => setLine(i, 'unitPrice', v), trA('ap.unitPrice'))}{form.lines.length > 1 && <button className="jp-icon" onClick={() => delLine(i)}><IconClose s={15} /></button>}</div>
+                <label className="ap-prepaid"><span>{trA('ap.prepaidMonths')}</span><input className="fld tnum" style={{ width: 52 }} inputMode="numeric" value={l.amortizeMonths || ''} placeholder="0" onChange={(e) => setLine(i, 'amortizeMonths', e.target.value.replace(/\D/g, ''))} />{+l.amortizeMonths > 0 && <input type="date" className="fld" value={l.amortizeStart} onChange={(e) => setLine(i, 'amortizeStart', e.target.value)} title={trA('ap.prepaidStart')} />}</label>
+              </div>
+            ))}
+            <button className="btn btn-ghost btn-sm" onClick={addLine}>{IcA('IconPlus', { s: 14 }) || '+'}{trA('ap.addLine')}</button>
+            <div className="dist-form-row" style={{ marginTop: 10 }}><div style={{ flex: 1 }}><label className="fld-label">{trA('ap.tax')}</label>{rpInput(form.tax, (v) => set('tax', v))}</div><div style={{ flex: 1, alignSelf: 'flex-end', textAlign: 'right' }}><div className="ap-total-lbl">{trA('ap.total')}</div><div className="ap-total tnum">{money(total)}</div></div></div>
+            <label className="ap-issue"><input type="checkbox" checked={form.issue} onChange={(e) => set('issue', e.target.checked)} /><span>{trA('ap.issueNow')}</span></label>
+            {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+          </div>
+          <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setForm(null)}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : (form.issue ? trA('ap.createIssue') : trA('ap.createDraft'))}</button></div>
+        </div>
+      </div>
+    );
+  }
+
+  // Bill detail + payment recording + void.
+  function BillDetail({ id, accounts, canRun, onClose, onChanged }) {
+    const q = useAcct(() => ACC().bill(id), [id]);
+    const [pay, setPay] = aS(null); const [busy, setBusy] = aS(false); const [err, setErr] = aS('');
+    const b = (q.state === 'ready' && q.data) || null;
+    const doIssue = async () => { setBusy(true); setErr(''); try { await ACC().billIssue(id); q.reload(); onChanged(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    const doVoid = async () => { const reason = window.prompt(trA('ap.voidReason')); if (!reason) return; setBusy(true); setErr(''); try { await ACC().billVoid(id, { reason }); q.reload(); onChanged(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    const submitPay = async () => { if (!(+pay.amount > 0) || busy) return; setBusy(true); setErr(''); try { await ACC().billPay(id, { date: pay.date, amount: +pay.amount, accountId: pay.accountId || undefined, method: pay.method, reference: pay.reference }); setPay(null); q.reload(); onChanged(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
+        <div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div>{b ? <><div style={{ fontSize: 17, fontWeight: 800 }}>{b.supplierName} {b.billNumber ? '· ' + b.billNumber : ''}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{b.billDate}{b.dueDate ? ' · ' + trA('ap.due') + ' ' + b.dueDate : ''} · <ApStatus s={b.status} /></div></> : '…'}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+          <div className="modal-body">
+            {q.state === 'loading' && <Skeleton n={5} />}
+            {b && (<>
+              <div className="fin-tablewrap"><table className="fin-table"><tbody>{b.lines.map((l) => <tr key={l.id} className="fin-trow"><td className="fin-td">{l.chartCode} · {l.description || ''}{l.amortizeMonths > 0 ? <span className="fin-td-sub">{trA('ap.prepaidN', { n: l.amortizeMonths })}</span> : ''}</td><td className="fin-td fin-r tnum">{money(l.amount)}</td></tr>)}{b.tax > 0 && <tr className="fin-trow"><td className="fin-td">{trA('ap.tax')} (PPN)</td><td className="fin-td fin-r tnum">{money(b.tax)}</td></tr>}</tbody><tfoot><tr className="fin-trow subtotal"><td className="fin-td">{trA('ap.total')}</td><td className="fin-td fin-r tnum"><b>{money(b.total)}</b></td></tr></tfoot></table></div>
+              <div className="ap-paybar"><span>{trA('ap.paid')}: <b className="tnum">{money(b.paid)}</b></span><span>{trA('ap.outstanding')}: <b className="tnum">{money(b.outstanding)}</b></span></div>
+              {b.payments.length > 0 && <div className="ap-payments">{b.payments.map((p) => <div key={p.id} className="ap-pay-row"><span>{p.date}</span><span>{p.method || ''}{p.reference ? ' · ' + p.reference : ''}</span><b className="tnum">{money(p.amount)}</b></div>)}</div>}
+              {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+              {canRun && (
+                <div className="ap-actions">
+                  {b.status === 'draft' && <button className="btn btn-primary btn-sm" disabled={busy} onClick={doIssue}>{IcA('IconCheck', { s: 14 })}{trA('ap.issue')}</button>}
+                  {(b.status === 'terbuka' || b.status === 'sebagian') && !pay && <button className="btn btn-primary btn-sm" onClick={() => setPay({ date: todayISO(), amount: '', accountId: (accounts && accounts[0] && accounts[0].id) || '', method: 'transfer', reference: '' })}>{IcA('IconCoinIn', { s: 14 })}{trA('ap.recordPayment')}</button>}
+                  {b.status !== 'batal' && b.paid === 0 && <button className="btn btn-ghost btn-sm danger" disabled={busy} onClick={doVoid}>{IcA('IconClose', { s: 14 })}{trA('ap.void')}</button>}
+                </div>
+              )}
+              {pay && (
+                <div className="ap-payform">
+                  <div className="sec-title" style={{ fontSize: 14 }}>{trA('ap.recordPayment')}</div>
+                  <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('ap.payDate')}</label><input type="date" className="fld" value={pay.date} max={todayISO()} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('ap.payAmount')}</label>{rpInput(pay.amount, (v) => setPay({ ...pay, amount: v }))}</div></div>
+                  <label className="fld-label">{trA('ap.payAccount')}</label><select className="fld" value={pay.accountId} onChange={(e) => setPay({ ...pay, accountId: e.target.value })}><option value="">{trA('ap.pickAccount')}</option>{(accounts || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+                  <input className="fld" style={{ marginTop: 8 }} placeholder={trA('ap.reference')} value={pay.reference} onChange={(e) => setPay({ ...pay, reference: e.target.value })} />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}><button className="btn btn-ghost btn-sm" onClick={() => setPay(null)}>{trA('common.cancel')}</button><button className="btn btn-primary btn-sm" disabled={!(+pay.amount > 0) || busy} onClick={submitPay}>{busy ? '…' : trA('ap.pay')}</button></div>
+                </div>
+              )}
+            </>)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  const msgOf = (e) => (e && e.body && e.body.error && e.body.error.message) || (e && e.message) || trA('acct.saveFail');
+
+  // ═══════════ AKRUAL & BEBAN DIBAYAR DI MUKA (accrued + prepaid amortisation) ═══════════
+  function AccrualScreen({ canRun }) {
+    const [aForm, setAForm] = aS(null); const [sForm, setSForm] = aS(null); const [busy, setBusy] = aS(''); const [err, setErr] = aS('');
+    const accrualsQ = useAcct(() => ACC().accruals({ status: 'aktif' }), []);
+    const schedQ = useAcct(() => ACC().amortSchedules(), []);
+    if (accrualsQ.state === 'gated') return <GatedCard icon="IconRefresh" body={trA('ac.soon')} />;
+    const accruals = (accrualsQ.data && accrualsQ.data.data) || [];
+    const scheds = (schedQ.data && schedQ.data.data) || [];
+    const pendingAmort = scheds.some((s) => s.remaining > 0);
+    const runAmort = async () => { setBusy('amort'); setErr(''); try { const r = await ACC().amortize({ asOf: todayISO() }); schedQ.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    const voidAccrual = async (id) => { const reason = window.prompt(trA('ac.voidReason')); if (!reason) return; try { await ACC().accrualVoid(id, { reason }); accrualsQ.reload(); } catch (e) { setErr(msgOf(e)); } };
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finAccrual')}</h2><div className="fin-head-scope">{trA('s.finAccrual')}</div></div></div>
+        <ScreenIntro answers={trA('ac.answers')} tone="info" />
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+
+        {/* PREPAID / amortisation schedules */}
+        <div className="card">
+          <div className="ac-sec-head"><div className="sec-title" style={{ fontSize: 15 }}>{trA('ac.prepaidTitle')}</div><div className="ac-sec-act">{canRun && <button className="btn btn-ghost btn-sm" onClick={() => setSForm({ chartCode: '', total: '', months: 12, startDate: todayISO(), description: '' })}>{IcA('IconPlus', { s: 14 }) || '+'}{trA('ac.newPrepaid')}</button>}{canRun && pendingAmort && <button className="btn btn-primary btn-sm" disabled={busy === 'amort'} onClick={runAmort}>{IcA('IconRefresh', { s: 14 })}{busy === 'amort' ? trA('ac.running') : trA('ac.runAmort')}</button>}</div></div>
+          {schedQ.state === 'loading' && <Skeleton n={4} />}
+          {schedQ.state === 'ready' && (scheds.length === 0
+            ? <EmptyState title={trA('ac.prepaidEmpty')} body={trA('ac.prepaidEmptyB')} />
+            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('ac.colWhat')}</th><th className="fin-th">{trA('ac.colStart')}</th><th className="fin-th fin-r">{trA('ac.colMonthly')}</th><th className="fin-th fin-r">{trA('ac.colTotal')}</th><th className="fin-th">{trA('ac.colProgress')}</th></tr></thead>
+              <tbody>{scheds.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">{s.chartCode} · {s.description || ''}</td><td className="fin-td tnum">{s.startDate}</td><td className="fin-td fin-r tnum">{money(s.monthlyAmount)}</td><td className="fin-td fin-r tnum">{money(s.total)}</td><td className="fin-td"><span className="ac-prog">{s.postedMonths}/{s.months}</span>{s.remaining === 0 ? <span className="ap-badge ok">{trA('ac.done')}</span> : null}</td></tr>)}</tbody></table></div>)}
+        </div>
+
+        {/* ACCRUED expenses */}
+        <div className="card" style={{ marginTop: 14 }}>
+          <div className="ac-sec-head"><div className="sec-title" style={{ fontSize: 15 }}>{trA('ac.accruedTitle')}</div>{canRun && <button className="btn btn-ghost btn-sm" onClick={() => setAForm({ chartCode: '', amount: '', date: todayISO(), reverseDate: '', description: '' })}>{IcA('IconPlus', { s: 14 }) || '+'}{trA('ac.newAccrued')}</button>}</div>
+          {accrualsQ.state === 'loading' && <Skeleton n={3} />}
+          {accrualsQ.state === 'ready' && (accruals.length === 0
+            ? <EmptyState title={trA('ac.accruedEmpty')} body={trA('ac.accruedEmptyB')} />
+            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('ac.colDate')}</th><th className="fin-th">{trA('ac.colWhat')}</th><th className="fin-th">{trA('ac.colReverse')}</th><th className="fin-th fin-r">{trA('ac.colAmount')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{accruals.map((a) => <tr key={a.id} className="fin-trow"><td className="fin-td tnum">{a.date}</td><td className="fin-td">{a.chartCode} · {a.description || ''}</td><td className="fin-td tnum">{a.reverseDate}</td><td className="fin-td fin-r tnum">{money(a.amount)}</td><td className="fin-td fin-r">{canRun && <button className="btn btn-ghost btn-xs danger" onClick={() => voidAccrual(a.id)}>{trA('ac.void')}</button>}</td></tr>)}</tbody></table></div>)}
+        </div>
+
+        {aForm && <AccrualForm form={aForm} setForm={setAForm} onDone={() => { setAForm(null); accrualsQ.reload(); }} />}
+        {sForm && <PrepaidForm form={sForm} setForm={setSForm} onDone={() => { setSForm(null); schedQ.reload(); }} />}
+      </div>
+    );
+  }
+  function AccrualForm({ form, setForm, onDone }) {
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS(''); const set = (k, v) => setForm({ ...form, [k]: v });
+    const valid = form.chartCode && +form.amount > 0 && form.date;
+    const submit = async () => { if (!valid || busy) return; setBusy(true); setErr(''); try { await ACC().accrualCreate({ chartCode: form.chartCode, amount: +form.amount, date: form.date, reverseDate: form.reverseDate || undefined, description: form.description }); onDone(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    return (
+      <div className="modal-scrim" onClick={() => setForm(null)} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('ac.newAccrued')}</div><button className="jp-icon" onClick={() => setForm(null)}><IconClose s={18} /></button></div>
+        <div className="modal-body"><div className="dist-infobox"><IconClock s={15} /><span>{trA('ac.accruedInfo')}</span></div>
+          <label className="fld-label">{trA('ac.expenseAcct')} *</label><AcctSelect value={form.chartCode} onChange={(v) => set('chartCode', v)} kinds={['expense']} />
+          <label className="fld-label">{trA('ac.amount')} *</label>{rpInput(form.amount, (v) => set('amount', v))}
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('ac.date')} *</label><input type="date" className="fld" value={form.date} onChange={(e) => set('date', e.target.value)} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('ac.reverseDate')}</label><input type="date" className="fld" value={form.reverseDate} onChange={(e) => set('reverseDate', e.target.value)} /></div></div>
+          <label className="fld-label">{trA('ac.desc')}</label><input className="fld" value={form.description} onChange={(e) => set('description', e.target.value)} />
+          {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setForm(null)}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : trA('ac.save')}</button></div>
+      </div></div>
+    );
+  }
+  function PrepaidForm({ form, setForm, onDone }) {
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS(''); const set = (k, v) => setForm({ ...form, [k]: v });
+    const valid = form.chartCode && +form.total > 0 && +form.months > 0 && form.startDate;
+    const submit = async () => { if (!valid || busy) return; setBusy(true); setErr(''); try { await ACC().amortScheduleCreate({ chartCode: form.chartCode, total: +form.total, months: +form.months, startDate: form.startDate, description: form.description }); onDone(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    return (
+      <div className="modal-scrim" onClick={() => setForm(null)} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('ac.newPrepaid')}</div><button className="jp-icon" onClick={() => setForm(null)}><IconClose s={18} /></button></div>
+        <div className="modal-body"><div className="dist-infobox"><IconInvoice s={15} /><span>{trA('ac.prepaidInfo')}</span></div>
+          <label className="fld-label">{trA('ac.expenseAcct')} *</label><AcctSelect value={form.chartCode} onChange={(v) => set('chartCode', v)} kinds={['expense']} />
+          <div className="dist-form-row"><div style={{ flex: 2 }}><label className="fld-label">{trA('ac.total')} *</label>{rpInput(form.total, (v) => set('total', v))}</div><div style={{ flex: 1 }}><label className="fld-label">{trA('ac.months')} *</label><input className="fld tnum" inputMode="numeric" value={form.months} onChange={(e) => set('months', e.target.value.replace(/\D/g, ''))} /></div></div>
+          <label className="fld-label">{trA('ac.startDate')} *</label><input type="date" className="fld" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} />
+          <label className="fld-label">{trA('ac.desc')}</label><input className="fld" value={form.description} onChange={(e) => set('description', e.target.value)} />
+          {form.total > 0 && form.months > 0 && <div className="ac-hint">{trA('ac.perMonth', { v: money(Math.floor((+form.total) / (+form.months))) })}</div>}
+          {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setForm(null)}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : trA('ac.save')}</button></div>
+      </div></div>
+    );
+  }
+
+  // ═══════════ LANGGANAN BERULANG (recurring subscriptions) ═══════════
+  const SUBBADGE = { aktif: 'ok', jeda: 'warn', selesai: 'default', batal: 'bad' };
+  function SubscriptionScreen({ canRun }) {
+    const [form, setForm] = aS(null); const [busy, setBusy] = aS(''); const [err, setErr] = aS('');
+    const q = useAcct(() => ACC().subscriptions(), []);
+    if (q.state === 'gated') return <GatedCard icon="IconRefresh" body={trA('sb.soon')} />;
+    const subs = (q.data && q.data.data) || [];
+    const summary = (q.data && q.data.summary) || { active: 0, dueSoon: 0 };
+    const act = async (fn) => { setBusy('x'); setErr(''); try { await fn(); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    const runNow = () => act(() => ACC().subscriptionsRun({ asOf: todayISO() }));
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finSubs')}</h2><div className="fin-head-scope">{trA('s.finSubs')}</div></div>
+          <div className="fin-head-actions">{canRun && summary.dueSoon > 0 && <button className="btn btn-ghost" disabled={!!busy} onClick={runNow}>{IcA('IconRefresh', { s: 15 })}{trA('sb.runNow')}</button>}{canRun && <button className="btn btn-primary" onClick={() => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, autoIssue: true })}>{IcA('IconPlus', { s: 16 })}{trA('sb.new')}</button>}</div>
+        </div>
+        <ScreenIntro answers={trA('sb.answers')} extra={trA('sb.activeN', { n: summary.active }) + (summary.dueSoon ? ' · ' + trA('sb.dueSoonN', { n: summary.dueSoon }) : '')} tone={summary.dueSoon ? 'warn' : 'info'} />
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+        <div className="card">
+          {q.state === 'loading' && <Skeleton n={5} />}
+          {q.state === 'ready' && (subs.length === 0
+            ? <EmptyState title={trA('sb.emptyT')} body={trA('sb.emptyB')} actionLabel={canRun ? trA('sb.new') : null} onAction={canRun ? () => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, autoIssue: true }) : null} />
+            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('sb.colName')}</th><th className="fin-th">{trA('sb.colCadence')}</th><th className="fin-th fin-r">{trA('sb.colAmount')}</th><th className="fin-th">{trA('sb.colNext')}</th><th className="fin-th">{trA('sb.colStatus')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{subs.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">{s.name}<span className="fin-td-sub">{s.supplierName}</span></td><td className="fin-td">{trA('sb.cad_' + s.cadence)}{s.interval > 1 ? ' ×' + s.interval : ''}</td><td className="fin-td fin-r tnum">{money(s.total)}</td><td className="fin-td tnum">{s.status === 'aktif' ? s.nextRunDate : '—'}</td><td className="fin-td"><span className={`ap-badge ${SUBBADGE[s.status]}`}>{trA('sb.st_' + s.status)}</span></td>
+                <td className="fin-td fin-r">{canRun && s.status !== 'batal' && s.status !== 'selesai' && (
+                  <span className="sb-acts">
+                    {s.status === 'aktif' ? <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => act(() => ACC().subscriptionPause(s.id))}>{trA('sb.pause')}</button> : <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => act(() => ACC().subscriptionResume(s.id))}>{trA('sb.resume')}</button>}
+                    <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => act(() => ACC().subscriptionSkip(s.id))}>{trA('sb.skip')}</button>
+                    <button className="btn btn-ghost btn-xs danger" disabled={!!busy} onClick={() => { if (window.confirm(trA('sb.cancelConfirm'))) act(() => ACC().subscriptionCancel(s.id)); }}>{trA('sb.cancel')}</button>
+                  </span>
+                )}</td></tr>)}</tbody></table></div>)}
+        </div>
+        {form && <SubForm form={form} setForm={setForm} onDone={() => { setForm(null); q.reload(); }} />}
+      </div>
+    );
+  }
+  function SubForm({ form, setForm, onDone }) {
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS(''); const set = (k, v) => setForm({ ...form, [k]: v });
+    const valid = form.supplierId && form.name.trim() && form.chartCode && +form.amount > 0 && form.startDate;
+    const submit = async () => { if (!valid || busy) return; setBusy(true); setErr(''); try { await ACC().subscriptionCreate({ supplierId: form.supplierId, name: form.name.trim(), chartCode: form.chartCode, amount: +form.amount, tax: +form.tax || 0, cadence: form.cadence, interval: +form.interval || 1, startDate: form.startDate, endDate: form.endDate || undefined, dueDays: +form.dueDays || 0, autoIssue: form.autoIssue }); onDone(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    return (
+      <div className="modal-scrim" onClick={() => setForm(null)} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('sb.new')}</div><button className="jp-icon" onClick={() => setForm(null)}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <label className="fld-label" style={{ marginTop: 0 }}>{trA('sb.supplier')} *</label><SupplierSelect value={form.supplierId} onChange={(v) => set('supplierId', v)} />
+          <label className="fld-label">{trA('sb.name')} *</label><input className="fld" placeholder={trA('sb.namePh')} value={form.name} onChange={(e) => set('name', e.target.value)} />
+          <label className="fld-label">{trA('sb.expenseAcct')} *</label><AcctSelect value={form.chartCode} onChange={(v) => set('chartCode', v)} kinds={['expense']} />
+          <div className="dist-form-row"><div style={{ flex: 2 }}><label className="fld-label">{trA('sb.amount')} *</label>{rpInput(form.amount, (v) => set('amount', v))}</div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.tax')}</label>{rpInput(form.tax, (v) => set('tax', v))}</div></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.cadence')} *</label><select className="fld" value={form.cadence} onChange={(e) => set('cadence', e.target.value)}>{['monthly', 'quarterly', 'yearly'].map((c) => <option key={c} value={c}>{trA('sb.cad_' + c)}</option>)}</select></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.every')}</label><input className="fld tnum" inputMode="numeric" value={form.interval} onChange={(e) => set('interval', e.target.value.replace(/\D/g, ''))} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.dueDays')}</label><input className="fld tnum" inputMode="numeric" value={form.dueDays} onChange={(e) => set('dueDays', e.target.value.replace(/\D/g, ''))} /></div></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.startDate')} *</label><input type="date" className="fld" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.endDate')}</label><input type="date" className="fld" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} /></div></div>
+          <label className="ap-issue"><input type="checkbox" checked={form.autoIssue} onChange={(e) => set('autoIssue', e.target.checked)} /><span>{trA('sb.autoIssue')}</span></label>
+          {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setForm(null)}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : trA('sb.save')}</button></div>
+      </div></div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen };
 })();

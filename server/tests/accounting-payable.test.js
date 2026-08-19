@@ -69,6 +69,16 @@ describe('bill → accrual → payment lifecycle', () => {
   });
 });
 
+describe('supplier picker (for the AP screens)', () => {
+  it('lists active suppliers and creates one inline (reports cap, no gudang access needed)', async () => {
+    const c = await request(app).post('/api/v1/accounting/suppliers').set(auth(gm)).send({ name: 'PT Baru' });
+    expect(c.status).toBe(201);
+    expect(c.body.data).toMatchObject({ name: 'PT Baru' });
+    const list = (await request(app).get('/api/v1/accounting/suppliers').set(auth(gm))).body.data;
+    expect(list.some((s) => s.id === c.body.data.id && s.name === 'PT Baru')).toBe(true);
+  });
+});
+
 describe('tax, AP aging, due-this-week, void', () => {
   it('a bill with tax posts Dr Beban + Dr PPN Masukan / Cr Utang (total), balanced', async () => {
     const c = await mkBill({ supplierId, billDate: '2026-08-02', tax: 55000, lines: [{ chartCode: '6-3000', unitPrice: 500000, qty: 1 }] });   // subtotal 500k + 11% VAT

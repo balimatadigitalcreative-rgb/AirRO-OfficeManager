@@ -132,6 +132,8 @@
       backfill: (b) => req('POST', '/accounting/backfill', b || {}),                  // dryRun → preview counts; else → { jobId, total } (async job)
       backfillStatus: (jobId) => req('GET', '/accounting/backfill/status/' + jobId),  // { processed, total, posted, failed, status, result, errors[] }
       // ACCOUNTS PAYABLE (Utang Usaha)
+      apSuppliers: (p) => req('GET', '/accounting/suppliers' + acctQs(p)),             // supplier picker → { data }
+      apSupplierCreate: (b) => req('POST', '/accounting/suppliers', b),                // { name, phone? }
       bills: (p) => req('GET', '/accounting/bills' + acctQs(p)),                       // { status?, supplierId?, dateFrom?, dateTo? } → { data, summary }
       bill: (id) => req('GET', '/accounting/bills/' + id),
       billCreate: (b) => req('POST', '/accounting/bills', b),                          // { supplierId, billDate, dueDate?, lines[], tax?, ... } (draft)

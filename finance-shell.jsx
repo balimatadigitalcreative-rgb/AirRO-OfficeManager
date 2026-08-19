@@ -28,6 +28,9 @@ function navForRole(p, role) {
   if (p.reports) items.push({ id: 'ledger', label: tr('nav.finLedger'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
   if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'finance' });
+  if (p.reports) items.push({ id: 'acct-payables', label: tr('nav.finAP'), icon: 'IconInvoice', grp: 'finance' });
+  if (p.reports) items.push({ id: 'acct-subscriptions', label: tr('nav.finSubs'), icon: 'IconClock', grp: 'finance' });
+  if (p.reports) items.push({ id: 'acct-accrual', label: tr('nav.finAccrual'), icon: 'IconRefresh', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-mapping', label: tr('nav.finMap'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'finance' });
   // Backfill is a one-time owner/GM migration tool (the server also enforces owner/GM), so it only
@@ -1819,6 +1822,9 @@ function FApp() {
           {screen === 'reconcile' && p.reports && (<ACCT.ReconcileScreen accounts={accounts} />)}
           {screen === 'acct-mapping' && p.reports && (<ACCT.MappingScreen canEdit={user.role === 'owner' || user.role === 'gm'} />)}
           {screen === 'acct-backfill' && p.reports && (user.role === 'owner' || user.role === 'gm') && (<ACCT.BackfillScreen canRun={user.role === 'owner' || user.role === 'gm'} />)}
+          {screen === 'acct-payables' && p.reports && ACCT.PayablesScreen && (<ACCT.PayablesScreen canRun={!!p.reports} accounts={accounts} />)}
+          {screen === 'acct-accrual' && p.reports && ACCT.AccrualScreen && (<ACCT.AccrualScreen canRun={!!p.reports} />)}
+          {screen === 'acct-subscriptions' && p.reports && ACCT.SubscriptionScreen && (<ACCT.SubscriptionScreen canRun={!!p.reports} />)}
           {screen === 'close' && p.reports && (<ACCT.CloseScreen isOwner={user.role === 'owner'} onNav={go} />)}
 
           {screen === 'payroll' && p.payroll && (

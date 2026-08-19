@@ -24,6 +24,8 @@ router.get('/receivables', ctrl.receivables);
 
 // ACCOUNTS PAYABLE (Utang Usaha) — bills accrue an expense when incurred; payments (partial ok) settle
 // them. AP aging mirrors AR; "payables-due" is the jatuh-tempo-minggu-ini card. All under the flag gate.
+router.get('/suppliers', ctrl.suppliersList);        // picker for the AP screens (reports cap)
+router.post('/suppliers', ctrl.supplierCreate);
 router.get('/bills', ctrl.billsList);
 router.get('/aging-payable', ctrl.apAging);          // Umur Utang (AP aging) — BEFORE :id
 router.get('/payables-due', ctrl.apDue);             // jatuh tempo minggu ini

@@ -250,4 +250,21 @@ async function payablesDue({ asOf, days = 7 } = {}) {
   return { asOf: today, until: untilStr, total, count: rows.length, rows };
 }
 
-module.exports = { createBill, updateBill, issueBill, recordBillPayment, voidBill, listBills, getBill, agingPayables, payablesBalance, payablesDue };
+// Supplier picker for the AP screens (reports-capped users can't reach /gudang/suppliers). List active
+// suppliers + create one inline so a bill/subscription can name its supplier without gudang access.
+async function listSuppliers(query) {
+  const q = query || {};
+  const where = {};
+  if (q.status !== 'all') where.active = true;
+  if (q.q) where.name = { contains: String(q.q) };
+  const rows = await prisma.supplier.findMany({ where, orderBy: { name: 'asc' }, take: 500, select: { id: true, name: true, phone: true, active: true } });
+  return { data: rows };
+}
+async function createSupplier(body, actor) {
+  const name = String(body.name || '').trim();
+  if (!name) throw ApiError.badRequest('Nama pemasok wajib diisi.');
+  const s = await prisma.supplier.create({ data: { name: name.slice(0, 120), phone: String(body.phone || '').slice(0, 40), note: String(body.note || '').slice(0, 300), createdById: (actor && actor.id) || null, createdByName: (actor && actor.name) || null } });
+  return { id: s.id, name: s.name, phone: s.phone };
+}
+
+module.exports = { createBill, updateBill, issueBill, recordBillPayment, voidBill, listBills, getBill, agingPayables, payablesBalance, payablesDue, listSuppliers, createSupplier };

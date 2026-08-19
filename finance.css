@@ -3853,6 +3853,38 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .flow-done .flow-dot { background: var(--sky-500, #2b8ac4); }
 .flow-load .flow-dot { background: var(--text-faint); }
 :root[data-theme="dark"] .flow-warn { border-color: rgba(255,180,60,.28); } :root[data-theme="dark"] .flow-warn .flow-n { background: rgba(255,180,60,.16); color: #ffcf8a; }
+
+/* ── Accounts Payable / accruals / subscriptions ── */
+.ap-badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+.ap-badge.ok { background: var(--mint-100, #d9f2e4); color: var(--green-800, #1f7a4d); }
+.ap-badge.warn { background: #fff4e5; color: #b26a00; } .ap-badge.bad { background: #fde8e8; color: #b42318; } .ap-badge.default { background: var(--card-soft); color: var(--text-mut); }
+:root[data-theme="dark"] .ap-badge.warn { background: rgba(255,180,60,.16); color: #ffcf8a; }
+.ap-due { padding: 12px 15px; margin-bottom: 12px; border: 1px solid #f6d9a6; background: #fff8ee; }
+:root[data-theme="dark"] .ap-due { background: rgba(255,180,60,.08); border-color: rgba(255,180,60,.28); }
+.ap-due-head { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 13.5px; color: #b26a00; margin-bottom: 8px; }
+.ap-due-list { display: flex; flex-direction: column; gap: 4px; }
+.ap-due-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 9px; background: var(--card); border: 1px solid var(--border-soft); cursor: pointer; text-align: left; }
+.ap-due-row:hover { border-color: var(--sky-300, #9cc9e6); } .ap-due-row.over { border-color: #f0b4b4; }
+.ap-due-sup { font-weight: 700; font-size: 12.5px; } .ap-due-date { font-size: 11.5px; color: var(--text-mut); }
+.ap-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ap-row { cursor: pointer; } .ap-row:hover { background: var(--surface-2, #f6f8f9); }
+.ap-suppick-add { display: flex; gap: 6px; margin-top: 6px; } .ap-suppick-add .fld { flex: 1; }
+.ap-line { border: 1px solid var(--border-soft); border-radius: 10px; padding: 9px 11px; margin-bottom: 8px; background: var(--surface-2, #f6f8f9); }
+.ap-line-main { display: flex; gap: 8px; } .ap-line-main .fld { flex: 1; } .ap-line-main select.fld { flex: 1.3; }
+.ap-line-num { display: flex; gap: 8px; align-items: center; margin-top: 7px; }
+.ap-prepaid { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 11.5px; color: var(--text-mut); }
+.ap-prepaid > span { white-space: nowrap; }
+.ap-total-lbl { font-size: 11px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; } .ap-total { font-size: 20px; font-weight: 800; }
+.ap-issue { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; font-weight: 600; }
+.ap-paybar { display: flex; gap: 20px; padding: 10px 0; border-top: 1px solid var(--border-soft); margin-top: 4px; font-size: 13px; }
+.ap-payments { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.ap-pay-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; font-size: 12px; color: var(--text-mut); padding: 3px 0; }
+.ap-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.ap-payform { margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--surface-2, #f6f8f9); border: 1px solid var(--border-soft); }
+.ac-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.ac-sec-act { display: flex; gap: 8px; }
+.ac-prog { font-weight: 700; font-size: 12.5px; margin-right: 8px; } .ac-hint { font-size: 12px; color: var(--text-mut); margin-top: 8px; }
+.sb-acts { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .fin-error { color: var(--neg); }
 .fin-error-ic { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 15px; background: var(--neg-bg); color: var(--neg); }
 .fin-badge-soon { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--green-800); background: var(--mint-100); border-radius: 999px; padding: 1px 7px; margin-left: 6px; }
