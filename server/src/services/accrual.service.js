@@ -132,6 +132,23 @@ async function postAmortization({ asOf } = {}, actor) {
   }
   return { posted, asOf: cutoff };
 }
+// How many amortisation MONTHS are due through `asOf`'s month but not yet posted — the Tutup Buku
+// blocker ("n amortisasi belum diposting"). Zero once postAmortization has run through the period end.
+async function pendingAmortizationCount({ asOf } = {}) {
+  const cutoff = ym(asOf || new Date().toISOString().slice(0, 10));
+  const schedules = await prisma.amortizationSchedule.findMany();
+  let pending = 0;
+  for (const s of schedules) {
+    const startYM = ym(s.startDate);
+    for (let i = 0; i < s.months; i++) {
+      const mKey = addMonths(startYM, i);
+      if (mKey > cutoff) break;
+      if (s.postedThrough && mKey <= s.postedThrough) continue;
+      pending++;
+    }
+  }
+  return pending;
+}
 async function listSchedules(query) {
   const q = query || {};
   const rows = await prisma.amortizationSchedule.findMany({ orderBy: [{ createdAt: 'desc' }], take: 500 });
@@ -142,4 +159,4 @@ async function listSchedules(query) {
   return { data: active };
 }
 
-module.exports = { createAccrual, voidAccrual, listAccruals, createSchedule, createManualSchedule, postAmortization, listSchedules, scheduleClient, PREPAID, ACCRUED };
+module.exports = { createAccrual, voidAccrual, listAccruals, createSchedule, createManualSchedule, postAmortization, pendingAmortizationCount, listSchedules, scheduleClient, PREPAID, ACCRUED };

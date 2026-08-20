@@ -115,6 +115,38 @@
     );
   }
 
+  // Dashboard card — subscriptions falling due in the next 7 days (a Bill isn't generated until the run
+  // job fires, so this is the "heads-up" before the cash goes out). Overdue rows (cycle passed, no bill)
+  // sort first and read red. Renders nothing when the engine is off or nothing is due — no empty clutter.
+  function SubsDueCard({ onNav }) {
+    const q = useAcct(() => ACC().subscriptionsDue({ asOf: todayISO(), days: 7 }), []);
+    if (q.state === 'gated' || q.state === 'error') return null;
+    const d = q.data || {};
+    if (q.state === 'ready' && (d.count || 0) === 0) return null;   // nothing due — stay out of the way
+    const loading = q.state === 'loading';
+    if (loading) return null;
+    const rows = d.rows || [];
+    return (
+      <div className="card fin-scope subsdue-card">
+        <button type="button" className="subsdue-head" onClick={() => onNav && onNav('acct-subscriptions')}>
+          <span className="subsdue-hic">{IcA('IconCalendar', { s: 15 })}</span>
+          <span className="subsdue-htxt">{trA('subsDue.title', { n: d.count })}</span>
+          <span className="subsdue-htot tnum">{money(d.total)}</span>
+          <span className="flow-caret">{IcA('IconCaret', { s: 13 })}</span>
+        </button>
+        <div className="subsdue-rows">
+          {rows.map((r) => (
+            <button key={r.id} type="button" className={`subsdue-row${r.overdue ? ' overdue' : ''}`} onClick={() => onNav && onNav('acct-subscriptions')}>
+              <span className="subsdue-name">{r.name}{r.supplierName ? <em> · {r.supplierName}</em> : ''}</span>
+              <span className="subsdue-when">{r.overdue ? <span className="subsdue-badge">{trA('subsDue.overdue')}</span> : r.nextRunDate}</span>
+              <span className="subsdue-amt tnum">{money(r.total)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // Small "?" info dot with a plain-language tooltip (Part 2 #6) — used to explain accounting terms
   // (Neraca Saldo, Buku Besar, Piutang Usaha, Arus Kas sections) to a non-accountant reader.
   function InfoDot({ tip }) { return <span className="fin-infodot" tabIndex={0} title={tip} aria-label={tip}>{IcA('IconInfo', { s: 11 }) || '?'}</span>; }
@@ -501,13 +533,27 @@
       { key: 'appr', ok: (chk.pendingApprovals || 0) === 0, label: trA('tp.chkAppr'), fix: 'approvals', val: chk.pendingApprovals ? String(chk.pendingApprovals) : '' },
       { key: 'galon', ok: chk.gallonIntegrity === 'ok', label: trA('tp.chkGalon'), fix: 'dist-gallon', val: chk.gallonIntegrity === 'ok' ? '' : trA('tp.chkGalonBad') },
       { key: 'journal', ok: chk.journalIntegrity !== 'drift', label: trA('tp.chkJournal'), fix: 'acct-backfill', val: chk.journalDrift ? trA('tp.chkJournalBad', { n: chk.journalDrift }) : '' },
+      // ACCRUAL-BASIS checks. Amortisation BLOCKS (unposted → overstated profit) and offers a one-click
+      // fix; accrued / subscriptions-due / draft bills only WARN.
+      { key: 'amort', ok: (chk.amortPending || 0) === 0, label: trA('tp.chkAmort'), fix: 'acct-accrual', blocking: true, val: chk.amortPending ? String(chk.amortPending) : '', action: (chk.amortPending || 0) > 0 ? 'amort' : null },
+      { key: 'accrued', ok: (chk.accruedOpen || 0) === 0, label: trA('tp.chkAccrued'), fix: 'acct-accrual', val: chk.accruedOpen ? String(chk.accruedOpen) : '' },
+      { key: 'subs', ok: (chk.subsDue || 0) === 0, label: trA('tp.chkSubs'), fix: 'acct-subscriptions', val: chk.subsDue ? String(chk.subsDue) : '' },
+      { key: 'draft', ok: (chk.draftBills || 0) === 0, label: trA('tp.chkDraft'), fix: 'acct-payables', val: chk.draftBills ? String(chk.draftBills) : '' },
     ];
     const targetStatus = (periods.find((p) => p.periodKey === target) || {}).status || 'terbuka';
-    const canClose = balanced && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
+    const amortBlocked = (chk.amortPending || 0) > 0;
+    const canClose = balanced && !amortBlocked && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
 
     const doClose = async () => {
       setBusy(true); setErr('');
       try { await ACC().periodClose({ year: Y, month: M }); setConfirm(''); periodsQ.reload(); checkQ.reload(); }
+      catch (e) { setErr((e && e.body && e.body.error && e.body.error.message) || (e && e.message) || 'Gagal.'); }
+      finally { setBusy(false); }
+    };
+    // One-click "post all amortisation for this period" — clears the amort blocker from the checklist.
+    const doPostAmort = async () => {
+      setBusy(true); setErr('');
+      try { await ACC().amortize({ asOf: target + '-31' }); checkQ.reload(); }
       catch (e) { setErr((e && e.body && e.body.error && e.body.error.message) || (e && e.message) || 'Gagal.'); }
       finally { setBusy(false); }
     };
@@ -540,6 +586,7 @@
                 <div key={it.key} className={`tp-chk ${it.ok ? 'ok' : (it.blocking ? 'bad' : 'warn')}`}>
                   <span className="tp-chk-ic">{IcA(it.ok ? 'IconCheck' : (it.blocking ? 'IconClose' : 'IconWarn'), { s: 15 })}</span>
                   <span className="tp-chk-lbl">{it.label}{it.val ? <em> — {it.val}</em> : ''}</span>
+                  {!it.ok && it.action === 'amort' && <button className="btn btn-primary btn-xs" disabled={busy} onClick={doPostAmort}>{IcA('IconRefresh', { s: 12 })}{trA('tp.postAmort')}</button>}
                   {!it.ok && it.fix && <button className="dist-link" onClick={() => onNav && onNav(it.fix)}>{trA('tp.fix')}</button>}
                 </div>
               ))}
@@ -548,8 +595,9 @@
           {targetStatus === 'terbuka' && (
             <div className="tp-confirm">
               {!balanced && <div className="add-err"><IconClose s={14} />{trA('tp.blockedUnbalanced')}</div>}
+              {balanced && amortBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedAmort', { n: chk.amortPending })}</div>}
               <label className="fld-label">{trA('tp.typeConfirm')}</label>
-              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced} />
+              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced || amortBlocked} />
               <div className="tp-lockinfo">{trA('tp.lockInfo')}</div>
               {err && <div className="add-err"><IconClose s={14} />{err}</div>}
               <button className="btn btn-primary" disabled={!canClose || busy} onClick={doClose}>{IcA('IconLock', { s: 16 })}{trA('tp.closeBtn', { m: target })}</button>
@@ -1067,16 +1115,16 @@
     return (
       <div className="screen-enter fin-scope">
         <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finSubs')}</h2><div className="fin-head-scope">{trA('s.finSubs')}</div></div>
-          <div className="fin-head-actions">{canRun && summary.dueSoon > 0 && <button className="btn btn-ghost" disabled={!!busy} onClick={runNow}>{IcA('IconRefresh', { s: 15 })}{trA('sb.runNow')}</button>}{canRun && <button className="btn btn-primary" onClick={() => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, autoIssue: true })}>{IcA('IconPlus', { s: 16 })}{trA('sb.new')}</button>}</div>
+          <div className="fin-head-actions">{canRun && summary.dueSoon > 0 && <button className="btn btn-ghost" disabled={!!busy} onClick={runNow}>{IcA('IconRefresh', { s: 15 })}{trA('sb.runNow')}</button>}{canRun && <button className="btn btn-primary" onClick={() => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, remindDays: 3, autoIssue: true })}>{IcA('IconPlus', { s: 16 })}{trA('sb.new')}</button>}</div>
         </div>
         <ScreenIntro answers={trA('sb.answers')} extra={trA('sb.activeN', { n: summary.active }) + (summary.dueSoon ? ' · ' + trA('sb.dueSoonN', { n: summary.dueSoon }) : '')} tone={summary.dueSoon ? 'warn' : 'info'} />
         {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
         <div className="card">
           {q.state === 'loading' && <Skeleton n={5} />}
           {q.state === 'ready' && (subs.length === 0
-            ? <EmptyState title={trA('sb.emptyT')} body={trA('sb.emptyB')} actionLabel={canRun ? trA('sb.new') : null} onAction={canRun ? () => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, autoIssue: true }) : null} />
+            ? <EmptyState title={trA('sb.emptyT')} body={trA('sb.emptyB')} actionLabel={canRun ? trA('sb.new') : null} onAction={canRun ? () => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, remindDays: 3, autoIssue: true }) : null} />
             : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('sb.colName')}</th><th className="fin-th">{trA('sb.colCadence')}</th><th className="fin-th fin-r">{trA('sb.colAmount')}</th><th className="fin-th">{trA('sb.colNext')}</th><th className="fin-th">{trA('sb.colStatus')}</th><th className="fin-th" /></tr></thead>
-              <tbody>{subs.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">{s.name}<span className="fin-td-sub">{s.supplierName}</span></td><td className="fin-td">{trA('sb.cad_' + s.cadence)}{s.interval > 1 ? ' ×' + s.interval : ''}</td><td className="fin-td fin-r tnum">{money(s.total)}</td><td className="fin-td tnum">{s.status === 'aktif' ? s.nextRunDate : '—'}</td><td className="fin-td"><span className={`ap-badge ${SUBBADGE[s.status]}`}>{trA('sb.st_' + s.status)}</span></td>
+              <tbody>{subs.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">{s.name}<span className="fin-td-sub">{s.supplierName}</span></td><td className="fin-td">{trA('sb.cad_' + s.cadence)}{s.interval > 1 ? ' ×' + s.interval : ''}</td><td className="fin-td fin-r tnum">{money(s.total)}</td><td className={`fin-td tnum${s.overdue ? ' sb-overdue' : ''}`}>{s.status === 'aktif' ? <span>{s.nextRunDate}{s.overdue ? <span className="subsdue-badge" style={{ marginLeft: 6 }}>{trA('subsDue.overdue')}</span> : ''}</span> : '—'}</td><td className="fin-td"><span className={`ap-badge ${SUBBADGE[s.status]}`}>{trA('sb.st_' + s.status)}</span></td>
                 <td className="fin-td fin-r">{canRun && s.status !== 'batal' && s.status !== 'selesai' && (
                   <span className="sb-acts">
                     {s.status === 'aktif' ? <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => act(() => ACC().subscriptionPause(s.id))}>{trA('sb.pause')}</button> : <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => act(() => ACC().subscriptionResume(s.id))}>{trA('sb.resume')}</button>}
@@ -1092,7 +1140,7 @@
   function SubForm({ form, setForm, onDone }) {
     const [busy, setBusy] = aS(false); const [err, setErr] = aS(''); const set = (k, v) => setForm({ ...form, [k]: v });
     const valid = form.supplierId && form.name.trim() && form.chartCode && +form.amount > 0 && form.startDate;
-    const submit = async () => { if (!valid || busy) return; setBusy(true); setErr(''); try { await ACC().subscriptionCreate({ supplierId: form.supplierId, name: form.name.trim(), chartCode: form.chartCode, amount: +form.amount, tax: +form.tax || 0, cadence: form.cadence, interval: +form.interval || 1, startDate: form.startDate, endDate: form.endDate || undefined, dueDays: +form.dueDays || 0, autoIssue: form.autoIssue }); onDone(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    const submit = async () => { if (!valid || busy) return; setBusy(true); setErr(''); try { await ACC().subscriptionCreate({ supplierId: form.supplierId, name: form.name.trim(), chartCode: form.chartCode, amount: +form.amount, tax: +form.tax || 0, cadence: form.cadence, interval: +form.interval || 1, startDate: form.startDate, endDate: form.endDate || undefined, dueDays: +form.dueDays || 0, remindDays: form.remindDays === '' ? 3 : +form.remindDays, autoIssue: form.autoIssue }); onDone(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
     return (
       <div className="modal-scrim" onClick={() => setForm(null)} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('sb.new')}</div><button className="jp-icon" onClick={() => setForm(null)}><IconClose s={18} /></button></div>
@@ -1101,7 +1149,7 @@
           <label className="fld-label">{trA('sb.name')} *</label><input className="fld" placeholder={trA('sb.namePh')} value={form.name} onChange={(e) => set('name', e.target.value)} />
           <label className="fld-label">{trA('sb.expenseAcct')} *</label><AcctSelect value={form.chartCode} onChange={(v) => set('chartCode', v)} kinds={['expense']} />
           <div className="dist-form-row"><div style={{ flex: 2 }}><label className="fld-label">{trA('sb.amount')} *</label>{rpInput(form.amount, (v) => set('amount', v))}</div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.tax')}</label>{rpInput(form.tax, (v) => set('tax', v))}</div></div>
-          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.cadence')} *</label><select className="fld" value={form.cadence} onChange={(e) => set('cadence', e.target.value)}>{['monthly', 'quarterly', 'yearly'].map((c) => <option key={c} value={c}>{trA('sb.cad_' + c)}</option>)}</select></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.every')}</label><input className="fld tnum" inputMode="numeric" value={form.interval} onChange={(e) => set('interval', e.target.value.replace(/\D/g, ''))} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.dueDays')}</label><input className="fld tnum" inputMode="numeric" value={form.dueDays} onChange={(e) => set('dueDays', e.target.value.replace(/\D/g, ''))} /></div></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.cadence')} *</label><select className="fld" value={form.cadence} onChange={(e) => set('cadence', e.target.value)}>{['monthly', 'quarterly', 'yearly'].map((c) => <option key={c} value={c}>{trA('sb.cad_' + c)}</option>)}</select></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.every')}</label><input className="fld tnum" inputMode="numeric" value={form.interval} onChange={(e) => set('interval', e.target.value.replace(/\D/g, ''))} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.dueDays')}</label><input className="fld tnum" inputMode="numeric" value={form.dueDays} onChange={(e) => set('dueDays', e.target.value.replace(/\D/g, ''))} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.remindDays')}</label><input className="fld tnum" inputMode="numeric" value={form.remindDays} onChange={(e) => set('remindDays', e.target.value.replace(/\D/g, ''))} /></div></div>
           <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.startDate')} *</label><input type="date" className="fld" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('sb.endDate')}</label><input type="date" className="fld" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} /></div></div>
           <label className="ap-issue"><input type="checkbox" checked={form.autoIssue} onChange={(e) => set('autoIssue', e.target.checked)} /><span>{trA('sb.autoIssue')}</span></label>
           {err && <div className="add-err"><IconClose s={14} />{err}</div>}
@@ -1111,5 +1159,5 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen };
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen };
 })();

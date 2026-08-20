@@ -46,6 +46,7 @@ router.post('/amortize', ctrl.amortize);             // post every due month up 
 
 // RECURRING SUBSCRIPTIONS — a recurring bill template; running it generates the due Bills (idempotent).
 router.get('/subscriptions', ctrl.subsList);
+router.get('/subscriptions-due', ctrl.subsDue);      // dashboard card — due within N days
 router.post('/subscriptions/run', ctrl.subRun);      // generate due bills up to { asOf } — BEFORE :id
 router.get('/subscriptions/:id', ctrl.subGet);
 router.post('/subscriptions', ctrl.subCreate);

@@ -548,10 +548,19 @@ async function accountingStatus({ asOf } = {}) {
     const per = await prisma.accountingPeriod.findUnique({ where: { periodKey: priorMonth }, select: { status: true } }).catch(() => null);
     priorClosed = !!(per && (per.status === 'ditutup' || per.status === 'terkunci'));
   }
+  // Subscription reminders (for the AlertBell) — active subs whose next cycle is within their remindDays.
+  // Computed inline (not via subscription.service) to avoid a require cycle. Best-effort.
+  let subsRemind = 0, subsRemindTotal = 0;
+  try {
+    const t = base || new Date().toISOString().slice(0, 10);
+    const addD = (d, k) => { const dt = new Date(d + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + (k | 0)); return dt.toISOString().slice(0, 10); };
+    const subs = await prisma.subscription.findMany({ where: { status: 'aktif' }, select: { nextRunDate: true, remindDays: true, amount: true, tax: true } });
+    subs.forEach((s) => { if (s.nextRunDate <= addD(t, s.remindDays != null ? s.remindDays : 3)) { subsRemind++; subsRemindTotal += Number(s.amount) + Number(s.tax); } });
+  } catch (e) { /* subscriptions optional */ }
   return {
     lastPostedAt: last ? last.postedAt : null, journalCount, trialBalanced,
     integrity: { ok: integrity.ok, missing: integrity.missingCount, orphan: integrity.orphanCount },
-    unmappedCount: unmapped.length, unreconciled, priorMonth, priorClosed,
+    unmappedCount: unmapped.length, unreconciled, priorMonth, priorClosed, subsRemind, subsRemindTotal,
   };
 }
 

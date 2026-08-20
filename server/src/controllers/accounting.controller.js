@@ -75,8 +75,9 @@ const subResume = asyncHandler(async (req, res) => res.json({ data: await subscr
 const subCancel = asyncHandler(async (req, res) => res.json({ data: await subscription.cancelSubscription(req.params.id) }));
 const subSkip = asyncHandler(async (req, res) => res.json({ data: await subscription.skipCycle(req.params.id) }));
 const subRun = asyncHandler(async (req, res) => res.json({ data: await subscription.runSubscriptions({ asOf: req.body && req.body.asOf }, req.user) }));
+const subsDue = asyncHandler(async (req, res) => res.json({ data: await subscription.subscriptionsDue({ asOf: req.query.asOf, days: req.query.days ? +req.query.days : 7 }) }));
 
 module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
   billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue, suppliersList, supplierCreate,
   accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize,
-  subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun };
+  subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun, subsDue };

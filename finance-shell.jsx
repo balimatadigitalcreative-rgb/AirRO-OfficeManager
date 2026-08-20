@@ -641,6 +641,9 @@ function FApp() {
       const a = [];
       if (s.unmappedCount > 0) a.push({ id: 'acctunmapped', level: 'med', icon: 'IconWarn', title: tr('map.alertTitle'), msg: tr('map.alertMsg', { n: s.unmappedCount }), screen: 'acct-mapping' });
       if (drift > 0) a.push({ id: 'acctdrift', level: 'high', icon: 'IconWarn', title: tr('flow.driftTitle'), msg: tr('flow.driftMsg', { n: drift }), screen: 'acct-backfill' });
+      // Subscription due reminder — N days before nextDueDate (remindDays, default 3). Reuses the bell
+      // rather than a separate mechanism; paused/stopped subs are excluded server-side.
+      if (s.subsRemind > 0) a.push({ id: 'acctsubsremind', level: 'med', icon: 'IconCalendar', title: tr('subsDue.title', { n: s.subsRemind }), msg: tr('subsDue.remind', { n: s.subsRemind, amt: FIN.fmt ? FIN.fmt(s.subsRemindTotal || 0) : (s.subsRemindTotal || 0) }), screen: 'acct-subscriptions' });
       setAcctAlerts(a);
     }).catch(() => { if (live) setAcctAlerts([]); });
     return () => { live = false; };
@@ -1707,6 +1710,9 @@ function FApp() {
               {/* ALUR KERJA — accounting workflow map (Record → Journal → Trial balance → Reconcile →
                   Close), each a link with a status dot. Renders only when accounting v2 is live. */}
               {p.reports && ACCT.WorkflowPanel && <ACCT.WorkflowPanel onNav={go} />}
+              {/* Langganan jatuh tempo — subscriptions due within 7 days (overdue rows first). Self-hides
+                  when the engine is off or nothing is due. */}
+              {p.reports && ACCT.SubsDueCard && <ACCT.SubsDueCard onNav={go} />}
               {/* Dashboard Keuangan — KPI cards (each states its period scope + drills to the ledger),
                   cash position per account, P&L month-vs-last, 12-month trend, ratios. All over the
                   cash-book figures the shell already computes; AR/liabilities gated to the engine. */}

@@ -23,11 +23,16 @@ function addMonthsDate(date, k) {
 function addDays(date, k) { const dt = new Date(date + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + (k | 0)); return dt.toISOString().slice(0, 10); }
 function advance(date, cadence, interval) { return addMonthsDate(date, (CADENCE[cadence] || 1) * Math.max(1, int(interval))); }
 
-function subClient(s) {
+const todayISO = () => new Date().toISOString().slice(0, 10);
+function subClient(s, today) {
+  const t = today || todayISO();
   return { id: s.id, supplierId: s.supplierId, supplierName: s.supplier ? s.supplier.name : null, name: s.name, description: s.description || '',
     chartAccountId: s.chartAccountId, chartCode: s._code || null, amount: n(s.amount), tax: n(s.tax), total: n(s.amount) + n(s.tax),
     cadence: s.cadence, interval: s.interval, startDate: s.startDate, nextRunDate: s.nextRunDate, endDate: s.endDate || null,
-    dueDays: s.dueDays, autoIssue: !!s.autoIssue, status: s.status, businessUnitId: s.businessUnitId || null, fleetId: s.fleetId || '',
+    dueDays: s.dueDays, remindDays: s.remindDays != null ? s.remindDays : 3, autoIssue: !!s.autoIssue, status: s.status, businessUnitId: s.businessUnitId || null, fleetId: s.fleetId || '',
+    // OVERDUE — an active subscription whose cycle date has passed with no bill yet generated (the job
+    // hasn't run). Visually distinct on the list; paused/ended never flag.
+    overdue: s.status === 'aktif' && s.nextRunDate < t,
     createdByName: s.createdByName || null, createdAt: s.createdAt ? new Date(s.createdAt).getTime() : null,
     runs: (s.runs || []).map((r) => ({ id: r.id, cycleDate: r.cycleDate, billId: r.billId || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null })) };
 }
@@ -46,7 +51,7 @@ async function createSubscription(body, actor) {
   const s = await prisma.subscription.create({ data: {
     supplierId: supplier.id, name: String(body.name || '').slice(0, 120) || supplier.name, description: String(body.description || '').slice(0, 300),
     chartAccountId: acct.id, amount: BigInt(amount), tax: BigInt(int(body.tax)), cadence: body.cadence, interval: Math.max(1, int(body.interval || 1)),
-    startDate: body.startDate, nextRunDate: body.startDate, endDate: body.endDate || null, dueDays: int(body.dueDays), autoIssue: body.autoIssue !== false,
+    startDate: body.startDate, nextRunDate: body.startDate, endDate: body.endDate || null, dueDays: int(body.dueDays), remindDays: body.remindDays != null ? int(body.remindDays) : 3, autoIssue: body.autoIssue !== false,
     businessUnitId: body.businessUnitId || null, fleetId: String(body.fleetId || ''), createdById: (actor && actor.id) || null, createdByName: (actor && actor.name) || null,
   }, include: { supplier: { select: { name: true } } } });
   return subClient(await attachCode(s));
@@ -64,6 +69,7 @@ async function updateSubscription(id, body, actor) {
   if (body.cadence != null) { if (!CADENCE[body.cadence]) throw ApiError.badRequest('Frekuensi tidak valid.'); data.cadence = body.cadence; }
   if (body.interval != null) data.interval = Math.max(1, int(body.interval));
   if (body.dueDays != null) data.dueDays = int(body.dueDays);
+  if (body.remindDays != null) data.remindDays = int(body.remindDays);
   if (body.autoIssue != null) data.autoIssue = !!body.autoIssue;
   if (body.endDate !== undefined) { if (body.endDate && !isDate(body.endDate)) throw ApiError.badRequest('Tanggal akhir tidak valid.'); data.endDate = body.endDate || null; }
   if (body.nextRunDate != null) { if (!isDate(body.nextRunDate)) throw ApiError.badRequest('Tanggal berikutnya tidak valid.'); data.nextRunDate = body.nextRunDate; }   // reschedule future runs
@@ -137,7 +143,8 @@ async function listSubscriptions(query) {
   // "jatuh berikutnya minggu ini" convenience: how many are due within 7 days
   const soon = new Date(); soon.setDate(soon.getDate() + 7); const soonStr = soon.toISOString().slice(0, 10);
   const dueSoon = rows.filter((r) => r.status === 'aktif' && r.nextRunDate <= soonStr).length;
-  return { data: rows.map(subClient), summary: { active: rows.filter((r) => r.status === 'aktif').length, dueSoon } };
+  const today = todayISO();   // pass explicitly — map's 2nd arg is the index, which would corrupt `overdue`
+  return { data: rows.map((r) => subClient(r, today)), summary: { active: rows.filter((r) => r.status === 'aktif').length, dueSoon } };
 }
 async function getSubscription(id) {
   const s = await prisma.subscription.findUnique({ where: { id }, include: { supplier: { select: { name: true } }, runs: { orderBy: { cycleDate: 'desc' }, take: 60 } } });
@@ -145,4 +152,24 @@ async function getSubscription(id) {
   return subClient(await attachCode(s));
 }
 
-module.exports = { createSubscription, updateSubscription, pauseSubscription, resumeSubscription, cancelSubscription, skipCycle, runSubscriptions, listSubscriptions, getSubscription };
+// Subscriptions falling due within `days` (default 7) — the dashboard "Langganan jatuh tempo" card.
+// ACTIVE only (paused/ended/cancelled never appear). `overdue` = the cycle date already passed.
+async function subscriptionsDue({ asOf, days = 7 } = {}) {
+  const today = isDate(asOf) ? asOf : todayISO();
+  const until = addDays(today, Math.max(0, int(days)));
+  const rows = await prisma.subscription.findMany({ where: { status: 'aktif', nextRunDate: { lte: until } }, orderBy: { nextRunDate: 'asc' }, include: { supplier: { select: { name: true } } } });
+  let total = 0;
+  const out = rows.map((s) => { total += n(s.amount) + n(s.tax); return { id: s.id, name: s.name, supplierName: s.supplier ? s.supplier.name : '', nextRunDate: s.nextRunDate, total: n(s.amount) + n(s.tax), overdue: s.nextRunDate < today }; });
+  return { asOf: today, until, count: out.length, total, rows: out };
+}
+// AlertBell reminder count — ACTIVE subs whose next cycle is within their OWN remindDays lead time.
+// Returns count + total; paused/ended never remind. Folded into accountingStatus so the bell reuses one poll.
+async function subscriptionReminderCount({ asOf } = {}) {
+  const today = isDate(asOf) ? asOf : todayISO();
+  const subs = await prisma.subscription.findMany({ where: { status: 'aktif' }, select: { nextRunDate: true, remindDays: true, amount: true, tax: true } });
+  let count = 0, total = 0;
+  for (const s of subs) { const threshold = addDays(today, s.remindDays != null ? s.remindDays : 3); if (s.nextRunDate <= threshold) { count++; total += n(s.amount) + n(s.tax); } }
+  return { count, total };
+}
+
+module.exports = { createSubscription, updateSubscription, pauseSubscription, resumeSubscription, cancelSubscription, skipCycle, runSubscriptions, listSubscriptions, getSubscription, subscriptionsDue, subscriptionReminderCount };

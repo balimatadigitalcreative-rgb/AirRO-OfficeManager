@@ -160,6 +160,7 @@
       subscriptionCancel: (id) => req('POST', '/accounting/subscriptions/' + id + '/cancel', {}),
       subscriptionSkip: (id) => req('POST', '/accounting/subscriptions/' + id + '/skip', {}),
       subscriptionsRun: (b) => req('POST', '/accounting/subscriptions/run', b || {}),  // { asOf? } → generates due bills
+      subscriptionsDue: (p) => req('GET', '/accounting/subscriptions-due' + acctQs(p)), // dashboard card — due within N days
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

@@ -1342,6 +1342,7 @@ model Subscription {
   nextRunDate    String                             // YYYY-MM-DD — next cycle to generate
   endDate        String?                            // stop after this date
   dueDays        Int      @default(0)               // generated bill due = cycle date + dueDays
+  remindDays     Int      @default(3)               // remind this many days before the next cycle is due
   autoIssue      Boolean  @default(true)            // issue the generated bill (post accrual) or leave draft
   status         String   @default("aktif")         // aktif | jeda | selesai | batal
   businessUnitId String?
