@@ -59,7 +59,8 @@ const CAPS = [
   ['distribusiKoreksi', 'distribusi', 'Koreksi Transaksi', 'Mengoreksi transaksi distribusi.', 2],
   ['distribusiHargaMaster', 'distribusi', 'Ubah Harga Master', 'Mengubah harga master pelanggan.', 2],
   ['distribusiBonAdjust', 'distribusi', 'Pelunasan/Kerugian', 'Pelunasan tidak diterima + laporan kerugian.', 2],
-  ['distribusiPenyesuaian', 'distribusi', 'Ajukan Penyesuaian', 'Mengajukan penyesuaian galon/bon (butuh persetujuan).', 2],
+  ['distribusiPenyesuaianGalon', 'distribusi', 'Sesuaikan Galon Pelanggan', 'Mengoreksi jumlah galon yang dipegang pelanggan (hitung fisik di lapangan). TIDAK mengubah uang.', 2],
+  ['distribusiPenyesuaianBon', 'distribusi', 'Sesuaikan Sisa Bon', 'Mengubah SISA BON pelanggan — mengubah uang yang terutang dan tidak dapat diverifikasi ulang setelahnya. Beri hanya ke GM/Pemilik.', 3, { destructive: true }],
   ['distribusiApprove', 'distribusi', 'Setujui Perubahan', 'Menyetujui koreksi/pembatalan distribusi.', 2],
   // Owner-only waiver of segregation of duties: approve your OWN correction/void/dispute. Needs
   // distribusiApprove to mean anything; every self-approval is badged + logged. Only Pemilik may grant.
@@ -104,7 +105,7 @@ const DEPENDENTS = {};
 EDITABLE_KEYS.forEach((k) => { const dep = CAP_META[k].dependsOn; if (dep) (DEPENDENTS[dep] || (DEPENDENTS[dep] = [])).push(k); });
 
 // Normalise a perms object for editing (derive kasbon split, strip computed flags).
-function editablePerms(raw) { const { kasbonView: _k, gudangKelola: _g, distribusi: _d, kasbon: _kb, ...p } = FS.normKasbon(raw || {}); return p; }
+function editablePerms(raw) { const { kasbonView: _k, gudangKelola: _g, distribusi: _d, kasbon: _kb, distribusiPenyesuaian: _dp, ...p } = FS.normKasbon(raw || {}); return p; }
 
 // ── PERMISSION EDITOR — module groups, risk order, destructive block, tri-state, dependency handling ──
 function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note, ownerAdmin }) {

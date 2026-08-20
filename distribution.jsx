@@ -3369,7 +3369,9 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   const num = (s) => { const t = String(s == null ? '' : s).trim(); const neg = /^-/.test(t); const n = parseInt(t.replace(/[^0-9]/g, ''), 10) || 0; return neg ? -n : n; };
   const after = mode === 'set' ? num(target) : before + num(delta);
   const selisih = after - before;
-  const noteReq = reason === 'lainnya' || reason === 'penghapusan_piutang';
+  // A GALLON adjustment always changes the physical count, so a note explaining the discrepancy
+  // (breakage, miscount, …) is REQUIRED — it is field work that must be accountable after the fact.
+  const noteReq = reason === 'lainnya' || reason === 'penghapusan_piutang' || (!isBon && selisih !== 0);
   const writeOff = isBon && reason === 'penghapusan_piutang';   // bon may be clamped to 0
   const numsOk = selisih !== 0 && (after >= 0 || writeOff);
   const valid = numsOk && (!noteReq || note.trim()) && !busy;
@@ -3387,14 +3389,14 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   };
   return (
     <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}>
-      <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+      <div className={'modal-card' + (isBon ? '' : ' adj-galon')} style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('adj.title')} · {isBon ? trD('adj.kindBon') : trD('adj.kindGalon')}</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{customer.name}</div></div>
           <button className="jp-icon" onClick={onClose}><IconClose s={18} /></button>
         </div>
         <div className="modal-body">
-          <div className="dist-warnbox"><IconWarn s={16} /><span>{trD('adj.info')}</span></div>
+          <div className="dist-warnbox"><IconWarn s={16} /><span>{isBon ? trD('adj.info') : trD('adj.infoGalon')}</span></div>
           <div className="dist-cd-stats" style={{ margin: '4px 0 10px' }}>
             <div><div className="dist-cd-slbl">{trD('adj.system')}</div><div className="dist-cd-sval">{fmt(before)}</div></div>
             <div><div className="dist-cd-slbl">{trD('adj.selisih')}</div><div className="dist-cd-sval" style={{ color: selisih === 0 ? 'var(--text-mut)' : selisih > 0 ? 'var(--green-700)' : 'var(--neg)' }}>{selisih >= 0 ? '+' : ''}{fmt(selisih)}</div></div>
@@ -3405,7 +3407,7 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
             <button className={`gran-btn ${mode === 'delta' ? 'on' : ''}`} onClick={() => setMode('delta')}>{trD('adj.modeDelta')}</button>
           </div>
           {mode === 'set'
-            ? (<><label className="fld-label">{trD('adj.newValue')}</label><input className="fld tnum" inputMode="numeric" value={target} onChange={(e) => setTarget(e.target.value)} /></>)
+            ? (<><label className="fld-label">{isBon ? trD('adj.newValue') : trD('adj.actualCount')}</label><input className="fld tnum" inputMode="numeric" value={target} onChange={(e) => setTarget(e.target.value)} /></>)
             : (<><label className="fld-label">{trD('adj.delta')}</label><input className="fld tnum" inputMode="numeric" value={delta} placeholder="cth. -2" onChange={(e) => setDelta(e.target.value)} /></>)}
           <label className="fld-label">{trD('adj.reason')}</label>
           <UI.Dropdown value={reason} options={ADJ_REASONS.map((r) => ({ value: r, label: adjReasonLabel(r) }))} onChange={setReason} fluid />
@@ -3428,7 +3430,7 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canVoid, canApprove, canApproveSelf, selfApproveLimit, currentUserId, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onGoApprovals, onOpenLoss, userName, nav, histTick }) {
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canVoid, canApprove, canApproveSelf, selfApproveLimit, currentUserId, canDelete, canLegacyImport, canBonAdjust, canPenyesuaianGalon, canPenyesuaianBon, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onGoApprovals, onOpenLoss, userName, nav, histTick }) {
   const clParam0 = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
   const [view, setView] = uSx(() => (clParam0('c', '') ? 'detail' : 'list'));   // ?c=<id> in the URL → open that detail (deep-link / refresh)
   const [custs, setCusts] = uSx(null);
@@ -3987,8 +3989,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
       canInput && d.sisaBon > 0 && { k: 'pay', label: trD('dist.payBon'), ic: 'IconCoinIn', fn: () => setPayFor(d) },
       canKoreksi && { k: 'ob', label: trD('dist.obBtn'), ic: 'IconInvoice', fn: () => setObFor(d) },
       canBonAdjust && d.sisaBon > 0 && { k: 'pnr', label: trD('pnr.btn'), ic: 'IconWarn', fn: () => setPnrFor(d) },
-      canPenyesuaian && { k: 'adjg', label: trD('adj.title') + ' · ' + trD('adj.kindGalon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'galon' }) },
-      canPenyesuaian && { k: 'adjb', label: trD('adj.title') + ' · ' + trD('adj.kindBon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'bon' }) },
+      canPenyesuaianGalon && { k: 'adjg', label: trD('adj.title') + ' · ' + trD('adj.kindGalon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'galon' }) },
+      canPenyesuaianBon && { k: 'adjb', label: trD('adj.title') + ' · ' + trD('adj.kindBon'), ic: 'IconPencil', fn: () => setAdjustFor({ customer: d, kind: 'bon' }) },
       { k: 'hist', label: trD('dist.printHistory'), ic: 'IconDownload', fn: () => setPrintFor({ mode: 'statement' }) },
       canLegacyImport && { k: 'imp', label: trD('dist.liBtn'), ic: 'IconDownload', fn: () => setLegacyOpen(true) },
       canCustomers && { k: 'edit', label: trD('dist.editCust'), ic: 'IconPencil', fn: () => openEdit(d) },
@@ -4141,8 +4143,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
           </div>
           {/* ── KPI STRIP ── */}
           <div className="cd-kpis">
-            <KpiCard label={trD('cd.kpiSisaBon')} tone={d.sisaBon > 0 ? 'bon' : 'ok'} value={d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')} sub={unpaidCount > 0 ? trD('cd.subUnpaid', { n: unpaidCount }) : trD('dist.lunas')} action={d.sisaBon > 0 && canPenyesuaian ? <button type="button" className="dist-link" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })}>{trD('cd.rekon')}</button> : null} />
-            <KpiCard label={trD('cd.kpiGalon')} tone={(d.gallonsHeld || 0) > 0 ? 'bon' : ''} value={numX(d.gallonsHeld || 0)} sub={canPenyesuaian ? <button type="button" className="dist-link" onClick={() => setAdjustFor({ customer: d, kind: 'galon' })}>{trD('adj.adjustBtn')}</button> : trD('dist.gallonsHeld')} />
+            <KpiCard label={trD('cd.kpiSisaBon')} tone={d.sisaBon > 0 ? 'bon' : 'ok'} value={d.sisaBon > 0 ? rpFull(d.sisaBon) : trD('dist.lunas')} sub={unpaidCount > 0 ? trD('cd.subUnpaid', { n: unpaidCount }) : trD('dist.lunas')} action={d.sisaBon > 0 && canPenyesuaianBon ? <button type="button" className="dist-link" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })}>{trD('cd.rekon')}</button> : null} />
+            <KpiCard label={trD('cd.kpiGalon')} tone={(d.gallonsHeld || 0) > 0 ? 'bon' : ''} value={numX(d.gallonsHeld || 0)} sub={canPenyesuaianGalon ? <button type="button" className="dist-link" onClick={() => setAdjustFor({ customer: d, kind: 'galon' })}>{trD('adj.adjustBtn')}</button> : trD('dist.gallonsHeld')} />
             <KpiCard label={trD('cd.kpiHarga')} value={rpFull(d.masterPrice)} sub={trD('dist.hargaPerGalon')} />
             <KpiCard label={trD('cd.kpi30')} value={numX(tx30)} sub={lastTx ? trD('cd.subLast', { d: fmtDateShort(lastTx.txnDate) }) : trD('cd.subNone')} />
             <KpiCard label={trD('cd.kpiLast')} value={lastTx ? fmtDateShort(lastTx.txnDate) : '—'} sub={lastTx ? methodLabel(lastTx.method) : trD('cd.subNone')} />
@@ -4266,7 +4268,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
               {pendingAdj.length > 0 && <div className="cd-pending-banner"><IconClock s={15} />{trD('cd.pendingBanner', { n: pendingAdj.length })}</div>}
               <div className="card cd-card">
                 <div className="sec-title" style={{ marginBottom: 8 }}><IconPencil s={14} /> {trD('adj.tableTitle')}</div>
-                {adjustments.length === 0 ? <ListState state="empty" emptyText={trD('adj.tableTitle')} emptyAction={canPenyesuaian ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })}>{trD('adj.adjustBtn')}</button> : null} /> : (
+                {adjustments.length === 0 ? <ListState state="empty" emptyText={trD('adj.tableTitle')} emptyAction={(canPenyesuaianGalon || canPenyesuaianBon) ? <span style={{ display: 'inline-flex', gap: 8 }}>{canPenyesuaianGalon && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdjustFor({ customer: d, kind: 'galon' })}>{trD('adj.adjustBtn')} · {trD('adj.kindGalon')}</button>}{canPenyesuaianBon && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdjustFor({ customer: d, kind: 'bon' })}>{trD('adj.adjustBtn')} · {trD('adj.kindBon')}</button>}</span> : null} /> : (
                   <div className="dist-adj-table">
                     <div className="dist-adj-hrow"><span>{trD('adj.colDate')}</span><span>{trD('adj.colKind')}</span><span>{trD('adj.colChange')}</span><span>{trD('adj.colReason')}</span><span>{trD('adj.colBy')}</span><span>{trD('adj.colApprovedBy')}</span><span /></div>
                     {adjustments.map((a) => (

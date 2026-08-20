@@ -23,13 +23,17 @@ router.use(requireModule('distribusi'));
 // CORRECTION tier (distribusiKoreksi), not plain input: a field helper who only records
 // sales must not be able to invent receivables. Owner/GM hold this cap by default.
 router.post('/customers/:id/opening-bon', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.openingBonSchema }), ctrl.createOpeningBon);
-// Balance ADJUSTMENTS (penyesuaian) — create/list need the dedicated cap; approve/reverse are GM/owner
-// (enforced in the service by role, on top of the cap here). A pending adjustment never affects balances.
-router.post('/customers/:id/adjustments', requireCap('distribusiPenyesuaian'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.adjustCreateSchema }), ctrl.createAdjustment);
-router.get('/customers/:id/adjustments', requireCap('distribusiPenyesuaian'), validate({ params: ctrl.schemas.idParams }), ctrl.listAdjustments);
-router.post('/adjustments/:id/approve', requireCap('distribusiPenyesuaian'), validate({ params: ctrl.schemas.idParams }), ctrl.approveAdjustment);
-router.post('/adjustments/:id/reverse', requireCap('distribusiPenyesuaian'), validate({ params: ctrl.schemas.idParams }), ctrl.reverseAdjustment);
-router.get('/reports/adjustments', requireCap('distribusiPenyesuaian'), validate({ query: ctrl.schemas.adjustReportQuery }), ctrl.adjustmentReport);
+// Balance ADJUSTMENTS (penyesuaian) — the cap is SPLIT per kind: distribusiPenyesuaianGalon (gallons)
+// vs distribusiPenyesuaianBon (receivable/money). The route opens for EITHER (so a gallon-only staff can
+// reach create/list to do gallon work), and createAdjustment enforces the SPECIFIC cap for the body's
+// kind — a gallon-only user POSTing a bon adjustment is rejected in the service even with a crafted call.
+// approve/reverse stay GM/owner (role-enforced in the service).
+const CAN_ADJUST = ['distribusiPenyesuaianGalon', 'distribusiPenyesuaianBon'];
+router.post('/customers/:id/adjustments', requireAnyCap(CAN_ADJUST), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.adjustCreateSchema }), ctrl.createAdjustment);
+router.get('/customers/:id/adjustments', requireAnyCap(CAN_ADJUST), validate({ params: ctrl.schemas.idParams }), ctrl.listAdjustments);
+router.post('/adjustments/:id/approve', requireAnyCap(CAN_ADJUST), validate({ params: ctrl.schemas.idParams }), ctrl.approveAdjustment);
+router.post('/adjustments/:id/reverse', requireAnyCap(CAN_ADJUST), validate({ params: ctrl.schemas.idParams }), ctrl.reverseAdjustment);
+router.get('/reports/adjustments', requireAnyCap(CAN_ADJUST), validate({ query: ctrl.schemas.adjustReportQuery }), ctrl.adjustmentReport);
 router.get('/customers', requireCap('distribusi'), validate({ query: ctrl.schemas.custListQuery }), ctrl.listCustomers);
 router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getCustomer);
 // NOTE: the delivery-fleet list is NOT served here — armada has a single app-wide

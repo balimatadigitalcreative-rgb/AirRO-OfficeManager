@@ -205,6 +205,22 @@ async function actorSnap(actor) {
   }
   return out;
 }
+// Does `actor` hold a specific capability? Resolved LIVE from the DB (never the token), so a
+// grant/revoke takes effect on the next request. Used to enforce a cap the coarse route gate can't —
+// e.g. the SPECIFIC penyesuaian kind (gallon vs bon) for the body of a create.
+async function actorHasCap(actor, cap) {
+  if (!actor || !actor.id) return false;
+  const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { role: true, permissions: true } });
+  return !!(u && resolvePerms(u.role, u.permissions)[cap]);
+}
+// Whether a GALLON adjustment must be APPROVED before it applies. Bon adjustments ALWAYS require
+// approval (they move money); gallon is configurable via the `adjustmentApproval.galon` setting so an
+// owner can let routine, physically-verifiable gallon corrections flow without a bottleneck. Default:
+// approval required (no behaviour change on upgrade).
+async function galonAdjustmentNeedsApproval() {
+  try { const s = await require('./settings.service').get('adjustmentApproval'); return !(s && s.galon === false); }
+  catch (e) { return true; }
+}
 // Append one immutable audit row. `snap` is the resolved actor snapshot. `fleetId`
 // tags the event's fleet ('' = global/cross-fleet). `selfApproved` flags the event as a
 // self-approval so the "Persetujuan mandiri" audit filter + owner-dashboard count can find it.
@@ -995,6 +1011,11 @@ async function createAdjustment(customerId, body, actor) {
   if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');   // out of fleet scope
   const kind = body.kind === 'galon' ? 'galon' : body.kind === 'bon' ? 'bon' : null;
   if (!kind) throw ApiError.badRequest('kind harus galon atau bon.');
+  // PER-KIND CAP — gallon (verifiable field work) vs bon (money owed) are granted separately. The route
+  // opened for EITHER; here we require the SPECIFIC one, so a gallon-only user cannot adjust bon and
+  // vice-versa — enforced server-side regardless of what the client sent.
+  const needCap = kind === 'galon' ? 'distribusiPenyesuaianGalon' : 'distribusiPenyesuaianBon';
+  if (!(await actorHasCap(actor, needCap))) throw ApiError.forbidden(`Akun kamu tidak punya akses: ${needCap}`);
   const mode = body.mode === 'set' ? 'set' : body.mode === 'delta' ? 'delta' : null;
   if (!mode) throw ApiError.badRequest('mode harus set atau delta.');
   const reason = ADJ_REASONS.includes(body.reason) ? body.reason : null;
@@ -1014,12 +1035,19 @@ async function createAdjustment(customerId, body, actor) {
   if (delta === 0) throw ApiError.badRequest('Tidak ada perubahan (selisih 0).');
 
   const snap = await actorSnap(actor);
+  // AUTO-APPROVE only when it's a GALLON adjustment AND the owner has turned the gallon approval
+  // requirement off (routine, verifiable field work). Bon adjustments always stay pending → GM/owner
+  // approval. An auto-approved gallon adjustment applies its ledger effect immediately.
+  const autoApprove = kind === 'galon' && !(await galonAdjustmentNeedsApproval());
   const created = await prisma.distAdjustment.create({ data: {
     customerId, fleetId: customer.armada || '', kind, mode, before, delta, after, reason, note,
-    evidenceUrl: body.evidenceUrl ? String(body.evidenceUrl).slice(0, 500) : null, status: 'pending',
+    evidenceUrl: body.evidenceUrl ? String(body.evidenceUrl).slice(0, 500) : null,
+    status: autoApprove ? 'approved' : 'pending',
     createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole,
+    ...(autoApprove ? { approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date() } : {}),
   } });
-  await logAudit('koreksi', `Ajukan penyesuaian ${kind}: ${customer.name}`, `${before} → ${after} (${delta >= 0 ? '+' : ''}${delta}) · ${reason}${note ? ' · ' + note : ''}`, snap, customer.armada || '');
+  if (autoApprove) await applyAdjustmentEffect(created, snap);   // gallon ledger movement (no journal for galon)
+  await logAudit('koreksi', `${autoApprove ? 'Penyesuaian galon (otomatis)' : 'Ajukan penyesuaian ' + kind}: ${customer.name}`, `${before} → ${after} (${delta >= 0 ? '+' : ''}${delta}) · ${reason}${note ? ' · ' + note : ''}${autoApprove ? ' · tanpa persetujuan (diatur pemilik)' : ''}`, snap, customer.armada || '');
   return adjustmentClient(created);
 }
 

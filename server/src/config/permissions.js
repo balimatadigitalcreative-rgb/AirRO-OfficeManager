@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true,
     // View-window (time-restriction): Pemilik sees all history + Sisa Bon.
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     'distribusi.galon.reset_total': true,   // OWNER ONLY — clean-slate reset of the whole gallon ledger
@@ -32,7 +32,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaian: true, distribusiApprove: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true,
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     gudangView: true, gudangDamage: true, gudangReport: true,
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -221,9 +221,21 @@ function deriveDistribusiCaps(perms, role) {
   if (p.distribusiDashHistory === undefined) p.distribusiDashHistory = isOwnerGm;
   if (p.distribusiPengirimanReport === undefined) p.distribusiPengirimanReport = isOwnerGm;
   if (p.distribusiBonAdjust === undefined) p.distribusiBonAdjust = isOwnerGm;
-  // Creating balance ADJUSTMENTS (penyesuaian galon/bon) — owner/GM tier by default (they still need
-  // GM/owner APPROVAL to take effect, enforced by role at the endpoint).
-  if (p.distribusiPenyesuaian === undefined) p.distribusiPenyesuaian = isOwnerGm;
+  // Creating balance ADJUSTMENTS (penyesuaian). The old SINGLE cap `distribusiPenyesuaian` covered BOTH
+  // gallon and bon, which forced handing helper staff the power to alter customer DEBT just to correct
+  // gallon counts. It is now SPLIT per kind:
+  //   • distribusiPenyesuaianGalon — adjust gallons held (routine, physically verifiable field work);
+  //   • distribusiPenyesuaianBon   — adjust outstanding bon (changes money owed, NOT verifiable after
+  //     the fact) — destructive/owner tier.
+  // MIGRATION (mirrors the gudang* rename): every ABSENT new cap is DERIVED from the legacy combined
+  // value, so anyone who held it keeps BOTH and nobody is widened. Explicit new values always win. The
+  // old name survives as a READ-ONLY alias ("holds either kind") for one release so stale tokens/clients
+  // and the module-open OR keep working; NO endpoint gates on it any more.
+  if (p.distribusiPenyesuaian === undefined) p.distribusiPenyesuaian = isOwnerGm;   // legacy default (owner/GM)
+  const legacyPeny = !!p.distribusiPenyesuaian;
+  if (p.distribusiPenyesuaianGalon === undefined) p.distribusiPenyesuaianGalon = legacyPeny;
+  if (p.distribusiPenyesuaianBon === undefined) p.distribusiPenyesuaianBon = legacyPeny;
+  p.distribusiPenyesuaian = !!(p.distribusiPenyesuaianGalon || p.distribusiPenyesuaianBon);   // read-only alias
   // Approving correction/void requests: a plain input/koreksi user may REQUEST a change but must never
   // gain approval by derivation (least-privilege) — yet owner/GM get it by default.
   if (p.distribusiApprove === undefined) p.distribusiApprove = isOwnerGm;

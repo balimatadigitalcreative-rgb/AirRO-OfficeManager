@@ -7,6 +7,10 @@ const DEFAULTS = {
   alerts: { lowCash: 20000000, bigExpense: 5000000, costPerGalon: 12000 },
   hrBudget: 30000000,
   hrRates: DEFAULT_RATES,
+  // Per-kind approval requirement for customer balance adjustments (penyesuaian). Bon ALWAYS needs
+  // approval (it moves money); gallon is configurable — set { galon: false } to let routine, verifiable
+  // gallon corrections apply without an approval bottleneck. Default: both require approval.
+  adjustmentApproval: { galon: true, bon: true },
 };
 
 async function getAll() {

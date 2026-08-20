@@ -2758,6 +2758,13 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 :root[data-theme="dark"] .cr-selfnote, :root[data-theme="dark"] .cd-pending-selfnote { color: #ffcf8a; background: rgba(255,180,60,.08); border-color: rgba(255,180,60,.28); }
 .cr-own-note { display: flex; align-items: center; gap: 6px; justify-content: flex-end; font-size: 12px; font-weight: 700; color: var(--text-mut); margin-top: 2px; }
 .cd-pending-btns { display: flex; gap: 8px; }
+/* Gallon adjustment form — helper-friendly, mobile-first: bigger touch targets, one clear count input,
+   and NO Sisa Bon anywhere (the two concerns stay visually separate in the field). */
+.modal-card.adj-galon .fld { min-height: 48px; font-size: 16px; }
+.modal-card.adj-galon .fld.tnum { font-size: 22px; font-weight: 700; text-align: center; letter-spacing: .02em; }
+.modal-card.adj-galon .gran-btn { min-height: 44px; font-size: 14px; }
+.modal-card.adj-galon .dist-cd-sval { font-size: 18px; }
+.modal-card.adj-galon .modal-foot .btn { min-height: 48px; font-size: 15px; }
 /* Owner-dashboard self-approval oversight card */
 .dist-selfapprove-card { display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin-bottom: 14px; border: 1px solid #f6d9a6; background: #fff8ee; }
 :root[data-theme="dark"] .dist-selfapprove-card { background: rgba(255,180,60,.08); border-color: rgba(255,180,60,.28); }

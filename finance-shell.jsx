@@ -1640,7 +1640,7 @@ function FApp() {
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
             <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canApprove={!!p.distribusiApprove} canApproveSelf={!!p.distribusiApproveSelf} selfApproveLimit={+p.maxSelfApproveAmount || 0} currentUserId={user && user.id} canDelete={!!p.distribusiCustomerDelete}
-              canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} canPenyesuaian={!!p.distribusiPenyesuaian} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
+              canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} canPenyesuaianGalon={!!p.distribusiPenyesuaianGalon} canPenyesuaianBon={!!p.distribusiPenyesuaianBon} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
               nav={distNavRef.current} histTick={histTick}
