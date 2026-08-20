@@ -1622,7 +1622,7 @@ function FApp() {
               a pure mfg/nsn user without hiding the nav for everyone. */}
           {screen && screen.indexOf('dist-') === 0 && screenModuleBlocked(screen) ? moduleNotice(screen) : (<>
           {screen === 'dist-dashboard' && p.distribusiDashboard && (
-            <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY}
+            <DIST.Dashboard refreshKey={distTick} today={FIN.TODAY} isOwner={user && user.role === 'owner'}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               canInput={!!p.distribusiInput} canHistory={!!p.distribusiDashHistory}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
@@ -1639,7 +1639,7 @@ function FApp() {
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
           {screen === 'dist-customers' && p.distribusiCustomers && (
-            <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canApprove={!!p.distribusiApprove} currentUserId={user && user.id} canDelete={!!p.distribusiCustomerDelete}
+            <DIST.Customers refreshKey={distTick} canCustomers={!!p.distribusiCustomers} canCustImport={!!p.distribusiCustomerImport} canPrice={!!p.distribusiHargaMaster} canInput={!!p.distribusiInput} canKoreksi={!!p.distribusiKoreksi} canVoid={!!p.distribusiVoid} canApprove={!!p.distribusiApprove} canApproveSelf={!!p.distribusiApproveSelf} selfApproveLimit={+p.maxSelfApproveAmount || 0} currentUserId={user && user.id} canDelete={!!p.distribusiCustomerDelete}
               canLegacyImport={!!p.distribusiLegacyImport} canBonAdjust={!!p.distribusiBonAdjust} canPenyesuaian={!!p.distribusiPenyesuaian} isGmOwner={user && (user.role === 'owner' || user.role === 'gm')}
               staffMode={!!(p.distribusi && !p.distribusiHargaMaster && !p.distribusiAudit && !p.distribusiCustomers)}
               fleet={fleet} fleetScope={user && user.fleetScope} distFleet={distFleet} setDistFleet={setDistFleet} userName={user && user.name}
@@ -1808,7 +1808,7 @@ function FApp() {
             <div className="screen-enter">
               {p.approvals && <COMPANY.ApprovalsCard approvals={approvals} setApprovals={applyApprovals} role={user.role} canSubmit={p.approvals} staff={hrdStaff} onApproveLeave={applyLeaveToAtt} onApproveDeduction={approveDeduction} onSubmitRequest={submitRequest} onCancelRequest={cancelRequest} onDeleteRequest={deleteRequest} userName={user.name} />}
               {/* Distribusi correction/void approval inbox — same screen, its own capability. */}
-              {p.distribusiApprove && <DIST.ChangeRequests refreshKey={distTick} fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} onChanged={() => setDistTick((t) => t + 1)} />}
+              {p.distribusiApprove && <DIST.ChangeRequests refreshKey={distTick} fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet} onChanged={() => setDistTick((t) => t + 1)} currentUserId={user && user.id} canApproveSelf={!!p.distribusiApproveSelf} selfApproveLimit={+p.maxSelfApproveAmount || 0} />}
             </div>
           )}
 
@@ -1842,7 +1842,7 @@ function FApp() {
           )}
 
           {screen === 'users' && p.manageUsers && (
-            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={!!p.manageUsers} fleet={fleet} businessUnits={businessUnits} />
+            <USERMGMT.UserManagement users={users} setUsers={setUsers} currentId={user.id} roles={roles} onRolesChanged={reloadRoles} canManageRoles={!!p.manageUsers} fleet={fleet} businessUnits={businessUnits} ownerAdmin={user && user.role === 'owner'} />
           )}
 
           <footer className="app-footer">

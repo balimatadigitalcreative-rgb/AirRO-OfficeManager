@@ -73,6 +73,28 @@ async function assertUnitAccessKept({ targetId, deleting, next }) {
   if (holders === 0) throw ApiError.badRequest('Minimal satu admin (Kelola Pengguna) harus punya akses semua unit bisnis.');
 }
 
+// ── SELF-APPROVAL GRANT GUARD (owner-only) ───────────────────────────────────
+// distribusiApproveSelf and its rupiah ceiling (maxSelfApproveAmount) are a deliberate waiver of
+// segregation of duties, so ONLY the owner may change them — even though a GM also holds manageUsers
+// and can edit every other capability. Resolved LIVE from the DB (never the token role), mirroring
+// how the caps themselves are read. Revoking is also gated (a control change in either direction).
+async function actorIsOwner(actor) {
+  if (!actor || !actor.id) return false;
+  const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { role: true } });
+  return !!(u && u.role === 'owner');
+}
+const selfApproveState = (role, perms) => {
+  const e = resolvePerms(role, perms);
+  return { cap: !!e.distribusiApproveSelf, limit: parseInt(e.maxSelfApproveAmount, 10) || 0 };
+};
+async function assertSelfApproveGrantAllowed({ beforeRole, beforePerms, afterRole, afterPerms, actor }) {
+  const b = selfApproveState(beforeRole, beforePerms);
+  const a = selfApproveState(afterRole, afterPerms);
+  if ((b.cap !== a.cap || b.limit !== a.limit) && !(await actorIsOwner(actor))) {
+    throw ApiError.forbidden('Hanya Pemilik yang boleh mengubah izin "Setujui Pengajuan Sendiri" atau batas nominalnya.');
+  }
+}
+
 // Guard: a user's role must reference an existing role in the Role table.
 async function assertRole(role) {
   if (role == null) return;
@@ -108,6 +130,8 @@ async function create({ password, ...rest }, actor) {
   const existing = await prisma.user.findUnique({ where: { username: rest.username } });
   if (existing) throw ApiError.conflict('Username is already taken');
   await assertRole(rest.role);
+  // Owner-only: a new user may only be created WITH self-approval already granted by an owner.
+  await assertSelfApproveGrantAllowed({ beforeRole: rest.role, beforePerms: null, afterRole: rest.role, afterPerms: rest.permissions || null, actor });
   const passwordHash = await bcrypt.hash(password, 10);
   const u = await prisma.user.create({ data: { ...normalize(rest), passwordHash, weakPassword: isWeakPassword(password) }, select: PUBLIC_FIELDS });
   const pub = publicUser(u);
@@ -117,6 +141,17 @@ async function create({ password, ...rest }, actor) {
 async function update(id, { password, ...rest }, actor) {
   const before = await getById(id);
   await assertRole(rest.role);
+  // Owner-only: granting/revoking self-approval (or changing its ceiling) is a control change even
+  // when the rest of the permission edit is allowed for a GM admin. Checked against the resolved
+  // before/after so a GM can still toggle every OTHER capability freely.
+  if ('permissions' in rest || 'role' in rest) {
+    await assertSelfApproveGrantAllowed({
+      beforeRole: before.role, beforePerms: before.permissions,
+      afterRole: 'role' in rest ? rest.role : before.role,
+      afterPerms: 'permissions' in rest ? rest.permissions : before.permissions,
+      actor,
+    });
+  }
   if (rest.username != null) {
     rest.username = normUsername(rest.username);   // case-insensitive
     // Block a rename that would collide with a DIFFERENT user (avoids a raw unique-constraint 500).

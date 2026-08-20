@@ -18,8 +18,8 @@ class ApiError extends Error {
   static unauthorized(message = 'Authentication required') {
     return new ApiError(401, 'UNAUTHORIZED', message);
   }
-  static forbidden(message = 'You do not have permission to do that') {
-    return new ApiError(403, 'FORBIDDEN', message);
+  static forbidden(message = 'You do not have permission to do that', details) {
+    return new ApiError(403, 'FORBIDDEN', message, details);
   }
   static notFound(message = 'Resource not found') {
     return new ApiError(404, 'NOT_FOUND', message);

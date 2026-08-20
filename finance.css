@@ -2742,8 +2742,38 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .cr-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-mut); }
 .cr-meta.cr-rej { color: var(--neg); }
 .cr-meta.cr-ok { color: #159a6b; }
-.cr-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+.cr-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; flex-wrap: wrap; }
 .cr-actions .cr-reject { color: var(--neg); }
+
+/* ── SELF-APPROVAL (segregation-of-duties waiver) — deliberately amber/distinct from a normal approve ── */
+.btn-warn { background: #b45309; color: #fff; border-color: #b45309; }
+.btn-warn:hover { background: #96450a; border-color: #96450a; }
+:root[data-theme="dark"] .btn-warn { background: #d08114; border-color: #d08114; color: #1a1205; }
+.cr-selfbadge, .dist-akind-self, .cd-act-self, .cr-status.self { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: #fff2df; color: #b45309; }
+:root[data-theme="dark"] .cr-selfbadge, :root[data-theme="dark"] .dist-akind-self, :root[data-theme="dark"] .cd-act-self { background: rgba(255,180,60,.18); color: #ffcf8a; }
+.cd-act-self { margin-left: 8px; }
+.cr-meta.cr-self { color: #b45309; font-weight: 700; }
+:root[data-theme="dark"] .cr-meta.cr-self { color: #ffcf8a; }
+.cr-selfnote, .cd-pending-selfnote { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 11.5px; font-weight: 600; color: #b45309; background: #fff8ee; border: 1px solid #f6d9a6; border-radius: 8px; padding: 6px 10px; margin-bottom: 4px; }
+:root[data-theme="dark"] .cr-selfnote, :root[data-theme="dark"] .cd-pending-selfnote { color: #ffcf8a; background: rgba(255,180,60,.08); border-color: rgba(255,180,60,.28); }
+.cr-own-note { display: flex; align-items: center; gap: 6px; justify-content: flex-end; font-size: 12px; font-weight: 700; color: var(--text-mut); margin-top: 2px; }
+.cd-pending-btns { display: flex; gap: 8px; }
+/* Owner-dashboard self-approval oversight card */
+.dist-selfapprove-card { display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin-bottom: 14px; border: 1px solid #f6d9a6; background: #fff8ee; }
+:root[data-theme="dark"] .dist-selfapprove-card { background: rgba(255,180,60,.08); border-color: rgba(255,180,60,.28); }
+.dist-selfapprove-card .dsa-ic { display: inline-flex; color: #b45309; flex-shrink: 0; }
+.dist-selfapprove-card .dsa-body { flex: 1; min-width: 0; }
+.dist-selfapprove-card .dsa-title { font-weight: 800; font-size: 13.5px; color: var(--text); }
+.dist-selfapprove-card .dsa-sub { font-size: 11.5px; color: var(--text-mut); }
+.dist-selfapprove-card .dsa-fig { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; }
+.dist-selfapprove-card .dsa-fig b { font-size: 20px; color: #b45309; line-height: 1; }
+.dist-selfapprove-card .dsa-fig span { font-size: 12px; font-weight: 700; color: var(--text-mut); }
+/* User-editor: owner-only cap tag + self-approval ceiling field */
+.cap-owneronly { font-size: 10px; font-weight: 700; color: #7c3aed; background: #f3ecfd; border-radius: 999px; padding: 1px 6px; margin-left: 6px; }
+:root[data-theme="dark"] .cap-owneronly { background: rgba(124,58,237,.18); color: #c4b0f8; }
+.perm-selflimit { margin: 8px 4px 4px; padding: 10px 12px; border: 1px dashed #f6d9a6; border-radius: 10px; background: #fff8ee; }
+:root[data-theme="dark"] .perm-selflimit { background: rgba(255,180,60,.06); border-color: rgba(255,180,60,.24); }
+.perm-selflimit .fld { max-width: 220px; }
 
 /* Correction form: the price field when the user lacks distribusiHargaMaster. */
 .amt-input.is-locked { background: var(--surface-2, #f2f5f6); opacity: .75; cursor: not-allowed; }

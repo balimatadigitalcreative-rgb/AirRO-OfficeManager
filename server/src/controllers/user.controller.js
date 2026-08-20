@@ -11,8 +11,10 @@ const createSchema = z.object({
   sub: z.string().max(120).optional(),
   color: z.string().max(20).optional(),
   active: z.boolean().optional(),
-  // Per-user capability override (object of booleans); null/omit = role defaults.
-  permissions: z.record(z.boolean()).nullable().optional(),
+  // Per-user capability override; boolean caps plus a few NUMERIC knobs carried in the same blob
+  // (maxLookbackDays view-window widening, maxSelfApproveAmount self-approval ceiling). null/omit =
+  // role defaults.
+  permissions: z.record(z.union([z.boolean(), z.number()])).nullable().optional(),
   // Distribusi fleet access: 'all' or a list of fleet names.
   fleetScope: z.union([z.literal('all'), z.array(z.string().max(60)).max(50)]).optional(),
   // Business-unit access: 'all' or a list of businessUnitIds.

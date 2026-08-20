@@ -221,6 +221,13 @@ function deriveDistribusiCaps(perms, role) {
   // Approving correction/void requests: a plain input/koreksi user may REQUEST a change but must never
   // gain approval by derivation (least-privilege) — yet owner/GM get it by default.
   if (p.distribusiApprove === undefined) p.distribusiApprove = isOwnerGm;
+  // SELF-APPROVAL — lifts the "you cannot approve your own submission" segregation rule (correction/
+  // void + disputes). Deliberately NEVER defaulted true, not even for owner/GM: it is a conscious
+  // waiver the owner grants per-user, so an absent value is ALWAYS false. It does NOT grant approval by
+  // itself — the holder still needs distribusiApprove. Owner-only to grant (enforced in user.service).
+  if (p.distribusiApproveSelf === undefined) p.distribusiApproveSelf = false;
+  // maxSelfApproveAmount (a rupiah ceiling carried in the blob like maxLookbackDays; absent/0 =
+  // unlimited) is NOT a boolean cap — it rides through untouched and is read by actorSnap.
   // BULK permanent deletion of transactions (owner/GM tier) — irreversible except by owner restore
   // from the audit snapshot; never derived from the legacy flag.
   if (p['distribusi.transaksi.hapus'] === undefined) p['distribusi.transaksi.hapus'] = isOwnerGm;

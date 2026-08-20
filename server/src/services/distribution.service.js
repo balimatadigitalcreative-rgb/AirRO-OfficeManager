@@ -185,7 +185,7 @@ async function deleteType(id, reassignTo, actor) {
 // actor = req.user ({ id, role, username }). We snapshot id+role (+name from DB) so
 // the trail is historical and can never be forged from the request body.
 async function actorSnap(actor) {
-  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null, actorStaff: false, canPrice: false };
+  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null, actorStaff: false, canPrice: false, canApproveSelf: false, selfApproveLimit: 0 };
   if (actor && actor.id) {
     const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true, role: true, permissions: true } });
     if (u) {
@@ -196,14 +196,41 @@ async function actorSnap(actor) {
       // May this actor change a PRICE? Resolved from the DB (never from the token/client body) —
       // gates the unitPrice field of a correction, both at request and at approve time.
       out.canPrice = !!perms.distribusiHargaMaster;
+      // SELF-APPROVAL — read LIVE from the DB (never the token): may this actor approve their OWN
+      // submission, and up to what rupiah ceiling (0 = unlimited). Both gate the approval doors below.
+      out.canApproveSelf = !!perms.distribusiApproveSelf;
+      const lim = parseInt(perms.maxSelfApproveAmount, 10);
+      out.selfApproveLimit = Number.isFinite(lim) && lim > 0 ? lim : 0;
     }
   }
   return out;
 }
 // Append one immutable audit row. `snap` is the resolved actor snapshot. `fleetId`
-// tags the event's fleet ('' = global/cross-fleet).
-async function logAudit(kind, title, detail, snap, fleetId) {
-  return prisma.distAuditLog.create({ data: { kind, title, detail: detail || '', fleetId: fleetId || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, actorStaff: !!snap.actorStaff } });
+// tags the event's fleet ('' = global/cross-fleet). `selfApproved` flags the event as a
+// self-approval so the "Persetujuan mandiri" audit filter + owner-dashboard count can find it.
+async function logAudit(kind, title, detail, snap, fleetId, selfApproved) {
+  return prisma.distAuditLog.create({ data: { kind, title, detail: detail || '', fleetId: fleetId || '', actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, actorStaff: !!snap.actorStaff, selfApproved: !!selfApproved } });
+}
+
+// ── SELF-APPROVAL GATE (segregation of duties) ───────────────────────────────
+// Normally an approver may NOT decide their own submission. This resolves whether `snap` is allowed
+// to self-approve a record worth `amount` rupiah, throwing the RIGHT ApiError when not. It is called
+// only once we already know the actor IS the "self" (requester / original txn handler).
+//   • without distribusiApproveSelf → forbidden (the classic rule, unchanged for everyone else);
+//   • with the cap but over the per-approver ceiling (maxSelfApproveAmount) → forbidden, and the
+//     request stays pending for another approver;
+//   • with the cap and within the ceiling → allowed. `noun` names the flow for the message.
+function assertSelfApprovalAllowed(snap, amount, noun) {
+  if (!snap.canApproveSelf) {
+    throw ApiError.forbidden(`Anda tidak boleh menyetujui ${noun} Anda sendiri.`);
+  }
+  const limit = snap.selfApproveLimit || 0;
+  if (limit > 0 && Math.abs(amount || 0) > limit) {
+    throw ApiError.forbidden(
+      `Nominal (${Math.abs(amount || 0)}) melebihi batas persetujuan mandiri Anda (${limit}) — pengajuan menunggu penyetuju lain.`,
+      { selfApproveLimit: limit, amount: Math.abs(amount || 0), overSelfApproveLimit: true },
+    );
+  }
 }
 
 // ── VIEW-WINDOW ENFORCEMENT (security-critical) ─────────────────────────────
@@ -1115,6 +1142,7 @@ function disputeClient(d) {
     reversalOf: d.reversalOf || null, reversedById: d.reversedById || null,
     raisedByName: d.raisedByName || null, raisedByRole: d.raisedByRole || null,
     approvedByName: d.approvedByName || null, approvedAt: d.approvedAt ? new Date(d.approvedAt).getTime() : null,
+    selfApproved: !!d.selfApproved,
     createdAt: d.createdAt ? new Date(d.createdAt).getTime() : null,
   };
 }
@@ -1145,8 +1173,13 @@ async function raiseDispute(transactionId, body, actor) {
   const txn = await prisma.distTransaction.findUnique({ where: { id: transactionId }, include: { customer: { select: { id: true, name: true, code: true, armada: true } } } });
   if (!txn || !txn.customer) throw ApiError.notFound('Transaksi tidak ditemukan.');
   if (!fleetAllows(actor, txn.customer.armada)) throw ApiError.notFound('Transaksi tidak ditemukan.');
-  // The staff who handled the transaction can never dispute their OWN transaction (server-enforced).
-  if (actor && actor.id && txn.actorId && actor.id === txn.actorId) throw ApiError.forbidden('Anda tidak boleh mengajukan sengketa atas transaksi Anda sendiri.');
+  const snap = await actorSnap(actor);
+  // The staff who handled the transaction can never dispute their OWN transaction — UNLESS the owner
+  // granted distribusiApproveSelf (so a lone operator isn't deadlocked on their own nota). Raising
+  // moves no money, so no ceiling here; the ceiling bites at APPROVE time (approveDispute).
+  if (actor && actor.id && txn.actorId && actor.id === txn.actorId && !snap.canApproveSelf) {
+    throw ApiError.forbidden('Anda tidak boleh mengajukan sengketa atas transaksi Anda sendiri.');
+  }
   // Alasan is OPTIONAL — an empty/absent/invalid reason is stored as '' (shown as "—"), never a
   // fake default. Only Catatan is mandatory (it is the evidence trail).
   const reason = DISPUTE_REASONS.includes(body.reason) ? body.reason : '';
@@ -1170,7 +1203,6 @@ async function raiseDispute(transactionId, body, actor) {
   let staffUserId = body.staffUserId ? String(body.staffUserId) : (txn.actorId || null);
   let staffName = body.staffName ? String(body.staffName).slice(0, 120) : (txn.actorName || null);
   if (staffUserId) { const su = await prisma.user.findUnique({ where: { id: staffUserId }, select: { name: true } }); if (su) staffName = su.name; else staffUserId = null; }
-  const snap = await actorSnap(actor);
   const created = await prisma.distTransactionDispute.create({ data: {
     transactionId, customerId: txn.customerId, fleetId: txn.fleetId || txn.customer.armada || '',
     status: 'disengketakan', resolution, reason, disputedAmount, customerClaimAmount: claim, note,
@@ -1192,17 +1224,21 @@ async function approveDispute(id, body, actor) {
   if (!fleetAllows(actor, d.fleetId)) throw ApiError.notFound('Sengketa tidak ditemukan.');
   if (d.status !== 'disengketakan') throw ApiError.badRequest('Sengketa ini sudah diputuskan.');
   const txn = await prisma.distTransaction.findUnique({ where: { id: d.transactionId }, select: { actorId: true } });
-  if (txn && txn.actorId && actor && actor.id === txn.actorId) throw ApiError.forbidden('Anda tidak boleh menyetujui sengketa atas transaksi Anda sendiri.');
+  const snap = await actorSnap(actor);
+  // SEGREGATION OF DUTIES — the approver may not resolve a dispute over a transaction THEY handled,
+  // UNLESS the owner granted distribusiApproveSelf (and the disputed rupiah is within their ceiling).
+  // The disputed amount is the money moved off receivables, so that is what the ceiling gates.
+  const isSelf = !!(txn && txn.actorId && actor && actor.id === txn.actorId);
+  if (isSelf) assertSelfApprovalAllowed(snap, d.disputedAmount, 'sengketa');
   const resolution = DISPUTE_RESOLUTIONS.includes(body && body.resolution) ? body.resolution : d.resolution;
   if (resolution === 'investigasi') throw ApiError.badRequest('Pilih penyelesaian (staf atau perusahaan) sebelum menyetujui.');
   const status = resolution === 'staf' ? 'tidak_diakui' : 'kerugian';
-  const snap = await actorSnap(actor);
   // LIVE POSTING: an approved dispute changes the parent bon's EFFECTIVE figure (a `tidak_diakui`
   // reverses revenue; a `kerugian` moves it to Beban Kerugian Piutang), so re-project that txn with an
   // append-only adjusting entry + the AR reclass, in the same transaction (flag-gated).
   const updated = await prisma.$transaction(async (tx) => {
     const u = await tx.distTransactionDispute.update({ where: { id }, data: {
-      status, resolution, approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(),
+      status, resolution, approvedById: snap.actorId, approvedByName: snap.actorName, approvedAt: new Date(), selfApproved: isSelf,
       // The dispute record IS the loss/liability record (no separate table) — self-link for the trail.
       staffLiabilityId: resolution === 'staf' ? id : null, lossId: resolution === 'perusahaan' ? id : null,
     }, include: { customer: { select: { name: true, code: true } } } });
@@ -1212,7 +1248,7 @@ async function approveDispute(id, body, actor) {
     }
     return u;
   });
-  await logAudit('koreksi', `Setujui sengketa (${status}): ${d.customer ? d.customer.name : ''}`, `selisih ${d.disputedAmount} · ${resolution}${d.staffName ? ' · staf ' + d.staffName : ''}`, snap, d.fleetId);
+  await logAudit('koreksi', `Setujui sengketa (${status})${isSelf ? ' [MANDIRI]' : ''}: ${d.customer ? d.customer.name : ''}`, `selisih ${d.disputedAmount} · ${resolution}${d.staffName ? ' · staf ' + d.staffName : ''}${isSelf ? ' · PERSETUJUAN MANDIRI' : ''}`, snap, d.fleetId, isSelf);
   return disputeClient(updated);
 }
 
@@ -1546,6 +1582,7 @@ async function changeRequestClient(req, txnMaybe) {
     requestedById: req.requestedById || null,
     decidedBy: req.decidedByName ? { name: req.decidedByName, role: req.decidedByRole || null } : null,
     decisionNote: req.decisionNote || '', decidedAt: req.decidedAt ? new Date(req.decidedAt).getTime() : null,
+    selfApproved: !!req.selfApproved,
     createdAt: req.createdAt ? new Date(req.createdAt).getTime() : null,
   };
 }
@@ -1664,13 +1701,15 @@ async function decideChangeRequest(id, decision, body, actor) {
   if (!req) throw ApiError.notFound('Pengajuan tidak ditemukan.');
   if (!fleetAllows(actor, req.fleetId)) throw ApiError.notFound('Pengajuan tidak ditemukan.');   // out of scope
   if (req.status !== 'pending') throw ApiError.badRequest('Pengajuan ini sudah diputuskan.');
-  // A requester can NEVER approve their own request — even holding distribusiApprove.
-  if (decision === 'approve' && req.requestedById && actor && req.requestedById === actor.id) {
-    throw ApiError.forbidden('Anda tidak boleh menyetujui pengajuan Anda sendiri.');
-  }
   const snap = await actorSnap(actor);
   const txn = await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true } } } });
   if (!txn) throw ApiError.notFound('Transaction not found');
+  // SEGREGATION OF DUTIES — a requester may not approve their OWN request, UNLESS the owner granted
+  // distribusiApproveSelf (and the txn is within their self-approval ceiling). Rejecting your own
+  // request is always fine (it changes nothing). `selfApproved` is stamped on the record + audit so
+  // the waiver is never silent. Enforced here regardless of what the client showed.
+  const isSelf = !!(decision === 'approve' && req.requestedById && actor && req.requestedById === actor.id);
+  if (isSelf) assertSelfApprovalAllowed(snap, txn.amount, 'pengajuan');
 
   if (decision === 'reject') {
     const note = String(body.note || '').trim();
@@ -1749,7 +1788,7 @@ async function decideChangeRequest(id, decision, body, actor) {
         actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, byStaff: false } });
     }
     await db.distChangeRequest.update({ where: { id }, data: {
-      status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(),
+      status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelf,
     } });
     // LIVE POSTING: an approved correction/void APPENDS an adjusting journal that moves this txn's
     // journals to its new effective figure (a void → fully reversed) — the original entry is never
@@ -1768,7 +1807,7 @@ async function decideChangeRequest(id, decision, body, actor) {
     ? ` · METODE ${oldVals.method} → ${newVals.method} (sisa bon ${newVals.method === 'bon' ? '+' : '−'}${Math.abs(newVals.method === 'bon' ? newVals.amount : oldVals.amount)})` : '';
   const arsip = txn.legacy ? ' (ARSIP)' : '';   // archive corrections change historical figures — flag them
   const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}${priceLine}${methodLine}`;
-  await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}${arsip}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)}${arsip} · ${detail} · ${req.reason} · oleh ${snap.actorName}`, snap, req.fleetId);
+  await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}${arsip}${isSelf ? ' [MANDIRI]' : ''}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)}${arsip} · ${detail} · ${req.reason} · oleh ${snap.actorName}${isSelf ? ' · PERSETUJUAN MANDIRI' : ''}`, snap, req.fleetId, isSelf);
   const fresh = await prisma.distChangeRequest.findUnique({ where: { id } });
   const out = await changeRequestClient(fresh);
   return { ...out, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
@@ -2481,6 +2520,27 @@ async function resolveDashWindow(user, query) {
   return { from: c.from, to: c.to, period, canHistory, clamped: c.clamped, win, reqFrom: from, reqTo: to };
 }
 
+// SELF-APPROVAL monthly roll-up for the owner dashboard card ("Persetujuan mandiri bulan ini: n ·
+// Rp X"). Counts + sums every self-approved decision in the month of `to`, fleet-scoped. Amounts:
+// a correction/void = the transaction's value; a dispute = the disputed rupiah moved off receivables.
+// Self-approvals are rare, so fetching the flagged rows and filtering by month in JS is cheap.
+async function selfApproveMonthStats(user, qFleet, to) {
+  const monthStart = to.slice(0, 8) + '01';
+  const fleetFilter = fleetWhere(user, 'fleetId', qFleet);
+  const inMonth = (dt) => { if (!dt) return false; const d = new Date(dt).toISOString().slice(0, 10); return d >= monthStart && d <= to; };
+  let count = 0, total = 0;
+  const crs = await prisma.distChangeRequest.findMany({ where: { selfApproved: true, status: 'approved', ...fleetFilter }, select: { transactionId: true, decidedAt: true } });
+  const monthCrs = crs.filter((r) => inMonth(r.decidedAt));
+  if (monthCrs.length) {
+    const txns = await prisma.distTransaction.findMany({ where: { id: { in: [...new Set(monthCrs.map((r) => r.transactionId))] } }, select: { id: true, amount: true } });
+    const amt = {}; txns.forEach((t) => { amt[t.id] = Number(t.amount) || 0; });
+    monthCrs.forEach((r) => { count++; total += Math.abs(amt[r.transactionId] || 0); });
+  }
+  const disp = await prisma.distTransactionDispute.findMany({ where: { selfApproved: true, ...fleetFilter }, select: { disputedAmount: true, approvedAt: true } });
+  disp.filter((r) => inMonth(r.approvedAt)).forEach((r) => { count++; total += Math.abs(Number(r.disputedAmount) || 0); });
+  return { count, total };
+}
+
 async function dashboardSummary(user, query) {
   const q = query || {};
   const dw = await resolveDashWindow(user, q);
@@ -2572,8 +2632,12 @@ async function dashboardSummary(user, query) {
   // otherwise it (and the all-time billing-reminders list) is withheld so the UI hides the card
   // rather than showing a truncated number. The window KPIs above stay visible.
   const reminders = (win.canAll || win.canSisaBon) ? (await billingReminders(user, qFleet, to)).data : [];
+  // Self-approval oversight — always month-to-date (of `to`), independent of the selected window. The
+  // owner card only renders when there is something to show; a staff account showing here is the alarm.
+  const selfApproveMonth = await selfApproveMonthStats(user, qFleet, to);
   return {
     date: to, from, to, period, canHistory, periodDays: series.length,
+    selfApproveMonth,   // { count, total } — "Persetujuan mandiri bulan ini" owner-dashboard card
     effectiveFrom: win.unlimited ? null : win.from, effectiveTo: win.unlimited ? null : win.to, clamped: !!clamped,
     viewWindow: { unlimited: win.unlimited, from: win.from, to: win.to, canSisaBon: win.canSisaBon, canAll: win.canAll },
     periodQty, periodIn,            // headline KPIs over the window (same source as chart/recent/top)

@@ -356,7 +356,7 @@ function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero, sub
   );
 }
 
-function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInput, onOpenCustomers, onOpenTransactions, today, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistDashboard({ refreshKey, staffMode, canInput, canHistory, isOwner, onQuickInput, onOpenCustomers, onOpenTransactions, today, fleetScope, fleet, distFleet, setDistFleet }) {
   const [sum, setSum] = uSx(null);
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
@@ -465,6 +465,20 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, onQuickInp
               sub={<span className="dist-kpi-cap">{trD('dist.allTimeSub')} · {fleetCaption}</span>} />
             <Kpi icon="IconTx" tile="#EAF1F4" fg="#5E7A88" value={sum.count != null ? numX(sum.count) : null} label={trD('dist.kpiTxn')} pill={periodLabel} pillCls="blue" />
           </div>
+
+          {/* SELF-APPROVAL OVERSIGHT (owner-only) — month-to-date count + rupiah of decisions approved by
+              their own requester. Shown only when it happened: a nonzero figure under a staff name is the
+              alarm the whole feature exists to raise. Renders independent of the selected window. */}
+          {isOwner && sum.selfApproveMonth && sum.selfApproveMonth.count > 0 && (
+            <div className="card dist-selfapprove-card">
+              <span className="dsa-ic"><IconWarn s={18} /></span>
+              <div className="dsa-body">
+                <div className="dsa-title">{trD('dist.selfApproveTitle')}</div>
+                <div className="dsa-sub">{trD('dist.selfApproveSub')}</div>
+              </div>
+              <div className="dsa-fig"><b className="tnum">{numX(sum.selfApproveMonth.count)}</b><span className="tnum">{rpFull(sum.selfApproveMonth.total)}</span></div>
+            </div>
+          )}
 
           {(sum.reminders || []).length > 0 && (
             <div className="card dist-card dist-remind-card">
@@ -3414,7 +3428,7 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   );
 }
 
-function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canVoid, canApprove, currentUserId, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onGoApprovals, onOpenLoss, userName, nav, histTick }) {
+function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canVoid, canApprove, canApproveSelf, selfApproveLimit, currentUserId, canDelete, canLegacyImport, canBonAdjust, canPenyesuaian, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onGoApprovals, onOpenLoss, userName, nav, histTick }) {
   const clParam0 = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
   const [view, setView] = uSx(() => (clParam0('c', '') ? 'detail' : 'list'));   // ?c=<id> in the URL → open that detail (deep-link / refresh)
   const [custs, setCusts] = uSx(null);
@@ -4042,14 +4056,20 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   <div className="cd-pending-head"><IconClock s={13} />{trD(t.pendingRequest.kind === 'void' ? 'cd.pendVoidTitle' : 'cd.pendCorrTitle')}</div>
                   <div className="cd-pending-meta">{trD('cr.requestedBy', { who: t.pendingRequest.requestedByName || '—' })}{t.pendingRequest.createdAt ? ' · ' + fmtDT(t.pendingRequest.createdAt) : ''}</div>
                   {t.pendingRequest.reason ? <div className="cd-pending-reason"><IconInvoice s={12} />{t.pendingRequest.reason}</div> : null}
-                  {canApprove && (
-                    (t.pendingRequest.requestedById && currentUserId && t.pendingRequest.requestedById === currentUserId)
-                      ? <div className="cd-pending-own">{trD('cd.pendOwn')}</div>
-                      : <div className="cd-pending-act">
+                  {canApprove && (() => {
+                    const own = !!(t.pendingRequest.requestedById && currentUserId && t.pendingRequest.requestedById === currentUserId);
+                    // Own request + NO self-approval cap → the classic block (server enforces it too).
+                    if (own && !canApproveSelf) return <div className="cd-pending-own">{trD('cd.pendOwn')}</div>;
+                    return (
+                      <div className="cd-pending-act">
+                        {own && <div className="cd-pending-selfnote"><IconWarn s={12} />{trD('cd.selfApproveNote')}{selfApproveLimit > 0 ? ' ' + trD('cd.selfApproveLimit', { amt: rpFull(selfApproveLimit) }) : ''}</div>}
+                        <div className="cd-pending-btns">
                           <button type="button" className="btn btn-ghost btn-sm danger" disabled={crBusy} onClick={() => { setCrRejFor({ id: t.pendingRequest.id }); setCrRejNote(''); }}><IconClose s={13} />{trD('cr.reject')}</button>
-                          <button type="button" className="btn btn-primary btn-sm" disabled={crBusy} onClick={() => approveChangeReq(t.pendingRequest)}><IconCheck s={13} />{trD('cr.approve')}</button>
+                          <button type="button" className={'btn btn-sm ' + (own ? 'btn-warn' : 'btn-primary')} disabled={crBusy} onClick={() => approveChangeReq(t.pendingRequest)}><IconCheck s={13} />{own ? trD('cd.selfApproveBtn') : trD('cr.approve')}</button>
                         </div>
-                  )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
               <div className="cd-txn-detail-act">
@@ -4087,6 +4107,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
       adjustments.forEach((a) => { activity.push({ at: a.createdAt, t: trD('cd.actAdjust', { kind: a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon') }) + ' · ' + (a.kind === 'bon' ? rpFull(a.before) + '→' + rpFull(a.after) : numX(a.before) + '→' + numX(a.after)), who: a.createdByName, tone: 'adj' }); if (a.approvedAt) activity.push({ at: a.approvedAt, t: trD('cd.actAdjustApproved'), who: a.approvedByName, tone: 'adj' }); });
       (d.priceAdjustments || []).forEach((b) => activity.push({ at: b.createdAt, t: trD('cd.actPrice') + ' · ' + rpFull(b.oldPrice) + '→' + rpFull(b.newPrice), who: b.actorName, tone: 'bon' }));
       txAll.filter((t) => t.voided).forEach((t) => activity.push({ at: t.voidedAt, t: trD('cd.actVoid') + ' · ' + txnCode(t), who: t.voidedByName, tone: 'rev' }));
+      // Self-approved disputes surface here with the badge (approver == the txn's original handler).
+      txAll.filter((t) => t.dispute && t.dispute.selfApproved && t.dispute.approvedAt).forEach((t) => activity.push({ at: t.dispute.approvedAt, t: trD('cd.actSelfApprove') + ' · ' + txnCode(t), who: t.dispute.approvedByName, tone: 'rev', self: true }));
     }
     activity.sort((a, b) => (b.at || 0) - (a.at || 0));
     return (
@@ -4306,7 +4328,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                 <p className="cd-muted">{trD('cd.gmOnly')}</p>
                 {activity.length === 0 ? <ListState state="empty" emptyText={trD('cd.activityTitle')} /> : (
                   <div className="cd-activity">{activity.map((ev, i) => (
-                    <div key={i} className="cd-act-row"><span className={'cd-act-dot ' + (ev.tone || '')} /><div className="cd-act-body"><div className="cd-act-t">{ev.t}</div><div className="cd-muted">{fmtDateShort(ev.at)}{ev.at ? ' · ' + hhmm(ev.at) : ''}{ev.who ? ' · ' + ev.who : ''}</div></div></div>
+                    <div key={i} className="cd-act-row"><span className={'cd-act-dot ' + (ev.tone || '')} /><div className="cd-act-body"><div className="cd-act-t">{ev.t}{ev.self ? <span className="cd-act-self">{trD('cr.selfApprovedBadge')}</span> : null}</div><div className="cd-muted">{fmtDateShort(ev.at)}{ev.at ? ' · ' + hhmm(ev.at) : ''}{ev.who ? ' · ' + ev.who : ''}</div></div></div>
                   ))}</div>
                 )}
               </div>
@@ -4799,9 +4821,12 @@ function DistAudit({ canAudit, refreshKey, onChanged }) {
   const cleanDetail = (d) => String(d || '').replace(/ · SNAPSHOT \{[\s\S]*\}$/, '');
   const doRestore = (a) => { if (!window.confirm(trD('tx.restoreConfirm'))) return; window.API.distribusi.transactions.bulkRestore(a.id).then((r) => { setRestored((p) => ({ ...p, [a.id]: (r && r.data && r.data.restored) || 0 })); setToast(trD('tx.bulkUndone', { n: (r && r.data && r.data.restored) || 0 })); setTimeout(() => setToast(''), 3000); reload(); if (onChanged) onChanged(); }).catch((e) => { setToast((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); setTimeout(() => setToast(''), 3500); }); };
 
-  const kindChips = [['all', trD('dist.fAll')], ['koreksi', trD('dist.akKoreksi')], ['harga', trD('dist.akHarga')], ['input', trD('dist.akInput')], ['impor', trD('dist.akImpor')], ['pelanggan', trD('dist.akPelanggan')], ['akses', trD('dist.akAkses')], ['batal-massal', trD('dist.akBatalMassal')], ['arsip-massal', trD('dist.akArsipMassal')], ['hapus-massal', trD('dist.akHapusMassal')]];
+  // "Persetujuan mandiri" is a cross-kind flag (a self-approval is stored on koreksi/batal rows), so it
+  // filters on a.selfApproved rather than a.kind — every self-approval, with its actor/amount/customer.
+  const kindChips = [['all', trD('dist.fAll')], ['self', trD('dist.akMandiri')], ['koreksi', trD('dist.akKoreksi')], ['harga', trD('dist.akHarga')], ['input', trD('dist.akInput')], ['impor', trD('dist.akImpor')], ['pelanggan', trD('dist.akPelanggan')], ['akses', trD('dist.akAkses')], ['batal-massal', trD('dist.akBatalMassal')], ['arsip-massal', trD('dist.akArsipMassal')], ['hapus-massal', trD('dist.akHapusMassal')]];
   const filtered = (rows || []).filter((a) => {
-    if (kind !== 'all' && a.kind !== kind) return false;
+    if (kind === 'self') { if (!a.selfApproved) return false; }
+    else if (kind !== 'all' && a.kind !== kind) return false;
     if (q && !((a.title || '') + (a.detail || '') + (a.actorName || '')).toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
@@ -4827,6 +4852,7 @@ function DistAudit({ canAudit, refreshKey, onChanged }) {
               <div className="dist-audit-body">
                 <div className="dist-audit-head">
                   <span className={`dist-akind ${m.cls}`}>{trD(m.k)}</span>
+                  {a.selfApproved ? <span className="dist-akind-self">{trD('dist.akMandiri')}</span> : null}
                   <span className="dist-audit-title">{a.title}</span>
                   {a.actorStaff ? <span className="dist-audit-staff">{trD('dist.olehStaff')}</span> : null}
                 </div>
@@ -6586,7 +6612,7 @@ function KerugianDetailModal({ item, onClose, onProof }) {
 // Approvers (distribusiApprove) see pending correction/void requests here — transaction ref,
 // customer, CURRENT vs REQUESTED input values, the recomputed delta, reason and requester — and
 // Setujui (apply atomically) / Tolak (rejection needs a note). Lives inside the Requests screen.
-function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistFleet, onChanged, currentUserId, canApproveSelf, selfApproveLimit }) {
   const [reqs, setReqs] = uSx(null);
   const [loadErr, setLoadErr] = uSx('');   // real load failure → message + "Coba lagi" (never a silent [])
   const [tab, setTab] = uSx('pending');
@@ -6660,6 +6686,7 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
                     <span className="cr-ref">{r.txnRef}</span>
                     <span className="cr-cust">{r.customerCode ? r.customerCode + ' · ' : ''}{r.customerName}</span>
                     <span style={{ flex: 1 }} />
+                    {r.selfApproved && <span className="cr-selfbadge" title={trD('cr.selfApprovedHint')}><IconWarn s={11} />{trD('cr.selfApprovedBadge')}</span>}
                     {r.status !== 'pending' && statusBadge(r.status)}
                   </div>
                   <div className="cr-amounts">
@@ -6680,13 +6707,21 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
                   <div className="cr-meta"><IconInvoice s={12} />{r.reason}</div>
                   <div className="cr-meta cr-by">{trD('cr.requestedBy', { who: r.requestedBy ? r.requestedBy.name : '—' })}{r.createdAt ? ' · ' + fmtDT(r.createdAt) : ''}</div>
                   {r.status === 'rejected' && r.decisionNote && <div className="cr-meta cr-rej"><IconClose s={12} />{trD('cr.rejectedNote', { note: r.decisionNote })}{r.decidedBy ? ' · ' + r.decidedBy.name : ''}</div>}
-                  {r.status === 'approved' && r.decidedBy && <div className="cr-meta cr-ok"><IconCheck s={12} />{trD('cr.approvedBy', { who: r.decidedBy.name })}</div>}
-                  {r.status === 'pending' && (
-                    <div className="cr-actions">
-                      <button type="button" className="btn btn-ghost btn-sm cr-reject" disabled={busy} onClick={() => { setRejFor(r); setRejNote(''); }}><IconClose s={14} />{trD('cr.reject')}</button>
-                      <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => approve(r)}><IconCheck s={14} />{trD('cr.approve')}</button>
-                    </div>
-                  )}
+                  {r.status === 'approved' && r.decidedBy && <div className={'cr-meta ' + (r.selfApproved ? 'cr-self' : 'cr-ok')}><IconCheck s={12} />{r.selfApproved ? trD('cr.approvedBySelf', { who: r.decidedBy.name }) : trD('cr.approvedBy', { who: r.decidedBy.name })}</div>}
+                  {r.status === 'pending' && (() => {
+                    const own = !!(r.requestedById && currentUserId && r.requestedById === currentUserId);
+                    // Own request without the waiver → no approve button, just the reason why (server enforces).
+                    if (own && !canApproveSelf) {
+                      return <div className="cr-own-note"><IconWarn s={13} />{trD('cd.pendOwn')}</div>;
+                    }
+                    return (
+                      <div className="cr-actions">
+                        {own && <div className="cr-selfnote"><IconWarn s={12} />{trD('cd.selfApproveNote')}{selfApproveLimit > 0 ? ' ' + trD('cd.selfApproveLimit', { amt: rpFull(selfApproveLimit) }) : ''}</div>}
+                        <button type="button" className="btn btn-ghost btn-sm cr-reject" disabled={busy} onClick={() => { setRejFor(r); setRejNote(''); }}><IconClose s={14} />{trD('cr.reject')}</button>
+                        <button type="button" className={'btn btn-sm ' + (own ? 'btn-warn' : 'btn-primary')} disabled={busy} onClick={() => approve(r)}><IconCheck s={14} />{own ? trD('cd.selfApproveBtn') : trD('cr.approve')}</button>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

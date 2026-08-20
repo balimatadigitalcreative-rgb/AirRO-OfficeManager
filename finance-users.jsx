@@ -61,6 +61,9 @@ const CAPS = [
   ['distribusiBonAdjust', 'distribusi', 'Pelunasan/Kerugian', 'Pelunasan tidak diterima + laporan kerugian.', 2],
   ['distribusiPenyesuaian', 'distribusi', 'Ajukan Penyesuaian', 'Mengajukan penyesuaian galon/bon (butuh persetujuan).', 2],
   ['distribusiApprove', 'distribusi', 'Setujui Perubahan', 'Menyetujui koreksi/pembatalan distribusi.', 2],
+  // Owner-only waiver of segregation of duties: approve your OWN correction/void/dispute. Needs
+  // distribusiApprove to mean anything; every self-approval is badged + logged. Only Pemilik may grant.
+  ['distribusiApproveSelf', 'distribusi', 'Setujui Pengajuan Sendiri', 'Menyetujui koreksi/pembatalan/sengketa yang Anda ajukan sendiri — pelonggaran pemisahan tugas. Hanya Pemilik yang boleh memberi; setiap persetujuan mandiri ditandai & dicatat.', 3, { destructive: true, ownerOnly: true, dependsOn: 'distribusiApprove' }],
   ['distribusiLegacyImport', 'distribusi', 'Impor Riwayat (arsip)', 'Mengimpor riwayat transaksi lama (arsip).', 2],
   ['distribusiVoid', 'distribusi', 'Batalkan Transaksi', 'Membatalkan transaksi distribusi.', 3, { destructive: true }],
   ['distribusiCustomerDelete', 'distribusi', 'Hapus/Nonaktifkan Pelanggan', 'Menghapus atau menonaktifkan pelanggan.', 3, { destructive: true }],
@@ -92,7 +95,7 @@ const CAPS = [
   ['dataWipe', 'admin', 'Hapus Data (berbahaya)', 'Menghapus data terpilih secara permanen.', 3, { destructive: true }],
 ];
 const CAP_META = {};
-CAPS.forEach(([key, module, label, desc, tier, opt]) => { CAP_META[key] = { key, module, label, desc, tier, destructive: !!(opt && opt.destructive), dependsOn: opt && opt.dependsOn }; });
+CAPS.forEach(([key, module, label, desc, tier, opt]) => { CAP_META[key] = { key, module, label, desc, tier, destructive: !!(opt && opt.destructive), ownerOnly: !!(opt && opt.ownerOnly), dependsOn: opt && opt.dependsOn }; });
 // Caps that are togglable in the editor (order preserved within a module by tier then declaration).
 const EDITABLE_KEYS = CAPS.map((c) => c[0]);
 const capsFor = (moduleId) => EDITABLE_KEYS.filter((k) => CAP_META[k].module === moduleId).sort((a, b) => CAP_META[a].tier - CAP_META[b].tier);
@@ -104,16 +107,20 @@ EDITABLE_KEYS.forEach((k) => { const dep = CAP_META[k].dependsOn; if (dep) (DEPE
 function editablePerms(raw) { const { kasbonView: _k, gudangKelola: _g, distribusi: _d, kasbon: _kb, ...p } = FS.normKasbon(raw || {}); return p; }
 
 // ── PERMISSION EDITOR — module groups, risk order, destructive block, tri-state, dependency handling ──
-function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note }) {
+function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note, ownerAdmin }) {
   const perms = value || {};
   const [open, setOpen] = uSu(() => { const o = {}; CAP_MODULES.forEach((m) => { o[m.id] = false; }); return o; });
   const isOn = (k) => !!perms[k];
   const isDrift = (k) => roleDefaults && (!!perms[k] !== !!roleDefaults[k]);
   const setMany = (changes) => onChange({ ...perms, ...changes });
+  // Owner-only caps (the self-approval waiver) are LOCKED for a non-owner admin — visible but not
+  // togglable — so a GM sees the control yet cannot grant it (also enforced server-side).
+  const ownerLocked = ownerAdmin ? [] : EDITABLE_KEYS.filter((k) => CAP_META[k].ownerOnly);
+  const lockedAll = [...(lockedKeys || []), ...ownerLocked];
   // Toggle a cap; enabling an action auto-enables its view dependency; disabling a view is allowed but
   // flagged. Returns the set of auto-enabled view keys (for the "Otomatis mengaktifkan" note).
   const toggle = (k) => {
-    if ((lockedKeys || []).includes(k) && isOn(k)) return;   // never strip a locked cap
+    if (lockedAll.includes(k) && isOn(k)) return;   // never strip a locked cap
     const next = { ...perms, [k]: !isOn(k) };
     const auto = [];
     if (!isOn(k)) { let d = CAP_META[k].dependsOn; while (d && !next[d]) { next[d] = true; auto.push(d); d = CAP_META[d].dependsOn; } }
@@ -123,7 +130,7 @@ function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note }) {
   const [autoMsg, setAutoMsg] = uSu('');
   const onToggle = (k) => { const auto = toggle(k); if (auto && auto.length) { setAutoMsg(trU('pe.autoOn', { list: auto.map((x) => CAP_META[x].label).join(', ') })); setTimeout(() => setAutoMsg(''), 3500); } };
   // Group-level tri-state (semua / sebagian / tidak) — NEVER touches destructive caps.
-  const groupSafeKeys = (mid) => capsFor(mid).filter((k) => !CAP_META[k].destructive && !(lockedKeys || []).includes(k));
+  const groupSafeKeys = (mid) => capsFor(mid).filter((k) => !CAP_META[k].destructive && !lockedAll.includes(k));
   const groupState = (mid) => { const ks = groupSafeKeys(mid); const on = ks.filter(isOn).length; return on === 0 ? 'none' : on === ks.length ? 'all' : 'some'; };
   const groupToggle = (mid) => { const ks = groupSafeKeys(mid); const target = groupState(mid) !== 'all'; const ch = {}; ks.forEach((k) => { ch[k] = target; if (target) { let d = CAP_META[k].dependsOn; while (d) { ch[d] = true; d = CAP_META[d].dependsOn; } } }); setMany(ch); };
   return (
@@ -146,11 +153,21 @@ function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note }) {
             </button>
             {open[m.id] && (
               <div className="perm-group-body">
-                {safe.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={(lockedKeys || []).includes(k)} onToggle={() => onToggle(k)} />)}
+                {safe.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={lockedAll.includes(k)} onToggle={() => onToggle(k)} />)}
                 {danger.length > 0 && (
                   <div className="perm-danger">
                     <div className="perm-danger-h"><IconWarn s={13} />{trU('pe.danger')}</div>
-                    {danger.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={(lockedKeys || []).includes(k)} onToggle={() => onToggle(k)} danger />)}
+                    {danger.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={lockedAll.includes(k)} onToggle={() => onToggle(k)} danger ownerOnly={CAP_META[k].ownerOnly && !ownerAdmin} />)}
+                  </div>
+                )}
+                {/* SELF-APPROVAL CEILING — a per-approver rupiah cap (0/blank = unlimited). Owner-only,
+                    shown only once the waiver itself is granted; stored in the same permissions blob. */}
+                {m.id === 'distribusi' && ownerAdmin && isOn('distribusiApproveSelf') && (
+                  <div className="perm-selflimit">
+                    <label className="fld-label" style={{ marginTop: 0 }}>{trU('pe.selfLimitLabel')}</label>
+                    <div className="cap-desc" style={{ marginBottom: 6 }}>{trU('pe.selfLimitHint')}</div>
+                    <input className="fld tnum" inputMode="numeric" value={perms.maxSelfApproveAmount || ''} placeholder={trU('pe.selfLimitPh')}
+                      onChange={(e) => { const n = e.target.value.replace(/\D/g, ''); onChange({ ...perms, maxSelfApproveAmount: n ? +n : 0 }); }} />
                   </div>
                 )}
               </div>
@@ -161,14 +178,14 @@ function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note }) {
     </div>
   );
 }
-function CapRow({ k, on, drift, locked, danger, onToggle }) {
+function CapRow({ k, on, drift, locked, danger, onToggle, ownerOnly }) {
   const m = CAP_META[k];
   return (
     <div className={'cap-row' + (on ? ' on' : '') + (danger ? ' danger' : '')} onClick={locked ? undefined : onToggle} title={k} role="button" tabIndex={0}
       onKeyDown={(e) => { if (!locked && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onToggle(); } }}>
       <span className={'cap-check' + (on ? ' on' : '')}>{on ? <IconCheck s={13} /> : null}</span>
       <div className="cap-main">
-        <div className="cap-label">{m.label}{drift ? <span className="cap-drift">{trU('pe.drift')}</span> : null}{locked ? ' 🔒' : ''}</div>
+        <div className="cap-label">{m.label}{drift ? <span className="cap-drift">{trU('pe.drift')}</span> : null}{ownerOnly ? <span className="cap-owneronly">{trU('pe.ownerOnly')}</span> : null}{locked ? ' 🔒' : ''}</div>
         <div className="cap-desc">{m.desc}</div>
       </div>
     </div>
@@ -221,7 +238,7 @@ function ScopeChips({ label, hint, value, active, allLabel, inactiveTag, onChang
 }
 
 // ── USER SLIDE-OVER — identity · role · scope · permission editor · Akses efektif · history ──
-function UserSlideOver({ row, users, onSave, onClose, busy, fleet, businessUnits, currentId }) {
+function UserSlideOver({ row, users, onSave, onClose, busy, fleet, businessUnits, currentId, ownerAdmin }) {
   const [f, setF] = uSu(row);
   const [confirmSave, setConfirmSave] = uSu(false);
   const [audit, setAudit] = uSu(null);
@@ -283,7 +300,7 @@ function UserSlideOver({ row, users, onSave, onClose, busy, fleet, businessUnits
           {/* Permission editor */}
           <div className="so-section">
             <div className="so-sec-title">{trU('pe.hakAkses')}</div>
-            <PermissionEditor value={eff} roleDefaults={roleDefaults} lockedKeys={lockMU ? ['manageUsers'] : []} onChange={(next) => set({ permissions: next })} note={lockMU ? trU('um.lastAdmin') : trU('pe.editHint')} />
+            <PermissionEditor value={eff} roleDefaults={roleDefaults} lockedKeys={lockMU ? ['manageUsers'] : []} ownerAdmin={ownerAdmin} onChange={(next) => set({ permissions: next })} note={lockMU ? trU('um.lastAdmin') : trU('pe.editHint')} />
           </div>
           {/* Scopes */}
           <div className="so-section">
@@ -337,7 +354,7 @@ function AuditRow({ a }) {
   );
 }
 
-function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, canManageRoles, fleet, businessUnits }) {
+function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, canManageRoles, fleet, businessUnits, ownerAdmin }) {
   const cloud = !!(window.CLOUD && window.CLOUD.active && window.API);
   const [rows, setRows] = uSu(cloud ? null : (users || []));
   const [edit, setEdit] = uSu(null);
@@ -440,7 +457,7 @@ function UserManagement({ users, setUsers, currentId, roles, onRolesChanged, can
               </table>
             </div>
           )}
-      {edit && <UserSlideOver row={edit} users={list} onSave={save} onClose={() => setEdit(null)} busy={busy} fleet={fleet} businessUnits={businessUnits} currentId={currentId} />}
+      {edit && <UserSlideOver row={edit} users={list} onSave={save} onClose={() => setEdit(null)} busy={busy} fleet={fleet} businessUnits={businessUnits} currentId={currentId} ownerAdmin={ownerAdmin} />}
     </div>
   );
 }
