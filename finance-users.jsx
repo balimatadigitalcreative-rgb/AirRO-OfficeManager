@@ -133,6 +133,11 @@ function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note, own
   const groupSafeKeys = (mid) => capsFor(mid).filter((k) => !CAP_META[k].destructive && !lockedAll.includes(k));
   const groupState = (mid) => { const ks = groupSafeKeys(mid); const on = ks.filter(isOn).length; return on === 0 ? 'none' : on === ks.length ? 'all' : 'some'; };
   const groupToggle = (mid) => { const ks = groupSafeKeys(mid); const target = groupState(mid) !== 'all'; const ch = {}; ks.forEach((k) => { ch[k] = target; if (target) { let d = CAP_META[k].dependsOn; while (d) { ch[d] = true; d = CAP_META[d].dependsOn; } } }); setMany(ch); };
+  // A row's VISIBLE lock reason + unmet prerequisite (for the ownerOnly self-approval cap). The reason is
+  // TEXT, not just a padlock: a non-owner reads WHY they cannot grant it; an owner whose prerequisite is
+  // off gets a one-click "enable prerequisite" instead of hunting for the Setujui Perubahan cap.
+  const rowLockReason = (k) => (CAP_META[k].ownerOnly && !ownerAdmin) ? trU('pe.ownerLockReason') : null;
+  const rowPrereq = (k) => { if (!CAP_META[k].ownerOnly || lockedAll.includes(k)) return null; const d = CAP_META[k].dependsOn; return (d && !isOn(d)) ? { key: d, label: CAP_META[d].label } : null; };
   return (
     <div className="perm-editor">
       {note && <div className="perm-note">{note}</div>}
@@ -153,11 +158,11 @@ function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note, own
             </button>
             {open[m.id] && (
               <div className="perm-group-body">
-                {safe.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={lockedAll.includes(k)} onToggle={() => onToggle(k)} />)}
+                {safe.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={lockedAll.includes(k)} onToggle={() => onToggle(k)} lockReason={rowLockReason(k)} prereq={rowPrereq(k)} onEnablePrereq={() => setMany({ [CAP_META[k].dependsOn]: true })} />)}
                 {danger.length > 0 && (
                   <div className="perm-danger">
                     <div className="perm-danger-h"><IconWarn s={13} />{trU('pe.danger')}</div>
-                    {danger.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={lockedAll.includes(k)} onToggle={() => onToggle(k)} danger ownerOnly={CAP_META[k].ownerOnly && !ownerAdmin} />)}
+                    {danger.map((k) => <CapRow key={k} k={k} on={isOn(k)} drift={isDrift(k)} locked={lockedAll.includes(k)} onToggle={() => onToggle(k)} danger ownerOnly={CAP_META[k].ownerOnly && !ownerAdmin} lockReason={rowLockReason(k)} prereq={rowPrereq(k)} onEnablePrereq={() => setMany({ [CAP_META[k].dependsOn]: true })} />)}
                   </div>
                 )}
                 {/* SELF-APPROVAL CEILING — a per-approver rupiah cap (0/blank = unlimited). Owner-only,
@@ -178,15 +183,18 @@ function PermissionEditor({ value, onChange, roleDefaults, lockedKeys, note, own
     </div>
   );
 }
-function CapRow({ k, on, drift, locked, danger, onToggle, ownerOnly }) {
+function CapRow({ k, on, drift, locked, danger, onToggle, ownerOnly, lockReason, prereq, onEnablePrereq }) {
   const m = CAP_META[k];
   return (
-    <div className={'cap-row' + (on ? ' on' : '') + (danger ? ' danger' : '')} onClick={locked ? undefined : onToggle} title={k} role="button" tabIndex={0}
+    <div className={'cap-row' + (on ? ' on' : '') + (danger ? ' danger' : '') + (locked ? ' locked' : '')} onClick={locked ? undefined : onToggle} title={k} role="button" tabIndex={0}
       onKeyDown={(e) => { if (!locked && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onToggle(); } }}>
       <span className={'cap-check' + (on ? ' on' : '')}>{on ? <IconCheck s={13} /> : null}</span>
       <div className="cap-main">
         <div className="cap-label">{m.label}{drift ? <span className="cap-drift">{trU('pe.drift')}</span> : null}{ownerOnly ? <span className="cap-owneronly">{trU('pe.ownerOnly')}</span> : null}{locked ? ' 🔒' : ''}</div>
         <div className="cap-desc">{m.desc}</div>
+        {/* The lock reason is TEXT — a disabled control with no explanation was the actual defect. */}
+        {lockReason ? <div className="cap-lockreason"><IconLock s={11} />{lockReason}</div> : null}
+        {prereq ? <div className="cap-prereq"><IconWarn s={11} />{trU('pe.prereqHint', { name: prereq.label })}<button type="button" className="cap-prereq-btn" onClick={(e) => { e.stopPropagation(); onEnablePrereq && onEnablePrereq(); }}>{trU('pe.enablePrereq')}</button></div> : null}
       </div>
     </div>
   );
@@ -289,7 +297,9 @@ function UserSlideOver({ row, users, onSave, onClose, busy, fleet, businessUnits
           {/* Role template */}
           <div className="so-section">
             <label className="fld-label" style={{ marginTop: 0 }}>{trU('um.role')}</label>
-            <UI.Dropdown value={f.role} options={FS.roleList().map((r) => ({ value: r.id, label: r.name }))} onChange={changeRole} />
+            {/* Only an owner may assign the OWNER role (server-enforced too). Hide it from a non-owner's
+                picker to avoid a dead-end 403 — unless the edited user is already an owner (keep it visible). */}
+            <UI.Dropdown value={f.role} options={FS.roleList().filter((r) => ownerAdmin || r.id !== 'owner' || f.role === 'owner').map((r) => ({ value: r.id, label: r.name }))} onChange={changeRole} />
             <div className="so-role-state">{custom ? <><span className="so-custom">{trU('pe.customized')}</span><button className="dist-link" onClick={() => set({ permissions: null })}>{trU('pe.resetRole')}</button></> : <span className="so-default">{trU('pe.roleDefault')}</span>}</div>
           </div>
           {/* Akses efektif */}

@@ -114,6 +114,12 @@ async function seedBuiltinRoles() {
   return refreshRoleCache();
 }
 
+// The single definition of "owner-tier" — the ONLY role that may grant owner-only capabilities
+// (distribusiApproveSelf) or assign the owner role itself. Used by the server guards AND the
+// promote-owner CLI so there is one source of truth. A deployment with zero active owner-role users
+// has NO account able to grant owner-only caps → recover with scripts/promote-owner.js.
+function isOwnerRole(role) { return role === OWNER_ROLE; }
+
 function rolePerms(role) {
   return (roleCache && roleCache[role]) || ROLE_PERMS[role] || null;
 }
@@ -345,4 +351,4 @@ function viewWindowFrom(perms, today) {
   return { unlimited: false, from, to: today, canSisaBon: !!p[VIEW_CAPS.sisaBon], canAll: false };
 }
 
-module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, deriveKasbonCaps, deriveDistribusiCaps, deriveGudangCaps, deriveGudangGalonCaps, refreshRoleCache, seedBuiltinRoles, VIEW_CAPS, viewWindowFrom, addDaysISO };
+module.exports = { ROLE_PERMS, BUILTIN_META, BUILTIN_IDS, OWNER_ROLE, ROLES, hasPerm, parsePerms, resolvePerms, rolePerms, isOwnerRole, deriveKasbonCaps, deriveDistribusiCaps, deriveGudangCaps, deriveGudangGalonCaps, refreshRoleCache, seedBuiltinRoles, VIEW_CAPS, viewWindowFrom, addDaysISO };

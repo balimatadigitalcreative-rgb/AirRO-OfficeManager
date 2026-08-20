@@ -13,6 +13,7 @@
 const request = require('supertest');
 const createApp = require('../src/app');
 const { resetDb, prisma } = require('./helpers');
+const { promoteToOwner, listRoles } = require('../scripts/promote-owner');
 
 const app = createApp();
 const auth = (t) => ({ Authorization: `Bearer ${t}` });
@@ -63,6 +64,39 @@ describe('Self-approval capability — grant is owner-only + audited', () => {
     const rows = await userAudit(owner, selfId);
     const permRow = rows.find((x) => x.action === 'permissions' && x.detail && (x.detail.added || []).includes('distribusiApproveSelf'));
     expect(permRow).toBeTruthy();
+  });
+});
+
+describe('Owner-role assignment is owner-only + the promote-owner recovery path', () => {
+  it('a GM (manageUsers, not owner) CANNOT assign the owner role via the API', async () => {
+    const u = await reg({ name: 'Wanna Owner', username: 'sa_wannaown', password: 'secret123', role: 'finance' });
+    const r = await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(gm)).send({ role: 'owner' });
+    expect(r.status).toBe(403);
+    expect(r.body.error.message).toMatch(/Pemilik/i);
+    expect((await request(app).get(`/api/v1/users/${u.user.id}`).set(auth(owner))).body.data.role).toBe('finance');
+  });
+
+  it('an OWNER can assign the owner role via the API', async () => {
+    const u = await reg({ name: 'Made Owner', username: 'sa_madeown', password: 'secret123', role: 'finance' });
+    const r = await request(app).patch(`/api/v1/users/${u.user.id}`).set(auth(owner)).send({ role: 'owner' });
+    expect(r.status).toBe(200);
+    expect(r.body.data.role).toBe('owner');
+  });
+
+  it('the promote-owner CLI promotes a named user and records it in UserAuditLog (the deadlock escape)', async () => {
+    const u = await reg({ name: 'Deadlock GM', username: 'sa_deadlock', password: 'secret123', role: 'gm' });
+    const res = await promoteToOwner('sa_deadlock');
+    expect(res.changed).toBe(true);
+    expect(res.from).toBe('gm');
+    expect((await request(app).get(`/api/v1/users/${u.user.id}`).set(auth(owner))).body.data.role).toBe('owner');
+    const rows = await request(app).get(`/api/v1/users/audit?userId=${u.user.id}`).set(auth(owner));
+    const roleRow = rows.body.data.find((x) => x.action === 'role' && x.detail && x.detail.to === 'owner' && x.detail.via === 'cli');
+    expect(roleRow).toBeTruthy();
+    // idempotent — re-running is a no-op
+    expect((await promoteToOwner('sa_deadlock')).changed).toBe(false);
+    // --list diagnostic sees at least our promoted owner
+    const { activeOwners } = await listRoles();
+    expect(activeOwners.some((o) => o.username === 'sa_deadlock')).toBe(true);
   });
 });
 

@@ -3711,6 +3711,15 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .cap-label { font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cap-drift { font-size: 10px; font-weight: 700; color: var(--warn, #b45309); background: var(--warn-bg, #fef3c7); border-radius: 999px; padding: 1px 6px; }
 .cap-desc { font-size: 11.5px; color: var(--text-mut); margin-top: 1px; line-height: 1.35; }
+/* Locked/owner-only rows: the reason is spelled out, not just a padlock. */
+.cap-row.locked { cursor: default; opacity: .92; }
+.cap-row.locked:hover { background: transparent; }
+.cap-lockreason { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; font-weight: 600; color: #7c3aed; background: #f3ecfd; border-radius: 7px; padding: 4px 8px; margin-top: 5px; line-height: 1.35; }
+:root[data-theme="dark"] .cap-lockreason { background: rgba(124,58,237,.16); color: #c4b0f8; }
+.cap-prereq { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11px; font-weight: 600; color: #b45309; background: #fff8ee; border: 1px solid #f6d9a6; border-radius: 7px; padding: 4px 8px; margin-top: 5px; }
+:root[data-theme="dark"] .cap-prereq { background: rgba(255,180,60,.08); border-color: rgba(255,180,60,.28); color: #ffcf8a; }
+.cap-prereq-btn { font-size: 10.5px; font-weight: 800; color: #fff; background: #b45309; border: 0; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.cap-prereq-btn:hover { background: #96450a; }
 .perm-danger { margin-top: 6px; border: 1px solid var(--danger, #dc2626); border-radius: 10px; padding: 6px; background: rgba(220,38,38,.03); }
 .perm-danger-h { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--danger, #dc2626); padding: 4px 8px; }
 .akses-efektif { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2, #f6f8fa); }

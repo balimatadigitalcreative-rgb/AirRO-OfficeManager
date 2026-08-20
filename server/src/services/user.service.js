@@ -2,7 +2,7 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
-const { resolvePerms } = require('../config/permissions');
+const { resolvePerms, isOwnerRole, OWNER_ROLE } = require('../config/permissions');
 const { PUBLIC_FIELDS, publicUser, normUsername, isWeakPassword } = require('./auth.service');
 const { unitScopeOf } = require('../lib/scope');
 
@@ -81,7 +81,16 @@ async function assertUnitAccessKept({ targetId, deleting, next }) {
 async function actorIsOwner(actor) {
   if (!actor || !actor.id) return false;
   const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { role: true } });
-  return !!(u && u.role === 'owner');
+  return !!(u && isOwnerRole(u.role));
+}
+// OWNER ROLE is itself owner-tier: only an owner may PROMOTE a user to owner (create or update). This
+// closes the escalation where any manageUsers holder could self-assign the owner role via the API, and
+// makes scripts/promote-owner.js the single controlled path to mint the first/only owner. Enforced in
+// the API (here), not just the UI. Only the TRANSITION to owner is gated — other edits are untouched.
+async function assertOwnerRoleGrantAllowed({ beforeRole, afterRole, actor }) {
+  if (isOwnerRole(afterRole) && !isOwnerRole(beforeRole) && !(await actorIsOwner(actor))) {
+    throw ApiError.forbidden('Hanya Pemilik yang boleh menetapkan peran Pemilik. Gunakan skrip server "promote-owner" untuk mempromosikan akun pertama.');
+  }
 }
 const selfApproveState = (role, perms) => {
   const e = resolvePerms(role, perms);
@@ -130,7 +139,8 @@ async function create({ password, ...rest }, actor) {
   const existing = await prisma.user.findUnique({ where: { username: rest.username } });
   if (existing) throw ApiError.conflict('Username is already taken');
   await assertRole(rest.role);
-  // Owner-only: a new user may only be created WITH self-approval already granted by an owner.
+  // Owner-only: a new user may only be created WITH self-approval already granted, or AS an owner, by an owner.
+  await assertOwnerRoleGrantAllowed({ beforeRole: null, afterRole: rest.role, actor });
   await assertSelfApproveGrantAllowed({ beforeRole: rest.role, beforePerms: null, afterRole: rest.role, afterPerms: rest.permissions || null, actor });
   const passwordHash = await bcrypt.hash(password, 10);
   const u = await prisma.user.create({ data: { ...normalize(rest), passwordHash, weakPassword: isWeakPassword(password) }, select: PUBLIC_FIELDS });
@@ -144,6 +154,9 @@ async function update(id, { password, ...rest }, actor) {
   // Owner-only: granting/revoking self-approval (or changing its ceiling) is a control change even
   // when the rest of the permission edit is allowed for a GM admin. Checked against the resolved
   // before/after so a GM can still toggle every OTHER capability freely.
+  if ('role' in rest) {
+    await assertOwnerRoleGrantAllowed({ beforeRole: before.role, afterRole: rest.role, actor });
+  }
   if ('permissions' in rest || 'role' in rest) {
     await assertSelfApproveGrantAllowed({
       beforeRole: before.role, beforePerms: before.permissions,
