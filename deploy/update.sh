@@ -41,6 +41,13 @@ DOMAIN="${AIRRO_DOMAIN:-airrooffice.com}"
 HEALTH_URL="http://127.0.0.1:$PORT/api/v1/health"
 READY_URL="http://127.0.0.1:$PORT/api/v1/health/ready"   # DB + schema-behind probe (see routes/index.js)
 
+# GATE 3 tests the fetched code in a throwaway `git worktree`. That worktree MUST live on a directory we
+# control and know PERSISTS for the whole test run. NOT /tmp: on this box /tmp is wiped almost immediately
+# (systemd-tmpfiles / a cleaner — see DEPLOY.md), so a worktree created there VANISHES before jest starts,
+# and GATE 3 mis-reports "tests failed" when the truth is "tests could not run". Default: a sibling of the
+# app dir (same disk, persistent). Override with DEPLOY_TEST_DIR=/root (or any writable, persistent path).
+DEPLOY_TEST_DIR="${DEPLOY_TEST_DIR:-$(dirname "$APP_DIR")}"
+
 RESTORE_DB=0; SKIP_OFFSITE=0; SKIP_TESTS=0
 for a in "$@"; do
   case "$a" in
@@ -130,6 +137,28 @@ counts_not_lower() {
     if [ "$a" -lt "$b" ]; then bad "$t dropped: $b → $a"; return 1; fi
   done
   return 0
+}
+
+# GATE 3 failure report — the specifics that were asked for repeatedly: jest exit code, the failing
+# suite file(s) and test name(s), and the first assertion diff (name + expected/received + code frame),
+# capped at ~20 lines, to BOTH stdout and the log. Jest's bare "● Console" output markers are dropped so
+# they never appear as content-free noise. $1 = captured jest output, $2 = jest exit code.
+report_test_failure() {
+  local out="$1" rc="$2" filtered start
+  filtered="$(echo "$out" | grep -vE '●[[:space:]]+Console')"   # drop jest's content-free console markers
+  {
+    echo "── GATE 3: tests FAILED (jest exit code $rc) ─────────────────"
+    echo "$out" | grep -E '^FAIL ' | head -8                        # which suites failed
+    start="$(echo "$filtered" | grep -nE '●[[:space:]]' | head -1 | cut -d: -f1)"
+    if [ -n "$start" ]; then
+      echo "── first failing test + assertion ────────────────────────"
+      echo "$filtered" | sed -n "${start},$((start + 17))p"         # ● name → expected/received → code frame
+    else
+      echo "── jest summary lines ────────────────────────────────────"
+      echo "$filtered" | grep -E '✕|Tests:|Suites:|Expected:|Received:' | head -18
+    fi
+    echo "── (full output in deploy/deploy.log) ────────────────────"
+  } | sed 's/^/        /' | tee -a "$LOG"
 }
 
 # Code-only rollback: previous commit → deps → build → reload → health.
@@ -349,18 +378,50 @@ if [ "$SKIP_TESTS" = "1" ]; then
   TESTS="SKIPPED (--skip-tests)"
   log "   ⚠️  test gate SKIPPED by flag — you are deploying unverified code"
 else
-  TEST_WT="$(mktemp -d "${TMPDIR:-/tmp}/airro-deploytest.XXXXXX")" || abort "cannot create a temp dir for the test worktree"
+  mkdir -p "$DEPLOY_TEST_DIR" 2>/dev/null || abort "cannot create DEPLOY_TEST_DIR ($DEPLOY_TEST_DIR) — set DEPLOY_TEST_DIR to a writable, persistent path"
+  TEST_WT="$(mktemp -d "$DEPLOY_TEST_DIR/.airro-deploytest.XXXXXX")" || abort "cannot create the test-worktree dir under $DEPLOY_TEST_DIR — set DEPLOY_TEST_DIR to a writable path"
   git worktree add --detach "$TEST_WT" "$TARGET_SHA" >>"$LOG" 2>&1 || abort "git worktree add for the test checkout failed"
-  ok "isolated test checkout at ${TARGET_SHA:0:8} (temp worktree — prod tree untouched)"
-  # Full install (incl. devDeps: jest/supertest/prisma-CLI) + the suite, entirely inside the temp
-  # checkout. `npm test` pins NODE_ENV=test + DATABASE_URL=file:./test.db (its OWN test.db in the
-  # worktree) — prod.db and the live node_modules are never touched. Unset any stray DATABASE_URL too.
-  TEST_OUT="$( cd "$TEST_WT/server" && unset DATABASE_URL && npm ci >>"$LOG" 2>&1 && npm test 2>&1 )"; TEST_RC=$?
+  # PROVE the worktree is on disk and populated. If the temp dir is being wiped (the /tmp trap this fix
+  # exists for), `git worktree add` can report success yet the tree be GONE before jest runs — blame the
+  # ENV, never the tests.
+  if [ ! -d "$TEST_WT" ] || [ ! -f "$TEST_WT/server/package.json" ]; then
+    TESTS="COULD NOT RUN (worktree vanished)"
+    abort "test worktree missing/empty at $TEST_WT (no server/package.json) — the temp dir is being cleaned. Set DEPLOY_TEST_DIR to a persistent path and re-run. This is a SETUP failure, NOT a test failure."
+  fi
+  ok "isolated test checkout at ${TARGET_SHA:0:8} → $TEST_WT (prod tree untouched)"
+
+  # SETUP (install devDeps: jest/supertest/prisma-CLI) is run and JUDGED SEPARATELY from the suite, so a
+  # setup/env failure is never mis-reported as a test failure. Everything stays inside the temp checkout;
+  # `npm test` pins NODE_ENV=test + its OWN DATABASE_URL=file:./test.db, so prod.db is never touched.
+  SETUP_OUT="$( cd "$TEST_WT/server" && unset DATABASE_URL && npm ci 2>&1 )"; SETUP_RC=$?
+  echo "$SETUP_OUT" >> "$LOG"
+  if [ "$SETUP_RC" -ne 0 ]; then
+    echo "$SETUP_OUT" | tail -15 | sed 's/^/        /' | tee -a "$LOG"
+    TESTS="COULD NOT RUN (npm ci rc=$SETUP_RC)"
+    abort "tests COULD NOT RUN on ${TARGET_SHA:0:8}: devDeps install (npm ci) failed — a SETUP/ENV failure, NOT an assertion failure. Production untouched."
+  fi
+  # The cleaner can also strike BETWEEN steps — re-assert the tree before spending time on the suite.
+  if [ ! -f "$TEST_WT/server/package.json" ]; then
+    TESTS="COULD NOT RUN (worktree vanished mid-setup)"
+    abort "test worktree vanished during setup at $TEST_WT — temp dir is being cleaned; set DEPLOY_TEST_DIR. NOT a test failure."
+  fi
+
+  TEST_OUT="$( cd "$TEST_WT/server" && unset DATABASE_URL && npm test 2>&1 )"; TEST_RC=$?
   echo "$TEST_OUT" >> "$LOG"
   git worktree remove --force "$TEST_WT" >>"$LOG" 2>&1 && TEST_WT="" || rm -rf "$TEST_WT"
   if [ "$TEST_RC" -ne 0 ]; then
-    echo "$TEST_OUT" | grep -E '✕|●|Tests:|Suites:|FAIL' | head -20 | sed 's/^/        /' | tee -a "$LOG"
-    abort "tests FAILED on ${TARGET_SHA:0:8} — deploy aborted, production untouched (still on ${SHA_BEFORE:0:8})"
+    # DISTINGUISH the two failure modes. Jest prints a "Tests:" summary line ONLY when it actually ran the
+    # suite; its ABSENCE means jest never started (missing dep, DB setup, OOM, worktree gone) — a setup
+    # failure, not a broken assertion.
+    if echo "$TEST_OUT" | grep -qE '^Tests:[[:space:]]'; then
+      report_test_failure "$TEST_OUT" "$TEST_RC"
+      TESTS="FAILED ($(echo "$TEST_OUT" | grep -E '^Tests:' | head -1 | sed 's/Tests:[[:space:]]*//'))"
+      abort "tests FAILED on ${TARGET_SHA:0:8} — assertions did not pass (the failing test is named above). Production untouched (still on ${SHA_BEFORE:0:8})."
+    else
+      echo "$TEST_OUT" | tail -20 | sed 's/^/        /' | tee -a "$LOG"
+      TESTS="COULD NOT RUN (jest did not start, rc=$TEST_RC)"
+      abort "tests COULD NOT RUN on ${TARGET_SHA:0:8}: jest produced no summary (rc=$TEST_RC) — a SETUP/ENV failure (missing dep, DB, or the temp dir was cleaned), NOT an assertion failure. See the log."
+    fi
   fi
   TESTS="$(echo "$TEST_OUT" | grep -E '^Tests:' | head -1 | sed 's/Tests:[[:space:]]*//')"
   ok "tests passed on ${TARGET_SHA:0:8}: ${TESTS:-all}"

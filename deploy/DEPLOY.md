@@ -255,6 +255,52 @@ ever do need a block, it must start with `include mime.types;` to re-inherit the
 
 **The lesson all three share: "exit 0" is not "it works", and localhost is not the internet.**
 
+### Post-mortem: 21 Aug — `/tmp` wiped mid-deploy, GATE 3 blamed the tests
+**Symptom:** four deploys in a row aborted at **GATE 3** with `tests FAILED`, yet the suite
+passed 5/5 when run by hand from `/root`. The deploy log showed jest output that never
+reached a `Tests:` summary — because jest never actually ran.
+**Root cause:** GATE 3 created its throwaway `git worktree` under `${TMPDIR:-/tmp}`, and on
+this box **`/tmp` is wiped almost immediately**. Proven at the time:
+
+```bash
+git worktree add /tmp/t2        # reported success…
+ls -d /tmp/t2                    # …gone a moment later
+git worktree list                # showed nothing
+```
+
+The worktree vanished between `git worktree add` and `npm test`, so the tests **could not
+run** — but the old GATE 3 reported that identical to **tests failed** (it only looked at a
+non-zero exit code), and the fix-the-tests reflex sent us in circles four times.
+**Fix (in `deploy/update.sh`):**
+1. The test worktree is created under **`DEPLOY_TEST_DIR`** (default: the app dir's parent,
+   same disk, persistent), never `/tmp`. Override: `DEPLOY_TEST_DIR=/root bash deploy/update.sh`.
+2. After `git worktree add`, GATE 3 **asserts the worktree exists and contains
+   `server/package.json`** before running anything; if not it aborts with *"temp dir is being
+   cleaned — set DEPLOY_TEST_DIR"*, not a test failure.
+3. GATE 3 now **distinguishes** "tests could not run (setup/env)" from "tests failed
+   (assertions)" — jest prints a `Tests:` summary only when it actually ran, so its absence
+   means a setup failure. `npm ci` (setup) is judged separately from `npm test` (suite).
+4. On a real assertion failure it prints — to stdout **and** `deploy/deploy.log` — the jest
+   exit code, the failing suite file(s) and test name(s), and the first assertion diff (with
+   the code frame), capped at ~20 lines; jest's content-free `● Console` markers are dropped.
+
+**Why `/tmp` doesn't persist here — confirm the mechanism (fix already sidesteps it):**
+the deploy no longer depends on `/tmp`, but the next person should still know *why*. On this
+host something clears `/tmp` aggressively. To identify the exact cause, run:
+
+```bash
+systemctl cat systemd-tmpfiles-clean.timer     # is the cleaner firing on a tight schedule?
+cat /usr/lib/tmpfiles.d/tmp.conf /etc/tmpfiles.d/*.conf 2>/dev/null   # a `q /tmp … 0` (age 0) rule wipes immediately
+findmnt /tmp                                    # a tmpfs mount, or PrivateTmp namespace?
+systemctl show "$(systemctl status $$ 2>/dev/null | head -1)" -p PrivateTmp 2>/dev/null
+grep -R "PrivateTmp" /etc/systemd 2>/dev/null   # a service running the deploy with a private /tmp
+crontab -l; ls -la /etc/cron.*/*tmp* 2>/dev/null # a tmpwatch/tmpreaper cron
+```
+The likeliest culprits are (a) a `systemd-tmpfiles` rule with **age `0`** on `/tmp`, (b) the
+deploy running inside a unit with **`PrivateTmp=yes`** (its `/tmp` is a throwaway namespace),
+or (c) a `tmpreaper`/`tmpwatch` cron with an aggressive policy. Whichever it is, **do not put
+build/test scratch under `/tmp` on this host** — use `DEPLOY_TEST_DIR`.
+
 ### The gates
 Pre-flight (nothing touched): app dir + git repo · warn on uncommitted changes ·
 record rollback SHA · **port guard** · record counts.
@@ -264,7 +310,7 @@ Then, aborting on any failure:
 |---|------|---------------|
 | 1 | `backup-db.sh` (local **+ offsite**) | no good backup → no deploy |
 | 2 | `git fetch` + `reset --hard origin/master` | can't get the code |
-| 3 | `npm ci` + **`npm test`** | failing tests → abort, **prod untouched** |
+| 3 | **isolated worktree** (`DEPLOY_TEST_DIR`, never `/tmp`): `npm ci` + `npm test` | *tests failed* → abort + **name the failing test**; *tests could not run* (env/temp-dir wiped) → abort, **blame the env** — either way **prod untouched** |
 | 4 | `prisma migrate deploy` | migration error, or reports **data loss** → abort |
 | 5 | `npm run build` → `dist/app.js` | build broken |
 | 6 | `pm2 startOrReload` | process won't start |
