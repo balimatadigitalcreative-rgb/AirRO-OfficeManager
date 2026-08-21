@@ -26,6 +26,7 @@ router.post('/periods/:id/approve', approve, asyncHandler(async (req, res) => re
 router.post('/periods/:id/pay', manage, asyncHandler(async (req, res) => res.json({ data: await service.payPeriod(req.params.id, req.body, req.user) })));
 router.post('/periods/:id/void', approve, asyncHandler(async (req, res) => res.json({ data: await service.voidPeriod(req.params.id, req.body, req.user) })));
 router.get('/report', view, asyncHandler(async (req, res) => res.json({ data: await service.payrollReport({ year: +req.query.year, month: +req.query.month }) })));
-router.get('/payslip/:lineId', view, asyncHandler(async (req, res) => res.json({ data: await service.getPayslip(req.params.lineId, req.query.employeeId) })));
+// Payslip authorization is derived from the SESSION (caps), never a request param — see getPayslip.
+router.get('/payslip/:lineId', view, asyncHandler(async (req, res) => res.json({ data: await service.getPayslip(req.params.lineId, req.user) })));
 
 module.exports = router;

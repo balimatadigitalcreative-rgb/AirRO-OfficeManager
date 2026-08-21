@@ -121,4 +121,17 @@ describe('Immutability + close + access', () => {
     expect(r.status).toBe(403);
     expect(r.body.error.message).toMatch(/sdmPayrollLihat/);
   });
+
+  it('payslip authorization is server-side — a spoofed employeeId query cannot bypass it, and non-HR is denied', async () => {
+    const p = (await mkPeriod()).body.data;
+    const line = (await getPeriod(p.id)).lines[0];
+    // an HR viewer (owner) may view any payslip; the old spoofable ?employeeId param is ignored
+    const ok = await request(app).get(`/api/v1/payroll-accrual/payslip/${line.id}?employeeId=someone-else`).set(auth(owner));
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.line.id).toBe(line.id);
+    // a non-HR user (no sdmPayrollLihat) is rejected by the route cap — cannot reach the payslip at all
+    const fin = (await request(app).post('/api/v1/auth/register').send({ name: 'Fin2', username: 'pr_fin2', password: 'secret123', role: 'finance' })).body.token;
+    const bad = await request(app).get(`/api/v1/payroll-accrual/payslip/${line.id}`).set(auth(fin));
+    expect(bad.status).toBe(403);
+  });
 });

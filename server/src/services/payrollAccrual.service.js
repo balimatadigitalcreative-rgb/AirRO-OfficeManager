@@ -106,11 +106,23 @@ async function listPeriods(query) {
   return { data };
 }
 async function getPeriod(id) { const p = await prisma.payrollPeriod.findUnique({ where: { id } }); if (!p) throw ApiError.notFound('Payroll periode tidak ditemukan.'); return periodClient(p, true); }
-// ONE employee's payslip — never exposes another line. Callers pass the requesting employeeId to gate.
-async function getPayslip(lineId, requesterEmployeeId) {
+// Map an authenticated USER to their own Employee record — the ONLY trustworthy requester identity.
+// There is no Employee↔User login link modelled today, so a non-HR caller has no verifiable own-line
+// and is therefore DENIED (fail-closed). A future self-service payslip path would add the link here.
+// Identity is NEVER taken from the request.
+async function ownEmployeeId(actor) { return null; }
+// ONE employee's payslip — never exposes another line. Authorization comes from the SESSION, never the
+// request: an HR viewer (sdmPayrollLihat — the route gate) may view any payslip; any non-HR caller is
+// restricted to their OWN employee line, and the ownership match is REQUIRED (missing identity = denied,
+// never granted). The old spoofable `employeeId` query param is gone.
+async function getPayslip(lineId, actor) {
   const l = await prisma.payrollLine.findUnique({ where: { id: lineId } });
   if (!l) throw ApiError.notFound('Slip gaji tidak ditemukan.');
-  if (requesterEmployeeId && l.employeeId !== requesterEmployeeId) throw ApiError.forbidden('Anda hanya boleh melihat slip gaji Anda sendiri.');
+  const perms = await actorPerms(actor);
+  if (!perms.sdmPayrollLihat) {
+    const me = await ownEmployeeId(actor);
+    if (!me || l.employeeId !== me) throw ApiError.forbidden('Anda hanya boleh melihat slip gaji Anda sendiri.');
+  }
   const p = await prisma.payrollPeriod.findUnique({ where: { id: l.payrollPeriodId } });
   return { period: keyOf(p.year, p.month), status: p.status, line: await lineClient(l, false) };
 }
