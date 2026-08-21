@@ -92,6 +92,7 @@ router.use('/approvals', require('./approval.routes'));
 router.use('/training', require('./training.routes'));
 router.use('/calendar', require('./calendar.routes'));
 router.use('/payroll', require('./payroll.routes'));
+router.use('/payroll-accrual', require('./payrollAccrual.routes'));   // accrual payroll (double-entry) — sdmPayroll* caps
 router.use('/attachments', require('./attachment.routes'));   // proof photos, out of the record payload
 router.use('/settings', require('./settings.routes'));
 router.use('/business-units', require('./businessUnit.routes'));   // unit bisnis dictionary (labels only, Stage 1)

@@ -2792,6 +2792,14 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .pc-vargrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
 .pc-varcell { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border-radius: 8px; background: var(--surface-2, #f6f8fa); }
 .pc-varlbl { font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .02em; }
+/* Payroll worksheet inline inputs + payslip sheet */
+.py-inp { width: 92px; padding: 4px 6px; text-align: right; display: inline-block; }
+.payslip-sheet { max-width: 640px; width: 100%; }
+.payslip-sheet .ps-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px 22px 6px; }
+.payslip-sheet .ps-body { padding: 6px 22px 12px; }
+.payslip-sheet .ps-name { font-size: 15px; font-weight: 700; }
+.payslip-sheet .ps-actions { display: flex; justify-content: flex-end; padding: 10px 22px 18px; }
+@media print { .payslip-sheet { box-shadow: none; max-width: 100%; } @page { size: A4; margin: 14mm; } }
 
 /* Correction form: the price field when the user lacks distribusiHargaMaster. */
 .amt-input.is-locked { background: var(--surface-2, #f2f5f6); opacity: .75; cursor: not-allowed; }

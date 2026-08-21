@@ -104,10 +104,10 @@ async function seedBuiltinRoles() {
         // Then materialize the split kasbon caps from the (merged) legacy value so the
         // Role editor shows them as explicit checkboxes, consistent with old behaviour.
         const cur = parsePerms(existing.permissions) || {};
-        const merged = deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps({ ...seed, ...cur }), id)), id);
+        const merged = derivePayrollCaps(deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps({ ...seed, ...cur }), id)), id), id);
         await prisma.role.update({ where: { id }, data: { builtin: true, permissions: JSON.stringify(merged) } });
       } else {
-        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(seed), id)), id)), builtin: true, sortOrder: i } });
+        await prisma.role.create({ data: { id, name: meta.name, color: meta.color, permissions: JSON.stringify(derivePayrollCaps(deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(seed), id)), id), id)), builtin: true, sortOrder: i } });
       }
     }
   } catch (e) { /* table may not exist yet on very first migrate; ignored */ }
@@ -318,6 +318,20 @@ function deriveGudangGalonCaps(perms, role) {
   return p;
 }
 
+// PAYROLL caps (SDM) — payroll figures are sensitive, so viewing/editing/approving each have their own
+// capability. Owner/GM get all three by default; everyone else defaults FALSE (never derived from a
+// broader cap), even on already-stored blobs. sdmPayrollKelola/Setujui imply the view.
+function derivePayrollCaps(perms, role) {
+  if (!perms || typeof perms !== 'object') return perms;
+  const p = { ...perms };
+  const isOwnerGm = role === 'owner' || role === 'gm';
+  if (p.sdmPayrollLihat === undefined) p.sdmPayrollLihat = isOwnerGm;
+  if (p.sdmPayrollKelola === undefined) p.sdmPayrollKelola = isOwnerGm;
+  if (p.sdmPayrollSetujui === undefined) p.sdmPayrollSetujui = isOwnerGm;
+  if (p.sdmPayrollKelola || p.sdmPayrollSetujui) p.sdmPayrollLihat = true;   // manage/approve implies view
+  return p;
+}
+
 // Effective capability map for a user: their per-user override if set, otherwise the
 // role's current defaults (from the live Role table, falling back to the seed). The
 // kasbon granular caps are derived for backward compatibility.
@@ -338,7 +352,7 @@ function resolvePerms(role, permsStrOrObj) {
   const override = parsePerms(permsStrOrObj);
   // Order matters: distribusi caps first (they seed distribusiGallon/Reset), THEN the gudang gallon
   // caps derive from them. Runs on EVERY request → in-flight tokens get the new caps with no re-login.
-  const resolved = deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance), role)), role);
+  const resolved = derivePayrollCaps(deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance), role)), role), role);
   return deriveManageUsers(resolved, role);
 }
 

@@ -187,6 +187,20 @@
       monthlyHpp: (p) => req('GET', '/accounting/costing/monthly-hpp' + acctQs(p)),
       marginAnalysis: (p) => req('GET', '/accounting/costing/margin' + acctQs(p)),
     },
+    // ACCRUAL PAYROLL (double-entry) — separate router, sdmPayroll* caps.
+    payrollAccrual: {
+      components: () => req('GET', '/payroll-accrual/components'),
+      componentCreate: (b) => req('POST', '/payroll-accrual/components', b),
+      periods: (p) => req('GET', '/payroll-accrual/periods' + acctQs(p)),
+      period: (id) => req('GET', '/payroll-accrual/periods/' + id),
+      periodCreate: (b) => req('POST', '/payroll-accrual/periods', b),
+      lineUpdate: (id, b) => req('PATCH', '/payroll-accrual/lines/' + id, b),
+      approve: (id) => req('POST', '/payroll-accrual/periods/' + id + '/approve', {}),
+      pay: (id, b) => req('POST', '/payroll-accrual/periods/' + id + '/pay', b),
+      voidPeriod: (id, b) => req('POST', '/payroll-accrual/periods/' + id + '/void', b),
+      report: (p) => req('GET', '/payroll-accrual/report' + acctQs(p)),
+      payslip: (lineId) => req('GET', '/payroll-accrual/payslip/' + lineId),
+    },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes
     // (only when a proof is actually opened).

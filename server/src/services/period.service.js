@@ -71,6 +71,9 @@ async function closeChecklist(year, month) {
   let prodDraft = 0, prodUnposted = 0, varOpen = 0;
   try { const pr = await require('./costing.service').pendingRuns({ asOf: to }); prodDraft = pr.draft; prodUnposted = pr.unposted; } catch (e) { /* costing optional */ }
   try { varOpen = await require('./costing.service').openVariancesCount({ asOf: to }); } catch (e) { /* costing optional */ }
+  // PAYROLL — a draft period this month WARNS; an approved period with no journal BLOCKS.
+  let payrollDraft = 0, payrollUnposted = 0;
+  try { const pc = await require('./payrollAccrual.service').payrollCheck({ year, month }); payrollDraft = pc.draft; payrollUnposted = pc.approvedUnposted; } catch (e) { /* payroll optional */ }
   try { accruedOpen = await prisma.accrual.count({ where: { status: 'aktif', reverseDate: { gt: to } } }); } catch (e) { /* optional */ }
   try { subsDue = await prisma.subscription.count({ where: { status: 'aktif', nextRunDate: { lte: to } } }); } catch (e) { /* optional */ }
   try { draftBills = await prisma.bill.count({ where: { status: 'draft', billDate: { lte: to } } }); } catch (e) { /* optional */ }
@@ -85,9 +88,10 @@ async function closeChecklist(year, month) {
     amortPending,        // BLOCKS the close
     deprPending, deprAssets,   // BLOCKS the close (n months across deprAssets assets)
     prodUnposted,        // BLOCKS the close (a completed run with no journal)
-    prodDraft, varOpen,  // warn only (runs not completed / variances not closed)
+    payrollUnposted,     // BLOCKS the close (an approved payroll with no journal)
+    prodDraft, varOpen, payrollDraft,  // warn only
     accruedOpen, subsDue, draftBills,   // warn only
-    clean: uncategorised === 0 && pending === 0 && bank.count === 0 && journalDrift === 0 && amortPending === 0 && deprPending === 0 && prodUnposted === 0,
+    clean: uncategorised === 0 && pending === 0 && bank.count === 0 && journalDrift === 0 && amortPending === 0 && deprPending === 0 && prodUnposted === 0 && payrollUnposted === 0,
   };
 }
 
@@ -112,6 +116,10 @@ async function closePeriod({ year, month, lock }, actor) {
   let prodUnposted = 0;
   try { prodUnposted = (await require('./costing.service').pendingRuns({ asOf: periodEnd })).unposted; } catch (e) { /* costing optional */ }
   if (prodUnposted > 0) throw ApiError.badRequest(`${prodUnposted} production run selesai tanpa jurnal — selesaikan/posting dulu sebelum menutup.`, { prodUnposted });
+  // An approved payroll with no journal must not be frozen.
+  let payrollUnposted = 0;
+  try { payrollUnposted = (await require('./payrollAccrual.service').payrollCheck({ year, month })).approvedUnposted; } catch (e) { /* payroll optional */ }
+  if (payrollUnposted > 0) throw ApiError.badRequest(`${payrollUnposted} payroll disetujui tapi belum berjurnal — posting dulu sebelum menutup.`, { payrollUnposted });
   const key = keyOf(year, month);
   const status = lock ? 'terkunci' : 'ditutup';
   const stamp = { status, closedById: (actor && actor.id) || null, closedByName: await actorName(actor), closedAt: new Date(), reopenReason: null, reopenedById: null, reopenedByName: null, reopenedAt: null };

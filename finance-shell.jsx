@@ -33,6 +33,7 @@ function navForRole(p, role) {
   if (p.reports) items.push({ id: 'acct-accrual', label: tr('nav.finAccrual'), icon: 'IconRefresh', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-assets', label: tr('nav.finAssets'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-costing', label: tr('nav.finCosting'), icon: 'IconRefresh', grp: 'finance' });
+  if (p.sdmPayrollLihat) items.push({ id: 'acct-payroll', label: tr('nav.finPayroll'), icon: 'IconCustomers', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-mapping', label: tr('nav.finMap'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'finance' });
   // Backfill is a one-time owner/GM migration tool (the server also enforces owner/GM), so it only
@@ -1835,6 +1836,7 @@ function FApp() {
           {screen === 'acct-subscriptions' && p.reports && ACCT.SubscriptionScreen && (<ACCT.SubscriptionScreen canRun={!!p.reports} />)}
           {screen === 'acct-assets' && p.reports && ACCT.AssetsScreen && (<ACCT.AssetsScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} />)}
           {screen === 'acct-costing' && p.reports && ACCT.CostingScreen && (<ACCT.CostingScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} />)}
+          {screen === 'acct-payroll' && p.sdmPayrollLihat && ACCT.PayrollAccrualScreen && (<ACCT.PayrollAccrualScreen canRun={!!p.sdmPayrollKelola} canApprove={!!p.sdmPayrollSetujui} />)}
           {screen === 'close' && p.reports && (<ACCT.CloseScreen isOwner={user.role === 'owner'} onNav={go} />)}
 
           {screen === 'payroll' && p.payroll && (

@@ -16,6 +16,7 @@ const CHART = [
   ['1-1000', 'Kas', 'asset', '1-0000', 'cash'],
   ['1-1100', 'Bank', 'asset', '1-0000', 'cash'],
   ['1-1200', 'Piutang Usaha', 'asset', '1-0000', 'receivable'],
+  ['1-1250', 'Piutang Karyawan', 'asset', '1-0000', 'receivable'],   // employee advances (cashbon) — repaid via payroll
   ['1-1300', 'Persediaan Galon', 'asset', '1-0000', 'inventory'],
   ['1-1350', 'Persediaan Barang Jadi', 'asset', '1-0000', 'inventory'],   // finished RO water, valued at STANDARD cost
   ['1-1400', 'Peralatan', 'asset', '1-0000', 'fixed_asset'],
@@ -29,6 +30,7 @@ const CHART = [
   ['2-0000', 'Kewajiban', 'liability', '', 'header'],
   ['2-1000', 'Utang Usaha', 'liability', '2-0000', 'payable'],
   ['2-2000', 'Utang Gaji', 'liability', '2-0000', 'payable'],
+  ['2-2100', 'Utang Potongan Gaji', 'liability', '2-0000', 'payable'],   // deductions withheld (PPh 21 etc.) pending remittance
   ['2-3000', 'Uang Muka Pelanggan', 'liability', '2-0000', 'deferred_income'],   // customer credit balance (overpaid bon → not negative AR)
   ['2-4000', 'Beban Yang Masih Harus Dibayar', 'liability', '2-0000', 'accrued'],   // accrued expense (recognised before the bill arrives)
   ['3-0000', 'Ekuitas', 'equity', '', 'header'],
@@ -41,6 +43,7 @@ const CHART = [
   ['4-3000', 'Laba Pelepasan Aset', 'revenue', '4-0000', 'revenue'],   // gain on disposal of a fixed asset
   ['5-0000', 'Harga Pokok Penjualan', 'expense', '', 'header'],
   ['5-1000', 'HPP Galon', 'expense', '5-0000', 'cogs'],
+  ['5-1500', 'HPP Tenaga Kerja Produksi', 'expense', '5-0000', 'cogs'],   // production-staff salaries → cost of goods (feeds costing)
   ['5-2000', 'Penyusutan Produksi (HPP)', 'expense', '5-0000', 'cogs'],   // depreciation of production assets → cost of goods
   // STANDARD-COSTING VARIANCE accounts — each difference posts to its OWN account (never absorbed
   // silently), rolls into COGS on the P&L (subtype cogs), and is closed to 5-1000 HPP at month-end.

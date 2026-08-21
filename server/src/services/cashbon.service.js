@@ -92,8 +92,40 @@ async function decide(id, status, user, reason, disbursedDate) {
   if (status === 'rejected') trail.rejectReason = reason || '';
   const data = { status, data: JSON.stringify(trail) };
   if (status === 'approved') data.disbursedDate = disbursedDate || existing.disbursedDate || new Date().toISOString().slice(0, 10);
-  const r = await prisma.cashbon.update({ where: { id }, data });
-  return toClient(r);
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.cashbon.update({ where: { id }, data });
+    // DISBURSEMENT posts an employee receivable so the payroll repayment (Cr Piutang Karyawan) balances:
+    // Dr Piutang Karyawan (1-1250) / Cr Kas (1-1000). Idempotent (sourceType cashbon). Flag-gated.
+    if (status === 'approved' && existing.status !== 'approved') {
+      try { const cfg = require('../config/env'); if (cfg.accountingV2) await require('./accounting.service').postJournal({ sourceType: 'cashbon', sourceId: row.id, date: row.disbursedDate, description: `Kasbon karyawan: ${Number(row.amount)}`, actor: user, lines: [{ code: '1-1250', debit: Number(row.amount) }, { code: '1-1000', credit: Number(row.amount) }] }, tx); } catch (e) { /* accounting optional */ }
+    }
+    return row;
+  });
+  return toClient(updated);
+}
+// Employee's OUTSTANDING cashbon (asset). Approved cashbons not fully repaid: Σ (amount − repaidAmount).
+async function outstandingFor(employeeId, db = prisma) {
+  const rows = await db.cashbon.findMany({ where: { employeeId, status: 'approved' }, select: { amount: true, repaidAmount: true } });
+  return rows.reduce((s, r) => s + Math.max(0, Number(r.amount) - Number(r.repaidAmount)), 0);
+}
+// Apply a repayment (from payroll) to an employee's approved cashbons, OLDEST first. Increases
+// repaidAmount and marks a cashbon 'paid' once fully repaid. Returns the total actually applied. The
+// ACCOUNTING side (Cr Piutang Karyawan) is posted by the payroll journal — this only moves the balance.
+async function applyRepayment(employeeId, amount, db = prisma) {
+  let remaining = Math.max(0, Math.round(Number(amount) || 0));
+  if (remaining <= 0) return 0;
+  const rows = await db.cashbon.findMany({ where: { employeeId, status: 'approved' }, orderBy: [{ disbursedDate: 'asc' }, { date: 'asc' }] });
+  let applied = 0;
+  for (const c of rows) {
+    if (remaining <= 0) break;
+    const owed = Math.max(0, Number(c.amount) - Number(c.repaidAmount));
+    if (owed <= 0) continue;
+    const pay = Math.min(owed, remaining);
+    const newRepaid = Number(c.repaidAmount) + pay;
+    await db.cashbon.update({ where: { id: c.id }, data: { repaidAmount: BigInt(newRepaid), ...(newRepaid >= Number(c.amount) ? { status: 'paid' } : {}) } });
+    remaining -= pay; applied += pay;
+  }
+  return applied;
 }
 
 // Monthly installment = amount / installments (rounded).
@@ -173,4 +205,4 @@ async function remove(id, user) {
   await prisma.cashbon.delete({ where: { id } });
 }
 
-module.exports = { list, getById, create, update, remove, cancel, preview, request, decide, toClient };
+module.exports = { list, getById, create, update, remove, cancel, preview, request, decide, toClient, outstandingFor, applyRepayment };

@@ -24,7 +24,7 @@ const MONEY = {
   employee: ['base', 'tjKinerja', 'tjProfesi', 'tjRumahDinas', 'tjBpjsKes', 'tjBpjsTk'],
   orientation: ['dailyWage'],
   training: ['cost'],
-  cashbon: ['amount'],
+  cashbon: ['amount', 'repaidAmount'],
   customer: ['masterPrice'],
   priceHistory: ['oldPrice', 'newPrice'],
   distTransaction: ['amount', 'unitPriceLocked'],
@@ -38,6 +38,9 @@ const MONEY = {
   depreciationEntry: ['amount', 'bookValueAfter'],
   costStandardLine: ['unitCost'],
   productionInput: ['actualCost'],
+  payrollLine: ['basicSalary', 'overtime', 'bonus', 'allowancesTotal', 'deductionsTotal', 'cashbonDeduction', 'netPay'],
+  payrollLineComponent: ['amount'],
+  payrollComponent: ['defaultAmount'],
 };
 function moneyResultExtension() {
   const result = {};

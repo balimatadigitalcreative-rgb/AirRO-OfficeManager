@@ -395,6 +395,84 @@ model Reconciliation {
   @@index([accountId])
 }
 
+// PAYROLL (ACCOUNTING_V2) — ACCRUAL basis: a period accrues wages in the month WORKED (Dr Beban Gaji /
+// COGS · Cr Utang Gaji) on APPROVAL, regardless of when paid; payment clears the liability. Reuses
+// Employee + Cashbon. Production staff (isProduction) post to a COGS labour account so the standard-
+// costing module picks them up. Standards/rates are the OWNER's estimates — NO fiscal rules hardcoded.
+model PayrollPeriod {
+  id             String   @id @default(cuid())
+  year           Int
+  month          Int
+  status         String   @default("draft")     // draft | disetujui | dibayar | batal
+  businessUnitId String?
+  note           String   @default("")
+  approvedById   String?
+  approvedByName String?
+  approvedAt     DateTime?
+  requestId      String?                          // the DistChangeRequest that approved it (self-approval waiver)
+  selfApproved   Boolean  @default(false)
+  paidAt         DateTime?
+  paidAccountId  String?
+  journalEntryId String?                          // the accrual journal (on approval)
+  payJournalId   String?                          // the payment journal
+  periodId       String?
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lines PayrollLine[]
+  @@index([year, month])
+  @@index([status])
+}
+model PayrollLine {
+  id               String @id @default(cuid())
+  payrollPeriodId  String
+  employeeId       String
+  employeeName     String @default("")
+  basicSalary      BigInt @default(0)
+  overtime         BigInt @default(0)
+  bonus            BigInt @default(0)
+  allowancesTotal  BigInt @default(0)
+  deductionsTotal  BigInt @default(0)            // withheld deductions (PPh 21 etc.) → separate liability
+  cashbonDeduction BigInt @default(0)            // repaid from net pay → Cr Piutang Karyawan
+  netPay           BigInt @default(0)
+  isProduction     Boolean @default(false)       // → COGS labour (settable per period; defaults from employee)
+  chartAccountId   String?                        // resolved expense/COGS account (audit)
+  businessUnitId   String?
+  fleetId          String @default("")
+
+  period     PayrollPeriod          @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  components PayrollLineComponent[]
+  @@index([payrollPeriodId])
+  @@index([employeeId])
+}
+model PayrollLineComponent {
+  id            String @id @default(cuid())
+  payrollLineId String
+  componentId   String
+  name          String @default("")
+  type          String @default("tunjangan")     // tunjangan | potongan
+  amount        BigInt @default(0)
+
+  line PayrollLine @relation(fields: [payrollLineId], references: [id], onDelete: Cascade)
+  @@index([payrollLineId])
+}
+model PayrollComponent {
+  id            String  @id @default(cuid())
+  name          String
+  type          String                            // tunjangan | potongan
+  taxable       Boolean @default(false)
+  defaultAmount BigInt  @default(0)
+  appliesTo     String  @default("semua")         // semua | per_karyawan
+  chartAccountId String?                          // liability account for a withheld potongan (e.g. PPh 21)
+  isActive      Boolean @default(true)
+  note          String  @default("")              // e.g. "PPh 21 — nominal manual, konfirmasikan ke akuntan"
+  sortOrder     Int     @default(0)
+  createdAt     DateTime @default(now())
+  @@index([type])
+}
+
 // HPP / PRODUCT COSTING — STANDARD COSTING (ACCOUNTING_V2). A CostStandard is a VERSIONED, date-effective
 // "bill of cost" per galon; activating one needs approval (reuses the DistChangeRequest engine). A
 // ProductionRun posts finished goods at STANDARD and routes every difference to a named variance
@@ -654,6 +732,10 @@ model Employee {
   businessUnitId String? // STAGE 1 label; null = "Air". Not yet filtered on. (BPJS/payroll
                          // data lives on this record + on posted Entries, both now labelled.)
 
+  // PRODUCTION flag — a production-staff salary posts to the COGS labour account (feeds standard
+  // costing). Defaulted on the record; the payroll line can still override it per period.
+  isProduction      Boolean  @default(false)
+
   cashbons          Cashbon[]
   trainings         Training[]
   calendarEvents    CalendarEvent[]
@@ -744,6 +826,7 @@ model Cashbon {
   disbursedDate String? // YYYY-MM-DD tanggal DIBERIKAN/dicairkan — set on ACC; drives the deduction cycle
   note         String   @default("")
   installments Int      @default(1) // dicicil berapa bulan (legacy; per-cycle rule deducts in full)
+  repaidAmount BigInt   @default(0) // repaid via payroll deduction; outstanding = amount − repaidAmount
   status       String   @default("pending") // pending | approved | rejected | paid | cancelled (legacy: active)
   cycleAnchor  String? // payroll cycle this kasbon belongs to (cutoff date YYYY-MM-15)
   // Approval trail (requestedBy/requestedAt/approvedBy/decidedAt/rejectReason), JSON.

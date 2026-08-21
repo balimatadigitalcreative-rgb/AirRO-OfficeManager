@@ -11,6 +11,7 @@
   const money = (n) => (window.FIN ? FIN.fmt(n) : String(n));
   const moneyS = (n) => (window.FIN ? FIN.fmtS(n) : String(n));
   const ACC = () => (window.API && window.API.accounting);
+  const ACC2 = () => (window.API && window.API.payrollAccrual);   // accrual payroll (separate router)
   const todayISO = () => (window.FIN ? FIN.TODAY : new Date().toISOString().slice(0, 10));
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   const monthKey = (d) => String(d || '').slice(0, 7);
@@ -540,6 +541,8 @@
       { key: 'prodJ', ok: (chk.prodUnposted || 0) === 0, label: trA('tp.chkProdJ'), fix: 'acct-costing', blocking: true, val: chk.prodUnposted ? String(chk.prodUnposted) : '' },
       { key: 'prodD', ok: (chk.prodDraft || 0) === 0, label: trA('tp.chkProdD'), fix: 'acct-costing', val: chk.prodDraft ? String(chk.prodDraft) : '' },
       { key: 'varO', ok: (chk.varOpen || 0) === 0, label: trA('tp.chkVarO'), fix: 'acct-costing', val: chk.varOpen ? String(chk.varOpen) : '' },
+      { key: 'payJ', ok: (chk.payrollUnposted || 0) === 0, label: trA('tp.chkPayJ'), fix: 'acct-payroll', blocking: true, val: chk.payrollUnposted ? String(chk.payrollUnposted) : '' },
+      { key: 'payD', ok: (chk.payrollDraft || 0) === 0, label: trA('tp.chkPayD'), fix: 'acct-payroll', val: chk.payrollDraft ? String(chk.payrollDraft) : '' },
       { key: 'accrued', ok: (chk.accruedOpen || 0) === 0, label: trA('tp.chkAccrued'), fix: 'acct-accrual', val: chk.accruedOpen ? String(chk.accruedOpen) : '' },
       { key: 'subs', ok: (chk.subsDue || 0) === 0, label: trA('tp.chkSubs'), fix: 'acct-subscriptions', val: chk.subsDue ? String(chk.subsDue) : '' },
       { key: 'draft', ok: (chk.draftBills || 0) === 0, label: trA('tp.chkDraft'), fix: 'acct-payables', val: chk.draftBills ? String(chk.draftBills) : '' },
@@ -548,7 +551,8 @@
     const amortBlocked = (chk.amortPending || 0) > 0;
     const deprBlocked = (chk.deprPending || 0) > 0;
     const prodBlocked = (chk.prodUnposted || 0) > 0;
-    const canClose = balanced && !amortBlocked && !deprBlocked && !prodBlocked && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
+    const payBlocked = (chk.payrollUnposted || 0) > 0;
+    const canClose = balanced && !amortBlocked && !deprBlocked && !prodBlocked && !payBlocked && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
 
     const doClose = async () => {
       setBusy(true); setErr('');
@@ -612,8 +616,9 @@
               {balanced && amortBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedAmort', { n: chk.amortPending })}</div>}
               {balanced && !amortBlocked && deprBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedDepr', { n: chk.deprAssets || 0 })}</div>}
               {balanced && !amortBlocked && !deprBlocked && prodBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedProd', { n: chk.prodUnposted })}</div>}
+              {balanced && !amortBlocked && !deprBlocked && !prodBlocked && payBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedPay', { n: chk.payrollUnposted })}</div>}
               <label className="fld-label">{trA('tp.typeConfirm')}</label>
-              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced || amortBlocked || deprBlocked || prodBlocked} />
+              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced || amortBlocked || deprBlocked || prodBlocked || payBlocked} />
               <div className="tp-lockinfo">{trA('tp.lockInfo')}</div>
               {err && <div className="add-err"><IconClose s={14} />{err}</div>}
               <button className="btn btn-primary" disabled={!canClose || busy} onClick={doClose}>{IcA('IconLock', { s: 16 })}{trA('tp.closeBtn', { m: target })}</button>
@@ -1542,5 +1547,116 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen };
+  // ── PAYROLL (accrual, double-entry) — period list, per-employee worksheet with inline draft editing,
+  // an approval view showing totals + the production/operating split, payment, and a printable payslip. ──
+  const PST = { draft: 'warn', disetujui: 'ok', dibayar: 'ok', batal: 'default' };
+  function PayrollAccrualScreen({ canRun, canApprove }) {
+    const [open, setOpen] = aS(null); const [form, setForm] = aS(false); const [busy, setBusy] = aS(''); const [err, setErr] = aS('');
+    const q = useAcct(() => ACC2().periods(), []);
+    if (q.state === 'gated') return <GatedCard icon="IconCustomers" body={trA('sb.soon')} />;
+    const data = (q.data && q.data.data) || [];
+    if (open) return <PayrollDetail id={open} canRun={canRun} canApprove={canApprove} onBack={() => { setOpen(null); q.reload(); }} />;
+    const create = async (y, m) => { setBusy('c'); setErr(''); try { const r = await ACC2().periodCreate({ year: y, month: m }); setForm(false); q.reload(); setOpen(r.data.id); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finPayroll')}</h2><div className="fin-head-scope">{trA('s.finPayroll')}</div></div>
+          {canRun && <div className="fin-head-actions"><button className="btn btn-primary" onClick={() => setForm(true)}>{IcA('IconPlus', { s: 16 })}{trA('py.new')}</button></div>}
+        </div>
+        <ScreenIntro answers={trA('py.answers')} extra={trA('py.taxNote')} tone="warn" />
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+        <div className="card">
+          {q.state === 'loading' && <Skeleton n={4} />}
+          {q.state === 'ready' && (data.length === 0
+            ? <EmptyState title={trA('py.emptyT')} body={trA('py.emptyB')} icon="IconCustomers" actionLabel={canRun ? trA('py.new') : null} onAction={canRun ? () => setForm(true) : null} />
+            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('py.period')}</th><th className="fin-th fin-r">{trA('py.staff')}</th><th className="fin-th fin-r">{trA('py.net')}</th><th className="fin-th">{trA('py.status')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{data.map((p) => <tr key={p.id} className="fin-trow" style={{ cursor: 'pointer' }} onClick={() => setOpen(p.id)}>
+                <td className="fin-td">{p.period}</td><td className="fin-td fin-r tnum">{p.totals.count}</td><td className="fin-td fin-r tnum">{money(p.totals.net)}</td>
+                <td className="fin-td"><span className={`ap-badge ${PST[p.status] || 'default'}`}>{trA('py.st_' + p.status)}</span>{p.selfApproved ? <span className="cr-selfbadge" style={{ marginLeft: 6 }}>{trA('cr.selfApprovedBadge')}</span> : ''}</td>
+                <td className="fin-td fin-r">{IcA('IconCaret', { s: 15 })}</td></tr>)}</tbody>
+            </table></div>)}
+        </div>
+        {form && <PayrollNewForm busy={busy} onClose={() => setForm(false)} onCreate={create} />}
+      </div>
+    );
+  }
+  function PayrollNewForm({ busy, onClose, onCreate }) {
+    const now = todayISO(); const [ym, setYm] = aS(now.slice(0, 7));
+    const [Y, M] = ym.split('-').map(Number);
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('py.new')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body"><label className="fld-label" style={{ marginTop: 0 }}>{trA('py.period')}</label><input type="month" className="fld" value={ym} max={now.slice(0, 7)} onChange={(e) => setYm(e.target.value)} /><div className="cap-desc" style={{ marginTop: 6 }}>{trA('py.newHint')}</div></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={busy === 'c'} onClick={() => onCreate(Y, M)}>{busy === 'c' ? '…' : trA('py.build')}</button></div>
+      </div></div>
+    );
+  }
+  function PayrollDetail({ id, canRun, canApprove, onBack }) {
+    const q = useAcct(() => ACC2().period(id), [id]);
+    const [busy, setBusy] = aS(''); const [err, setErr] = aS(''); const [slip, setSlip] = aS(null);
+    const p = q.data || {}; const t = p.totals || {}; const draft = p.status === 'draft';
+    const edit = async (lineId, patch) => { setBusy(lineId); setErr(''); try { await ACC2().lineUpdate(lineId, patch); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    const act = async (fn) => { setBusy('a'); setErr(''); try { await fn(); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    return (
+      <div className="screen-enter fin-scope">
+        <button className="dist-back no-print" onClick={onBack}><IconCaret s={14} style={{ transform: 'rotate(90deg)' }} />{trA('py.back')}</button>
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finPayroll')} · {p.period}</h2><div className="fin-head-scope"><span className={`ap-badge ${PST[p.status] || 'default'}`}>{trA('py.st_' + (p.status || 'draft'))}</span>{p.approvedByName ? ' · ' + trA('py.approvedBy', { who: p.approvedByName }) : ''}</div></div>
+          <div className="fin-head-actions">
+            {canApprove && draft && <button className="btn btn-primary" disabled={!!busy} onClick={() => act(() => ACC2().approve(id))}>{IcA('IconLock', { s: 15 })}{trA('py.approve')}</button>}
+            {canRun && p.status === 'disetujui' && <button className="btn btn-primary" disabled={!!busy} onClick={() => act(() => ACC2().pay(id, { account: 'bank' }))}>{IcA('IconCoinIn', { s: 15 })}{trA('py.pay')}</button>}
+          </div>
+        </div>
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+        <div className="dist-cd-stats" style={{ marginBottom: 12 }}>
+          <div><div className="dist-cd-slbl">{trA('py.gross')}</div><div className="dist-cd-sval">{money(t.gross || 0)}</div></div>
+          <div><div className="dist-cd-slbl">{trA('py.net')}</div><div className="dist-cd-sval">{money(t.net || 0)}</div></div>
+          <div><div className="dist-cd-slbl">{trA('py.splitProd')}</div><div className="dist-cd-sval" style={{ color: '#7c3aed' }}>{money(t.prodGross || 0)}</div></div>
+          <div><div className="dist-cd-slbl">{trA('py.splitOpex')}</div><div className="dist-cd-sval">{money(t.opexGross || 0)}</div></div>
+        </div>
+        <div className="card">
+          {q.state !== 'ready' ? <Skeleton n={6} /> : <div className="fin-tablewrap"><table className="fin-table"><thead><tr>
+            <th className="fin-th">{trA('py.employee')}</th><th className="fin-th fin-r">{trA('py.basic')}</th><th className="fin-th fin-r">{trA('py.ot')}</th><th className="fin-th fin-r">{trA('py.bonus')}</th><th className="fin-th fin-r">{trA('py.allow')}</th><th className="fin-th fin-r">{trA('py.ded')}</th><th className="fin-th fin-r">{trA('py.cashbon')}</th><th className="fin-th fin-r">{trA('py.net')}</th><th className="fin-th">{trA('py.prod')}</th><th className="fin-th" /></tr></thead>
+            <tbody>{(p.lines || []).map((l) => <tr key={l.id} className="fin-trow">
+              <td className="fin-td">{l.employeeName}</td>
+              <td className="fin-td fin-r tnum">{money(l.basicSalary)}</td>
+              <td className="fin-td fin-r tnum">{draft && canRun ? <input className="fld tnum py-inp" value={l.overtime || ''} onChange={(e) => edit(l.id, { overtime: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.overtime)}</td>
+              <td className="fin-td fin-r tnum">{draft && canRun ? <input className="fld tnum py-inp" value={l.bonus || ''} onChange={(e) => edit(l.id, { bonus: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.bonus)}</td>
+              <td className="fin-td fin-r tnum">{money(l.allowancesTotal)}</td>
+              <td className="fin-td fin-r tnum">{money(l.deductionsTotal)}</td>
+              <td className="fin-td fin-r tnum">{draft && canRun ? <input className="fld tnum py-inp" value={l.cashbonDeduction || ''} title={trA('py.outstanding', { amt: money(l.cashbonOutstanding || 0) })} onChange={(e) => edit(l.id, { cashbonDeduction: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.cashbonDeduction)}</td>
+              <td className="fin-td fin-r tnum"><b>{money(l.netPay)}</b></td>
+              <td className="fin-td">{draft && canRun ? <input type="checkbox" checked={l.isProduction} onChange={(e) => edit(l.id, { isProduction: e.target.checked })} /> : (l.isProduction ? <span className="ap-badge ok">COGS</span> : '—')}</td>
+              <td className="fin-td fin-r"><button className="dist-link" onClick={() => setSlip(l)}>{trA('py.slip')}</button></td></tr>)}
+            </tbody>
+          </table></div>}
+        </div>
+        {slip && <PayslipModal period={p.period} line={slip} onClose={() => setSlip(null)} />}
+      </div>
+    );
+  }
+  function PayslipModal({ period, line, onClose }) {
+    aEf(() => { document.body.classList.add('payslip-open'); return () => document.body.classList.remove('payslip-open'); }, []);
+    const l = line;
+    return (
+      <div className="payslip-overlay modal-scrim" onClick={onClose} style={{ zIndex: 250 }}><div className="payslip-sheet modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="ps-head"><div><div style={{ fontSize: 18, fontWeight: 800 }}>{trA('py.slipTitle')}</div><div style={{ color: 'var(--text-mut)' }}>{period}</div></div><button className="jp-icon no-print" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="ps-body">
+          <div className="ps-name">{l.employeeName}</div>
+          <table className="fin-table" style={{ marginTop: 10 }}><tbody>
+            <tr><td className="fin-td">{trA('py.basic')}</td><td className="fin-td fin-r tnum">{money(l.basicSalary)}</td></tr>
+            <tr><td className="fin-td">{trA('py.ot')}</td><td className="fin-td fin-r tnum">{money(l.overtime)}</td></tr>
+            <tr><td className="fin-td">{trA('py.bonus')}</td><td className="fin-td fin-r tnum">{money(l.bonus)}</td></tr>
+            <tr><td className="fin-td">{trA('py.allow')}</td><td className="fin-td fin-r tnum">{money(l.allowancesTotal)}</td></tr>
+            {(l.components || []).map((c) => <tr key={c.id}><td className="fin-td" style={{ paddingLeft: 20, color: 'var(--text-mut)' }}>· {c.name}</td><td className="fin-td fin-r tnum">{c.type === 'potongan' ? '−' : ''}{money(c.amount)}</td></tr>)}
+            <tr><td className="fin-td">{trA('py.ded')}</td><td className="fin-td fin-r tnum amt-neg">−{money(l.deductionsTotal)}</td></tr>
+            <tr><td className="fin-td">{trA('py.cashbon')}</td><td className="fin-td fin-r tnum amt-neg">−{money(l.cashbonDeduction)}</td></tr>
+            <tr style={{ fontWeight: 800 }}><td className="fin-td">{trA('py.net')}</td><td className="fin-td fin-r tnum">{money(l.netPay)}</td></tr>
+          </tbody></table>
+          <div className="dist-hint" style={{ marginTop: 10 }}>{trA('py.taxNote')}</div>
+        </div>
+        <div className="ps-actions no-print"><button className="btn btn-primary" onClick={() => window.print()}>{IcA('IconDownload', { s: 15 })}{trA('py.print')}</button></div>
+      </div></div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen, PayrollAccrualScreen };
 })();
