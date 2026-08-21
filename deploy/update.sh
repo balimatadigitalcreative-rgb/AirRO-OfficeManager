@@ -408,16 +408,15 @@ else
     abort "test worktree vanished during setup at $TEST_WT — temp dir is being cleaned; set DEPLOY_TEST_DIR. NOT a test failure."
   fi
 
-  # RESOURCE GUARDS so a test run can NEVER starve the live airro-api:
-  #   • --max-old-space-size caps V8 old-space. The suite's heap grows monotonically (~7 MB per test
-  #     file: each jest file re-requires the whole app graph + its own PrismaClient, and --runInBand keeps
-  #     them all in ONE process — measured peak ~0.75-1.0 Gi at 95 files). Node's DEFAULT limit (~2 Gi) is
-  #     what the suite blew past → FatalProcessOutOfMemory. 4096 gives generous headroom on this 7.8 Gi
-  #     box; override with DEPLOY_TEST_HEAP_MB. NODE_OPTIONS reaches every Node jest spawns.
-  #   • ONE worker: the npm test script already pins --runInBand (a single in-process worker, not N) —
-  #     which IS the worker cap (jest rejects --runInBand + --maxWorkers together), so nothing to add.
+  # THE PROVEN INVOCATION — `NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand`:
+  #   • The 90+ suites are COMPILE-HEAVY. Run across jest's default PARALLEL workers they exceed V8's
+  #     default old-space and die with FatalProcessOutOfMemory while COMPILING test modules — never a
+  #     real assertion failure. --runInBand serialises them into ONE process, and 4096 MB is the value
+  #     MEASURED to pass on this machine (94 suites, exit 0, ~158 s). Do NOT lower it or drop --runInBand.
+  #     158 s is fine for a deploy gate — correctness over speed here. The npm test script already pins
+  #     --runInBand; NODE_OPTIONS reaches every Node it spawns. Override the cap via DEPLOY_TEST_HEAP_MB.
   #   • NICED to the lowest priority when `nice` exists, so the live API keeps the CPU under contention.
-  #   • --logHeapUsage so we REPORT the peak heap actually used — an evidence-based cap, not a guess.
+  #   • --logHeapUsage so we REPORT the peak heap actually used (also forces a GC per file → lower peak).
   local_nice=""; command -v nice >/dev/null 2>&1 && local_nice="nice -n 19"
   TEST_OUT="$( cd "$TEST_WT/server" && unset DATABASE_URL \
     && NODE_OPTIONS="--max-old-space-size=${DEPLOY_TEST_HEAP_MB:-4096}" $local_nice npm test -- --logHeapUsage 2>&1 )"; TEST_RC=$?
@@ -435,8 +434,8 @@ else
       abort "tests FAILED on ${TARGET_SHA:0:8} — assertions did not pass (the failing test is named above). Production untouched (still on ${SHA_BEFORE:0:8})."
     elif echo "$TEST_OUT" | grep -qiE 'FatalProcessOutOfMemory|JavaScript heap out of memory|Reached heap limit|Allocation failed'; then
       echo "$TEST_OUT" | tail -20 | sed 's/^/        /' | tee -a "$LOG"
-      TESTS="COULD NOT RUN (OUT OF MEMORY — jest killed; cap ${DEPLOY_TEST_HEAP_MB:-4096}MB, peak ${TEST_PEAK_HEAP:-?}MB)"
-      abort "tests OUT OF MEMORY on ${TARGET_SHA:0:8}: jest was KILLED hitting the V8 heap cap (${DEPLOY_TEST_HEAP_MB:-4096}MB; peak seen ${TEST_PEAK_HEAP:-?}MB) — NOT an assertion failure and NOT machine RAM. Raise DEPLOY_TEST_HEAP_MB, or investigate a suite leak (npm test -- --logHeapUsage). Last 20 lines above; full log in deploy/deploy.log."
+      TESTS="OUT OF MEMORY (jest killed while compiling tests; cap ${DEPLOY_TEST_HEAP_MB:-4096}MB, peak ${TEST_PEAK_HEAP:-?}MB)"
+      abort "OUT OF MEMORY on ${TARGET_SHA:0:8}: jest was KILLED while COMPILING the tests (V8 heap cap ${DEPLOY_TEST_HEAP_MB:-4096}MB; peak seen ${TEST_PEAK_HEAP:-?}MB) — NOT an assertion failure and NOT machine RAM. This is the compile-heavy-suite OOM: the gate runs --runInBand + 4096; raise DEPLOY_TEST_HEAP_MB if the suite has grown. Last 20 lines above; full log in deploy/deploy.log."
     else
       echo "$TEST_OUT" | tail -20 | sed 's/^/        /' | tee -a "$LOG"
       TESTS="COULD NOT RUN (jest did not start, rc=$TEST_RC)"
