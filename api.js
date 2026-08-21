@@ -171,6 +171,21 @@
       assetsImportCommit: (b) => req('POST', '/accounting/assets/import', b),           // { rows } → commit valid rows
       gallonPoolReconcile: (id) => req('GET', '/accounting/assets/' + id + '/reconcile-pool'),
       gallonPoolLoss: (id, b) => req('POST', '/accounting/assets/' + id + '/pool-loss', b), // { qty, kind, reason }
+      // HPP / PRODUCT COSTING
+      costStandards: (p) => req('GET', '/accounting/cost-standards' + acctQs(p)),
+      costStandardGet: (id) => req('GET', '/accounting/cost-standards/' + id),
+      costStandardCreate: (b) => req('POST', '/accounting/cost-standards', b),
+      costStandardActivate: (id, b) => req('POST', '/accounting/cost-standards/' + id + '/request-activation', b || {}),
+      productionRuns: (p) => req('GET', '/accounting/production-runs' + acctQs(p)),
+      productionRunGet: (id) => req('GET', '/accounting/production-runs/' + id),
+      productionRunCreate: (b) => req('POST', '/accounting/production-runs', b),
+      productionRunComplete: (id) => req('POST', '/accounting/production-runs/' + id + '/complete', {}),
+      varianceReport: (p) => req('GET', '/accounting/costing/variance-report' + acctQs(p)),
+      closeVariances: (b) => req('POST', '/accounting/costing/close-variances', b),
+      costingGallonLoss: (p) => req('GET', '/accounting/costing/gallon-loss' + acctQs(p)),
+      costingInventory: () => req('GET', '/accounting/costing/inventory'),
+      monthlyHpp: (p) => req('GET', '/accounting/costing/monthly-hpp' + acctQs(p)),
+      marginAnalysis: (p) => req('GET', '/accounting/costing/margin' + acctQs(p)),
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

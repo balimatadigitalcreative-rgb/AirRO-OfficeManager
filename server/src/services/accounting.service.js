@@ -17,6 +17,7 @@ const CHART = [
   ['1-1100', 'Bank', 'asset', '1-0000', 'cash'],
   ['1-1200', 'Piutang Usaha', 'asset', '1-0000', 'receivable'],
   ['1-1300', 'Persediaan Galon', 'asset', '1-0000', 'inventory'],
+  ['1-1350', 'Persediaan Barang Jadi', 'asset', '1-0000', 'inventory'],   // finished RO water, valued at STANDARD cost
   ['1-1400', 'Peralatan', 'asset', '1-0000', 'fixed_asset'],
   ['1-1410', 'Kendaraan', 'asset', '1-0000', 'fixed_asset'],
   ['1-1420', 'Mesin & Peralatan Produksi', 'asset', '1-0000', 'fixed_asset'],   // RO machines etc. (production)
@@ -41,6 +42,14 @@ const CHART = [
   ['5-0000', 'Harga Pokok Penjualan', 'expense', '', 'header'],
   ['5-1000', 'HPP Galon', 'expense', '5-0000', 'cogs'],
   ['5-2000', 'Penyusutan Produksi (HPP)', 'expense', '5-0000', 'cogs'],   // depreciation of production assets → cost of goods
+  // STANDARD-COSTING VARIANCE accounts — each difference posts to its OWN account (never absorbed
+  // silently), rolls into COGS on the P&L (subtype cogs), and is closed to 5-1000 HPP at month-end.
+  ['5-3100', 'Selisih Harga Bahan', 'expense', '5-0000', 'cogs'],
+  ['5-3200', 'Selisih Kuantitas Bahan', 'expense', '5-0000', 'cogs'],
+  ['5-3300', 'Selisih Tarif Tenaga Kerja', 'expense', '5-0000', 'cogs'],
+  ['5-3400', 'Selisih Efisiensi Tenaga Kerja', 'expense', '5-0000', 'cogs'],
+  ['5-3500', 'Selisih Pengeluaran Overhead', 'expense', '5-0000', 'cogs'],
+  ['5-3600', 'Selisih Volume Overhead', 'expense', '5-0000', 'cogs'],
   ['6-0000', 'Beban Operasional', 'expense', '', 'header'],
   ['6-1000', 'Beban Gaji', 'expense', '6-0000', 'expense'],
   ['6-2000', 'Beban BBM & Pengiriman', 'expense', '6-0000', 'expense'],
@@ -202,6 +211,27 @@ async function postDistExpense(x, actor, db = prisma) {
 //   • bon       → Dr Piutang(effective) / Cr Pendapatan, effective = amount + Σ price-corrections
 //                 − capped disputes; a `kerugian` dispute is a company loss (Dr Beban Kerugian Piutang),
 //                 a `tidak_diakui` reverses revenue. Capped at the sale (per-bon floor at 0).
+// STANDARD cost per galon in force on `date` (via the caller's db client, so it reads inside the same
+// transaction and never cycles back into costing.service). 0 = no active standard → HPP-on-sale is a
+// no-op, so the cash book is untouched until product costing is set up.
+async function standardPerUnitViaDb(date, db = prisma) {
+  const d = String(date || '');
+  const rows = await db.costStandard.findMany({ where: { productId: 'galon-19l', status: 'aktif', effectiveFrom: { lte: d } }, orderBy: { effectiveFrom: 'desc' } }).catch(() => []);
+  const s = (rows || []).find((x) => !x.effectiveTo || x.effectiveTo >= d);
+  if (!s) return 0;
+  const lines = await db.costStandardLine.findMany({ where: { standardId: s.id } });
+  return lines.reduce((sum, l) => sum + Math.round(Number(l.qtyPerUnit || 0) * Number(l.unitCost || 0)), 0);
+}
+// HPP ON SALE (standard costing): a gallon sale consumes finished-goods inventory at STANDARD cost —
+// Dr HPP (5-1000) / Cr Persediaan Barang Jadi (1-1350). Self-balancing, so it rides in the sale journal.
+async function hppOnSaleLines(t, db) {
+  if (t.openingBon) return [];
+  const qty = n(t.qty); if (qty <= 0) return [];
+  const std = await standardPerUnitViaDb(t.txnDate, db);
+  if (!std) return [];
+  const amt = std * qty; const f = t.fleetId || '';
+  return [{ code: '5-1000', debit: amt, fleetId: f }, { code: '1-1350', credit: amt, fleetId: f }];
+}
 async function distTxnLines(t, db = prisma) {
   if (t.status === 'void') return [];
   const f = t.fleetId || '';
@@ -214,7 +244,7 @@ async function distTxnLines(t, db = prisma) {
     if (t.paymentNotReceived) return [{ code: LOSS_AR, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
     return [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
   }
-  if (t.method !== 'bon') { const amt = n(t.amount); return amt ? [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }] : []; }
+  if (t.method !== 'bon') { const amt = n(t.amount); if (!amt) return []; return [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }, ...(await hppOnSaleLines(t, db))]; }
   const corrs = t.corrections || await db.correction.findMany({ where: { transactionId: t.id, kind: 'price', active: true }, select: { deltaAmount: true, kind: true, active: true } });
   const pdelta = (corrs || []).filter((c) => c.kind === 'price' && c.active).reduce((a, c) => a + Number(c.deltaAmount || 0), 0);
   const disputes = await db.distTransactionDispute.findMany({ where: { transactionId: t.id, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { status: true, disputedAmount: true } });
@@ -228,7 +258,7 @@ async function distTxnLines(t, db = prisma) {
   if (arNet <= 0 && revenue <= 0) return [];
   const lines = [{ code: AR, debit: arNet, fleetId: f }, { code: REV_MAIN, credit: revenue - tidak, fleetId: f }];
   if (rugi > 0) lines.push({ code: LOSS_AR, debit: rugi, fleetId: f });   // debits arNet + rugi = revenue − tidak = credit ✓
-  return lines;
+  return [...lines, ...(await hppOnSaleLines(t, db))];   // HPP on sale at standard (no-op without an active standard)
 }
 // LIVE post / backfill of a distribution transaction — INSERT-only under (dist_txn, id). At creation
 // there are no corrections/disputes yet, so this is the original figure; for a historical backfill it
@@ -584,9 +614,9 @@ async function accountBalances({ dateFrom, dateTo } = {}) {
   const jWhere = {};
   if (dateFrom) (jWhere.date || (jWhere.date = {})).gte = dateFrom;
   if (dateTo) (jWhere.date || (jWhere.date = {})).lte = dateTo;
-  const lines = await prisma.journalLine.findMany({ where: Object.keys(jWhere).length ? { journalEntry: jWhere } : {}, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, type: true } } } });
+  const lines = await prisma.journalLine.findMany({ where: Object.keys(jWhere).length ? { journalEntry: jWhere } : {}, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, type: true, subtype: true } } } });
   const acc = {};
-  for (const l of lines) { const c = l.chartAccount.code; if (!acc[c]) acc[c] = { code: c, name: l.chartAccount.name, type: l.chartAccount.type, debit: 0, credit: 0 }; acc[c].debit += Number(l.debit); acc[c].credit += Number(l.credit); }
+  for (const l of lines) { const c = l.chartAccount.code; if (!acc[c]) acc[c] = { code: c, name: l.chartAccount.name, type: l.chartAccount.type, subtype: l.chartAccount.subtype || '', debit: 0, credit: 0 }; acc[c].debit += Number(l.debit); acc[c].credit += Number(l.credit); }
   return Object.values(acc).sort((a, b) => a.code.localeCompare(b.code)).map((a) => ({ ...a, balance: ((a.debit - a.credit) * SIGN[a.type]) || 0 }));   // `|| 0` normalises -0 → 0
 }
 async function trialBalance(range) {
@@ -609,7 +639,11 @@ async function incomeStatement(range) {
   const rows = await accountBalances(range);
   const revenue = rows.filter((r) => r.type === 'revenue').reduce((s, r) => s + r.balance, 0);
   const expense = rows.filter((r) => r.type === 'expense').reduce((s, r) => s + r.balance, 0);
-  return { revenue, expense, profit: revenue - expense, margin: revenue ? +(((revenue - expense) / revenue) * 100).toFixed(1) : 0, rows: rows.filter((r) => r.type === 'revenue' || r.type === 'expense') };
+  // HPP (cost of goods) is the cogs-subtype slice of expense — the standard-costing module's period HPP
+  // reads the SAME accounts, so the two agree by construction (asserted in the costing tests).
+  const hpp = rows.filter((r) => r.subtype === 'cogs').reduce((s, r) => s + r.balance, 0);
+  const opex = expense - hpp;
+  return { revenue, expense, hpp, opex, grossProfit: revenue - hpp, profit: revenue - expense, margin: revenue ? +(((revenue - expense) / revenue) * 100).toFixed(1) : 0, rows: rows.filter((r) => r.type === 'revenue' || r.type === 'expense') };
 }
 
 // UMUR PIUTANG (AR aging). Standard FIFO: a customer's collections/write-downs pay their OLDEST bon

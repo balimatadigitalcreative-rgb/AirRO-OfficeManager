@@ -66,6 +66,11 @@ async function closeChecklist(year, month) {
   // Unposted DEPRECIATION for this period understates expense / overstates profit — BLOCKS the close
   // (same rule as amortisation), with a one-click "post all" in the checklist.
   try { const d = await require('./depreciation.service').pendingDepreciation({ asOf: to }); deprPending = d.months; deprAssets = d.assets; } catch (e) { /* fixed assets optional */ }
+  // COSTING — production runs not yet completed + variances not yet closed WARN; a completed run whose
+  // journal never posted BLOCKS the close (an approved run without a journal).
+  let prodDraft = 0, prodUnposted = 0, varOpen = 0;
+  try { const pr = await require('./costing.service').pendingRuns({ asOf: to }); prodDraft = pr.draft; prodUnposted = pr.unposted; } catch (e) { /* costing optional */ }
+  try { varOpen = await require('./costing.service').openVariancesCount({ asOf: to }); } catch (e) { /* costing optional */ }
   try { accruedOpen = await prisma.accrual.count({ where: { status: 'aktif', reverseDate: { gt: to } } }); } catch (e) { /* optional */ }
   try { subsDue = await prisma.subscription.count({ where: { status: 'aktif', nextRunDate: { lte: to } } }); } catch (e) { /* optional */ }
   try { draftBills = await prisma.bill.count({ where: { status: 'draft', billDate: { lte: to } } }); } catch (e) { /* optional */ }
@@ -79,8 +84,10 @@ async function closeChecklist(year, month) {
     journalDrift,
     amortPending,        // BLOCKS the close
     deprPending, deprAssets,   // BLOCKS the close (n months across deprAssets assets)
+    prodUnposted,        // BLOCKS the close (a completed run with no journal)
+    prodDraft, varOpen,  // warn only (runs not completed / variances not closed)
     accruedOpen, subsDue, draftBills,   // warn only
-    clean: uncategorised === 0 && pending === 0 && bank.count === 0 && journalDrift === 0 && amortPending === 0 && deprPending === 0,
+    clean: uncategorised === 0 && pending === 0 && bank.count === 0 && journalDrift === 0 && amortPending === 0 && deprPending === 0 && prodUnposted === 0,
   };
 }
 
@@ -101,6 +108,10 @@ async function closePeriod({ year, month, lock }, actor) {
   let deprPending = { months: 0, assets: 0 };
   try { deprPending = await require('./depreciation.service').pendingDepreciation({ asOf: periodEnd }); } catch (e) { /* fixed assets optional */ }
   if (deprPending.months > 0) throw ApiError.badRequest(`Penyusutan bulan ini belum diposting (${deprPending.assets} aset) — posting dulu sebelum menutup.`, { deprPending: deprPending.months, deprAssets: deprPending.assets });
+  // A completed production run whose journal never posted must not be frozen — block until it posts.
+  let prodUnposted = 0;
+  try { prodUnposted = (await require('./costing.service').pendingRuns({ asOf: periodEnd })).unposted; } catch (e) { /* costing optional */ }
+  if (prodUnposted > 0) throw ApiError.badRequest(`${prodUnposted} production run selesai tanpa jurnal — selesaikan/posting dulu sebelum menutup.`, { prodUnposted });
   const key = keyOf(year, month);
   const status = lock ? 'terkunci' : 'ditutup';
   const stamp = { status, closedById: (actor && actor.id) || null, closedByName: await actorName(actor), closedAt: new Date(), reopenReason: null, reopenedById: null, reopenedByName: null, reopenedAt: null };

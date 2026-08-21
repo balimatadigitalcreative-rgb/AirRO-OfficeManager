@@ -1572,6 +1572,19 @@ async function normalizeCorrection(txn, payload, opts) {
 
 // Enrich a request row into the client shape: current vs requested inputs + the recomputed delta.
 async function changeRequestClient(req, txnMaybe) {
+  // Non-transaction request kinds (cost-standard activation) carry no DistTransaction — return a
+  // standard-shaped row so the shared inbox renders them without a txn lookup.
+  if (req.kind === 'cost_standard') {
+    let p = {}; try { p = JSON.parse(req.payload || '{}'); } catch (e) {}
+    return {
+      id: req.id, kind: 'cost_standard', status: req.status, fleetId: req.fleetId || '', reason: req.reason,
+      standardId: p.standardId || req.transactionId, standardVersion: p.version || null, customerName: 'Standar Biaya', txnRef: 'STD',
+      requestedBy: req.requestedByName ? { name: req.requestedByName, role: req.requestedByRole || null } : null, requestedById: req.requestedById || null,
+      decidedBy: req.decidedByName ? { name: req.decidedByName, role: req.decidedByRole || null } : null,
+      decisionNote: req.decisionNote || '', decidedAt: req.decidedAt ? new Date(req.decidedAt).getTime() : null,
+      selfApproved: !!req.selfApproved, createdAt: req.createdAt ? new Date(req.createdAt).getTime() : null,
+    };
+  }
   const txn = txnMaybe || await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true, code: true } } } });
   let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
   const sale = txn && isGallonSale(txn);
@@ -1730,6 +1743,24 @@ async function decideChangeRequest(id, decision, body, actor) {
   if (!fleetAllows(actor, req.fleetId)) throw ApiError.notFound('Pengajuan tidak ditemukan.');   // out of scope
   if (req.status !== 'pending') throw ApiError.badRequest('Pengajuan ini sudah diputuskan.');
   const snap = await actorSnap(actor);
+  // NON-TRANSACTION requests reuse this same engine (inbox / approve / reject / audit) but carry a
+  // different source in `transactionId`. Cost-standard activation is handled here, before any txn fetch.
+  if (req.kind === 'cost_standard') {
+    const isSelfStd = !!(decision === 'approve' && req.requestedById && actor && req.requestedById === actor.id);
+    if (isSelfStd) assertSelfApprovalAllowed(snap, 0, 'aktivasi standar');   // segregation of duties (0 = no rupiah ceiling)
+    let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
+    if (decision === 'reject') {
+      const note = String(body.note || '').trim();
+      if (!note) throw ApiError.badRequest('Alasan penolakan wajib diisi.');
+      const updated = await prisma.distChangeRequest.update({ where: { id }, data: { status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date() } });
+      await logAudit('koreksi', 'Tolak aktivasi standar biaya', note, snap, '');
+      return changeRequestClient(updated);
+    }
+    await require('./costing.service').activateStandard(payload.standardId || req.transactionId, req.id, snap);
+    const updated = await prisma.distChangeRequest.update({ where: { id }, data: { status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelfStd } });
+    await logAudit('koreksi', `Setujui aktivasi standar biaya${isSelfStd ? ' [MANDIRI]' : ''}`, `standar ${payload.standardId || req.transactionId} v${payload.version || '?'}`, snap, '', isSelfStd);
+    return changeRequestClient(updated);
+  }
   const txn = await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true } } } });
   if (!txn) throw ApiError.notFound('Transaction not found');
   // SEGREGATION OF DUTIES — a requester may not approve their OWN request, UNLESS the owner granted
@@ -4000,7 +4031,7 @@ async function deliveryReport(user, query) {
 }
 
 module.exports = {
-  METHODS, DAY_CODES, PRICE_SCOPES,
+  METHODS, DAY_CODES, PRICE_SCOPES, actorSnap,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
   gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance, openingRowsPanel, openingRowsBulk, restoreOpeningRowsBatch,

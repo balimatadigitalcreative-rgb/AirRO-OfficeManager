@@ -8,6 +8,7 @@ const bill = require('../services/bill.service');
 const accrual = require('../services/accrual.service');
 const subscription = require('../services/subscription.service');
 const depreciation = require('../services/depreciation.service');
+const costing = require('../services/costing.service');
 const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
 
 const trialBalance = asyncHandler(async (req, res) => res.json({ data: await service.trialBalance(range(req)) }));
@@ -90,8 +91,25 @@ const assetsImportCommit = asyncHandler(async (req, res) => res.json({ data: awa
 const gallonPoolReconcile = asyncHandler(async (req, res) => res.json({ data: await depreciation.reconcileGallonPool(req.params.id, req.user) }));
 const gallonPoolLoss = asyncHandler(async (req, res) => res.json({ data: await depreciation.gallonPoolLoss(req.params.id, req.body, req.user) }));
 
+// HPP / PRODUCT COSTING — standards, production runs, variance analysis, reports.
+const stdList = asyncHandler(async (req, res) => res.json(await costing.listStandards(req.query)));
+const stdGet = asyncHandler(async (req, res) => res.json({ data: await costing.getStandard(req.params.id) }));
+const stdCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await costing.createStandard(req.body, req.user) }));
+const stdRequestActivate = asyncHandler(async (req, res) => res.json({ data: await costing.requestStandardActivation(req.params.id, { ...req.user, reason: req.body && req.body.reason }) }));
+const runList = asyncHandler(async (req, res) => res.json(await costing.listRuns(req.query)));
+const runGet = asyncHandler(async (req, res) => res.json({ data: await costing.getRun(req.params.id) }));
+const runCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await costing.createRun(req.body, req.user) }));
+const runComplete = asyncHandler(async (req, res) => res.json({ data: await costing.completeRun(req.params.id, req.user) }));
+const varReport = asyncHandler(async (req, res) => res.json({ data: await costing.varianceReport({ year: +req.query.year, month: +req.query.month }) }));
+const varClose = asyncHandler(async (req, res) => res.json({ data: await costing.closeVariances({ year: +req.body.year, month: +req.body.month }, req.user) }));
+const costingGallonLoss = asyncHandler(async (req, res) => res.json({ data: await costing.gallonLossReconcile({ year: +req.query.year, month: +req.query.month }, req.user) }));
+const costingInventory = asyncHandler(async (req, res) => res.json({ data: await costing.costingInventory(req.user) }));
+const costingHpp = asyncHandler(async (req, res) => res.json({ data: await costing.monthlyHpp({ year: +req.query.year, month: +req.query.month }) }));
+const costingMargin = asyncHandler(async (req, res) => res.json({ data: await costing.marginAnalysis(req.query) }));
+
 module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
   billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue, suppliersList, supplierCreate,
   accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize,
   subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun, subsDue,
-  assetsList, assetGet, assetCreate, assetDispose, depreciate, assetsImportPreview, assetsImportCommit, gallonPoolReconcile, gallonPoolLoss };
+  assetsList, assetGet, assetCreate, assetDispose, depreciate, assetsImportPreview, assetsImportCommit, gallonPoolReconcile, gallonPoolLoss,
+  stdList, stdGet, stdCreate, stdRequestActivate, runList, runGet, runCreate, runComplete, varReport, varClose, costingGallonLoss, costingInventory, costingHpp, costingMargin };

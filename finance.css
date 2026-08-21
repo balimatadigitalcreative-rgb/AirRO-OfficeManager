@@ -2781,6 +2781,17 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .perm-selflimit { margin: 8px 4px 4px; padding: 10px 12px; border: 1px dashed #f6d9a6; border-radius: 10px; background: #fff8ee; }
 :root[data-theme="dark"] .perm-selflimit { background: rgba(255,180,60,.06); border-color: rgba(255,180,60,.24); }
 .perm-selflimit .fld { max-width: 220px; }
+/* Product costing — variance tags + production-run cards */
+.pc-var-good { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 800; color: #159a6b; background: #e6f5f0; border-radius: 999px; padding: 2px 9px; }
+.pc-var-bad { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 800; color: #b42318; background: #fde8e8; border-radius: 999px; padding: 2px 9px; }
+:root[data-theme="dark"] .pc-var-good { background: rgba(21,157,107,.16); color: #6ee7b7; }
+:root[data-theme="dark"] .pc-var-bad { background: rgba(224,64,64,.14); color: #ff9a9a; }
+.pc-runs { display: flex; flex-direction: column; gap: 10px; padding: 4px; }
+.pc-run { padding: 12px 14px; }
+.pc-run-head { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.pc-vargrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
+.pc-varcell { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border-radius: 8px; background: var(--surface-2, #f6f8fa); }
+.pc-varlbl { font-size: 10.5px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .02em; }
 
 /* Correction form: the price field when the user lacks distribusiHargaMaster. */
 .amt-input.is-locked { background: var(--surface-2, #f2f5f6); opacity: .75; cursor: not-allowed; }

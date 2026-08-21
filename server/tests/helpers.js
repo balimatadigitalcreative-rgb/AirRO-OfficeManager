@@ -10,6 +10,10 @@ async function resetDb() {
   // ACCOUNTING v2 journals are PROJECTIONS of the source rows; wipe them each suite so a backfill in
   // one test file never leaks journals into the next (JournalLine cascades from JournalEntry).
   await prisma.journalEntry.deleteMany();
+  await prisma.productionInput.deleteMany();      // FK → ProductionRun (cascade)
+  await prisma.productionRun.deleteMany();        // FK → CostStandard
+  await prisma.costStandardLine.deleteMany();     // FK → CostStandard (cascade)
+  await prisma.costStandard.deleteMany();
   await prisma.depreciationEntry.deleteMany();   // FK → FixedAsset (cascade), delete before the parent
   await prisma.fixedAsset.deleteMany();
   await prisma.accountingPeriod.deleteMany();

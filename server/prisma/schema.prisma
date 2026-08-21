@@ -395,6 +395,83 @@ model Reconciliation {
   @@index([accountId])
 }
 
+// HPP / PRODUCT COSTING — STANDARD COSTING (ACCOUNTING_V2). A CostStandard is a VERSIONED, date-effective
+// "bill of cost" per galon; activating one needs approval (reuses the DistChangeRequest engine). A
+// ProductionRun posts finished goods at STANDARD and routes every difference to a named variance
+// account — nothing is silently absorbed. normalVolume drives the fixed-overhead rate + volume variance.
+model CostStandard {
+  id             String   @id @default(cuid())
+  productId      String   @default("galon-19l")
+  version        Int      @default(1)
+  effectiveFrom  String                            // YYYY-MM-DD
+  effectiveTo    String?                           // set when superseded (never edit an active one in place)
+  normalVolume   Int                               // galon/bulan — drives the fixed-overhead rate + volume variance
+  status         String   @default("draft")        // draft | aktif | arsip
+  requestId      String?                           // the DistChangeRequest that activated it
+  approvedById   String?
+  approvedByName String?
+  approvedAt     DateTime?
+  note           String   @default("")
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lines CostStandardLine[]
+  runs  ProductionRun[]
+  @@index([productId])
+  @@index([status])
+}
+model CostStandardLine {
+  id             String @id @default(cuid())
+  standardId     String
+  component      String                            // air_baku | listrik | membran_ro | filter | tutup | segel | tenaga_kerja | penyusutan_mesin | penyusutan_galon | pemeliharaan | susut_galon
+  category       String                            // bahan_langsung | tenaga_kerja | overhead_variabel | overhead_tetap
+  qtyPerUnit     Float  @default(0)                // qty of this component per 1 galon
+  unit           String @default("")               // kWh | ml | pcs | jam | galon …
+  unitCost       BigInt @default(0)                // rupiah per `unit`
+  chartAccountId String                            // account credited at ACTUAL on a production run
+  sortOrder      Int    @default(0)
+
+  standard CostStandard @relation(fields: [standardId], references: [id], onDelete: Cascade)
+  @@index([standardId])
+}
+model ProductionRun {
+  id             String @id @default(cuid())
+  date           String                            // YYYY-MM-DD
+  unitsProduced  Int
+  unitsRejected  Int    @default(0)
+  standardId     String
+  businessUnitId String?
+  status         String @default("draft")          // draft | selesai
+  journalPosted  Boolean @default(false)
+  recordedById   String?
+  recordedByName String?
+  periodId       String?
+  note           String @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  standard CostStandard @relation(fields: [standardId], references: [id])
+  inputs   ProductionInput[]
+  @@index([date])
+  @@index([status])
+  @@index([standardId])
+}
+model ProductionInput {
+  id             String @id @default(cuid())
+  runId          String
+  component      String
+  category       String
+  actualQty      Float  @default(0)
+  actualCost     BigInt @default(0)                // total actual rupiah for this component this run
+  chartAccountId String
+  auto           Boolean @default(false)           // derived from the ledger (depreciation / gallon loss), not typed
+
+  run ProductionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  @@index([runId])
+}
+
 model Entry {
   id          String    @id @default(cuid())
   type        String // "income" | "expense"

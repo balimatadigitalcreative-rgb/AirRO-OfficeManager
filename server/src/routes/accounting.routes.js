@@ -68,6 +68,23 @@ router.post('/assets/:id/dispose', requireRole('owner', 'gm'), ctrl.assetDispose
 router.get('/assets/:id/reconcile-pool', ctrl.gallonPoolReconcile);       // gallon pool vs ledger total-owned
 router.post('/assets/:id/pool-loss', requireRole('owner', 'gm'), ctrl.gallonPoolLoss);
 
+// HPP / PRODUCT COSTING — standards + production runs + variance analysis. Reads for any reports user;
+// create/complete/activate/close are owner/GM-tier. Static paths before ':id'.
+router.get('/cost-standards', ctrl.stdList);
+router.post('/cost-standards', requireRole('owner', 'gm'), ctrl.stdCreate);
+router.get('/cost-standards/:id', ctrl.stdGet);
+router.post('/cost-standards/:id/request-activation', requireRole('owner', 'gm'), ctrl.stdRequestActivate);
+router.get('/production-runs', ctrl.runList);
+router.post('/production-runs', requireRole('owner', 'gm'), ctrl.runCreate);
+router.get('/production-runs/:id', ctrl.runGet);
+router.post('/production-runs/:id/complete', requireRole('owner', 'gm'), ctrl.runComplete);
+router.get('/costing/variance-report', ctrl.varReport);
+router.post('/costing/close-variances', requireRole('owner', 'gm'), ctrl.varClose);
+router.get('/costing/gallon-loss', ctrl.costingGallonLoss);
+router.get('/costing/inventory', ctrl.costingInventory);
+router.get('/costing/monthly-hpp', ctrl.costingHpp);
+router.get('/costing/margin', ctrl.costingMargin);
+
 router.get('/unmapped', ctrl.unmapped);
 router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
 router.get('/status', ctrl.status);        // workflow-panel + report-header roll-up (?asOf=YYYY-MM-DD)

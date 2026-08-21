@@ -36,6 +36,8 @@ const MONEY = {
   stockMovement: ['amount'],
   fixedAsset: ['acquisitionCost', 'salvageValue', 'disposalProceeds'],
   depreciationEntry: ['amount', 'bookValueAfter'],
+  costStandardLine: ['unitCost'],
+  productionInput: ['actualCost'],
 };
 function moneyResultExtension() {
   const result = {};

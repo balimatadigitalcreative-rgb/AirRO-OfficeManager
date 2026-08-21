@@ -537,6 +537,9 @@
       // fix; accrued / subscriptions-due / draft bills only WARN.
       { key: 'amort', ok: (chk.amortPending || 0) === 0, label: trA('tp.chkAmort'), fix: 'acct-accrual', blocking: true, val: chk.amortPending ? String(chk.amortPending) : '', action: (chk.amortPending || 0) > 0 ? 'amort' : null },
       { key: 'depr', ok: (chk.deprPending || 0) === 0, label: trA('tp.chkDepr'), fix: 'acct-assets', blocking: true, val: chk.deprPending ? trA('tp.chkDeprVal', { n: chk.deprAssets || 0 }) : '', action: (chk.deprPending || 0) > 0 ? 'depr' : null },
+      { key: 'prodJ', ok: (chk.prodUnposted || 0) === 0, label: trA('tp.chkProdJ'), fix: 'acct-costing', blocking: true, val: chk.prodUnposted ? String(chk.prodUnposted) : '' },
+      { key: 'prodD', ok: (chk.prodDraft || 0) === 0, label: trA('tp.chkProdD'), fix: 'acct-costing', val: chk.prodDraft ? String(chk.prodDraft) : '' },
+      { key: 'varO', ok: (chk.varOpen || 0) === 0, label: trA('tp.chkVarO'), fix: 'acct-costing', val: chk.varOpen ? String(chk.varOpen) : '' },
       { key: 'accrued', ok: (chk.accruedOpen || 0) === 0, label: trA('tp.chkAccrued'), fix: 'acct-accrual', val: chk.accruedOpen ? String(chk.accruedOpen) : '' },
       { key: 'subs', ok: (chk.subsDue || 0) === 0, label: trA('tp.chkSubs'), fix: 'acct-subscriptions', val: chk.subsDue ? String(chk.subsDue) : '' },
       { key: 'draft', ok: (chk.draftBills || 0) === 0, label: trA('tp.chkDraft'), fix: 'acct-payables', val: chk.draftBills ? String(chk.draftBills) : '' },
@@ -544,7 +547,8 @@
     const targetStatus = (periods.find((p) => p.periodKey === target) || {}).status || 'terbuka';
     const amortBlocked = (chk.amortPending || 0) > 0;
     const deprBlocked = (chk.deprPending || 0) > 0;
-    const canClose = balanced && !amortBlocked && !deprBlocked && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
+    const prodBlocked = (chk.prodUnposted || 0) > 0;
+    const canClose = balanced && !amortBlocked && !deprBlocked && !prodBlocked && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
 
     const doClose = async () => {
       setBusy(true); setErr('');
@@ -607,8 +611,9 @@
               {!balanced && <div className="add-err"><IconClose s={14} />{trA('tp.blockedUnbalanced')}</div>}
               {balanced && amortBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedAmort', { n: chk.amortPending })}</div>}
               {balanced && !amortBlocked && deprBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedDepr', { n: chk.deprAssets || 0 })}</div>}
+              {balanced && !amortBlocked && !deprBlocked && prodBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedProd', { n: chk.prodUnposted })}</div>}
               <label className="fld-label">{trA('tp.typeConfirm')}</label>
-              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced || amortBlocked || deprBlocked} />
+              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced || amortBlocked || deprBlocked || prodBlocked} />
               <div className="tp-lockinfo">{trA('tp.lockInfo')}</div>
               {err && <div className="add-err"><IconClose s={14} />{err}</div>}
               <button className="btn btn-primary" disabled={!canClose || busy} onClick={doClose}>{IcA('IconLock', { s: 16 })}{trA('tp.closeBtn', { m: target })}</button>
@@ -1351,5 +1356,191 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen };
+  // ── HPP / PRODUCT COSTING — cost standards (versioned, approval-activated), production runs with
+  // variance analysis, the variance report, and margin / break-even support. ──
+  const PC_CATS = ['bahan_langsung', 'tenaga_kerja', 'overhead_variabel', 'overhead_tetap'];
+  const VAR_META = [['price', 'pc.vPrice'], ['qty', 'pc.vQty'], ['rate', 'pc.vRate'], ['eff', 'pc.vEff'], ['spending', 'pc.vSpending'], ['volume', 'pc.vVolume']];
+  const varTag = (amt) => amt === 0 ? <span className="ap-badge default">—</span> : amt > 0 ? <span className="pc-var-bad">{trA('pc.unfav')} {money(amt)}</span> : <span className="pc-var-good">{trA('pc.fav')} {money(-amt)}</span>;
+
+  function CostingScreen({ canRun }) {
+    const [tab, setTab] = aS('standar');
+    const tabs = [['standar', 'pc.tabStd'], ['produksi', 'pc.tabRun'], ['selisih', 'pc.tabVar'], ['margin', 'pc.tabMargin']];
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finCosting')}</h2><div className="fin-head-scope">{trA('s.finCosting')}</div></div></div>
+        <ScreenIntro answers={trA('pc.answers')} extra={trA('pc.taxNote')} tone="warn" />
+        <div className="gran-seg" style={{ marginBottom: 12 }}>{tabs.map(([k, l]) => <button key={k} className={`gran-btn ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{trA(l)}</button>)}</div>
+        {tab === 'standar' && <StandardsTab canRun={canRun} />}
+        {tab === 'produksi' && <RunsTab canRun={canRun} />}
+        {tab === 'selisih' && <VarianceTab canRun={canRun} />}
+        {tab === 'margin' && <MarginTab />}
+      </div>
+    );
+  }
+
+  function StandardsTab({ canRun }) {
+    const [form, setForm] = aS(false); const [busy, setBusy] = aS(''); const [err, setErr] = aS('');
+    const q = useAcct(() => ACC().costStandards(), []);
+    if (q.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('sb.soon')} />;
+    const data = (q.data && q.data.data) || [];
+    const activate = async (id) => { setBusy(id); setErr(''); try { await ACC().costStandardActivate(id, {}); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    return (
+      <div>
+        {canRun && <div style={{ marginBottom: 10 }}><button className="btn btn-primary" onClick={() => setForm(true)}>{IcA('IconPlus', { s: 16 })}{trA('pc.newStd')}</button></div>}
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+        <div className="card">
+          {q.state === 'loading' && <Skeleton n={4} />}
+          {q.state === 'ready' && (data.length === 0
+            ? <EmptyState title={trA('pc.emptyStdT')} body={trA('pc.emptyStdB')} icon="IconInvoice" actionLabel={canRun ? trA('pc.newStd') : null} onAction={canRun ? () => setForm(true) : null} />
+            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">v</th><th className="fin-th">{trA('pc.effFrom')}</th><th className="fin-th fin-r">{trA('pc.normalVol')}</th><th className="fin-th fin-r">{trA('pc.perUnit')}</th><th className="fin-th">{trA('pc.status')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{data.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">v{s.version}</td><td className="fin-td">{s.effectiveFrom}{s.effectiveTo ? ' → ' + s.effectiveTo : ''}</td><td className="fin-td fin-r tnum">{s.normalVolume}</td><td className="fin-td fin-r tnum">{money(s.perUnit)}</td>
+                <td className="fin-td"><span className={`ap-badge ${s.status === 'aktif' ? 'ok' : s.status === 'draft' ? 'warn' : 'default'}`}>{trA('pc.st_' + s.status)}</span></td>
+                <td className="fin-td fin-r">{canRun && s.status === 'draft' && <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => activate(s.id)}>{IcA('IconLock', { s: 12 })}{trA('pc.activate')}</button>}</td></tr>)}</tbody>
+            </table></div>)}
+        </div>
+        {form && <StandardForm onClose={() => setForm(false)} onDone={() => { setForm(false); q.reload(); }} />}
+      </div>
+    );
+  }
+  function StandardForm({ onClose, onDone }) {
+    const [f, setF] = aS({ effectiveFrom: todayISO(), normalVolume: '', note: '' });
+    const [lines, setLines] = aS([{ component: 'air_baku', category: 'bahan_langsung', qtyPerUnit: '1', unit: 'galon', unitCost: '', chartCode: '6-3000' }]);
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS('');
+    const setL = (i, k, v) => setLines(lines.map((l, j) => j === i ? { ...l, [k]: v } : l));
+    const perUnit = lines.reduce((s, l) => s + Math.round((+l.qtyPerUnit || 0) * (+l.unitCost || 0)), 0);
+    const valid = f.effectiveFrom && +f.normalVolume > 0 && lines.length && lines.every((l) => l.component && +l.unitCost >= 0);
+    const submit = async () => { if (!valid || busy) return; setBusy(true); setErr(''); try { await ACC().costStandardCreate({ effectiveFrom: f.effectiveFrom, normalVolume: +f.normalVolume, note: f.note, lines: lines.map((l) => ({ component: l.component, category: l.category, qtyPerUnit: +l.qtyPerUnit || 0, unit: l.unit, unitCost: +l.unitCost || 0, chartCode: l.chartCode })) }); onDone(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 760, maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('pc.newStd')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-warnbox"><IconWarn s={16} /><span>{trA('pc.taxNote')}</span></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('pc.effFrom')} *</label><input type="date" className="fld" value={f.effectiveFrom} onChange={(e) => setF({ ...f, effectiveFrom: e.target.value })} /></div><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('pc.normalVol')} *</label><input className="fld tnum" inputMode="numeric" value={f.normalVolume} onChange={(e) => setF({ ...f, normalVolume: e.target.value.replace(/\D/g, '') })} /><div className="cap-desc">{trA('pc.normalHint')}</div></div></div>
+          <div className="sec-title" style={{ fontSize: 13, margin: '12px 0 6px' }}>{trA('pc.components')} · {trA('pc.perUnit')}: <b className="tnum">{money(perUnit)}</b></div>
+          {lines.map((l, i) => (
+            <div key={i} className="dist-form-row" style={{ alignItems: 'flex-end' }}>
+              <div style={{ flex: 2 }}><input className="fld" placeholder={trA('pc.component')} value={l.component} onChange={(e) => setL(i, 'component', e.target.value)} /></div>
+              <div style={{ flex: 2 }}><select className="fld" value={l.category} onChange={(e) => setL(i, 'category', e.target.value)}>{PC_CATS.map((c) => <option key={c} value={c}>{trA('pc.cat_' + c)}</option>)}</select></div>
+              <div style={{ flex: 1 }}><input className="fld tnum" placeholder={trA('pc.qtyU')} value={l.qtyPerUnit} onChange={(e) => setL(i, 'qtyPerUnit', e.target.value.replace(/[^\d.]/g, ''))} /></div>
+              <div style={{ flex: 1 }}>{rpInput(l.unitCost, (v) => setL(i, 'unitCost', v))}</div>
+              <div style={{ flex: 2 }}><AcctSelect value={l.chartCode} onChange={(v) => setL(i, 'chartCode', v)} /></div>
+              <button className="jp-icon" onClick={() => setLines(lines.filter((_, j) => j !== i))}><IconClose s={16} /></button>
+            </div>
+          ))}
+          <button className="btn btn-ghost btn-sm" onClick={() => setLines([...lines, { component: '', category: 'overhead_variabel', qtyPerUnit: '1', unit: '', unitCost: '', chartCode: '6-9000' }])}>{IcA('IconPlus', { s: 14 })}{trA('pc.addLine')}</button>
+          {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : trA('sb.save')}</button></div>
+      </div></div>
+    );
+  }
+
+  function RunsTab({ canRun }) {
+    const [form, setForm] = aS(false); const [busy, setBusy] = aS(''); const [err, setErr] = aS('');
+    const q = useAcct(() => ACC().productionRuns(), []);
+    if (q.state === 'gated') return <GatedCard icon="IconRefresh" body={trA('sb.soon')} />;
+    const data = (q.data && q.data.data) || [];
+    const complete = async (id) => { setBusy(id); setErr(''); try { await ACC().productionRunComplete(id); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    return (
+      <div>
+        {canRun && <div style={{ marginBottom: 10 }}><button className="btn btn-primary" onClick={() => setForm(true)}>{IcA('IconPlus', { s: 16 })}{trA('pc.newRun')}</button></div>}
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+        <div className="card">
+          {q.state === 'loading' && <Skeleton n={4} />}
+          {q.state === 'ready' && (data.length === 0
+            ? <EmptyState title={trA('pc.emptyRunT')} body={trA('pc.emptyRunB')} icon="IconRefresh" actionLabel={canRun ? trA('pc.newRun') : null} onAction={canRun ? () => setForm(true) : null} />
+            : <div className="pc-runs">{data.map((r) => (
+              <div key={r.id} className="card pc-run">
+                <div className="pc-run-head"><b>{r.date}</b> · {trA('pc.produced', { n: r.unitsProduced })}<span style={{ flex: 1 }} /><span className={`ap-badge ${r.status === 'selesai' ? 'ok' : 'warn'}`}>{trA('pc.rst_' + r.status)}</span>{canRun && r.status === 'draft' && <button className="btn btn-primary btn-xs" disabled={!!busy} onClick={() => complete(r.id)} style={{ marginLeft: 8 }}>{trA('pc.complete')}</button>}</div>
+                {r.variances && <div className="pc-vargrid">{VAR_META.map(([k, lbl]) => <div key={k} className="pc-varcell"><span className="pc-varlbl">{trA(lbl)}</span>{varTag(r.variances[k])}</div>)}</div>}
+              </div>
+            ))}</div>)}
+        </div>
+        {form && <RunForm onClose={() => setForm(false)} onDone={() => { setForm(false); q.reload(); }} />}
+      </div>
+    );
+  }
+  function RunForm({ onClose, onDone }) {
+    const sq = useAcct(() => ACC().costStandards({ status: 'aktif' }), []);
+    const stds = (sq.data && sq.data.data) || [];
+    const [f, setF] = aS({ date: todayISO(), unitsProduced: '', standardId: '' });
+    const [inputs, setInputs] = aS([]);
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS('');
+    aEf(() => { if (stds.length && !f.standardId) { const s = stds[0]; setF((x) => ({ ...x, standardId: s.id })); setInputs(s.lines.map((l) => ({ component: l.component, category: l.category, actualQty: '', actualCost: '', chartCode: l.chartCode }))); } }, [stds.length]);
+    const setI = (i, k, v) => setInputs(inputs.map((x, j) => j === i ? { ...x, [k]: v } : x));
+    const valid = f.date && +f.unitsProduced > 0 && f.standardId;
+    const submit = async () => { if (!valid || busy) return; setBusy(true); setErr(''); try { await ACC().productionRunCreate({ date: f.date, unitsProduced: +f.unitsProduced, standardId: f.standardId, inputs: inputs.map((i) => ({ component: i.component, category: i.category, actualQty: +i.actualQty || 0, actualCost: +i.actualCost || 0, chartCode: i.chartCode })) }); onDone(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 700, maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('pc.newRun')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {stds.length === 0 ? <div className="dist-warnbox"><IconWarn s={16} /><span>{trA('pc.noActiveStd')}</span></div> : <>
+            <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('pc.date')} *</label><input type="date" className="fld" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></div><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('pc.produced_l')} *</label><input className="fld tnum" inputMode="numeric" value={f.unitsProduced} onChange={(e) => setF({ ...f, unitsProduced: e.target.value.replace(/\D/g, '') })} /></div></div>
+            <div className="sec-title" style={{ fontSize: 13, margin: '12px 0 6px' }}>{trA('pc.actualInputs')}</div>
+            {inputs.map((i, idx) => (
+              <div key={idx} className="dist-form-row" style={{ alignItems: 'flex-end' }}>
+                <div style={{ flex: 2 }}><input className="fld" value={i.component} onChange={(e) => setI(idx, 'component', e.target.value)} /></div>
+                <div style={{ flex: 1 }}><input className="fld tnum" placeholder={trA('pc.actualQty')} value={i.actualQty} onChange={(e) => setI(idx, 'actualQty', e.target.value.replace(/[^\d.]/g, ''))} /></div>
+                <div style={{ flex: 1 }}>{rpInput(i.actualCost, (v) => setI(idx, 'actualCost', v))}</div>
+                <div style={{ flex: 2 }}><AcctSelect value={i.chartCode} onChange={(v) => setI(idx, 'chartCode', v)} /></div>
+              </div>
+            ))}
+            {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+          </>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : trA('pc.saveRun')}</button></div>
+      </div></div>
+    );
+  }
+
+  function VarianceTab({ canRun }) {
+    const now = todayISO();
+    const [ym, setYm] = aS(now.slice(0, 7));
+    const [Y, M] = ym.split('-').map(Number);
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS('');
+    const q = useAcct(() => ACC().varianceReport({ year: Y, month: M }), [ym]);
+    const lq = useAcct(() => ACC().costingGallonLoss({ year: Y, month: M }), [ym]);
+    const data = q.data || {}; const rows = data.rows || [];
+    const close = async () => { setBusy(true); setErr(''); try { await ACC().closeVariances({ year: Y, month: M }); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    return (
+      <div>
+        <div className="rep-controls" style={{ marginBottom: 10 }}><input type="month" className="fld tp-month" value={ym} max={now.slice(0, 7)} onChange={(e) => setYm(e.target.value)} />{canRun && <button className="btn btn-ghost" disabled={busy} onClick={close}>{IcA('IconLock', { s: 15 })}{trA('pc.closeVar')}</button>}</div>
+        <div className="dist-hint" style={{ marginBottom: 10 }}>{trA('pc.closePolicy')}</div>
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+        <div className="card">
+          {q.state === 'loading' ? <Skeleton n={6} /> : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('pc.variance')}</th><th className="fin-th">{trA('pc.account')}</th><th className="fin-th fin-r">{trA('pc.result')}</th></tr></thead>
+            <tbody>{rows.map((r) => <tr key={r.code} className="fin-trow"><td className="fin-td">{r.name}</td><td className="fin-td">{r.code}</td><td className="fin-td fin-r">{varTag(r.amount)}</td></tr>)}</tbody>
+            <tfoot><tr className="fin-trow" style={{ fontWeight: 700 }}><td className="fin-td" colSpan={2}>{trA('pc.totalVar')}</td><td className="fin-td fin-r">{varTag(data.total || 0)}</td></tr></tfoot>
+          </table></div>}
+        </div>
+        {lq.state === 'ready' && lq.data && (
+          <div className="card" style={{ marginTop: 12, padding: 14 }}>
+            <div className="sec-title" style={{ fontSize: 13 }}>{trA('pc.gallonLoss')}</div>
+            <div className="dist-hint">{trA('pc.costingQty')}: <b>{lq.data.costingQty}</b> · {trA('pc.ledgerQty')}: <b>{lq.data.ledgerQty}</b> · {trA('pc.drift')}: <b className={lq.data.drift === 0 ? 'amt-pos' : 'amt-neg'}>{lq.data.drift}</b></div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function MarginTab() {
+    const q = useAcct(() => ACC().marginAnalysis(), []);
+    const iq = useAcct(() => ACC().costingInventory(), []);
+    const d = q.data || {}; const segs = d.segments || [];
+    return (
+      <div>
+        <div className="dist-hint" style={{ marginBottom: 10 }}>{trA('pc.priceNote')}</div>
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="sec-title" style={{ padding: '10px 14px 0' }}>{trA('pc.marginTitle')} · {trA('pc.hppUnit')}: <b className="tnum">{money(d.hppPerUnit || 0)}</b></div>
+          {q.state === 'loading' ? <Skeleton n={3} /> : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('pc.segment')}</th><th className="fin-th fin-r">{trA('pc.avgPrice')}</th><th className="fin-th fin-r">{trA('pc.hpp')}</th><th className="fin-th fin-r">{trA('pc.margin')}</th><th className="fin-th fin-r">%</th></tr></thead>
+            <tbody>{segs.map((s) => <tr key={s.type} className="fin-trow"><td className="fin-td">{s.type}</td><td className="fin-td fin-r tnum">{money(s.avgPrice)}</td><td className="fin-td fin-r tnum">{money(s.hpp)}</td><td className="fin-td fin-r tnum" style={{ color: s.margin >= 0 ? 'var(--green-700)' : 'var(--neg)' }}>{money(s.margin)}</td><td className="fin-td fin-r tnum">{s.marginPct}%</td></tr>)}</tbody>
+          </table></div>}
+          <div className="dist-hint" style={{ padding: '8px 14px 12px' }}>{trA('pc.breakEven')}: <b>{d.breakEvenVolume != null ? d.breakEvenVolume + ' galon/bulan' : '—'}</b> ({trA('pc.normalVol')}: {d.normalVolume || '—'})</div>
+        </div>
+        {iq.state === 'ready' && iq.data && <div className="card" style={{ padding: 14 }}><div className="sec-title" style={{ fontSize: 13 }}>{trA('pc.inventory')}</div><div className="dist-hint">{trA('pc.invQty')}: <b>{iq.data.qty}</b> ({trA('as.ledgerOwned')} depot+armada) · {trA('pc.invValue')}: <b className="tnum">{money(iq.data.value)}</b></div></div>}
+      </div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen };
 })();
