@@ -90,4 +90,32 @@ describe('adjustment posts a DELTA, never the full amount', () => {
     expect(await gap()).toBe(0);
     expect((await acc.trialBalance()).balanced).toBe(true);
   });
+
+  it('the detector flags ONLY the full-amount-on-bon defect, not lunas / zero-AR baseline-less adjustments', async () => {
+    // (a) REAL defect: a bon + a no-baseline adj that re-posted the FULL amount to AR.
+    const cbon = await mkCust(612000);
+    const tbon = await dist.createTransaction({ customerId: cbon.id, method: 'bon', qty: 1, txnDate: '2026-08-15' }, actor);
+    const bonJ = await prisma.journalEntry.findFirst({ where: { sourceType: 'dist_txn', sourceId: tbon.id }, include: { lines: true } });
+    await prisma.journalEntry.create({ data: { sourceType: 'dist_txn_adj', sourceId: `${tbon.id}:bad`, ref: tbon.id, date: bonJ.date, reversalOf: null, description: 'defect',
+      lines: { create: bonJ.lines.map((l) => ({ chartAccountId: l.chartAccountId, debit: BigInt(Math.round(num(l.debit))), credit: BigInt(Math.round(num(l.credit))), fleetId: l.fleetId || '' })) } } });
+
+    // (b) FALSE POSITIVE — lunas parent: a no-baseline adj that touches NO receivable (Kas/Pendapatan).
+    const clun = await mkCust(300000);
+    const tlun = await dist.createTransaction({ customerId: clun.id, method: 'lunas', qty: 1, txnDate: '2026-08-15' }, actor);
+    const lunJ = await prisma.journalEntry.findFirst({ where: { sourceType: 'dist_txn', sourceId: tlun.id }, include: { lines: true } });
+    await prisma.journalEntry.create({ data: { sourceType: 'dist_txn_adj', sourceId: `${tlun.id}:info`, ref: tlun.id, date: '2026-08-15', reversalOf: null, description: 'lunas info',
+      lines: { create: lunJ.lines.map((l) => ({ chartAccountId: l.chartAccountId, debit: BigInt(Math.round(num(l.debit))), credit: BigInt(Math.round(num(l.credit))), fleetId: l.fleetId || '' })) } } });
+
+    // (c) FALSE POSITIVE — bon parent but ZERO AR effect (copy the lunas Kas/Pendapatan pair, no AR line).
+    const cbon2 = await mkCust(500000);
+    const tbon2 = await dist.createTransaction({ customerId: cbon2.id, method: 'bon', qty: 1, txnDate: '2026-08-15' }, actor);
+    await prisma.journalEntry.create({ data: { sourceType: 'dist_txn_adj', sourceId: `${tbon2.id}:info`, ref: tbon2.id, date: '2026-08-15', reversalOf: null, description: 'zero-AR info',
+      lines: { create: lunJ.lines.map((l) => ({ chartAccountId: l.chartAccountId, debit: BigInt(Math.round(num(l.debit))), credit: BigInt(Math.round(num(l.credit))), fleetId: l.fleetId || '' })) } } });
+
+    const ic = await acc.integrityCheck({});
+    expect(ic.duplicateCount).toBe(1);                       // only the real overstatement fails the invariant
+    expect(ic.duplicate[0].type).toBe('full_amount_adj');
+    expect(ic.duplicate[0].ref).toBe(tbon.id);
+    expect(ic.baselinelessAdjustments).toBe(2);              // the two harmless ones — counted, not failing
+  });
 });

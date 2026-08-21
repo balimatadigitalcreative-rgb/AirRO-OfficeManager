@@ -75,24 +75,39 @@ async function run() {
   }
   console.log(`\n  Σ extra AR from duplicates: ${rupiah(excess)}   (the amount by which AR is overstated)\n`);
 
-  // FULL-AMOUNT ADJUSTMENTS — dist_txn_adj with no baseline (reversalOf=null) that carry the FULL parent
-  // amount instead of a delta. Cardinality misses them (their "parent:child" sourceId differs from the
-  // parent's). Join each to its parent dist_txn and show adj AR vs the parent's nominal.
+  // FULL-AMOUNT ADJUSTMENTS — dist_txn_adj with no baseline (reversalOf=null). Only the ones whose AR
+  // effect EQUALS the parent BON's amount are the real defect (posted the full amount, not the delta);
+  // a lunas parent (AR = 0) or a zero-AR adjustment is EXPECTED and listed separately as informational so
+  // it never buries the real one. For each defect we also show the parent's own AR journal and what the
+  // correction changed (old → new), so a reversal can account for a re-posted parent, not blindly undo it.
   const noBase = await prisma.journalEntry.findMany({ where: { sourceType: 'dist_txn_adj', reversalOf: null }, include: { lines: { where: { chartAccountId: arId } } }, orderBy: { postedAt: 'asc' } });
-  const reversed = new Set((await prisma.journalEntry.findMany({ where: { sourceType: 'dup_reversal', reversalOf: { not: null } }, select: { reversalOf: true } })).map((r) => r.reversalOf));
-  const live = noBase.filter((e) => !reversed.has(e.id));
-  console.log(`FULL-AMOUNT ADJUSTMENTS (dist_txn_adj with no baseline)  ·  ${live.length} entr${live.length === 1 ? 'y' : 'ies'}\n`);
-  const parentIds = live.map((e) => e.ref).filter(Boolean);
-  const parents = Object.fromEntries((await prisma.distTransaction.findMany({ where: { id: { in: parentIds } }, select: { id: true, amount: true, method: true, customerId: true } })).map((t) => [t.id, t]));
-  let adjExcess = 0;
+  const revd = new Set((await prisma.journalEntry.findMany({ where: { sourceType: 'dup_reversal', reversalOf: { not: null } }, select: { reversalOf: true } })).map((r) => r.reversalOf));
+  const live = noBase.filter((e) => !revd.has(e.id));
+  const parents = Object.fromEntries((await prisma.distTransaction.findMany({ where: { id: { in: live.map((e) => e.ref).filter(Boolean) } }, select: { id: true, amount: true, method: true, customerId: true } })).map((t) => [t.id, t]));
+  const defects = [], info = [];
   for (const e of live) {
     const adjAR = e.lines.reduce((a, l) => a + num(l.debit) - num(l.credit), 0);
     const p = parents[e.ref];
-    const eq = p && Math.round(Math.abs(adjAR)) === Math.round(num(p.amount)) ? '  ← EQUALS parent full amount (delta expected, not full)' : '';
-    adjExcess += adjAR;
-    console.log(`  ${e.sourceId}  postedAt=${stamp(e.postedAt)}  adj AR ${rupiah(adjAR)}  parent ${e.ref} ${p ? rupiah(num(p.amount)) + ' (' + p.method + ')' : '(missing)'}${eq}`);
+    if (adjAR !== 0 && p && p.method === 'bon' && Math.round(Math.abs(adjAR)) === Math.round(num(p.amount))) defects.push({ e, adjAR, p });
+    else info.push({ e, adjAR, p });
   }
-  console.log(`\n  Σ AR from full-amount adjustments: ${rupiah(adjExcess)}\n`);
+  console.log(`FULL-AMOUNT ADJUSTMENTS  ·  ${defects.length} DEFECT(S) + ${info.length} informational (lunas / zero-AR)\n`);
+  let adjExcess = 0;
+  for (const { e, adjAR, p } of defects) {
+    adjExcess += adjAR;
+    // The parent's own AR journal (dist_txn) — so a reversal can be checked against a possibly re-posted parent.
+    const parentJ = await prisma.journalEntry.findFirst({ where: { sourceType: 'dist_txn', sourceId: e.ref }, include: { lines: { where: { chartAccountId: arId } } } });
+    const parentAR = parentJ ? parentJ.lines.reduce((a, l) => a + num(l.debit) - num(l.credit), 0) : 0;
+    const corr = await prisma.correction.findFirst({ where: { transactionId: e.ref, kind: 'manual' }, orderBy: { createdAt: 'desc' }, select: { oldValue: true, newValue: true } });
+    let changed = '';
+    if (corr) { try { const o = JSON.parse(corr.oldValue || '{}'), n = JSON.parse(corr.newValue || '{}'); changed = `  correction: amount ${rupiah(num(o.amount))} → ${rupiah(num(n.amount))}`; } catch (x) {} }
+    console.log(`  ✖ ${e.sourceId}  postedAt=${stamp(e.postedAt)}`);
+    console.log(`      adj AR ${rupiah(adjAR)}  ==  parent ${p.method} ${rupiah(num(p.amount))} [${e.ref}]   ← FULL AMOUNT, delta expected`);
+    console.log(`      parent's own dist_txn AR = ${rupiah(parentAR)}   → after reversing the adj, this txn nets ${rupiah(parentAR)} (must equal its Sisa Bon contribution)${changed}`);
+  }
+  console.log(`\n  Σ AR from DEFECT adjustments: ${rupiah(adjExcess)}   (what the reversal removes)`);
+  if (info.length) console.log(`  (${info.length} baseline-less adjustments with no AR overstatement — informational, NOT remediated)`);
+  console.log('');
 }
 
 if (require.main === module) run().then(() => prisma.$disconnect()).catch(async (e) => { console.error('LIST FAILED:', e); try { await prisma.$disconnect(); } catch (x) {} process.exit(1); });

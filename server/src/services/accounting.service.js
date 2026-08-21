@@ -551,17 +551,28 @@ async function integrityCheck({ fromDate } = {}) {
     const live = rows.filter((r) => !reversed.has(r.id));
     if (live.length > 1) duplicate.push({ type: 'cardinality', sourceType: g.sourceType, sourceId: g.sourceId, count: live.length, date: live[0] && live[0].date, entryIds: live.map((r) => r.id), reverseIds: live.slice(1).map((r) => r.id) });
   }
-  // (2) FULL-AMOUNT ADJUSTMENT — a dist_txn_adj MUST reconcile against its original (reversalOf = the
-  // original's id). One with reversalOf = NULL was posted with NO baseline (the "adjustment posted the
-  // full amount" bug), so it double-counts the parent once the original is posted. Cardinality can't see
-  // it because its "parent:child" sourceId differs from the parent's. Flag every un-reversed one — the
-  // whole entry is the excess, so reverseIds is the entry itself.
-  const noBaseAdjs = await prisma.journalEntry.findMany({ where: { sourceType: 'dist_txn_adj', reversalOf: null }, select: { id: true, sourceId: true, ref: true, date: true } });
-  for (const e of noBaseAdjs) {
-    if (reversed.has(e.id)) continue;
-    duplicate.push({ type: 'full_amount_adj', sourceType: 'dist_txn_adj', sourceId: e.sourceId, ref: e.ref, count: 1, date: e.date, entryIds: [e.id], reverseIds: [e.id] });
+  // (2) FULL-AMOUNT ADJUSTMENT — the REAL defect is precise: a dist_txn_adj that reconciled with NO
+  // baseline (reversalOf = null) and posted the parent BON's FULL AR amount instead of the delta, so it
+  // double-counts once the original is posted. The signature is exact — reversalOf null AND a NON-ZERO AR
+  // effect that EQUALS the parent bon's amount. Everything else with reversalOf=null is EXPECTED and must
+  // NOT fail the invariant: a LUNAS parent never touches AR (its adj posts Kas/Pendapatan, AR = 0), and a
+  // zero-AR adjustment moves no receivable. Those are counted informationally (baselineless) so the one
+  // real overstatement is never buried among harmless rows — the noise that cost several rounds.
+  const arAcc = (await chartMap())['1-1200'];
+  let baselinelessAdj = 0;   // reversalOf=null dist_txn_adj that are NOT the defect (lunas / zero-AR) — informational only
+  const noBaseAdjs = await prisma.journalEntry.findMany({ where: { sourceType: 'dist_txn_adj', reversalOf: null }, include: { lines: { where: { chartAccountId: arAcc } } } });
+  if (noBaseAdjs.length) {
+    const parents = Object.fromEntries((await prisma.distTransaction.findMany({ where: { id: { in: noBaseAdjs.map((e) => e.ref).filter(Boolean) } }, select: { id: true, amount: true, method: true } })).map((t) => [t.id, t]));
+    for (const e of noBaseAdjs) {
+      if (reversed.has(e.id)) continue;
+      const arNet = e.lines.reduce((a, l) => a + Number(l.debit) - Number(l.credit), 0);
+      const p = parents[e.ref];
+      const isDefect = arNet !== 0 && p && p.method === 'bon' && Math.round(Math.abs(arNet)) === Math.round(Number(p.amount));
+      if (isDefect) duplicate.push({ type: 'full_amount_adj', sourceType: 'dist_txn_adj', sourceId: e.sourceId, ref: e.ref, count: 1, date: e.date, entryIds: [e.id], reverseIds: [e.id], arNet, parentAmount: Number(p.amount) });
+      else baselinelessAdj++;
+    }
   }
-  return { ok: missing.length === 0 && orphan.length === 0 && duplicate.length === 0, missing, orphan, duplicate, missingCount: missing.length, orphanCount: orphan.length, duplicateCount: duplicate.length };
+  return { ok: missing.length === 0 && orphan.length === 0 && duplicate.length === 0, missing, orphan, duplicate, missingCount: missing.length, orphanCount: orphan.length, duplicateCount: duplicate.length, baselinelessAdjustments: baselinelessAdj };
 }
 
 // Category keys used by entries that have NO chart mapping — REPORTED so an admin fixes the map
