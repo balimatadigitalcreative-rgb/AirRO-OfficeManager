@@ -71,6 +71,7 @@ MIGRATIONS_APPLIED="no"; TESTS="skipped"; ROLLED_BACK="no"; DB_RESTORED="no"
 HEALTH_CODE="000"; READY_CODE="000"; READY_BODY=""; FAIL_REASON=""
 PUBLIC_HTTPS="not checked"; LISTEN_443="?"; CERT_DAYS="?"
 TEST_WT=""   # path to the throwaway test worktree (GATE 3), cleaned up on exit
+TEST_PEAK_HEAP=""; TEST_WALL=""   # evidence from the jest run (peak V8 heap MB · wall-clock), shown in the summary
 
 log ""
 log "════════════════════════════════════════════════════════════════════"
@@ -231,6 +232,7 @@ finish() {
   log "  commit after  : ${SHA_AFTER:0:8}${SHA_AFTER:+ }$([ "$ROLLED_BACK" = yes ] && echo '(rolled back)')"
   log "  on-disk HEAD  : ${ACTUAL:0:8}   (what the server is ACTUALLY left on)"
   log "  tests         : $TESTS"
+  log "  test heap/time: peak ${TEST_PEAK_HEAP:-?}MB (cap ${DEPLOY_TEST_HEAP_MB:-4096}) · ${TEST_WALL:-?}"
   log "  migrations    : $MIGRATIONS_APPLIED"
   log "  health (local): $HEALTH_CODE"
   log "  ready (db+schema): $READY_CODE"
@@ -406,25 +408,43 @@ else
     abort "test worktree vanished during setup at $TEST_WT — temp dir is being cleaned; set DEPLOY_TEST_DIR. NOT a test failure."
   fi
 
-  TEST_OUT="$( cd "$TEST_WT/server" && unset DATABASE_URL && npm test 2>&1 )"; TEST_RC=$?
+  # RESOURCE GUARDS so a test run can NEVER starve the live airro-api:
+  #   • --max-old-space-size caps V8 old-space. The suite's heap grows monotonically (~7 MB per test
+  #     file: each jest file re-requires the whole app graph + its own PrismaClient, and --runInBand keeps
+  #     them all in ONE process — measured peak ~0.75-1.0 Gi at 95 files). Node's DEFAULT limit (~2 Gi) is
+  #     what the suite blew past → FatalProcessOutOfMemory. 4096 gives generous headroom on this 7.8 Gi
+  #     box; override with DEPLOY_TEST_HEAP_MB. NODE_OPTIONS reaches every Node jest spawns.
+  #   • ONE worker: the npm test script already pins --runInBand (a single in-process worker, not N) —
+  #     which IS the worker cap (jest rejects --runInBand + --maxWorkers together), so nothing to add.
+  #   • NICED to the lowest priority when `nice` exists, so the live API keeps the CPU under contention.
+  #   • --logHeapUsage so we REPORT the peak heap actually used — an evidence-based cap, not a guess.
+  local_nice=""; command -v nice >/dev/null 2>&1 && local_nice="nice -n 19"
+  TEST_OUT="$( cd "$TEST_WT/server" && unset DATABASE_URL \
+    && NODE_OPTIONS="--max-old-space-size=${DEPLOY_TEST_HEAP_MB:-4096}" $local_nice npm test -- --logHeapUsage 2>&1 )"; TEST_RC=$?
   echo "$TEST_OUT" >> "$LOG"
   git worktree remove --force "$TEST_WT" >>"$LOG" 2>&1 && TEST_WT="" || rm -rf "$TEST_WT"
+  # Evidence from the run (reported whether it passed or failed).
+  TEST_PEAK_HEAP="$(echo "$TEST_OUT" | grep -oE '[0-9]+ MB heap size' | grep -oE '^[0-9]+' | sort -n | tail -1)"
+  TEST_WALL="$(echo "$TEST_OUT" | grep -oE 'Time:[[:space:]]+[0-9.]+ s' | grep -oE '[0-9.]+ s' | head -1)"
   if [ "$TEST_RC" -ne 0 ]; then
-    # DISTINGUISH the two failure modes. Jest prints a "Tests:" summary line ONLY when it actually ran the
-    # suite; its ABSENCE means jest never started (missing dep, DB setup, OOM, worktree gone) — a setup
-    # failure, not a broken assertion.
+    # DISTINGUISH the failure modes. Jest prints a "Tests:" summary line ONLY when it actually ran the
+    # suite; its ABSENCE means jest never got there — and OUT OF MEMORY is its own class, not a broken test.
     if echo "$TEST_OUT" | grep -qE '^Tests:[[:space:]]'; then
       report_test_failure "$TEST_OUT" "$TEST_RC"
       TESTS="FAILED ($(echo "$TEST_OUT" | grep -E '^Tests:' | head -1 | sed 's/Tests:[[:space:]]*//'))"
       abort "tests FAILED on ${TARGET_SHA:0:8} — assertions did not pass (the failing test is named above). Production untouched (still on ${SHA_BEFORE:0:8})."
+    elif echo "$TEST_OUT" | grep -qiE 'FatalProcessOutOfMemory|JavaScript heap out of memory|Reached heap limit|Allocation failed'; then
+      echo "$TEST_OUT" | tail -20 | sed 's/^/        /' | tee -a "$LOG"
+      TESTS="COULD NOT RUN (OUT OF MEMORY — jest killed; cap ${DEPLOY_TEST_HEAP_MB:-4096}MB, peak ${TEST_PEAK_HEAP:-?}MB)"
+      abort "tests OUT OF MEMORY on ${TARGET_SHA:0:8}: jest was KILLED hitting the V8 heap cap (${DEPLOY_TEST_HEAP_MB:-4096}MB; peak seen ${TEST_PEAK_HEAP:-?}MB) — NOT an assertion failure and NOT machine RAM. Raise DEPLOY_TEST_HEAP_MB, or investigate a suite leak (npm test -- --logHeapUsage). Last 20 lines above; full log in deploy/deploy.log."
     else
       echo "$TEST_OUT" | tail -20 | sed 's/^/        /' | tee -a "$LOG"
       TESTS="COULD NOT RUN (jest did not start, rc=$TEST_RC)"
-      abort "tests COULD NOT RUN on ${TARGET_SHA:0:8}: jest produced no summary (rc=$TEST_RC) — a SETUP/ENV failure (missing dep, DB, or the temp dir was cleaned), NOT an assertion failure. See the log."
+      abort "tests COULD NOT RUN on ${TARGET_SHA:0:8}: jest produced no summary (rc=$TEST_RC) — a SETUP/ENV failure (missing dep, DB, or the temp dir was cleaned), NOT an assertion failure. Last 20 lines above; full log in deploy/deploy.log."
     fi
   fi
   TESTS="$(echo "$TEST_OUT" | grep -E '^Tests:' | head -1 | sed 's/Tests:[[:space:]]*//')"
-  ok "tests passed on ${TARGET_SHA:0:8}: ${TESTS:-all}"
+  ok "tests passed on ${TARGET_SHA:0:8}: ${TESTS:-all}  ·  peak heap ${TEST_PEAK_HEAP:-?}MB (cap ${DEPLOY_TEST_HEAP_MB:-4096})  ·  ${TEST_WALL:-?}"
 fi
 
 # Tests are green (or skipped) → NOW it is safe to advance the LIVE working tree to the target.

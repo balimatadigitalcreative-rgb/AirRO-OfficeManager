@@ -301,6 +301,32 @@ deploy running inside a unit with **`PrivateTmp=yes`** (its `/tmp` is a throwawa
 or (c) a `tmpreaper`/`tmpwatch` cron with an aggressive policy. Whichever it is, **do not put
 build/test scratch under `/tmp` on this host** — use `DEPLOY_TEST_DIR`.
 
+### Post-mortem: 22 Aug — GATE 3 out of memory (not machine RAM)
+**Symptom:** GATE 3 died with `FatalProcessOutOfMemory` even though the box has 7.8 Gi RAM,
+7.0 Gi free, no swap. So it was **not** machine exhaustion — a single Node process hit V8's
+default old-space limit (~2 Gi).
+**Root cause:** the suite's heap grows **monotonically** — measured **66 MB → ~750-1100 MB
+across 95 files** (`jest --logHeapUsage`), ~7 MB per file. Under `--runInBand` every file runs
+in ONE process, and each jest file re-requires the whole app graph **plus its own
+`PrismaClient`** (~2 clients/file — confirmed 10 across 5 files). jest isolates each file's
+`process`/module registry, so those clients/graphs **cannot be shared** across files (a
+`process`-cached client was tested — it did **not** lower the peak, so the client alone is not
+the bulk; the retained per-file module graph is). Heaviest single files: `product-costing`
+(+70 MB), `invoice` (+22), `money-bigint` (+15), `rate-limit`/`opening-bon` (+13 each).
+**Fix (in `deploy/update.sh`, GATE 3):**
+1. Run jest with `NODE_OPTIONS=--max-old-space-size=${DEPLOY_TEST_HEAP_MB:-4096}` — 4096 gives
+   ~4× headroom over the measured peak on this 7.8 Gi box. Tune with `DEPLOY_TEST_HEAP_MB`.
+2. `--logHeapUsage` so every run **reports the peak heap and wall-clock** in the summary
+   (`test heap/time: peak NNNMB (cap 4096) · NNN s`) — evidence, not a guessed cap.
+3. A dedicated **OUT OF MEMORY** failure class — distinct from "tests failed (assertions)" and
+   from the generic "could not run (setup/env)" — with the last 20 lines of the jest log.
+4. The run is **niced** (`nice -n 19`) and single-worker (`--runInBand`), so it can never
+   starve the live `airro-api` under CPU/RAM contention.
+**Watch item:** the cap postpones, it doesn't cure — the heap climbs as the suite grows. The
+peak is printed every deploy; when it approaches the cap, either raise `DEPLOY_TEST_HEAP_MB` or
+move the suite to recycled workers (`--maxWorkers=N --workerIdleMemoryLimit=…`, which restarts a
+worker when it bloats — but uses more concurrent RAM/CPU, so weigh it against starving the API).
+
 ### The gates
 Pre-flight (nothing touched): app dir + git repo · warn on uncommitted changes ·
 record rollback SHA · **port guard** · record counts.
