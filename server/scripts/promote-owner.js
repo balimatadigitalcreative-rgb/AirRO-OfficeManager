@@ -16,6 +16,7 @@
  *
  * After promotion the user must LOG OUT and back in (their session/token carries the old role until then).
  */
+const guard = require('./_db-guard');   // FIRST: resolve+print DATABASE_URL, guard prod writes
 const prisma = require('../src/lib/prisma');
 const { OWNER_ROLE } = require('../src/config/permissions');
 
@@ -50,6 +51,7 @@ if (require.main === module) {
     const args = process.argv.slice(2);
     const wantList = args.includes('--list') || args.length === 0;
     if (wantList) {
+      guard.printBanner('READ-ONLY (--list)');
       const { users, activeOwners } = await listRoles();
       console.log('\nUsers (username · role · status):');
       users.forEach((u) => console.log(`  ${u.username.padEnd(20)} ${String(u.role).padEnd(14)} ${u.active === false ? 'inactive' : 'active'}${u.role === OWNER_ROLE ? '   ← OWNER' : ''}`));
@@ -64,6 +66,7 @@ if (require.main === module) {
       return;
     }
     const username = args.find((a) => !a.startsWith('--'));
+    guard.assertWriteAllowed();   // refuse a prod-looking DB without --confirm-production (this branch WRITES)
     try {
       const res = await promoteToOwner(username);
       if (res.changed) console.log(`✔ Promoted "${username}" from "${res.from}" to "owner". Recorded in UserAuditLog.\n  They must LOG OUT and back in for the new role to take effect.`);

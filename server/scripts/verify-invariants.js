@@ -8,7 +8,9 @@
  *
  * The optional YYYY-MM scopes the HPP == P&L check to that month (default: current month).
  * Reuses the SAME service functions the app uses, so a PASS here means the app's own figures agree.
+ * _db-guard is required FIRST so the resolved DATABASE_URL is honoured + printed before anything reads.
  */
+const guard = require('./_db-guard');
 const prisma = require('../src/lib/prisma');
 const acc = require('../src/services/accounting.service');
 const dist = require('../src/services/distribution.service');
@@ -20,6 +22,7 @@ const results = [];
 function check(name, pass, detail) { results.push({ name, pass: !!pass, detail: detail || '' }); }
 
 async function run() {
+  guard.printBanner('READ-ONLY (writes nothing)');   // show the resolved DB prominently, up front
   const month = (process.argv[2] && /^\d{4}-\d{2}$/.test(process.argv[2])) ? process.argv[2] : new Date().toISOString().slice(0, 7);
   const [y, m] = month.split('-').map(Number);
   const owner = await prisma.user.findFirst({ where: { role: 'owner' }, select: { id: true, role: true, fleetScope: true } }).catch(() => null);
@@ -75,9 +78,26 @@ async function run() {
   check('source ↔ journal integrity (0 missing, 0 orphan)', ic.missingCount === 0 && ic.orphanCount === 0, `${ic.missingCount} missing, ${ic.orphanCount} orphan` + (ic.missingCount ? `\n     missing by type: ` + Object.entries(ic.missing.reduce((a, x) => { a[x.sourceType] = (a[x.sourceType] || 0) + 1; return a; }, {})).map(([k, v]) => `${k}=${v}`).join(', ') + `\n     e.g. ${ic.missing.slice(0, 8).map((x) => `${x.sourceType}:${x.sourceId} (${x.date})`).join(' · ')}` : ''));
 
   // ── print ──
-  console.log(`\nCROSS-MODULE INVARIANTS  ·  DB: ${process.env.DATABASE_URL || '(default)'}  ·  HPP month: ${month}\n`);
+  console.log(`\nCROSS-MODULE INVARIANTS  ·  HPP month: ${month}\n`);
   let failed = 0;
   for (const r of results) { const tag = r.pass ? '✔ PASS' : '✖ FAIL'; if (!r.pass) failed++; console.log(`  ${tag}  ${r.name}\n           ${r.detail}`); }
+
+  // FULL DUMP of every un-posted dist_txn (the offending rows behind a source↔journal failure): the
+  // exact fields needed to diagnose WHY they were skipped — method, amount, legacy/bonCounted, customer,
+  // import batch, dispute/void status, dates — plus the summed amount (so it can be matched to an AR gap).
+  const missingDtx = (ic.missing || []).filter((x) => x.sourceType === 'dist_txn').map((x) => x.sourceId);
+  if (missingDtx.length) {
+    const rows = await prisma.distTransaction.findMany({ where: { id: { in: missingDtx } }, orderBy: { txnDate: 'asc' } });
+    let sum = 0;
+    console.log(`\n  ── ${rows.length} dist_txn WITHOUT a journal ─────────────────────────────────────────`);
+    for (const t of rows) {
+      sum += t.amount;
+      console.log(`   ${t.txnDate}  ${t.method.padEnd(9)} ${rupiah(t.amount).padStart(14)}  legacy=${t.legacy} bonCounted=${t.bonCounted} status=${t.status}` +
+        `\n        id=${t.id} customer=${t.customerId} batch=${t.importBatchId || '—'} paymentNotReceived=${t.paymentNotReceived} createdAt=${t.createdAt && t.createdAt.toISOString ? t.createdAt.toISOString().slice(0, 10) : t.createdAt}`);
+    }
+    console.log(`   Σ amount of the missing rows: ${rupiah(sum)}  (compare to the finance-AR gap above)\n`);
+  }
+
   console.log(`\n${failed === 0 ? '✔ ALL ' + results.length + ' INVARIANTS HOLD' : '✖ ' + failed + ' of ' + results.length + ' INVARIANT(S) FAILED'}\n`);
   process.exitCode = failed ? 2 : 0;
 }

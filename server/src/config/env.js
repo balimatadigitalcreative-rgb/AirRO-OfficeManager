@@ -6,7 +6,16 @@
 // tests ended up asserting an ambient default that isn't the code's real default. Under test the only
 // environment is what the runner + tests/jest.setup.js set explicitly — the suite is hermetic.
 if (process.env.NODE_ENV !== 'test') {
+  // An EXPLICITLY-provided DATABASE_URL (e.g. a script pointed at a prod COPY:
+  // `DATABASE_URL="file:./prod-copy.db" node scripts/...`) must ALWAYS win — otherwise override:true
+  // silently clobbers it with .env's DATABASE_URL and the script reads the WRONG database (this is
+  // exactly how a "read a copy" verification once read production). We pin the caller's value, let
+  // dotenv override everything else (its purpose: beat stray/inherited vars), then restore the pin.
+  // In production DATABASE_URL lives only in .env (not in process.env before dotenv), so pinned is
+  // undefined and behaviour is unchanged; a real deploy that sets it in the environment keeps that too.
+  const pinnedDbUrl = process.env.DATABASE_URL;
   require('dotenv').config({ override: true });
+  if (pinnedDbUrl) process.env.DATABASE_URL = pinnedDbUrl;
 }
 
 function required(name, fallback) {

@@ -757,29 +757,48 @@ async function importLegacyTransactions(customerId, rows, actor, clientSkipped, 
       const k = key(ex.date, t.method, t.amount);
       if (seen.has(k)) { serverSkipped++; continue; }   // duplicate
       seen.add(k);
-      await prisma.distTransaction.create({ data: {
-        customerId, fleetId: customer.armada || '', qty: t.qty, unitPriceLocked: t.price, amount: t.amount, method: t.method, bonCounted,
-        note: ex.note, txnDate: ex.date, legacy: true, importBatchId: batchId,
-        actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
-      } });   // legacy=true + NO GallonMovement — purchases stay archive-only; a pelunasan reduces sisa
-              // bon because the receivable math (BON_TXN) counts legacy bon/pelunasan (see top of file).
+      // LIVE POSTING (flag-gated): a legacy BON/PELUNASAN reduces/raises Sisa Bon, so it MUST hit the
+      // ledger exactly as createOpeningBon and the backfill do (Dr/Cr Piutang) — otherwise Piutang
+      // drifts from Σ Sisa Bon (a back-dated pelunasan imported while the flag is on would leave AR
+      // overstated by the un-posted Cr). A legacy LUNAS is archive-only (no receivable, and
+      // integrityCheck excludes legacy lunas), so it is created WITHOUT a journal. Row + journal are
+      // one transaction, so the source never exists without its ledger entry.
+      const post = config.accountingV2 && bonCounted && t.method !== 'lunas';
+      await prisma.$transaction(async (tx) => {
+        const row = await tx.distTransaction.create({ data: {
+          customerId, fleetId: customer.armada || '', qty: t.qty, unitPriceLocked: t.price, amount: t.amount, method: t.method, bonCounted,
+          note: ex.note, txnDate: ex.date, legacy: true, importBatchId: batchId,   // legacy=true + NO GallonMovement — purchases stay archive-only
+          actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+        } });
+        if (post) await acc.postDistTransaction(row, actor, tx);
+      });
       created++;
     }
   }
+  // One receivable reclass once the whole batch is on the books (idempotent) — keeps Piutang == Σ Sisa
+  // Bon, e.g. when imported payments push a customer into overpayment (credit balance → uang muka).
+  if (config.accountingV2 && bonCounted && created) await acc.postReceivablesReclass(customerId, actor);
   const skipped = Math.max(0, Math.round(+clientSkipped || 0)) + serverSkipped;
   await logAudit('impor', `Impor riwayat: ${customer.name}`, `batch ${batchId} · ${created} ditambah · ${skipped} dilewati (duplikat/invalid)`, snap, customer.armada);
   return { imported: created, skipped, batchId, received: list.length };
 }
-// Undo a whole legacy import batch — GM/OWNER ONLY. Safe: legacy rows touch no ledger. Only rows
-// that are BOTH legacy AND in this batch AND this customer are removed (never a real sale).
+// Undo a whole legacy import batch — GM/OWNER ONLY. Only rows that are BOTH legacy AND in this batch
+// AND this customer are removed (never a real sale). A legacy bon/pelunasan now carries a journal (it
+// affects Sisa Bon), so each removed row's journal is deleted and the customer re-reclassed — undoing
+// an import must never orphan a ledger entry nor leave Piutang overstated.
 async function undoLegacyBatch(customerId, batchId, actor) {
   if (!(actor && (actor.role === 'owner' || actor.role === 'gm'))) throw ApiError.forbidden('Hanya GM/Owner yang boleh membatalkan impor.');
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!customer) throw ApiError.notFound('Customer not found');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.notFound('Customer not found');
   const where = { customerId, importBatchId: String(batchId || ''), legacy: true };
+  const rows = await prisma.distTransaction.findMany({ where, select: { id: true } });
   await prisma.correction.deleteMany({ where: { transaction: where } });   // defensive (legacy rows have none)
   const del = await prisma.distTransaction.deleteMany({ where });
+  if (config.accountingV2) {
+    for (const r of rows) await acc.deleteJournal('dist_txn', r.id);   // drop each row's ledger entry
+    await acc.postReceivablesReclass(customerId, actor);               // re-reconcile Piutang to Σ Sisa Bon
+  }
   const snap = await actorSnap(actor);
   await logAudit('pelanggan', `Batalkan impor riwayat: ${customer.name}`, `batch ${batchId} · ${del.count} baris arsip dihapus`, snap, customer.armada);
   return { deleted: del.count, batchId };
