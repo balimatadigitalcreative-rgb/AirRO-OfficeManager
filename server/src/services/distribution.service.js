@@ -2223,7 +2223,17 @@ async function setTransactionArchive(txnId, targetLegacy, body, actor) {
   const updated = await prisma.$transaction(async (tx) => {
     if (target) await tx.gallonMovement.updateMany({ where: { transactionId: txnId, active: true }, data: { active: false } });   // archive → reverse stock
     else await tx.gallonMovement.updateMany({ where: { transactionId: txnId, active: false }, data: { active: true } });          // reactivate own movements (none for imports)
-    return tx.distTransaction.update({ where: { id: txnId }, data: { legacy: target, bonCounted } });
+    const row = await tx.distTransaction.update({ where: { id: txnId }, data: { legacy: target, bonCounted } });
+    // Keep the AR ledger in step with the row's receivable status: archiving a bon to bonCounted=false
+    // reverses its Piutang (distTxnLines now yields [] for it); reactivating re-posts it. Same reconcile
+    // engine every other mutator uses. The event key is UNIQUE per toggle — a row can archive/reactivate
+    // many times, and a static key would hit postJournal's idempotency guard and skip the 2nd reversal.
+    if (config.accountingV2 && (txn.method === 'bon' || txn.method === 'pelunasan')) {
+      const nArch = await tx.journalEntry.count({ where: { sourceType: 'dist_txn_adj', sourceId: { startsWith: `${txnId}:arch` } } });
+      await acc.reconcileDistTxn(row, `arch${nArch}`, actor, tx);
+      await acc.postReceivablesReclass(txn.customerId, actor, tx);
+    }
+    return row;
   });
   const bonNote = (txn.method === 'bon' || txn.method === 'pelunasan') ? ` · sisa bon ${bonCounted ? 'dihitung' : 'tidak dihitung'}` : '';
   await logAudit('impor', `${target ? 'Jadikan arsip' : 'Jadikan aktif'}: ${txn.customer ? txn.customer.name : ''}`,

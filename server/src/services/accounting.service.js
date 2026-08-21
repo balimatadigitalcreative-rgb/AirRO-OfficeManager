@@ -235,10 +235,16 @@ async function hppOnSaleLines(t, db) {
   const amt = std * qty; const f = t.fleetId || '';
   return [{ code: '5-1000', debit: amt, fleetId: f }, { code: '1-1350', credit: amt, fleetId: f }];
 }
+// The AR projection obeys the SAME predicate as Sisa Bon (BON_TXN in distribution.service.js): a
+// bon/pelunasan is a receivable IFF status!=void AND bonCounted. So a row archived to bonCounted=false
+// (or voided) posts NO Piutang — reconcileDistTxn on that transition reverses whatever was posted. NOTE
+// bonCounted is meaningless for a LUNAS cash sale (Dr Kas / Cr Pendapatan, no receivable), so the guard
+// lives inside the bon/pelunasan branches only — never suppressing a lunas sale.
 async function distTxnLines(t, db = prisma) {
   if (t.status === 'void') return [];
   const f = t.fleetId || '';
   if (t.method === 'pelunasan') {
+    if (!t.bonCounted) return [];   // pelunasan excluded from sisa bon → no AR movement
     const amt = n(t.amount); if (!amt) return [];
     // PAYMENT NOT RECEIVED: the customer paid (their bon drops → Cr Piutang) but the money never
     // reached the company — a staff took it — so it is a LOSS (Dr Beban Kerugian Piutang), never cash.
@@ -248,6 +254,7 @@ async function distTxnLines(t, db = prisma) {
     return [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
   }
   if (t.method !== 'bon') { const amt = n(t.amount); if (!amt) return []; return [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }, ...(await hppOnSaleLines(t, db))]; }
+  if (!t.bonCounted) return [];   // bon excluded from sisa bon (archived/mistaken) → no Piutang
   const corrs = t.corrections || await db.correction.findMany({ where: { transactionId: t.id, kind: 'price', active: true }, select: { deltaAmount: true, kind: true, active: true } });
   const pdelta = (corrs || []).filter((c) => c.kind === 'price' && c.active).reduce((a, c) => a + Number(c.deltaAmount || 0), 0);
   const disputes = await db.distTransactionDispute.findMany({ where: { transactionId: t.id, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { status: true, disputedAmount: true } });
