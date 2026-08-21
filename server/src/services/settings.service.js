@@ -11,6 +11,10 @@ const DEFAULTS = {
   // approval (it moves money); gallon is configurable — set { galon: false } to let routine, verifiable
   // gallon corrections apply without an approval bottleneck. Default: both require approval.
   adjustmentApproval: { galon: true, bon: true },
+  // DEPRECIATION first-month policy — 'full' (a full month's charge in the acquisition month) or
+  // 'prorata' (by days). Explicit, not implicit. Useful lives/methods are the owner's ACCOUNTING
+  // estimates; tax depreciation may differ and should be confirmed with an accountant.
+  depreciation: { firstMonth: 'full' },
 };
 
 async function getAll() {

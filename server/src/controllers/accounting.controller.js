@@ -7,6 +7,7 @@ const recon = require('../services/reconciliation.service');
 const bill = require('../services/bill.service');
 const accrual = require('../services/accrual.service');
 const subscription = require('../services/subscription.service');
+const depreciation = require('../services/depreciation.service');
 const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
 
 const trialBalance = asyncHandler(async (req, res) => res.json({ data: await service.trialBalance(range(req)) }));
@@ -77,7 +78,20 @@ const subSkip = asyncHandler(async (req, res) => res.json({ data: await subscrip
 const subRun = asyncHandler(async (req, res) => res.json({ data: await subscription.runSubscriptions({ asOf: req.body && req.body.asOf }, req.user) }));
 const subsDue = asyncHandler(async (req, res) => res.json({ data: await subscription.subscriptionsDue({ asOf: req.query.asOf, days: req.query.days ? +req.query.days : 7 }) }));
 
+// FIXED ASSETS & DEPRECIATION — register/list/detail + the monthly run, disposal, bulk import, and the
+// gallon-pool reconcile/loss. The service validates + posts; handlers pass through.
+const assetsList = asyncHandler(async (req, res) => res.json({ data: await depreciation.listAssets(req.query) }));
+const assetGet = asyncHandler(async (req, res) => res.json({ data: await depreciation.getAsset(req.params.id) }));
+const assetCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await depreciation.createAsset(req.body, req.user) }));
+const assetDispose = asyncHandler(async (req, res) => res.json({ data: await depreciation.disposeAsset(req.params.id, req.body, req.user) }));
+const depreciate = asyncHandler(async (req, res) => res.json({ data: await depreciation.postDepreciation({ asOf: req.body && req.body.asOf, assetId: req.body && req.body.assetId }, req.user) }));
+const assetsImportPreview = asyncHandler(async (req, res) => res.json({ data: await depreciation.previewImport(req.body && req.body.rows) }));
+const assetsImportCommit = asyncHandler(async (req, res) => res.json({ data: await depreciation.commitImport(req.body && req.body.rows, req.user) }));
+const gallonPoolReconcile = asyncHandler(async (req, res) => res.json({ data: await depreciation.reconcileGallonPool(req.params.id, req.user) }));
+const gallonPoolLoss = asyncHandler(async (req, res) => res.json({ data: await depreciation.gallonPoolLoss(req.params.id, req.body, req.user) }));
+
 module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
   billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue, suppliersList, supplierCreate,
   accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize,
-  subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun, subsDue };
+  subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun, subsDue,
+  assetsList, assetGet, assetCreate, assetDispose, depreciate, assetsImportPreview, assetsImportCommit, gallonPoolReconcile, gallonPoolLoss };

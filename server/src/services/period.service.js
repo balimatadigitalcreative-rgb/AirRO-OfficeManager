@@ -61,8 +61,11 @@ async function closeChecklist(year, month) {
   // ACCRUAL-BASIS CHECKS — closing a period with unposted amortisation overstates profit, so it BLOCKS
   // the close (like an unbalanced trial balance). Accrued not-yet-reversed / subscriptions due / draft
   // bills only WARN. All are best-effort (the tables may not exist on an older DB).
-  let amortPending = 0, accruedOpen = 0, subsDue = 0, draftBills = 0;
+  let amortPending = 0, accruedOpen = 0, subsDue = 0, draftBills = 0, deprPending = 0, deprAssets = 0;
   try { amortPending = await require('./accrual.service').pendingAmortizationCount({ asOf: to }); } catch (e) { /* accrual optional */ }
+  // Unposted DEPRECIATION for this period understates expense / overstates profit — BLOCKS the close
+  // (same rule as amortisation), with a one-click "post all" in the checklist.
+  try { const d = await require('./depreciation.service').pendingDepreciation({ asOf: to }); deprPending = d.months; deprAssets = d.assets; } catch (e) { /* fixed assets optional */ }
   try { accruedOpen = await prisma.accrual.count({ where: { status: 'aktif', reverseDate: { gt: to } } }); } catch (e) { /* optional */ }
   try { subsDue = await prisma.subscription.count({ where: { status: 'aktif', nextRunDate: { lte: to } } }); } catch (e) { /* optional */ }
   try { draftBills = await prisma.bill.count({ where: { status: 'draft', billDate: { lte: to } } }); } catch (e) { /* optional */ }
@@ -75,8 +78,9 @@ async function closeChecklist(year, month) {
     journalIntegrity: integrity.ok ? 'ok' : 'drift',
     journalDrift,
     amortPending,        // BLOCKS the close
+    deprPending, deprAssets,   // BLOCKS the close (n months across deprAssets assets)
     accruedOpen, subsDue, draftBills,   // warn only
-    clean: uncategorised === 0 && pending === 0 && bank.count === 0 && journalDrift === 0 && amortPending === 0,
+    clean: uncategorised === 0 && pending === 0 && bank.count === 0 && journalDrift === 0 && amortPending === 0 && deprPending === 0,
   };
 }
 
@@ -93,6 +97,10 @@ async function closePeriod({ year, month, lock }, actor) {
   let amortPending = 0;
   try { amortPending = await require('./accrual.service').pendingAmortizationCount({ asOf: periodEnd }); } catch (e) { /* accrual optional */ }
   if (amortPending > 0) throw ApiError.badRequest(`${amortPending} amortisasi belum diposting untuk periode ini — posting dulu sebelum menutup.`, { amortPending });
+  // Unposted depreciation likewise blocks the close (the checklist offers a one-click "post all").
+  let deprPending = { months: 0, assets: 0 };
+  try { deprPending = await require('./depreciation.service').pendingDepreciation({ asOf: periodEnd }); } catch (e) { /* fixed assets optional */ }
+  if (deprPending.months > 0) throw ApiError.badRequest(`Penyusutan bulan ini belum diposting (${deprPending.assets} aset) — posting dulu sebelum menutup.`, { deprPending: deprPending.months, deprAssets: deprPending.assets });
   const key = keyOf(year, month);
   const status = lock ? 'terkunci' : 'ditutup';
   const stamp = { status, closedById: (actor && actor.id) || null, closedByName: await actorName(actor), closedAt: new Date(), reopenReason: null, reopenedById: null, reopenedByName: null, reopenedAt: null };

@@ -161,6 +161,16 @@
       subscriptionSkip: (id) => req('POST', '/accounting/subscriptions/' + id + '/skip', {}),
       subscriptionsRun: (b) => req('POST', '/accounting/subscriptions/run', b || {}),  // { asOf? } → generates due bills
       subscriptionsDue: (p) => req('GET', '/accounting/subscriptions-due' + acctQs(p)), // dashboard card — due within N days
+      // FIXED ASSETS & DEPRECIATION
+      assets: (p) => req('GET', '/accounting/assets' + acctQs(p)),                      // { category, unit, fleet, status }
+      assetGet: (id) => req('GET', '/accounting/assets/' + id),                         // detail + full schedule
+      assetCreate: (b) => req('POST', '/accounting/assets', b),
+      assetDispose: (id, b) => req('POST', '/accounting/assets/' + id + '/dispose', b), // { disposalDate, disposalProceeds, status, proceedsCode? }
+      depreciate: (b) => req('POST', '/accounting/depreciate', b || {}),               // { asOf?, assetId? } → posts every due month
+      assetsImportPreview: (b) => req('POST', '/accounting/assets/import/preview', b),  // { rows } → per-row validation
+      assetsImportCommit: (b) => req('POST', '/accounting/assets/import', b),           // { rows } → commit valid rows
+      gallonPoolReconcile: (id) => req('GET', '/accounting/assets/' + id + '/reconcile-pool'),
+      gallonPoolLoss: (id, b) => req('POST', '/accounting/assets/' + id + '/pool-loss', b), // { qty, kind, reason }
     },
     // Proof attachments live out of the record payload. `create` uploads a compressed
     // data URL and returns { id, name, isImg, mime, size }; `get` lazily fetches the bytes

@@ -18,6 +18,11 @@ const CHART = [
   ['1-1200', 'Piutang Usaha', 'asset', '1-0000', 'receivable'],
   ['1-1300', 'Persediaan Galon', 'asset', '1-0000', 'inventory'],
   ['1-1400', 'Peralatan', 'asset', '1-0000', 'fixed_asset'],
+  ['1-1410', 'Kendaraan', 'asset', '1-0000', 'fixed_asset'],
+  ['1-1420', 'Mesin & Peralatan Produksi', 'asset', '1-0000', 'fixed_asset'],   // RO machines etc. (production)
+  ['1-1430', 'Bangunan', 'asset', '1-0000', 'fixed_asset'],
+  ['1-1440', 'Galon (Aset Tetap)', 'asset', '1-0000', 'fixed_asset'],   // pooled gallon asset
+  ['1-1900', 'Akumulasi Penyusutan', 'asset', '1-0000', 'accum_depreciation'],   // CONTRA-asset: reduces fixed assets to book value
   ['1-1500', 'PPN Masukan', 'asset', '1-0000', 'prepaid'],   // recoverable input VAT on a bill (Accounts Payable tax)
   ['1-1600', 'Beban Dibayar Di Muka', 'asset', '1-0000', 'prepaid'],   // prepaid expense — capitalised, amortised monthly
   ['2-0000', 'Kewajiban', 'liability', '', 'header'],
@@ -32,8 +37,10 @@ const CHART = [
   ['4-0000', 'Pendapatan', 'revenue', '', 'header'],
   ['4-1000', 'Penjualan Air', 'revenue', '4-0000', 'revenue'],
   ['4-2000', 'Pendapatan Lain', 'revenue', '4-0000', 'revenue'],
+  ['4-3000', 'Laba Pelepasan Aset', 'revenue', '4-0000', 'revenue'],   // gain on disposal of a fixed asset
   ['5-0000', 'Harga Pokok Penjualan', 'expense', '', 'header'],
   ['5-1000', 'HPP Galon', 'expense', '5-0000', 'cogs'],
+  ['5-2000', 'Penyusutan Produksi (HPP)', 'expense', '5-0000', 'cogs'],   // depreciation of production assets → cost of goods
   ['6-0000', 'Beban Operasional', 'expense', '', 'header'],
   ['6-1000', 'Beban Gaji', 'expense', '6-0000', 'expense'],
   ['6-2000', 'Beban BBM & Pengiriman', 'expense', '6-0000', 'expense'],
@@ -42,6 +49,8 @@ const CHART = [
   ['6-5000', 'Beban Utilitas', 'expense', '6-0000', 'expense'],
   ['6-6000', 'Beban Sewa', 'expense', '6-0000', 'expense'],
   ['6-7000', 'Beban Kerugian Piutang', 'expense', '6-0000', 'expense'],   // bad-debt / dispute loss (kerugian) + write-offs
+  ['6-8000', 'Beban Penyusutan', 'expense', '6-0000', 'expense'],   // depreciation of NON-production (operating) assets
+  ['6-8500', 'Rugi Pelepasan/Kerusakan Aset', 'expense', '6-0000', 'expense'],   // loss on disposal + rusak/hilang gallon-pool write-off
   ['6-9000', 'Beban Lain-lain', 'expense', '6-0000', 'expense'],
 ];
 // ARUS KAS classification — subtype → section. Explicit + configurable. An account whose subtype is not
@@ -50,6 +59,11 @@ const CF_SECTION = {
   cash: 'cash', header: 'header',
   receivable: 'operasi', inventory: 'operasi', prepaid: 'operasi', payable: 'operasi', accrued: 'operasi', deferred_income: 'operasi', revenue: 'operasi', expense: 'operasi', cogs: 'operasi',
   fixed_asset: 'investasi',
+  // Accumulated depreciation is a CONTRA-asset whose only movement is the non-cash depreciation charge.
+  // Classifying it under OPERASI turns the indirect method into the textbook "add depreciation back":
+  // net income already carries the depreciation EXPENSE (−), and this contra account's period change
+  // adds the same amount back (+), netting the non-cash item to zero cash effect. Reconciles exactly.
+  accum_depreciation: 'operasi',
   capital: 'pendanaan', retained: 'pendanaan', drawing: 'pendanaan',
 };
 const CF_INCOME_SUBTYPES = new Set(['revenue', 'expense', 'cogs']);   // the accounts that make up "laba bersih"

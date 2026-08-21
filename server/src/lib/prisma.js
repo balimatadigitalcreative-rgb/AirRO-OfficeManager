@@ -34,6 +34,8 @@ const MONEY = {
   distAdjustment: ['before', 'delta', 'after'],
   distTransactionDispute: ['disputedAmount', 'customerClaimAmount'],
   stockMovement: ['amount'],
+  fixedAsset: ['acquisitionCost', 'salvageValue', 'disposalProceeds'],
+  depreciationEntry: ['amount', 'bookValueAfter'],
 };
 function moneyResultExtension() {
   const result = {};

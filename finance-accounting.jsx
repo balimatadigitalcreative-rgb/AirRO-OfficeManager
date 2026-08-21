@@ -536,13 +536,15 @@
       // ACCRUAL-BASIS checks. Amortisation BLOCKS (unposted → overstated profit) and offers a one-click
       // fix; accrued / subscriptions-due / draft bills only WARN.
       { key: 'amort', ok: (chk.amortPending || 0) === 0, label: trA('tp.chkAmort'), fix: 'acct-accrual', blocking: true, val: chk.amortPending ? String(chk.amortPending) : '', action: (chk.amortPending || 0) > 0 ? 'amort' : null },
+      { key: 'depr', ok: (chk.deprPending || 0) === 0, label: trA('tp.chkDepr'), fix: 'acct-assets', blocking: true, val: chk.deprPending ? trA('tp.chkDeprVal', { n: chk.deprAssets || 0 }) : '', action: (chk.deprPending || 0) > 0 ? 'depr' : null },
       { key: 'accrued', ok: (chk.accruedOpen || 0) === 0, label: trA('tp.chkAccrued'), fix: 'acct-accrual', val: chk.accruedOpen ? String(chk.accruedOpen) : '' },
       { key: 'subs', ok: (chk.subsDue || 0) === 0, label: trA('tp.chkSubs'), fix: 'acct-subscriptions', val: chk.subsDue ? String(chk.subsDue) : '' },
       { key: 'draft', ok: (chk.draftBills || 0) === 0, label: trA('tp.chkDraft'), fix: 'acct-payables', val: chk.draftBills ? String(chk.draftBills) : '' },
     ];
     const targetStatus = (periods.find((p) => p.periodKey === target) || {}).status || 'terbuka';
     const amortBlocked = (chk.amortPending || 0) > 0;
-    const canClose = balanced && !amortBlocked && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
+    const deprBlocked = (chk.deprPending || 0) > 0;
+    const canClose = balanced && !amortBlocked && !deprBlocked && targetStatus === 'terbuka' && confirm.trim().toUpperCase() === 'TUTUP';
 
     const doClose = async () => {
       setBusy(true); setErr('');
@@ -554,6 +556,13 @@
     const doPostAmort = async () => {
       setBusy(true); setErr('');
       try { await ACC().amortize({ asOf: target + '-31' }); checkQ.reload(); }
+      catch (e) { setErr((e && e.body && e.body.error && e.body.error.message) || (e && e.message) || 'Gagal.'); }
+      finally { setBusy(false); }
+    };
+    // One-click "post all depreciation for this period" — clears the depreciation blocker.
+    const doPostDepr = async () => {
+      setBusy(true); setErr('');
+      try { await ACC().depreciate({ asOf: target + '-31' }); checkQ.reload(); }
       catch (e) { setErr((e && e.body && e.body.error && e.body.error.message) || (e && e.message) || 'Gagal.'); }
       finally { setBusy(false); }
     };
@@ -587,6 +596,7 @@
                   <span className="tp-chk-ic">{IcA(it.ok ? 'IconCheck' : (it.blocking ? 'IconClose' : 'IconWarn'), { s: 15 })}</span>
                   <span className="tp-chk-lbl">{it.label}{it.val ? <em> — {it.val}</em> : ''}</span>
                   {!it.ok && it.action === 'amort' && <button className="btn btn-primary btn-xs" disabled={busy} onClick={doPostAmort}>{IcA('IconRefresh', { s: 12 })}{trA('tp.postAmort')}</button>}
+                  {!it.ok && it.action === 'depr' && <button className="btn btn-primary btn-xs" disabled={busy} onClick={doPostDepr}>{IcA('IconRefresh', { s: 12 })}{trA('tp.postDepr')}</button>}
                   {!it.ok && it.fix && <button className="dist-link" onClick={() => onNav && onNav(it.fix)}>{trA('tp.fix')}</button>}
                 </div>
               ))}
@@ -596,8 +606,9 @@
             <div className="tp-confirm">
               {!balanced && <div className="add-err"><IconClose s={14} />{trA('tp.blockedUnbalanced')}</div>}
               {balanced && amortBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedAmort', { n: chk.amortPending })}</div>}
+              {balanced && !amortBlocked && deprBlocked && <div className="add-err"><IconClose s={14} />{trA('tp.blockedDepr', { n: chk.deprAssets || 0 })}</div>}
               <label className="fld-label">{trA('tp.typeConfirm')}</label>
-              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced || amortBlocked} />
+              <input className="fld" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="TUTUP" disabled={!balanced || amortBlocked || deprBlocked} />
               <div className="tp-lockinfo">{trA('tp.lockInfo')}</div>
               {err && <div className="add-err"><IconClose s={14} />{err}</div>}
               <button className="btn btn-primary" disabled={!canClose || busy} onClick={doClose}>{IcA('IconLock', { s: 16 })}{trA('tp.closeBtn', { m: target })}</button>
@@ -1159,5 +1170,186 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen };
+  // ── FIXED ASSETS & DEPRECIATION — the ASSET REGISTER (cost · accumulated · book value · monthly
+  // charge · remaining life), filters, XLSX export, the monthly depreciation run, register/import forms,
+  // and a detail view with the full schedule (past + future) + disposal + gallon-pool reconcile. ──
+  const AS_CATS = ['kendaraan', 'mesin_ro', 'peralatan', 'galon', 'bangunan', 'lainnya'];
+  const AS_METHODS = ['garis_lurus', 'saldo_menurun'];
+  const AS_STATUSES = ['aktif', 'dijual', 'dilepas', 'rusak'];
+  const asCat = (c) => trA('as.cat_' + c) || c;
+
+  function AssetsScreen({ canRun }) {
+    const [fCat, setFCat] = aS(''); const [fStatus, setFStatus] = aS('aktif');
+    const [form, setForm] = aS(false); const [imp, setImp] = aS(false); const [detail, setDetail] = aS(null);
+    const [busy, setBusy] = aS(''); const [err, setErr] = aS(''); const [toast, setToast] = aS('');
+    const q = useAcct(() => ACC().assets({ category: fCat || undefined, status: fStatus || undefined }), [fCat, fStatus]);
+    if (q.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('sb.soon')} />;
+    const data = (q.data && q.data.data) || [];
+    const totals = (q.data && q.data.totals) || { cost: 0, accumulated: 0, bookValue: 0, monthlyCharge: 0 };
+    const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+    const doPost = async () => { setBusy('post'); setErr(''); try { const r = await ACC().depreciate({ asOf: todayISO() }); flash(trA('as.posted', { n: (r.data && r.data.posted) || 0 })); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    const doExport = () => {
+      const head = [trA('as.colCode'), trA('as.colName'), trA('as.colCat'), trA('as.colCost'), trA('as.colAccum'), trA('as.colBook'), trA('as.colMonthly'), trA('as.colRemain'), trA('as.colStatus'), trA('as.colProd')];
+      const body = data.map((a) => [a.code, a.name, asCat(a.category), a.acquisitionCost, a.accumulated, a.bookValue, a.monthlyCharge, a.remainingMonths, trA('as.st_' + a.status), a.isProduction ? 'COGS' : 'Opex']);
+      exportXLS('Aset Tetap', [head, ...body], `AirRO-AsetTetap-${todayISO()}.xls`);
+    };
+    return (
+      <div className="screen-enter fin-scope">
+        <div className="fin-head"><div className="fin-head-titles"><h2>{trA('t.finAssets')}</h2><div className="fin-head-scope">{trA('s.finAssets')}</div></div>
+          <div className="fin-head-actions">
+            {canRun && <button className="btn btn-ghost" disabled={!!busy} onClick={doPost}>{IcA('IconRefresh', { s: 15 })}{trA('as.postDepr')}</button>}
+            {canRun && <button className="btn btn-ghost" onClick={() => setImp(true)}>{IcA('IconDownload', { s: 15 })}{trA('as.import')}</button>}
+            <button className="btn btn-ghost" disabled={!data.length} onClick={doExport}>{IcA('IconDownload', { s: 15 })}XLSX</button>
+            {canRun && <button className="btn btn-primary" onClick={() => setForm(true)}>{IcA('IconPlus', { s: 16 })}{trA('as.new')}</button>}
+          </div>
+        </div>
+        <ScreenIntro answers={trA('as.answers')} extra={trA('as.taxNote')} tone="warn" />
+        {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
+        <div className="rep-controls" style={{ marginBottom: 10 }}>
+          <div className="range-picker">{['', ...AS_STATUSES].map((s) => <button key={s || 'all'} className={`range-btn ${fStatus === s ? 'on' : ''}`} onClick={() => setFStatus(s)}>{s ? trA('as.st_' + s) : trA('as.all')}</button>)}</div>
+          <select className="fld" style={{ maxWidth: 180 }} value={fCat} onChange={(e) => setFCat(e.target.value)}><option value="">{trA('as.allCats')}</option>{AS_CATS.map((c) => <option key={c} value={c}>{asCat(c)}</option>)}</select>
+        </div>
+        <div className="card">
+          {q.state === 'loading' && <Skeleton n={6} />}
+          {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
+          {q.state === 'ready' && (data.length === 0
+            ? <EmptyState title={trA('as.emptyT')} body={trA('as.emptyB')} icon="IconInvoice" actionLabel={canRun ? trA('as.new') : null} onAction={canRun ? () => setForm(true) : null} />
+            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr>
+              <th className="fin-th">{trA('as.colCode')}</th><th className="fin-th">{trA('as.colName')}</th><th className="fin-th fin-r">{trA('as.colCost')}</th><th className="fin-th fin-r">{trA('as.colAccum')}</th><th className="fin-th fin-r">{trA('as.colBook')}</th><th className="fin-th fin-r">{trA('as.colMonthly')}</th><th className="fin-th fin-r">{trA('as.colRemain')}</th><th className="fin-th">{trA('as.colStatus')}</th></tr></thead>
+              <tbody>{data.map((a) => <tr key={a.id} className="fin-trow" style={{ cursor: 'pointer' }} onClick={() => setDetail(a.id)}>
+                <td className="fin-td">{a.code}{a.isProduction ? <span className="ap-badge ok" style={{ marginLeft: 6 }}>COGS</span> : ''}</td>
+                <td className="fin-td">{a.name}<span className="fin-td-sub">{asCat(a.category)}{a.pooled ? ' · ' + trA('as.pool', { n: a.quantity }) : ''}</span></td>
+                <td className="fin-td fin-r tnum">{money(a.acquisitionCost)}</td>
+                <td className="fin-td fin-r tnum">{money(a.accumulated)}</td>
+                <td className="fin-td fin-r tnum">{money(a.bookValue)}</td>
+                <td className="fin-td fin-r tnum">{a.status === 'aktif' ? money(a.monthlyCharge) : '—'}</td>
+                <td className="fin-td fin-r tnum">{a.status === 'aktif' ? a.remainingMonths : '—'}</td>
+                <td className="fin-td"><span className={`ap-badge ${a.status === 'aktif' ? 'ok' : 'default'}`}>{trA('as.st_' + a.status)}</span></td></tr>)}
+              </tbody>
+              <tfoot><tr className="fin-trow" style={{ fontWeight: 700 }}><td className="fin-td" colSpan={2}>{trA('as.totals')}</td><td className="fin-td fin-r tnum">{money(totals.cost)}</td><td className="fin-td fin-r tnum">{money(totals.accumulated)}</td><td className="fin-td fin-r tnum">{money(totals.bookValue)}</td><td className="fin-td fin-r tnum">{money(totals.monthlyCharge)}</td><td className="fin-td" colSpan={2} /></tr></tfoot>
+            </table></div>)}
+        </div>
+        {form && <AssetForm onClose={() => setForm(false)} onDone={() => { setForm(false); q.reload(); flash(trA('as.saved')); }} />}
+        {imp && <AssetImport onClose={() => setImp(false)} onDone={(n) => { setImp(false); q.reload(); flash(trA('as.importDone', { n })); }} />}
+        {detail && <AssetDetail id={detail} canRun={canRun} onClose={() => setDetail(null)} onChanged={() => q.reload()} />}
+        {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
+      </div>
+    );
+  }
+
+  function AssetForm({ onClose, onDone }) {
+    const [f, setF] = aS({ code: '', name: '', category: 'peralatan', acquisitionDate: todayISO(), acquisitionCost: '', salvageValue: '', usefulLifeMonths: '', method: 'garis_lurus', isProduction: false, pooled: false, quantity: '', note: '' });
+    const [busy, setBusy] = aS(false); const [err, setErr] = aS('');
+    const set = (k, v) => setF({ ...f, [k]: v });
+    const pooled = f.pooled || f.category === 'galon';
+    const valid = f.code.trim() && f.name.trim() && f.acquisitionDate && +f.acquisitionCost > 0 && +f.usefulLifeMonths > 0 && (!pooled || +f.quantity > 0);
+    const submit = async () => {
+      if (!valid || busy) return; setBusy(true); setErr('');
+      try { await ACC().assetCreate({ code: f.code.trim(), name: f.name.trim(), category: f.category, acquisitionDate: f.acquisitionDate, acquisitionCost: +f.acquisitionCost, salvageValue: +f.salvageValue || 0, usefulLifeMonths: +f.usefulLifeMonths, method: f.method, isProduction: !!f.isProduction, pooled, quantity: +f.quantity || 1, note: f.note.trim() }); onDone(); }
+      catch (e) { setErr(msgOf(e)); } finally { setBusy(false); }
+    };
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('as.new')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-warnbox"><IconWarn s={16} /><span>{trA('as.taxNote')}</span></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('as.fCode')} *</label><input className="fld" value={f.code} onChange={(e) => set('code', e.target.value)} /></div><div style={{ flex: 2 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('as.fName')} *</label><input className="fld" value={f.name} onChange={(e) => set('name', e.target.value)} /></div></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('as.fCat')}</label><select className="fld" value={f.category} onChange={(e) => set('category', e.target.value)}>{AS_CATS.map((c) => <option key={c} value={c}>{asCat(c)}</option>)}</select></div><div style={{ flex: 1 }}><label className="fld-label">{trA('as.fDate')} *</label><input type="date" className="fld" value={f.acquisitionDate} onChange={(e) => set('acquisitionDate', e.target.value)} /></div></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('as.fCost')} *</label>{rpInput(f.acquisitionCost, (v) => set('acquisitionCost', v))}</div><div style={{ flex: 1 }}><label className="fld-label">{trA('as.fSalvage')}</label>{rpInput(f.salvageValue, (v) => set('salvageValue', v))}</div></div>
+          <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label">{trA('as.fLife')} *</label><input className="fld tnum" inputMode="numeric" value={f.usefulLifeMonths} onChange={(e) => set('usefulLifeMonths', e.target.value.replace(/\D/g, ''))} /></div><div style={{ flex: 1 }}><label className="fld-label">{trA('as.fMethod')}</label><select className="fld" value={f.method} onChange={(e) => set('method', e.target.value)}>{AS_METHODS.map((m) => <option key={m} value={m}>{trA('as.m_' + m)}</option>)}</select></div></div>
+          {pooled && <div><label className="fld-label">{trA('as.fQty')} *</label><input className="fld tnum" inputMode="numeric" value={f.quantity} onChange={(e) => set('quantity', e.target.value.replace(/\D/g, ''))} /><div className="cap-desc">{trA('as.poolHint')}</div></div>}
+          <label className="ap-issue" style={{ marginTop: 10 }}><input type="checkbox" checked={f.isProduction} onChange={(e) => set('isProduction', e.target.checked)} /><span>{trA('as.fProd')}</span></label>
+          <label className="fld-label">{trA('as.fNote')}</label><input className="fld" value={f.note} onChange={(e) => set('note', e.target.value)} />
+          {err && <div className="add-err"><IconClose s={14} />{err}</div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!valid || busy} onClick={submit}>{busy ? '…' : trA('sb.save')}</button></div>
+      </div></div>
+    );
+  }
+
+  function AssetDetail({ id, canRun, onClose, onChanged }) {
+    const q = useAcct(() => ACC().assetGet(id), [id]);
+    const [busy, setBusy] = aS(''); const [err, setErr] = aS('');
+    const [disp, setDisp] = aS(null); const [poolQty, setPoolQty] = aS(''); const [recon, setRecon] = aS(null);
+    const a = q.data || {};
+    const doDispose = async () => {
+      if (!disp || busy) return; setBusy('d'); setErr('');
+      try { await ACC().assetDispose(id, { disposalDate: disp.date, disposalProceeds: +disp.proceeds || 0, status: disp.status }); onChanged(); q.reload(); setDisp(null); }
+      catch (e) { setErr(msgOf(e)); } finally { setBusy(''); }
+    };
+    const doReconcile = async () => { setBusy('r'); try { const r = await ACC().gallonPoolReconcile(id); setRecon(r.data); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    const doPoolLoss = async () => { if (!(+poolQty > 0) || busy) return; setBusy('l'); setErr(''); try { await ACC().gallonPoolLoss(id, { qty: +poolQty, kind: 'rusak' }); setPoolQty(''); onChanged(); q.reload(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{a.code} · {a.name}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{asCat(a.category)} · {trA('as.st_' + (a.status || 'aktif'))}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {q.state !== 'ready' ? <Skeleton n={5} /> : <>
+            <div className="dist-cd-stats" style={{ marginBottom: 10 }}>
+              <div><div className="dist-cd-slbl">{trA('as.colCost')}</div><div className="dist-cd-sval">{money(a.acquisitionCost)}</div></div>
+              <div><div className="dist-cd-slbl">{trA('as.colAccum')}</div><div className="dist-cd-sval">{money(a.accumulated)}</div></div>
+              <div><div className="dist-cd-slbl">{trA('as.colBook')}</div><div className="dist-cd-sval">{money(a.bookValue)}</div></div>
+            </div>
+            <div className="dist-hint" style={{ marginBottom: 10 }}><b>{trA('as.formula')}:</b> {a.methodFormula} · {trA('as.firstMonth_' + (a.firstMonth || 'full'))}</div>
+            {a.pooled && (
+              <div className="card" style={{ padding: 12, marginBottom: 10 }}>
+                <div className="sec-title" style={{ fontSize: 13 }}>{trA('as.poolTitle')}</div>
+                <button className="btn btn-ghost btn-sm" disabled={!!busy} onClick={doReconcile}>{trA('as.reconcile')}</button>
+                {recon && <div className="dist-hint" style={{ marginTop: 8 }}>{trA('as.poolQty')}: <b>{recon.poolQuantity}</b> · {trA('as.ledgerOwned')}: <b>{recon.totalOwned}</b> · {trA('as.ledgerDimiliki')}: <b>{recon.totalDimiliki}</b> · {trA('as.drift')}: <b className={recon.drift === 0 ? 'amt-pos' : 'amt-neg'}>{recon.drift}</b></div>}
+                {canRun && a.status === 'aktif' && <div className="dist-form-row" style={{ marginTop: 8 }}><div style={{ flex: 1 }}><input className="fld tnum" inputMode="numeric" placeholder={trA('as.lossQty')} value={poolQty} onChange={(e) => setPoolQty(e.target.value.replace(/\D/g, ''))} /></div><button className="btn btn-ghost btn-sm danger" disabled={!(+poolQty > 0) || !!busy} onClick={doPoolLoss}>{trA('as.poolLoss')}</button></div>}
+              </div>
+            )}
+            <div className="sec-title" style={{ fontSize: 13, marginBottom: 6 }}>{trA('as.schedule')}</div>
+            <div className="fin-tablewrap" style={{ maxHeight: 260, overflow: 'auto' }}><table className="fin-table"><thead><tr><th className="fin-th">{trA('as.period')}</th><th className="fin-th fin-r">{trA('as.charge')}</th><th className="fin-th fin-r">{trA('as.colAccum')}</th><th className="fin-th fin-r">{trA('as.colBook')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{(a.schedule || []).map((r) => <tr key={r.period} className="fin-trow"><td className="fin-td">{r.period}</td><td className="fin-td fin-r tnum">{money(r.charge)}</td><td className="fin-td fin-r tnum">{money(r.accumulated)}</td><td className="fin-td fin-r tnum">{money(r.bookValue)}</td><td className="fin-td">{r.posted ? <span className="ap-badge ok">{trA('as.postedBadge')}</span> : <span className="ap-badge default">{trA('as.future')}</span>}</td></tr>)}</tbody>
+            </table></div>
+            {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+            {canRun && a.status === 'aktif' && !disp && <button className="btn btn-ghost btn-sm danger" style={{ marginTop: 10 }} onClick={() => setDisp({ date: todayISO(), proceeds: '', status: 'dijual' })}>{trA('as.dispose')}</button>}
+            {disp && (
+              <div className="card" style={{ padding: 12, marginTop: 10 }}>
+                <div className="sec-title" style={{ fontSize: 13 }}>{trA('as.dispose')}</div>
+                <div className="dist-form-row"><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('as.dispDate')}</label><input type="date" className="fld" value={disp.date} onChange={(e) => setDisp({ ...disp, date: e.target.value })} /></div><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('as.dispProceeds')}</label>{rpInput(disp.proceeds, (v) => setDisp({ ...disp, proceeds: v }))}</div><div style={{ flex: 1 }}><label className="fld-label" style={{ marginTop: 0 }}>{trA('as.dispStatus')}</label><select className="fld" value={disp.status} onChange={(e) => setDisp({ ...disp, status: e.target.value })}>{['dijual', 'dilepas', 'rusak'].map((s) => <option key={s} value={s}>{trA('as.st_' + s)}</option>)}</select></div></div>
+                <div className="modal-foot" style={{ padding: '8px 0 0' }}><button className="btn btn-ghost" onClick={() => setDisp(null)}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!!busy} onClick={doDispose}>{busy === 'd' ? '…' : trA('as.disposeBtn')}</button></div>
+              </div>
+            )}
+          </>}
+        </div>
+      </div></div>
+    );
+  }
+
+  function AssetImport({ onClose, onDone }) {
+    const [text, setText] = aS(''); const [preview, setPreview] = aS(null); const [busy, setBusy] = aS(false); const [err, setErr] = aS('');
+    const parseCsv = (raw) => {
+      const lines = String(raw || '').split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) return [];
+      const split = (l) => l.split(/[,;\t]/).map((c) => c.trim().replace(/^"|"$/g, ''));
+      const head = split(lines[0]).map((h) => h.toLowerCase());
+      return lines.slice(1).map((l) => { const cells = split(l); const o = {}; head.forEach((h, i) => { o[h] = cells[i] || ''; }); return o; });
+    };
+    const doPreview = async () => { setBusy(true); setErr(''); try { const rows = parseCsv(text); const r = await ACC().assetsImportPreview({ rows }); setPreview(r.data); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    const doCommit = async () => { setBusy(true); setErr(''); try { const rows = parseCsv(text); const r = await ACC().assetsImportCommit({ rows }); onDone((r.data && r.data.created) || 0); } catch (e) { setErr(msgOf(e)); } finally { setBusy(false); } };
+    const tmpl = () => { const csv = 'kode,nama,kategori,tanggal,harga,nilai_sisa,umur_bulan,metode,produksi\nAST-001,Mesin RO,mesin_ro,2025-01-15,60000000,0,60,garis_lurus,ya\n'; const bl = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(bl); const el = document.createElement('a'); el.href = url; el.download = 'template-aset.csv'; el.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+    const onFile = (e) => { const file = e.target.files && e.target.files[0]; if (!file) return; const rd = new FileReader(); rd.onload = () => setText(String(rd.result || '')); rd.readAsText(file); };
+    return (
+      <div className="modal-scrim" onClick={onClose} style={{ zIndex: 200 }}><div className="modal-card" style={{ maxWidth: 720, maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trA('as.import')}</div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          <div className="dist-hint" style={{ marginBottom: 8 }}>{trA('as.importHint')} <button className="dist-link" onClick={tmpl}>{trA('as.template')}</button></div>
+          <input type="file" accept=".csv,text/csv" onChange={onFile} style={{ marginBottom: 8 }} />
+          <textarea className="fld" style={{ height: 90, fontFamily: 'monospace', fontSize: 12 }} placeholder="kode,nama,kategori,tanggal,harga,nilai_sisa,umur_bulan,metode,produksi" value={text} onChange={(e) => setText(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}><button className="btn btn-ghost" disabled={!text.trim() || busy} onClick={doPreview}>{trA('as.preview')}</button></div>
+          {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+          {preview && <>
+            <div className="dist-hint" style={{ margin: '10px 0' }}>{trA('as.previewSummary', { ok: preview.validCount, bad: preview.invalidCount, total: preview.total })}</div>
+            <div className="fin-tablewrap" style={{ maxHeight: 300, overflow: 'auto' }}><table className="fin-table"><thead><tr><th className="fin-th">#</th><th className="fin-th">{trA('as.colCode')}</th><th className="fin-th">{trA('as.colName')}</th><th className="fin-th fin-r">{trA('as.colCost')}</th><th className="fin-th">{trA('as.status')}</th></tr></thead>
+              <tbody>{preview.rows.map((r) => <tr key={r.srcRow} className="fin-trow"><td className="fin-td">{r.srcRow}</td><td className="fin-td">{r.code || '—'}</td><td className="fin-td">{r.name || '—'}</td><td className="fin-td fin-r tnum">{money(r.acquisitionCost)}</td><td className="fin-td">{r.valid ? <span className="ap-badge ok">OK</span> : <span className="ap-badge bad" title={r.errors.join(', ')}>{r.errors[0]}</span>}</td></tr>)}</tbody>
+            </table></div>
+          </>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={busy || !(preview && preview.validCount > 0)} onClick={doCommit}>{busy ? '…' : trA('as.importCommit', { n: (preview && preview.validCount) || 0 })}</button></div>
+      </div></div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen };
 })();

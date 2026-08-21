@@ -55,6 +55,19 @@ router.post('/subscriptions/:id/pause', ctrl.subPause);
 router.post('/subscriptions/:id/resume', ctrl.subResume);
 router.post('/subscriptions/:id/cancel', ctrl.subCancel);
 router.post('/subscriptions/:id/skip', ctrl.subSkip);   // skip the next cycle (no bill)
+// FIXED ASSETS & DEPRECIATION — list/detail readable by any reports user; register/dispose/depreciate/
+// import + gallon-pool loss are owner/GM-tier (they materially change the ledger). Static paths BEFORE
+// '/assets/:id' so 'import' isn't captured as an id.
+router.get('/assets', ctrl.assetsList);
+router.post('/assets/import/preview', requireRole('owner', 'gm'), ctrl.assetsImportPreview);
+router.post('/assets/import', requireRole('owner', 'gm'), ctrl.assetsImportCommit);
+router.post('/depreciate', requireRole('owner', 'gm'), ctrl.depreciate);   // post every due month up to { asOf } (idempotent)
+router.get('/assets/:id', ctrl.assetGet);
+router.post('/assets', requireRole('owner', 'gm'), ctrl.assetCreate);
+router.post('/assets/:id/dispose', requireRole('owner', 'gm'), ctrl.assetDispose);
+router.get('/assets/:id/reconcile-pool', ctrl.gallonPoolReconcile);       // gallon pool vs ledger total-owned
+router.post('/assets/:id/pool-loss', requireRole('owner', 'gm'), ctrl.gallonPoolLoss);
+
 router.get('/unmapped', ctrl.unmapped);
 router.get('/integrity', ctrl.integrity);  // drift detector — sources missing a journal / orphan journals
 router.get('/status', ctrl.status);        // workflow-panel + report-header roll-up (?asOf=YYYY-MM-DD)

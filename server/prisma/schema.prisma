@@ -320,6 +320,64 @@ model AccountingPeriod {
   @@index([status])
 }
 
+// FIXED ASSETS & DEPRECIATION (ACCOUNTING_V2). A capitalised asset depreciates monthly (Dr Beban
+// Penyusutan / Cr Akumulasi Penyusutan) over usefulLifeMonths, floored at salvageValue. isProduction
+// routes the charge to a COGS account (feeds product costing) instead of opex — EXPLICIT per asset,
+// never inferred from category. A POOLED asset (pooled=true) covers `quantity` units in one record
+// (gallons), its quantity kept reconciled to the gallon ledger's total-owned. Useful lives + methods
+// are the OWNER's accounting estimates (not hardcoded fiscal classes); tax depreciation may differ.
+model FixedAsset {
+  id                   String   @id @default(cuid())
+  code                 String   @unique
+  name                 String
+  category             String                          // kendaraan | mesin_ro | peralatan | galon | bangunan | lainnya
+  acquisitionDate      String                          // YYYY-MM-DD
+  acquisitionCost      BigInt
+  salvageValue         BigInt   @default(0)            // residual — depreciation never takes book value below this
+  usefulLifeMonths     Int
+  method               String   @default("garis_lurus") // garis_lurus (straight-line) | saldo_menurun (declining)
+  chartAccountId       String                          // ASSET account holding the cost
+  accumulatedAccountId String                          // contra-asset: accumulated depreciation
+  expenseAccountId     String                          // depreciation charge target (a COGS account when isProduction)
+  businessUnitId       String?
+  fleetId              String   @default("")
+  isProduction         Boolean  @default(false)        // charge → COGS (explicit routing, never from category)
+  pooled               Boolean  @default(false)        // one record covers `quantity` units (gallon pool)
+  quantity             Int      @default(1)            // pool size; reconciled to the gallon ledger for gallon pools
+  status               String   @default("aktif")      // aktif | dijual | dilepas | rusak
+  disposalDate         String?
+  disposalProceeds     BigInt?
+  note                 String   @default("")
+  attachmentId         String?
+  createdById          String?
+  createdByName        String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  entries DepreciationEntry[]
+  @@index([status])
+  @@index([category])
+  @@index([businessUnitId])
+  @@index([fleetId])
+}
+
+// One posted depreciation charge for one asset in one month. UNIQUE (assetId, period) makes the monthly
+// run idempotent — running it twice posts once. `journalEntryId` links to the posted journal.
+model DepreciationEntry {
+  id             String   @id @default(cuid())
+  assetId        String
+  period         String                                // YYYY-MM
+  amount         BigInt
+  bookValueAfter BigInt   @default(0)                  // book value after this charge (audit trail)
+  journalEntryId String?
+  postedAt       DateTime @default(now())
+
+  asset FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  @@unique([assetId, period])
+  @@index([assetId])
+  @@index([period])
+}
+
 // ACCOUNTING v2 — BANK RECONCILIATION. One row marks a single book movement (an entry or a transfer)
 // as CLEARED on a bank account's statement. Absence = not yet reconciled. Reuses the Account model; the
 // cash book itself is never touched (marks live here). Cleared balance vs statement = running diff.
