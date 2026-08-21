@@ -302,6 +302,13 @@ async function reconcileDistTxn(t, eventKey, actor, db = prisma) {
   const desired = await distTxnLines(t, db);
   const entries = await db.journalEntry.findMany({ where: { OR: [{ sourceType: 'dist_txn', sourceId: t.id }, { sourceType: 'dist_txn_adj', ref: t.id }] }, include: { lines: true } });
   const orig = entries.find((e) => e.sourceType === 'dist_txn');
+  // GUARD (the "adjustment posted the FULL amount" bug): an adjustment reconciles a txn AGAINST its
+  // original journal. If that original was never posted — the txn was created while posting was OFF, then
+  // corrected/voided BEFORE the backfill posted it — there is no baseline, so delta-from-zero would post
+  // the FULL amount and DOUBLE-COUNT once the backfill later posts the original. Establish the original
+  // from the CURRENT row instead (idempotent → the backfill then no-ops) and append NO adjustment: the
+  // fresh original already carries the new figure. A void/archived row projects to [] so this is a no-op.
+  if (!orig) { await postDistTransaction(t, actor, db); return null; }
   const posted = {}; entries.forEach((e) => e.lines.forEach((l) => { const c = idToCode[l.chartAccountId]; if (c) posted[c] = (posted[c] || 0) + Number(l.debit) - Number(l.credit); }));
   const want = {}; desired.forEach((l) => { want[l.code] = (want[l.code] || 0) + n(l.debit) - n(l.credit); });
   const f = t.fleetId || '';
@@ -533,15 +540,26 @@ async function integrityCheck({ fromDate } = {}) {
   // inflate AR. An extra that has been NEUTRALISED by a 'dup_reversal' entry no longer counts, so the
   // reverse-duplicate-journals remediation clears this check without hard-deleting anything.
   const duplicate = [];
+  // An extra NEUTRALISED by a 'dup_reversal' no longer counts (the remediation clears these checks
+  // without hard-deleting). Computed once — both classes below honour it.
+  const reversed = new Set((await prisma.journalEntry.findMany({ where: { sourceType: 'dup_reversal', reversalOf: { not: null } }, select: { reversalOf: true } })).map((r) => r.reversalOf));
+  // (1) CARDINALITY — the same (sourceType, sourceId) posted more than once. reverseIds keeps the
+  // earliest and neutralises the rest.
   const groups = await prisma.journalEntry.groupBy({ by: ['sourceType', 'sourceId'], where: { sourceId: { not: null } }, _count: { _all: true } });
-  const dupGroups = groups.filter((g) => (g._count._all || 0) > 1);
-  if (dupGroups.length) {
-    const reversed = new Set((await prisma.journalEntry.findMany({ where: { sourceType: 'dup_reversal', reversalOf: { not: null } }, select: { reversalOf: true } })).map((r) => r.reversalOf));
-    for (const g of dupGroups) {
-      const rows = await prisma.journalEntry.findMany({ where: { sourceType: g.sourceType, sourceId: g.sourceId }, select: { id: true, date: true, postedAt: true }, orderBy: { postedAt: 'asc' } });
-      const live = rows.filter((r) => !reversed.has(r.id));
-      if (live.length > 1) duplicate.push({ sourceType: g.sourceType, sourceId: g.sourceId, count: live.length, date: live[0] && live[0].date, entryIds: live.map((r) => r.id) });
-    }
+  for (const g of groups.filter((x) => (x._count._all || 0) > 1)) {
+    const rows = await prisma.journalEntry.findMany({ where: { sourceType: g.sourceType, sourceId: g.sourceId }, select: { id: true, date: true, postedAt: true }, orderBy: { postedAt: 'asc' } });
+    const live = rows.filter((r) => !reversed.has(r.id));
+    if (live.length > 1) duplicate.push({ type: 'cardinality', sourceType: g.sourceType, sourceId: g.sourceId, count: live.length, date: live[0] && live[0].date, entryIds: live.map((r) => r.id), reverseIds: live.slice(1).map((r) => r.id) });
+  }
+  // (2) FULL-AMOUNT ADJUSTMENT — a dist_txn_adj MUST reconcile against its original (reversalOf = the
+  // original's id). One with reversalOf = NULL was posted with NO baseline (the "adjustment posted the
+  // full amount" bug), so it double-counts the parent once the original is posted. Cardinality can't see
+  // it because its "parent:child" sourceId differs from the parent's. Flag every un-reversed one — the
+  // whole entry is the excess, so reverseIds is the entry itself.
+  const noBaseAdjs = await prisma.journalEntry.findMany({ where: { sourceType: 'dist_txn_adj', reversalOf: null }, select: { id: true, sourceId: true, ref: true, date: true } });
+  for (const e of noBaseAdjs) {
+    if (reversed.has(e.id)) continue;
+    duplicate.push({ type: 'full_amount_adj', sourceType: 'dist_txn_adj', sourceId: e.sourceId, ref: e.ref, count: 1, date: e.date, entryIds: [e.id], reverseIds: [e.id] });
   }
   return { ok: missing.length === 0 && orphan.length === 0 && duplicate.length === 0, missing, orphan, duplicate, missingCount: missing.length, orphanCount: orphan.length, duplicateCount: duplicate.length };
 }

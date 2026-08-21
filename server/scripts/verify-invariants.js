@@ -78,7 +78,7 @@ async function run() {
   check('source ↔ journal integrity (0 missing, 0 orphan, 0 duplicate)', ic.missingCount === 0 && ic.orphanCount === 0 && ic.duplicateCount === 0,
     `${ic.missingCount} missing, ${ic.orphanCount} orphan, ${ic.duplicateCount} duplicate`
     + (ic.missingCount ? `\n     missing by type: ` + Object.entries(ic.missing.reduce((a, x) => { a[x.sourceType] = (a[x.sourceType] || 0) + 1; return a; }, {})).map(([k, v]) => `${k}=${v}`).join(', ') + `\n     e.g. ${ic.missing.slice(0, 8).map((x) => `${x.sourceType}:${x.sourceId} (${x.date})`).join(' · ')}` : '')
-    + (ic.duplicateCount ? `\n     duplicate (sourceType:sourceId ×count): ${ic.duplicate.slice(0, 8).map((x) => `${x.sourceType}:${x.sourceId} ×${x.count}`).join(' · ')}` : ''));
+    + (ic.duplicateCount ? `\n     duplicate: ${ic.duplicate.slice(0, 8).map((x) => `[${x.type || 'dup'}] ${x.sourceType}:${x.sourceId}${x.count > 1 ? ' ×' + x.count : ''}`).join(' · ')}` : ''));
 
   // ── print ──
   console.log(`\nCROSS-MODULE INVARIANTS  ·  HPP month: ${month}\n`);

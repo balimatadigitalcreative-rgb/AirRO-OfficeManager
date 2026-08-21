@@ -74,6 +74,25 @@ async function run() {
     for (const r of rows) console.log(`        postedAt=${stamp(r.postedAt)}  date=${r.date}  AR=${rupiah(arMap[r.id] || 0)}  reversalOf=${r.reversalOf || '—'}  id=${r.id}`);
   }
   console.log(`\n  Σ extra AR from duplicates: ${rupiah(excess)}   (the amount by which AR is overstated)\n`);
+
+  // FULL-AMOUNT ADJUSTMENTS — dist_txn_adj with no baseline (reversalOf=null) that carry the FULL parent
+  // amount instead of a delta. Cardinality misses them (their "parent:child" sourceId differs from the
+  // parent's). Join each to its parent dist_txn and show adj AR vs the parent's nominal.
+  const noBase = await prisma.journalEntry.findMany({ where: { sourceType: 'dist_txn_adj', reversalOf: null }, include: { lines: { where: { chartAccountId: arId } } }, orderBy: { postedAt: 'asc' } });
+  const reversed = new Set((await prisma.journalEntry.findMany({ where: { sourceType: 'dup_reversal', reversalOf: { not: null } }, select: { reversalOf: true } })).map((r) => r.reversalOf));
+  const live = noBase.filter((e) => !reversed.has(e.id));
+  console.log(`FULL-AMOUNT ADJUSTMENTS (dist_txn_adj with no baseline)  ·  ${live.length} entr${live.length === 1 ? 'y' : 'ies'}\n`);
+  const parentIds = live.map((e) => e.ref).filter(Boolean);
+  const parents = Object.fromEntries((await prisma.distTransaction.findMany({ where: { id: { in: parentIds } }, select: { id: true, amount: true, method: true, customerId: true } })).map((t) => [t.id, t]));
+  let adjExcess = 0;
+  for (const e of live) {
+    const adjAR = e.lines.reduce((a, l) => a + num(l.debit) - num(l.credit), 0);
+    const p = parents[e.ref];
+    const eq = p && Math.round(Math.abs(adjAR)) === Math.round(num(p.amount)) ? '  ← EQUALS parent full amount (delta expected, not full)' : '';
+    adjExcess += adjAR;
+    console.log(`  ${e.sourceId}  postedAt=${stamp(e.postedAt)}  adj AR ${rupiah(adjAR)}  parent ${e.ref} ${p ? rupiah(num(p.amount)) + ' (' + p.method + ')' : '(missing)'}${eq}`);
+  }
+  console.log(`\n  Σ AR from full-amount adjustments: ${rupiah(adjExcess)}\n`);
 }
 
 if (require.main === module) run().then(() => prisma.$disconnect()).catch(async (e) => { console.error('LIST FAILED:', e); try { await prisma.$disconnect(); } catch (x) {} process.exit(1); });

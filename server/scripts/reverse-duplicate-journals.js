@@ -1,10 +1,13 @@
 'use strict';
 /*
  * REMEDIATION (WRITE) — neutralise DUPLICATE journals by REVERSING the extras (never hard-deletes a
- * source row, never deletes a journal). For each (sourceType, sourceId) with >1 live entry it keeps the
- * EARLIEST and posts, for every other, a 'dup_reversal' entry with swapped debit/credit and
- * reversalOf=<extra id> — so the extra's effect is cancelled and integrityCheck (which ignores reversed
- * extras) reads 0 duplicate, with the full audit trail intact. Then re-reclasses affected customers.
+ * source row, never deletes a journal). Drives off integrityCheck().duplicate, covering BOTH classes:
+ *   • cardinality     — same (sourceType, sourceId) posted twice: keep the earliest, reverse the rest.
+ *   • full_amount_adj — a dist_txn_adj with no baseline (reversalOf=null) that posted the FULL parent
+ *                       amount instead of a delta: reverse the whole entry.
+ * Each reversal is a 'dup_reversal' with swapped debit/credit + reversalOf=<extra id>, so the extra is
+ * cancelled and integrityCheck (which ignores reversed extras) reads 0 duplicate, audit trail intact.
+ * Then re-reclasses affected customers.
  *
  *   cd server && DATABASE_URL="file:./prod-copy.db" node scripts/reverse-duplicate-journals.js            # DRY RUN
  *   cd server && DATABASE_URL="file:./prod.db"      node scripts/reverse-duplicate-journals.js --apply --confirm-production
@@ -32,48 +35,50 @@ async function run() {
   if (APPLY) guard.assertWriteAllowed();
 
   const arId = (await acc.chartMap())['1-1200'];
-  const groups = await prisma.journalEntry.groupBy({ by: ['sourceType', 'sourceId'], where: { sourceId: { not: null } }, _count: { _all: true } });
-  const dupGroups = groups.filter((g) => (g._count._all || 0) > 1);
-  const reversed = new Set((await prisma.journalEntry.findMany({ where: { sourceType: 'dup_reversal', reversalOf: { not: null } }, select: { reversalOf: true } })).map((r) => r.reversalOf));
+  // Drive off the SAME detector the invariant uses, so both classes are covered and stay in sync:
+  //   • cardinality        — same (sourceType, sourceId) posted twice (keep earliest, reverse the rest)
+  //   • full_amount_adj    — a dist_txn_adj with no baseline that carries the full parent amount
+  // Each finding carries reverseIds: exactly the entries to neutralise.
+  const findings = (await acc.integrityCheck({})).duplicate || [];
+  const targets = [];
+  for (const f of findings) for (const id of (f.reverseIds || [])) targets.push({ id, type: f.type });
+  const entries = Object.fromEntries((await prisma.journalEntry.findMany({ where: { id: { in: targets.map((t) => t.id) } }, include: { lines: true } })).map((e) => [e.id, e]));
 
-  const plan = [];   // { extra entry (with lines), sourceType, sourceId, ref }
-  for (const g of dupGroups) {
-    const rows = await prisma.journalEntry.findMany({ where: { sourceType: g.sourceType, sourceId: g.sourceId }, include: { lines: true }, orderBy: { postedAt: 'asc' } });
-    const live = rows.filter((r) => !reversed.has(r.id));
-    for (const extra of live.slice(1)) plan.push({ extra, sourceType: g.sourceType, sourceId: g.sourceId, ref: extra.ref });   // keep live[0], reverse the rest
-  }
-
-  console.log(`Duplicate sources: ${dupGroups.length}  ·  extra entries to reverse: ${plan.length}\n`);
+  const nCard = findings.filter((f) => f.type === 'cardinality').length;
+  const nAdj = findings.filter((f) => f.type === 'full_amount_adj').length;
+  console.log(`Duplicate findings: ${findings.length} (${nCard} cardinality, ${nAdj} full-amount-adj)  ·  entries to reverse: ${targets.length}\n`);
   let arExcess = 0;
-  for (const p of plan) {
-    const arDelta = p.extra.lines.filter((l) => l.chartAccountId === arId).reduce((a, l) => a + num(l.debit) - num(l.credit), 0);   // AR impact of the extra
+  for (const t of targets) {
+    const e = entries[t.id]; if (!e) continue;
+    const arDelta = e.lines.filter((l) => l.chartAccountId === arId).reduce((a, l) => a + num(l.debit) - num(l.credit), 0);
     arExcess += arDelta;
-    console.log(`   ${p.sourceType}:${p.sourceId}  extra id=${p.extra.id}  postedAt=${stamp(p.extra.postedAt)}  AR impact=${rupiah(arDelta)}`);
+    console.log(`   [${t.type}] ${e.sourceType}:${e.sourceId}  id=${e.id}  postedAt=${stamp(e.postedAt)}  AR impact=${rupiah(arDelta)}`);
   }
   console.log(`\n   Σ AR to be removed: ${rupiah(arExcess)}`);
-  if (!plan.length) { console.log('\nNothing to do.\n'); return; }
+  if (!targets.length) { console.log('\nNothing to do.\n'); return; }
   if (!APPLY) { console.log('\nDRY RUN — re-run with --apply (and --confirm-production for a prod DB) to post the reversals.\n'); return; }
 
   const actor = (await prisma.user.findFirst({ where: { role: 'owner' }, select: { id: true, name: true } })) || { id: null, name: 'CLI reverse-duplicate-journals' };
   const custs = new Set();
   let done = 0;
-  for (const p of plan) {
+  for (const t of targets) {
+    const e = entries[t.id]; if (!e) continue;
     await prisma.journalEntry.create({ data: {
-      sourceType: 'dup_reversal', sourceId: p.extra.id, date: p.extra.date, ref: p.sourceId, reversalOf: p.extra.id,
-      description: `Pembalik jurnal ganda (${p.sourceType}:${p.sourceId})`.slice(0, 500), postedById: actor.id || null, postedByName: actor.name || null,
-      lines: { create: p.extra.lines.map((l) => ({ chartAccountId: l.chartAccountId, debit: BigInt(Math.round(num(l.credit))), credit: BigInt(Math.round(num(l.debit))), businessUnitId: l.businessUnitId || null, fleetId: l.fleetId || '' })) },   // swapped
+      sourceType: 'dup_reversal', sourceId: e.id, date: e.date, ref: e.sourceId, reversalOf: e.id,
+      description: `Pembalik jurnal ganda (${t.type} · ${e.sourceType}:${e.sourceId})`.slice(0, 500), postedById: actor.id || null, postedByName: actor.name || null,
+      lines: { create: e.lines.map((l) => ({ chartAccountId: l.chartAccountId, debit: BigInt(Math.round(num(l.credit))), credit: BigInt(Math.round(num(l.debit))), businessUnitId: l.businessUnitId || null, fleetId: l.fleetId || '' })) },   // swapped
     } });
     done++;
-    const cid = await customerOf(p.sourceType, p.sourceId, p.ref);
+    const cid = await customerOf(e.sourceType, e.sourceId, e.ref);
     if (cid) custs.add(cid);
   }
   for (const cid of custs) await prisma.$transaction((tx) => acc.postReceivablesReclass(cid, { id: actor.id, name: actor.name, role: 'owner' }, tx));
 
-  const ic = await acc.integrityCheck({});
+  const ic2 = await acc.integrityCheck({});
   const ar = await acc.receivablesBalance();
   const aging = (await acc.agingReceivables({})).total;
-  console.log(`\n✔ Reversed ${done} duplicate entr${done === 1 ? 'y' : 'ies'}; re-reclassed ${custs.size} customer(s).`);
-  console.log(`   integrity: ${ic.missingCount} missing, ${ic.orphanCount} orphan, ${ic.duplicateCount} duplicate`);
+  console.log(`\n✔ Reversed ${done} entr${done === 1 ? 'y' : 'ies'}; re-reclassed ${custs.size} customer(s).`);
+  console.log(`   integrity: ${ic2.missingCount} missing, ${ic2.orphanCount} orphan, ${ic2.duplicateCount} duplicate`);
   console.log(`   AR(1-1200) ${rupiah(ar)}  vs  Σ Sisa Bon ${rupiah(aging)}  (Δ ${rupiah(ar - aging)})\n`);
 }
 
