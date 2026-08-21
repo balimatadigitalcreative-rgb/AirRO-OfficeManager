@@ -73,9 +73,12 @@ async function run() {
   const gi = await dist.gallonIntegrityCheck(admin);
   check('DistTransaction ↔ GallonMovement (both directions)', gi.missingCount === 0 && gi.orphanCount === 0, `${gi.missingCount} txn(s) without a movement, ${gi.orphanCount} movement(s) without a txn` + (gi.missingCount ? ` · e.g. ${gi.missingLedger.slice(0, 5).map((t) => t.id).join(',')}` : '') + (gi.orphanCount ? ` · orphan e.g. ${gi.orphanRows.slice(0, 5).map((r) => r.transactionId).join(',')}` : ''));
 
-  // 10. Source ↔ journal integrity: 0 missing, 0 orphan
+  // 10. Source ↔ journal integrity: 0 missing, 0 orphan, 0 duplicate
   const ic = await acc.integrityCheck({});
-  check('source ↔ journal integrity (0 missing, 0 orphan)', ic.missingCount === 0 && ic.orphanCount === 0, `${ic.missingCount} missing, ${ic.orphanCount} orphan` + (ic.missingCount ? `\n     missing by type: ` + Object.entries(ic.missing.reduce((a, x) => { a[x.sourceType] = (a[x.sourceType] || 0) + 1; return a; }, {})).map(([k, v]) => `${k}=${v}`).join(', ') + `\n     e.g. ${ic.missing.slice(0, 8).map((x) => `${x.sourceType}:${x.sourceId} (${x.date})`).join(' · ')}` : ''));
+  check('source ↔ journal integrity (0 missing, 0 orphan, 0 duplicate)', ic.missingCount === 0 && ic.orphanCount === 0 && ic.duplicateCount === 0,
+    `${ic.missingCount} missing, ${ic.orphanCount} orphan, ${ic.duplicateCount} duplicate`
+    + (ic.missingCount ? `\n     missing by type: ` + Object.entries(ic.missing.reduce((a, x) => { a[x.sourceType] = (a[x.sourceType] || 0) + 1; return a; }, {})).map(([k, v]) => `${k}=${v}`).join(', ') + `\n     e.g. ${ic.missing.slice(0, 8).map((x) => `${x.sourceType}:${x.sourceId} (${x.date})`).join(' · ')}` : '')
+    + (ic.duplicateCount ? `\n     duplicate (sourceType:sourceId ×count): ${ic.duplicate.slice(0, 8).map((x) => `${x.sourceType}:${x.sourceId} ×${x.count}`).join(' · ')}` : ''));
 
   // ── print ──
   console.log(`\nCROSS-MODULE INVARIANTS  ·  HPP month: ${month}\n`);

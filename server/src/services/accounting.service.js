@@ -155,11 +155,21 @@ async function postJournal({ sourceType, sourceId, date, ref, description, actor
     // "newly posted" (backfill) see a true no-op on a re-run. `replace` overwrites (the mutable reclass).
     if (existing) { if (!replace) return null; await db.journalEntry.delete({ where: { id: existing.id } }); }
   }
-  return db.journalEntry.create({ data: {
-    sourceType, sourceId: sourceId || null, date, ref: ref || '', description: (description || '').slice(0, 500), reversalOf: reversalOf || null,
-    postedById: (actor && actor.id) || null, postedByName: (actor && actor.name) || null,
-    lines: { create: lines.filter((l) => n(l.debit) || n(l.credit)).map((l) => ({ chartAccountId: cm[l.code], debit: BigInt(n(l.debit)), credit: BigInt(n(l.credit)), businessUnitId: l.businessUnitId || businessUnitId || null, fleetId: l.fleetId || '' })) },
-  } });
+  try {
+    return await db.journalEntry.create({ data: {
+      sourceType, sourceId: sourceId || null, date, ref: ref || '', description: (description || '').slice(0, 500), reversalOf: reversalOf || null,
+      postedById: (actor && actor.id) || null, postedByName: (actor && actor.name) || null,
+      lines: { create: lines.filter((l) => n(l.debit) || n(l.credit)).map((l) => ({ chartAccountId: cm[l.code], debit: BigInt(n(l.debit)), credit: BigInt(n(l.credit)), businessUnitId: l.businessUnitId || businessUnitId || null, fleetId: l.fleetId || '' })) },
+    } });
+  } catch (e) {
+    // Idempotency is enforced by the DB, not just the findFirst above: the UNIQUE (sourceType, sourceId)
+    // index makes a concurrent/retried post of the SAME source lose the race here. Treat that as a no-op
+    // (already posted) so a source can NEVER post twice — this is what the check-then-create alone could
+    // not guarantee. Only swallow the uniqueness collision; every other error still fails the write.
+    const uniqueClash = e && (e.code === 'P2002' || /unique/i.test(String(e.message || '')));
+    if (uniqueClash && sourceId != null && !replace) return null;
+    throw e;
+  }
 }
 
 // Append a REVERSING entry for an existing source's journal — swap each line's debit/credit, link via
@@ -517,7 +527,23 @@ async function integrityCheck({ fromDate } = {}) {
     const chk = existsById[j.sourceType]; if (!chk) continue;   // synthetic types (ar_reclass, dist_txn_adj:*) — not row-backed
     if (!(await chk(j.sourceId))) orphan.push({ sourceType: j.sourceType, sourceId: j.sourceId, journalId: j.id, date: j.date });
   }
-  return { ok: missing.length === 0 && orphan.length === 0, missing, orphan, missingCount: missing.length, orphanCount: orphan.length };
+  // DUPLICATE journals: a (sourceType, sourceId) must be UNIQUE — one journal per source (idempotency).
+  // More than one LIVE entry = a source POSTED TWICE, invisible to the missing/orphan checks above
+  // because they test EXISTENCE, not CARDINALITY. This is the gap that let a double-posted transaction
+  // inflate AR. An extra that has been NEUTRALISED by a 'dup_reversal' entry no longer counts, so the
+  // reverse-duplicate-journals remediation clears this check without hard-deleting anything.
+  const duplicate = [];
+  const groups = await prisma.journalEntry.groupBy({ by: ['sourceType', 'sourceId'], where: { sourceId: { not: null } }, _count: { _all: true } });
+  const dupGroups = groups.filter((g) => (g._count._all || 0) > 1);
+  if (dupGroups.length) {
+    const reversed = new Set((await prisma.journalEntry.findMany({ where: { sourceType: 'dup_reversal', reversalOf: { not: null } }, select: { reversalOf: true } })).map((r) => r.reversalOf));
+    for (const g of dupGroups) {
+      const rows = await prisma.journalEntry.findMany({ where: { sourceType: g.sourceType, sourceId: g.sourceId }, select: { id: true, date: true, postedAt: true }, orderBy: { postedAt: 'asc' } });
+      const live = rows.filter((r) => !reversed.has(r.id));
+      if (live.length > 1) duplicate.push({ sourceType: g.sourceType, sourceId: g.sourceId, count: live.length, date: live[0] && live[0].date, entryIds: live.map((r) => r.id) });
+    }
+  }
+  return { ok: missing.length === 0 && orphan.length === 0 && duplicate.length === 0, missing, orphan, duplicate, missingCount: missing.length, orphanCount: orphan.length, duplicateCount: duplicate.length };
 }
 
 // Category keys used by entries that have NO chart mapping — REPORTED so an admin fixes the map
