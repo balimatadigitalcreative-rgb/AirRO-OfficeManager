@@ -3847,6 +3847,42 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-acct-caret.open { transform: rotate(90deg); }
 .fin-acct-code { font-variant-numeric: tabular-nums; color: var(--text-faint); font-size: 11.5px; margin-right: var(--fs-2); }
 
+/* ── RESPONSIVE BREAKPOINT SCALE — the ONE canonical set. CSS @media conditions cannot read var(),
+   so this comment IS the contract; migrate ad-hoc finance breakpoints to these four values:
+       480px  phone            768px  tablet portrait
+       1024px tablet landscape / small laptop        1280px desktop
+   Rule of thumb for the accounting screens: < 768 → data tables become stacked cards (.fin-cards
+   below); two-column structural layouts collapse to one at 1024. A layout that genuinely needs a
+   different value must say why in a comment next to its @media. ── */
+
+/* Table → labelled CARDS on phones. Opt-in per table with class `fin-cards`; each row's labels come
+   from the cell `data-label` (header and body still share the ONE colgroup on desktop). Width-gated at
+   767px so PRINT — which never matches width queries — keeps the real table + repeating headers intact.
+   The block table is width:100%, so nothing overflows: no horizontal scroll, no nested scroll. */
+@media (max-width: 767px) {
+  .fin-table.fin-cards, .fin-table.fin-cards > tbody, .fin-table.fin-cards > tfoot { display: block; width: 100%; }
+  .fin-table.fin-cards > thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); }
+  .fin-table.fin-cards > colgroup { display: none; }
+  .fin-table.fin-cards .fin-trow { display: block; height: auto; border: 1px solid var(--border); border-radius: var(--r-md); margin: 0 0 10px; background: var(--surface); }
+  .fin-table.fin-cards .fin-trow.clickable:hover { background: var(--card-soft); }
+  .fin-table.fin-cards .fin-trow.active { box-shadow: inset 3px 0 0 var(--green-600); }
+  .fin-table.fin-cards .fin-td { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: auto; min-height: 40px; padding: 7px 14px; white-space: normal; overflow: visible; text-overflow: clip; text-align: right; }
+  .fin-table.fin-cards .fin-trow > .fin-td:not(:last-child) { border-bottom: 1px solid var(--border-soft); }
+  .fin-table.fin-cards .fin-td::before { content: attr(data-label); flex: 0 0 auto; margin-right: auto; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); white-space: nowrap; }
+  .fin-table.fin-cards .fin-td[data-label=""]::before, .fin-table.fin-cards .fin-td:not([data-label])::before { content: none; }
+  .fin-table.fin-cards .fin-td-desc, .fin-table.fin-cards .fin-td-sub { display: block; text-align: right; }
+  /* opening / subtotal / closing / grand rows: full-width emphasis card (their cells use colSpan) */
+  .fin-table.fin-cards .fin-trow.subtotal .fin-td, .fin-table.fin-cards .fin-trow.grand .fin-td { background: var(--card-soft); }
+  .fin-table.fin-cards .fin-trow.grand { border-color: var(--green-800); }
+}
+
+/* Touch-target minimums (finger input) — the small inline money/qty inputs the global .btn rule at the
+   coarse-pointer block does not cover, so forms stay usable one-handed. */
+@media (hover: none) and (pointer: coarse) {
+  .py-inp, .amt-input input, .fld.tnum, .rc-stmt { min-height: 44px; }
+  .btn-xs { min-height: 36px; }
+}
+
 /* ── States: skeleton · empty · error · coming-soon — used on every finance screen ── */
 .fin-skel { padding: var(--fs-2) 0; }
 .fin-skel-row { display: flex; align-items: center; gap: var(--fs-3); height: var(--fin-row-h); padding: 0 var(--fs-3); border-bottom: 1px solid var(--border-soft); }
@@ -4188,7 +4224,7 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .rc-list { display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto; }
 .rc-row { display: grid; grid-template-columns: auto 82px 1fr auto auto; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
 .rc-panel .rc-row { grid-template-columns: auto 82px 1fr auto auto; }
-.rc-row.cleared, .rc-row.has-suggest { grid-template-columns: 82px 1fr auto auto; }
+.rc-row.cleared, .rc-row.has-suggest, .rc-row.rc-srow { grid-template-columns: 82px 1fr auto auto; }   /* statement rows have no checkbox → 4 cols, always (fixes the no-suggestion misalignment) */
 .rc-row-date { font-size: 11.5px; color: var(--text-faint); } .rc-row-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-row-amt { font-weight: 700; white-space: nowrap; } .rc-suggest { display: block; font-style: normal; font-size: 11px; color: var(--green-700); }
 .rc-nomatch, .rc-matched { font-size: 11.5px; color: var(--text-faint); } .rc-locked { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--warn); }

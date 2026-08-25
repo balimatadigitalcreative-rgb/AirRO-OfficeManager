@@ -471,7 +471,7 @@
               <div className="rc-list">
                 {stmt.length === 0 && <div className="fin-empty-s" style={{ padding: 18, textAlign: 'center' }}>{trA('rc.importHint')}</div>}
                 {stmt.map((s, i) => (
-                  <div key={i} className={`rc-row ${s.suggest ? 'has-suggest' : ''}`}>
+                  <div key={i} className={`rc-row rc-srow ${s.suggest ? 'has-suggest' : ''}`}>
                     <span className="rc-row-date tnum">{s.date || '—'}</span>
                     <span className="rc-row-desc">{s.desc}{s.suggest && <em className="rc-suggest">{trA('rc.suggest')}: {s.suggest.desc}</em>}</span>
                     <span className="tnum rc-row-amt">{money(s.amount)}</span>
@@ -922,9 +922,9 @@
             {billsQ.state === 'error' && <ErrorCard onRetry={billsQ.reload} />}
             {billsQ.state === 'ready' && (bills.length === 0
               ? <EmptyState title={trA('ap.emptyT')} body={trA('ap.emptyB')} actionLabel={canRun ? trA('ap.newBill') : null} onAction={canRun ? () => setForm({ supplierId: '', billDate: todayISO(), dueDate: '', tax: '', lines: [{ chartCode: '', description: '', qty: 1, unitPrice: '', amortizeMonths: 0, amortizeStart: '' }], issue: true }) : null} />
-              : (<div className="fin-tablewrap"><table className="fin-table">
+              : (<div className="fin-tablewrap"><table className="fin-table fin-cards">
                   <thead><tr><th className="fin-th">{trA('ap.colDate')}</th><th className="fin-th">{trA('ap.colSupplier')}</th><th className="fin-th">{trA('ap.colDue')}</th><th className="fin-th fin-r">{trA('ap.colTotal')}</th><th className="fin-th fin-r">{trA('ap.colOutstanding')}</th><th className="fin-th">{trA('ap.colStatus')}</th></tr></thead>
-                  <tbody>{bills.map((b) => <tr key={b.id} className="fin-trow ap-row" onClick={() => setDetail(b.id)}><td className="fin-td tnum">{b.billDate}</td><td className="fin-td">{b.supplierName}{b.billNumber ? <span className="fin-td-sub">{b.billNumber}</span> : ''}</td><td className="fin-td tnum">{b.dueDate || '—'}</td><td className="fin-td fin-r tnum">{money(b.total)}</td><td className="fin-td fin-r tnum">{money(b.outstanding)}</td><td className="fin-td"><ApStatus s={b.status} /></td></tr>)}</tbody>
+                  <tbody>{bills.map((b) => <tr key={b.id} className="fin-trow ap-row" onClick={() => setDetail(b.id)}><td className="fin-td tnum" data-label={trA('ap.colDate')}>{b.billDate}</td><td className="fin-td" data-label={trA('ap.colSupplier')}>{b.supplierName}{b.billNumber ? <span className="fin-td-sub">{b.billNumber}</span> : ''}</td><td className="fin-td tnum" data-label={trA('ap.colDue')}>{b.dueDate || '—'}</td><td className="fin-td fin-r tnum" data-label={trA('ap.colTotal')}>{money(b.total)}</td><td className="fin-td fin-r tnum" data-label={trA('ap.colOutstanding')}>{money(b.outstanding)}</td><td className="fin-td" data-label={trA('ap.colStatus')}><ApStatus s={b.status} /></td></tr>)}</tbody>
                 </table></div>))}
           </div>
         )}
@@ -944,10 +944,10 @@
     if (!d.rows.length) return <EmptyState title={trA('ap.agingEmpty')} />;
     const B = d.buckets;
     return (
-      <div className="card"><div className="fin-tablewrap"><table className="fin-table">
+      <div className="card"><div className="fin-tablewrap"><table className="fin-table fin-cards">
         <thead><tr><th className="fin-th">{colName}</th><th className="fin-th fin-r">0–30</th><th className="fin-th fin-r">31–60</th><th className="fin-th fin-r">61–90</th><th className="fin-th fin-r">90+</th><th className="fin-th fin-r">{trA('ap.colTotal')}</th></tr></thead>
-        <tbody>{d.rows.map((r) => <tr key={r.supplierId || r.customerId} className="fin-trow"><td className="fin-td">{r.name}</td><td className="fin-td fin-r tnum">{money(r.d0_30)}</td><td className="fin-td fin-r tnum">{money(r.d31_60)}</td><td className="fin-td fin-r tnum">{money(r.d61_90)}</td><td className="fin-td fin-r tnum">{money(r.d90p)}</td><td className="fin-td fin-r tnum"><b>{money(r.total)}</b></td></tr>)}</tbody>
-        <tfoot><tr className="fin-trow subtotal"><td className="fin-td">{trA('ap.total')}</td><td className="fin-td fin-r tnum">{money(B.d0_30)}</td><td className="fin-td fin-r tnum">{money(B.d31_60)}</td><td className="fin-td fin-r tnum">{money(B.d61_90)}</td><td className="fin-td fin-r tnum">{money(B.d90p)}</td><td className="fin-td fin-r tnum"><b>{money(d.total)}</b></td></tr></tfoot>
+        <tbody>{d.rows.map((r) => <tr key={r.supplierId || r.customerId} className="fin-trow"><td className="fin-td" data-label={colName}>{r.name}</td><td className="fin-td fin-r tnum" data-label="0–30">{money(r.d0_30)}</td><td className="fin-td fin-r tnum" data-label="31–60">{money(r.d31_60)}</td><td className="fin-td fin-r tnum" data-label="61–90">{money(r.d61_90)}</td><td className="fin-td fin-r tnum" data-label="90+">{money(r.d90p)}</td><td className="fin-td fin-r tnum" data-label={trA('ap.colTotal')}><b>{money(r.total)}</b></td></tr>)}</tbody>
+        <tfoot><tr className="fin-trow subtotal"><td className="fin-td" data-label={trA('ap.total')}>{trA('ap.total')}</td><td className="fin-td fin-r tnum" data-label="0–30">{money(B.d0_30)}</td><td className="fin-td fin-r tnum" data-label="31–60">{money(B.d31_60)}</td><td className="fin-td fin-r tnum" data-label="61–90">{money(B.d61_90)}</td><td className="fin-td fin-r tnum" data-label="90+">{money(B.d90p)}</td><td className="fin-td fin-r tnum" data-label={trA('ap.colTotal')}><b>{money(d.total)}</b></td></tr></tfoot>
       </table></div></div>
     );
   }
@@ -1144,8 +1144,8 @@
           {q.state === 'loading' && <Skeleton n={5} />}
           {q.state === 'ready' && (subs.length === 0
             ? <EmptyState title={trA('sb.emptyT')} body={trA('sb.emptyB')} actionLabel={canRun ? trA('sb.new') : null} onAction={canRun ? () => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, remindDays: 3, autoIssue: true }) : null} />
-            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('sb.colName')}</th><th className="fin-th">{trA('sb.colCadence')}</th><th className="fin-th fin-r">{trA('sb.colAmount')}</th><th className="fin-th">{trA('sb.colNext')}</th><th className="fin-th">{trA('sb.colStatus')}</th><th className="fin-th" /></tr></thead>
-              <tbody>{subs.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">{s.name}<span className="fin-td-sub">{s.supplierName}</span></td><td className="fin-td">{trA('sb.cad_' + s.cadence)}{s.interval > 1 ? ' ×' + s.interval : ''}</td><td className="fin-td fin-r tnum">{money(s.total)}</td><td className={`fin-td tnum${s.overdue ? ' sb-overdue' : ''}`}>{s.status === 'aktif' ? <span>{s.nextRunDate}{s.overdue ? <span className="subsdue-badge" style={{ marginLeft: 6 }}>{trA('subsDue.overdue')}</span> : ''}</span> : '—'}</td><td className="fin-td"><span className={`ap-badge ${SUBBADGE[s.status]}`}>{trA('sb.st_' + s.status)}</span></td>
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('sb.colName')}</th><th className="fin-th">{trA('sb.colCadence')}</th><th className="fin-th fin-r">{trA('sb.colAmount')}</th><th className="fin-th">{trA('sb.colNext')}</th><th className="fin-th">{trA('sb.colStatus')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{subs.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td" data-label={trA('sb.colName')}>{s.name}<span className="fin-td-sub">{s.supplierName}</span></td><td className="fin-td" data-label={trA('sb.colCadence')}>{trA('sb.cad_' + s.cadence)}{s.interval > 1 ? ' ×' + s.interval : ''}</td><td className="fin-td fin-r tnum" data-label={trA('sb.colAmount')}>{money(s.total)}</td><td className={`fin-td tnum${s.overdue ? ' sb-overdue' : ''}`} data-label={trA('sb.colNext')}>{s.status === 'aktif' ? <span>{s.nextRunDate}{s.overdue ? <span className="subsdue-badge" style={{ marginLeft: 6 }}>{trA('subsDue.overdue')}</span> : ''}</span> : '—'}</td><td className="fin-td" data-label={trA('sb.colStatus')}><span className={`ap-badge ${SUBBADGE[s.status]}`}>{trA('sb.st_' + s.status)}</span></td>
                 <td className="fin-td fin-r">{canRun && s.status !== 'batal' && s.status !== 'selesai' && (
                   <span className="sb-acts">
                     {s.status === 'aktif' ? <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => act(() => ACC().subscriptionPause(s.id))}>{trA('sb.pause')}</button> : <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => act(() => ACC().subscriptionResume(s.id))}>{trA('sb.resume')}</button>}
@@ -1224,19 +1224,19 @@
           {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
           {q.state === 'ready' && (data.length === 0
             ? <EmptyState title={trA('as.emptyT')} body={trA('as.emptyB')} icon="IconInvoice" actionLabel={canRun ? trA('as.new') : null} onAction={canRun ? () => setForm(true) : null} />
-            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr>
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr>
               <th className="fin-th">{trA('as.colCode')}</th><th className="fin-th">{trA('as.colName')}</th><th className="fin-th fin-r">{trA('as.colCost')}</th><th className="fin-th fin-r">{trA('as.colAccum')}</th><th className="fin-th fin-r">{trA('as.colBook')}</th><th className="fin-th fin-r">{trA('as.colMonthly')}</th><th className="fin-th fin-r">{trA('as.colRemain')}</th><th className="fin-th">{trA('as.colStatus')}</th></tr></thead>
               <tbody>{data.map((a) => <tr key={a.id} className="fin-trow" style={{ cursor: 'pointer' }} onClick={() => setDetail(a.id)}>
-                <td className="fin-td">{a.code}{a.isProduction ? <span className="ap-badge ok" style={{ marginLeft: 6 }}>COGS</span> : ''}</td>
-                <td className="fin-td">{a.name}<span className="fin-td-sub">{asCat(a.category)}{a.pooled ? ' · ' + trA('as.pool', { n: a.quantity }) : ''}</span></td>
-                <td className="fin-td fin-r tnum">{money(a.acquisitionCost)}</td>
-                <td className="fin-td fin-r tnum">{money(a.accumulated)}</td>
-                <td className="fin-td fin-r tnum">{money(a.bookValue)}</td>
-                <td className="fin-td fin-r tnum">{a.status === 'aktif' ? money(a.monthlyCharge) : '—'}</td>
-                <td className="fin-td fin-r tnum">{a.status === 'aktif' ? a.remainingMonths : '—'}</td>
-                <td className="fin-td"><span className={`ap-badge ${a.status === 'aktif' ? 'ok' : 'default'}`}>{trA('as.st_' + a.status)}</span></td></tr>)}
+                <td className="fin-td" data-label={trA('as.colCode')}>{a.code}{a.isProduction ? <span className="ap-badge ok" style={{ marginLeft: 6 }}>COGS</span> : ''}</td>
+                <td className="fin-td" data-label={trA('as.colName')}>{a.name}<span className="fin-td-sub">{asCat(a.category)}{a.pooled ? ' · ' + trA('as.pool', { n: a.quantity }) : ''}</span></td>
+                <td className="fin-td fin-r tnum" data-label={trA('as.colCost')}>{money(a.acquisitionCost)}</td>
+                <td className="fin-td fin-r tnum" data-label={trA('as.colAccum')}>{money(a.accumulated)}</td>
+                <td className="fin-td fin-r tnum" data-label={trA('as.colBook')}>{money(a.bookValue)}</td>
+                <td className="fin-td fin-r tnum" data-label={trA('as.colMonthly')}>{a.status === 'aktif' ? money(a.monthlyCharge) : '—'}</td>
+                <td className="fin-td fin-r tnum" data-label={trA('as.colRemain')}>{a.status === 'aktif' ? a.remainingMonths : '—'}</td>
+                <td className="fin-td" data-label={trA('as.colStatus')}><span className={`ap-badge ${a.status === 'aktif' ? 'ok' : 'default'}`}>{trA('as.st_' + a.status)}</span></td></tr>)}
               </tbody>
-              <tfoot><tr className="fin-trow" style={{ fontWeight: 700 }}><td className="fin-td" colSpan={2}>{trA('as.totals')}</td><td className="fin-td fin-r tnum">{money(totals.cost)}</td><td className="fin-td fin-r tnum">{money(totals.accumulated)}</td><td className="fin-td fin-r tnum">{money(totals.bookValue)}</td><td className="fin-td fin-r tnum">{money(totals.monthlyCharge)}</td><td className="fin-td" colSpan={2} /></tr></tfoot>
+              <tfoot><tr className="fin-trow subtotal" style={{ fontWeight: 700 }}><td className="fin-td" colSpan={2} data-label={trA('as.totals')}>{trA('as.totals')}</td><td className="fin-td fin-r tnum" data-label={trA('as.colCost')}>{money(totals.cost)}</td><td className="fin-td fin-r tnum" data-label={trA('as.colAccum')}>{money(totals.accumulated)}</td><td className="fin-td fin-r tnum" data-label={trA('as.colBook')}>{money(totals.bookValue)}</td><td className="fin-td fin-r tnum" data-label={trA('as.colMonthly')}>{money(totals.monthlyCharge)}</td><td className="fin-td" colSpan={2} /></tr></tfoot>
             </table></div>)}
         </div>
         {form && <AssetForm onClose={() => setForm(false)} onDone={() => { setForm(false); q.reload(); flash(trA('as.saved')); }} />}
@@ -1513,9 +1513,12 @@
         <div className="dist-hint" style={{ marginBottom: 10 }}>{trA('pc.closePolicy')}</div>
         {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
         <div className="card">
-          {q.state === 'loading' ? <Skeleton n={6} /> : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('pc.variance')}</th><th className="fin-th">{trA('pc.account')}</th><th className="fin-th fin-r">{trA('pc.result')}</th></tr></thead>
-            <tbody>{rows.map((r) => <tr key={r.code} className="fin-trow"><td className="fin-td">{r.name}</td><td className="fin-td">{r.code}</td><td className="fin-td fin-r">{varTag(r.amount)}</td></tr>)}</tbody>
-            <tfoot><tr className="fin-trow" style={{ fontWeight: 700 }}><td className="fin-td" colSpan={2}>{trA('pc.totalVar')}</td><td className="fin-td fin-r">{varTag(data.total || 0)}</td></tr></tfoot>
+          {q.state === 'loading' ? <Skeleton n={6} />
+            : q.state === 'error' ? <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={q.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>
+            : !rows.length ? <div className="fin-empty-s" style={{ padding: 18, textAlign: 'center' }}>{trA('rep.nodata')}</div>
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('pc.variance')}</th><th className="fin-th">{trA('pc.account')}</th><th className="fin-th fin-r">{trA('pc.result')}</th></tr></thead>
+            <tbody>{rows.map((r) => <tr key={r.code} className="fin-trow"><td className="fin-td" data-label={trA('pc.variance')}>{r.name}</td><td className="fin-td" data-label={trA('pc.account')}>{r.code}</td><td className="fin-td fin-r" data-label={trA('pc.result')}>{varTag(r.amount)}</td></tr>)}</tbody>
+            <tfoot><tr className="fin-trow" style={{ fontWeight: 700 }}><td className="fin-td" colSpan={2} data-label={trA('pc.totalVar')}>{trA('pc.totalVar')}</td><td className="fin-td fin-r" data-label={trA('pc.result')}>{varTag(data.total || 0)}</td></tr></tfoot>
           </table></div>}
         </div>
         {lq.state === 'ready' && lq.data && (
@@ -1537,8 +1540,11 @@
         <div className="dist-hint" style={{ marginBottom: 10 }}>{trA('pc.priceNote')}</div>
         <div className="card" style={{ marginBottom: 12 }}>
           <div className="sec-title" style={{ padding: '10px 14px 0' }}>{trA('pc.marginTitle')} · {trA('pc.hppUnit')}: <b className="tnum">{money(d.hppPerUnit || 0)}</b></div>
-          {q.state === 'loading' ? <Skeleton n={3} /> : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('pc.segment')}</th><th className="fin-th fin-r">{trA('pc.avgPrice')}</th><th className="fin-th fin-r">{trA('pc.hpp')}</th><th className="fin-th fin-r">{trA('pc.margin')}</th><th className="fin-th fin-r">%</th></tr></thead>
-            <tbody>{segs.map((s) => <tr key={s.type} className="fin-trow"><td className="fin-td">{s.type}</td><td className="fin-td fin-r tnum">{money(s.avgPrice)}</td><td className="fin-td fin-r tnum">{money(s.hpp)}</td><td className="fin-td fin-r tnum" style={{ color: s.margin >= 0 ? 'var(--green-700)' : 'var(--neg)' }}>{money(s.margin)}</td><td className="fin-td fin-r tnum">{s.marginPct}%</td></tr>)}</tbody>
+          {q.state === 'loading' ? <Skeleton n={3} />
+            : q.state === 'error' ? <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={q.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>
+            : !segs.length ? <div className="fin-empty-s" style={{ padding: 18, textAlign: 'center' }}>{trA('rep.nodata')}</div>
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('pc.segment')}</th><th className="fin-th fin-r">{trA('pc.avgPrice')}</th><th className="fin-th fin-r">{trA('pc.hpp')}</th><th className="fin-th fin-r">{trA('pc.margin')}</th><th className="fin-th fin-r">%</th></tr></thead>
+            <tbody>{segs.map((s) => <tr key={s.type} className="fin-trow"><td className="fin-td" data-label={trA('pc.segment')}>{s.type}</td><td className="fin-td fin-r tnum" data-label={trA('pc.avgPrice')}>{money(s.avgPrice)}</td><td className="fin-td fin-r tnum" data-label={trA('pc.hpp')}>{money(s.hpp)}</td><td className="fin-td fin-r tnum" data-label={trA('pc.margin')} style={{ color: s.margin >= 0 ? 'var(--green-700)' : 'var(--neg)' }}>{money(s.margin)}</td><td className="fin-td fin-r tnum" data-label="%">{s.marginPct}%</td></tr>)}</tbody>
           </table></div>}
           <div className="dist-hint" style={{ padding: '8px 14px 12px' }}>{trA('pc.breakEven')}: <b>{d.breakEvenVolume != null ? d.breakEvenVolume + ' galon/bulan' : '—'}</b> ({trA('pc.normalVol')}: {d.normalVolume || '—'})</div>
         </div>

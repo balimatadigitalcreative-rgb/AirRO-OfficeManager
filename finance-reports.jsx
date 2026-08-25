@@ -357,20 +357,23 @@ function LedgerDrill({ code, name, range, onClose }) {
   );
 }
 
-function CashFlowReport({ range, label, prevRange, prevLabel, unitLabel, fleetId }) {
+function CashFlowReport({ range, label, prevRange, prevLabel, unitLabel, fleetId, businessUnitId }) {
   const [data, setData] = uSr(null); const [prev, setPrev] = uSr(null);
   const [st, setSt] = uSr('loading'); const [drill, setDrill] = uSr(null);
   React.useEffect(() => {
     let alive = true; setSt('loading'); setPrev(null);
-    const base = { dateFrom: range.start, dateTo: range.end, fleetId: fleetId || undefined };
+    // Scope MUST match the label: when a business unit is active, fetch that unit's cash flow — otherwise
+    // the report shows company-wide figures under a unit heading (and the XLSX/print inherit the mislabel).
+    const scope = { fleetId: fleetId || undefined, businessUnitId: businessUnitId || undefined };
+    const base = { dateFrom: range.start, dateTo: range.end, ...scope };
     window.API.accounting.cashFlow(base)
       .then((r) => {
         if (!alive) return; setData(r.data); setSt('ready');
-        if (prevRange) window.API.accounting.cashFlow({ dateFrom: prevRange.start, dateTo: prevRange.end, fleetId: fleetId || undefined }).then((pr) => { if (alive) setPrev(pr.data); }).catch(() => {});
+        if (prevRange) window.API.accounting.cashFlow({ dateFrom: prevRange.start, dateTo: prevRange.end, ...scope }).then((pr) => { if (alive) setPrev(pr.data); }).catch(() => {});
       })
       .catch((err) => { if (!alive) return; const gated = err && (err.status === 404 || /404|not found|disabled/i.test(String((err && err.message) || ''))); setSt(gated ? 'gated' : 'error'); });
     return () => { alive = false; };
-  }, [range.start, range.end, fleetId]);
+  }, [range.start, range.end, fleetId, businessUnitId]);
 
   if (st === 'loading') return <div className="card" style={{ padding: 18 }}><div className="fin-skel">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="fin-skel-row"><span className="fin-skel-bar" style={{ width: (60 + (i * 7) % 40) + '%' }} /></div>)}</div></div>;
   if (st === 'gated') return <div className="card fin-scope"><div className="fin-coming"><span className="fin-coming-ic">{IcR('IconRefresh', { s: 24 })}</span><div className="fin-coming-t">{trR('cf.title')}</div><div className="fin-coming-s">{trR('cf.gated')}</div></div></div>;
@@ -448,7 +451,7 @@ function CashFlowReport({ range, label, prevRange, prevLabel, unitLabel, fleetId
   );
 }
 
-function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted, payrollTotal, payrollLabel, onPostPayroll, onOpenEntry, unitLabel }) {
+function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted, payrollTotal, payrollLabel, onPostPayroll, onOpenEntry, unitLabel, businessUnitId }) {
   const [tab, setTab] = uSr('fin');
   const [drill, setDrill] = uSr(null);   // { type, key, label } → opens the figure→journal→source modal
   const [gran, setGran] = uSr('month');
@@ -540,7 +543,7 @@ function ReportsScreen({ entries, catMap, userName, rates, staff, payrollPosted,
               )}
             </div>
           </div>
-          <CashFlowReport range={range} label={label} prevRange={prevRange} prevLabel={prevLbl} unitLabel={unitLabel} />
+          <CashFlowReport range={range} label={label} prevRange={prevRange} prevLabel={prevLbl} unitLabel={unitLabel} businessUnitId={businessUnitId} />
         </div>
       ) : (
       <div className="screen-enter">
