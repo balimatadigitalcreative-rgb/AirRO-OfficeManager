@@ -1664,5 +1664,167 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen, PayrollAccrualScreen };
+  // ── Shared statement section: a titled card listing {code,name,balance} account rows (server figures,
+  // no client recompute) with a grand-total row; each account drills into its Buku Besar → source. ──
+  function StmtSection({ title, rows, total, totalLabel, onDrill, extraRows }) {
+    return (
+      <div className="card fin-stmt-sec">
+        <div className="fin-stmt-h">{title}</div>
+        <div className="fin-tablewrap"><table className="fin-table fin-cards"><tbody>
+          {(rows || []).map((r) => <tr key={r.code} className="fin-trow clickable" tabIndex={0} onClick={() => onDrill && onDrill(r.code)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onDrill && onDrill(r.code)}>
+            <td className="fin-td" data-label={trA('acct.account')}><span className="fin-acct-code">{r.code}</span>{r.name}</td>
+            <td className="fin-td fin-r tnum" data-label={trA('bs.amount')}>{money(r.balance)}</td></tr>)}
+          {!(rows || []).length && <tr><td className="fin-td" colSpan={2} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: 14 }}>{trA('acct.noMovement')}</td></tr>}
+          {extraRows}
+          <tr className="fin-trow grand"><td className="fin-td" data-label="">{totalLabel}</td><td className="fin-td fin-r tnum" data-label={trA('bs.amount')}>{money(total)}</td></tr>
+        </tbody></table></div>
+      </div>
+    );
+  }
+
+  // Account drill: figure → this account's journal lines (Buku Besar) → each line → its source record.
+  function AcctDrill({ code, dateFrom, dateTo, businessUnitId, onClose }) {
+    const q = useAcct(() => ACC().ledger({ code, dateFrom, dateTo, businessUnitId }), [code, dateFrom, dateTo, businessUnitId]);
+    const [row, setRow] = aS(null);
+    aEf(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+    const d = q.data;
+    return (
+      <div className="modal-scrim" onClick={onClose}>
+        <div className="modal-card fin-scope" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+          <div className="modal-head"><div><div style={{ fontSize: 16, fontWeight: 800 }}>{trA('t.finLedger')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{d && d.account ? d.account.code + ' · ' + d.account.name : code}</div></div><button className="icon-btn" onClick={onClose}>{IcA('IconClose', { s: 18 })}</button></div>
+          <div className="modal-body">
+            {q.state === 'loading' && <Skeleton n={6} />}
+            {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
+            {q.state === 'ready' && d && (
+              <div className="fin-tablewrap"><table className="fin-table fin-cards">
+                <thead><tr><th className="fin-th">{trA('ms.date')}</th><th className="fin-th">{trA('ms.desc')}</th><th className="fin-th fin-r">{trA('je.debit')}</th><th className="fin-th fin-r">{trA('je.credit')}</th><th className="fin-th fin-r">{trA('acct.runningBal')}</th></tr></thead>
+                <tbody>
+                  <tr className="fin-trow subtotal"><td className="fin-td" colSpan={4} data-label="">{trA('acct.opening')}</td><td className="fin-td fin-r tnum" data-label={trA('acct.runningBal')}>{money(d.opening)}</td></tr>
+                  {(d.rows || []).map((r, i) => <tr key={i} className="fin-trow clickable" tabIndex={0} onClick={() => setRow(r)} onKeyDown={(e) => e.key === 'Enter' && setRow(r)}>
+                    <td className="fin-td tnum" data-label={trA('ms.date')}>{r.date}</td>
+                    <td className="fin-td" data-label={trA('ms.desc')}><span className="fin-td-desc">{r.description || '—'}</span><span className="fin-td-sub">{r.sourceType}</span></td>
+                    <td className="fin-td fin-r tnum" data-label={trA('je.debit')}>{r.debit ? money(r.debit) : ''}</td>
+                    <td className="fin-td fin-r tnum" data-label={trA('je.credit')}>{r.credit ? money(r.credit) : ''}</td>
+                    <td className="fin-td fin-r tnum" data-label={trA('acct.runningBal')}>{money(r.balance)}</td></tr>)}
+                  {!(d.rows || []).length && <tr><td className="fin-td" colSpan={5} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: 20 }}>{trA('acct.noMovement')}</td></tr>}
+                  <tr className="fin-trow grand"><td className="fin-td" colSpan={4} data-label="">{trA('acct.closing')}</td><td className="fin-td fin-r tnum" data-label={trA('acct.runningBal')}>{money(d.closing)}</td></tr>
+                </tbody>
+              </table></div>
+            )}
+          </div>
+        </div>
+        {row && <JournalDrill row={row} onClose={() => setRow(null)} />}
+      </div>
+    );
+  }
+
+  // ── NERACA (Balance Sheet) — COMPANY-WIDE as-of a date (the accounting equation holds only company-wide;
+  // a per-unit balance sheet would not balance without inter-unit eliminations). Renders server rows verbatim. ──
+  function BalanceSheetScreen({ unitLabel }) {
+    const [period, setPeriod] = aS(defaultPeriod);
+    const [drill, setDrill] = aS(null);
+    const q = useAcct(() => ACC().balanceSheet({ dateTo: period.end }), [period.end]);   // no businessUnitId → company-wide
+    const statusOf = usePeriodStatus();
+    if (q.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('fin.bsSoon')} />;
+    const d = q.data;
+    const closedBadge = period.preset !== 'custom' && monthKey(period.start) === monthKey(period.end) ? statusOf(monthKey(period.end)) : null;
+    const doXLS = () => {
+      if (!d) return;
+      const M = [[trA('bs.section'), trA('acct.code'), trA('ms.desc'), trA('bs.amount')]];
+      d.assetRows.forEach((r) => M.push([trA('bs.assets'), r.code, r.name, r.balance]));
+      M.push(['', '', trA('bs.totalAssets'), d.assets]);
+      d.liabilityRows.forEach((r) => M.push([trA('bs.liabilities'), r.code, r.name, r.balance]));
+      M.push(['', '', trA('bs.totalLiabilities'), d.liabilities]);
+      d.equityRows.forEach((r) => M.push([trA('bs.equity'), r.code, r.name, r.balance]));
+      M.push(['', '', trA('bs.netIncome'), d.netIncome]); M.push(['', '', trA('bs.totalEquity'), d.equity]);
+      exportXLS('Neraca', M, `AirRO-Neraca-${period.end}.xls`);
+    };
+    return (
+      <div className="screen-enter fin-scope" id="report-area">
+        <div className="fin-print-head print-only">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{IcA('Logo', { s: 30 })}<div><div style={{ fontSize: 19, fontWeight: 800 }}>{trA('t.finBS')}</div><div style={{ fontSize: 12.5, color: '#555' }}>{trA('bs.asOf')} {period.end} · {trA('bs.companyWide')}</div></div></div>
+          <hr style={{ border: 'none', borderTop: '2px solid #065489', margin: '12px 0 4px' }} />
+        </div>
+        <div className="fin-head">
+          <div className="fin-head-titles"><h2>{trA('t.finBS')}</h2><div className="fin-head-scope">{IcA('IconCalendar', { s: 11 })} {trA('bs.asOf')} {period.end} · {trA('bs.companyWide')}{closedBadge && closedBadge !== 'terbuka' ? <span> · <PeriodBadge status={closedBadge} /></span> : null}</div></div>
+          <div className="fin-head-actions">
+            <PeriodBar value={period} onChange={setPeriod} />
+            <button className="btn btn-ghost" disabled={!d} onClick={doXLS}>{IcA('IconDownload', { s: 16 })}<span className="fin-btn-lbl">XLSX</span></button>
+            <button className="btn btn-primary" disabled={!d} onClick={() => window.print()}>{IcA('IconReport', { s: 16 })}<span className="fin-btn-lbl">{trA('rep.print')}</span></button>
+          </div>
+        </div>
+        <div className="no-print"><ReportHeader answers={trA('rep.bsAnswers')} periodLabel={trA('bs.asOf') + ' ' + period.end} closed={closedBadge === 'terkunci' || closedBadge === 'tertutup'} /></div>
+        {q.state === 'loading' && <div className="card"><Skeleton n={10} /></div>}
+        {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
+        {q.state === 'ready' && d && (<>
+          <div className={`fin-bs-balance ${d.balanced ? 'ok' : 'bad'}`}>{d.balanced ? trA('bs.balancedOk') : trA('bs.balancedBad', { d: money(d.assets - d.liabilities - d.equity) })}</div>
+          <div className="fin-bs-grid">
+            <StmtSection title={trA('bs.assets')} rows={d.assetRows} total={d.assets} totalLabel={trA('bs.totalAssets')} onDrill={(c) => setDrill(c)} />
+            <div className="fin-bs-col">
+              <StmtSection title={trA('bs.liabilities')} rows={d.liabilityRows} total={d.liabilities} totalLabel={trA('bs.totalLiabilities')} onDrill={(c) => setDrill(c)} />
+              <StmtSection title={trA('bs.equity')} rows={d.equityRows} total={d.equity} totalLabel={trA('bs.totalEquity')} onDrill={(c) => setDrill(c)}
+                extraRows={<tr className="fin-trow subtotal"><td className="fin-td" data-label="">{trA('bs.netIncome')}</td><td className="fin-td fin-r tnum" data-label={trA('bs.amount')}>{money(d.netIncome)}</td></tr>} />
+            </div>
+          </div>
+        </>)}
+        {drill && <AcctDrill code={drill} dateTo={period.end} onClose={() => setDrill(null)} />}
+      </div>
+    );
+  }
+
+  // ── LABA RUGI (Income Statement) — a date RANGE, optionally scoped to a business unit/armada. ──
+  function IncomeStatementScreen({ businessUnitId, fleetId, unitLabel }) {
+    const [period, setPeriod] = aS(defaultPeriod);
+    const [drill, setDrill] = aS(null);
+    const q = useAcct(() => ACC().incomeStatement({ dateFrom: period.start, dateTo: period.end, businessUnitId, fleetId }), [period.start, period.end, businessUnitId, fleetId]);
+    const statusOf = usePeriodStatus();
+    if (q.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('fin.isSoon')} />;
+    const d = q.data;
+    const closedBadge = period.preset !== 'custom' && monthKey(period.start) === monthKey(period.end) ? statusOf(monthKey(period.start)) : null;
+    const doXLS = () => {
+      if (!d) return;
+      const M = [[trA('bs.section'), trA('acct.code'), trA('ms.desc'), trA('bs.amount')]];
+      d.revenueRows.forEach((r) => M.push([trA('is.revenue'), r.code, r.name, r.balance])); M.push(['', '', trA('is.totalRevenue'), d.revenue]);
+      d.hppRows.forEach((r) => M.push([trA('is.hpp'), r.code, r.name, r.balance])); M.push(['', '', trA('is.grossProfit'), d.grossProfit]);
+      d.opexRows.forEach((r) => M.push([trA('is.opex'), r.code, r.name, r.balance])); M.push(['', '', trA('is.opexTotal'), d.opex]);
+      M.push(['', '', trA('is.netProfit'), d.profit]); M.push(['', '', trA('is.margin'), d.margin + '%']);
+      exportXLS('Laba Rugi', M, `AirRO-LabaRugi-${period.start}.xls`);
+    };
+    return (
+      <div className="screen-enter fin-scope" id="report-area">
+        <div className="fin-print-head print-only">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{IcA('Logo', { s: 30 })}<div><div style={{ fontSize: 19, fontWeight: 800 }}>{trA('t.finIS')}</div><div style={{ fontSize: 12.5, color: '#555' }}>{period.label || period.start + '–' + period.end}{unitLabel ? ' · ' + unitLabel : ''}</div></div></div>
+          <hr style={{ border: 'none', borderTop: '2px solid #065489', margin: '12px 0 4px' }} />
+        </div>
+        <div className="fin-head">
+          <div className="fin-head-titles"><h2>{trA('t.finIS')}</h2><div className="fin-head-scope">{IcA('IconCalendar', { s: 11 })} {period.label || `${period.start} – ${period.end}`}{unitLabel ? ' · ' + unitLabel : ''}{closedBadge && closedBadge !== 'terbuka' ? <span> · <PeriodBadge status={closedBadge} /></span> : null}</div></div>
+          <div className="fin-head-actions">
+            <PeriodBar value={period} onChange={setPeriod} />
+            <button className="btn btn-ghost" disabled={!d} onClick={doXLS}>{IcA('IconDownload', { s: 16 })}<span className="fin-btn-lbl">XLSX</span></button>
+            <button className="btn btn-primary" disabled={!d} onClick={() => window.print()}>{IcA('IconReport', { s: 16 })}<span className="fin-btn-lbl">{trA('rep.print')}</span></button>
+          </div>
+        </div>
+        <div className="no-print"><ReportHeader answers={trA('rep.isAnswers')} periodLabel={period.label} closed={closedBadge === 'terkunci' || closedBadge === 'tertutup'} /></div>
+        {q.state === 'loading' && <div className="card"><Skeleton n={10} /></div>}
+        {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
+        {q.state === 'ready' && d && (<>
+          <div className="fin-is-kpis">
+            <div className="fin-kpi"><span>{trA('is.revenue')}</span><b className="tnum">{money(d.revenue)}</b></div>
+            <div className="fin-kpi"><span>{trA('is.grossProfit')}</span><b className="tnum">{money(d.grossProfit)}</b></div>
+            <div className="fin-kpi"><span>{trA('is.netProfit')}</span><b className={`tnum ${d.profit < 0 ? 'amt-neg' : 'amt-pos'}`}>{money(d.profit)}</b></div>
+            <div className="fin-kpi"><span>{trA('is.margin')}</span><b className="tnum">{d.margin}%</b></div>
+          </div>
+          <div className="fin-is-grid">
+            <StmtSection title={trA('is.revenue')} rows={d.revenueRows} total={d.revenue} totalLabel={trA('is.totalRevenue')} onDrill={(c) => setDrill(c)} />
+            <StmtSection title={trA('is.hpp')} rows={d.hppRows} total={d.grossProfit} totalLabel={trA('is.grossProfit')} onDrill={(c) => setDrill(c)} />
+            <StmtSection title={trA('is.opex')} rows={d.opexRows} total={d.opex} totalLabel={trA('is.opexTotal')} onDrill={(c) => setDrill(c)}
+              extraRows={<tr className="fin-trow grand" style={{ borderTopWidth: 2 }}><td className="fin-td" data-label="">{trA('is.netProfit')}</td><td className={`fin-td fin-r tnum ${d.profit < 0 ? 'amt-neg' : 'amt-pos'}`} data-label={trA('bs.amount')}>{money(d.profit)}</td></tr>} />
+          </div>
+        </>)}
+        {drill && <AcctDrill code={drill} dateFrom={period.start} dateTo={period.end} businessUnitId={businessUnitId} onClose={() => setDrill(null)} />}
+      </div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen, PayrollAccrualScreen, BalanceSheetScreen, IncomeStatementScreen };
 })();

@@ -3883,6 +3883,22 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .btn-xs { min-height: 36px; }
 }
 
+/* ── Neraca (balance sheet) / Laba Rugi (income statement) statements ── */
+.fin-stmt-sec { padding: 0; overflow: hidden; }
+.fin-stmt-h { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); padding: 12px var(--fs-4) 8px; border-bottom: 1px solid var(--border); }
+.fin-stmt-sec .fin-td { height: auto; padding-top: 8px; padding-bottom: 8px; }
+.fin-bs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--fs-4); align-items: start; }
+.fin-bs-col { display: flex; flex-direction: column; gap: var(--fs-4); }
+.fin-is-grid { display: grid; grid-template-columns: 1fr; gap: var(--fs-4); }
+.fin-bs-balance { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; padding: 10px 14px; border-radius: var(--r-md); margin-bottom: var(--fs-4); }
+.fin-bs-balance.ok { background: var(--pos-bg); color: var(--green-800); }
+.fin-bs-balance.bad { background: rgba(224,64,64,.12); color: var(--neg); }
+.fin-is-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--fs-3); margin-bottom: var(--fs-4); }
+.fin-is-kpis .fin-kpi { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); }
+.fin-is-kpis .fin-kpi > span { font-size: 11.5px; color: var(--text-mut); }
+.fin-is-kpis .fin-kpi > b { font-family: 'Poppins'; font-size: 18px; font-weight: 800; }
+@media (max-width: 1024px) { .fin-bs-grid { grid-template-columns: 1fr; } .fin-is-kpis { grid-template-columns: repeat(2, 1fr); } }   /* tablet: single column */
+
 /* ── States: skeleton · empty · error · coming-soon — used on every finance screen ── */
 .fin-skel { padding: var(--fs-2) 0; }
 .fin-skel-row { display: flex; align-items: center; gap: var(--fs-3); height: var(--fin-row-h); padding: 0 var(--fs-3); border-bottom: 1px solid var(--border-soft); }

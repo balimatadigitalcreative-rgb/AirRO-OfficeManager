@@ -675,11 +675,15 @@ async function accountingStatus({ asOf } = {}) {
 
 // ── Reports (read the journal, never the cash book). ──
 const SIGN = { asset: 1, expense: 1, liability: -1, equity: -1, revenue: -1 };   // normal-balance sign for (debit − credit)
-async function accountBalances({ dateFrom, dateTo } = {}) {
+async function accountBalances({ dateFrom, dateTo, businessUnitId, fleetId } = {}) {
   const jWhere = {};
   if (dateFrom) (jWhere.date || (jWhere.date = {})).gte = dateFrom;
   if (dateTo) (jWhere.date || (jWhere.date = {})).lte = dateTo;
-  const lines = await prisma.journalLine.findMany({ where: Object.keys(jWhere).length ? { journalEntry: jWhere } : {}, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, type: true, subtype: true } } } });
+  const where = {};
+  if (businessUnitId) where.businessUnitId = businessUnitId;   // per-unit scope (journal lines carry the unit)
+  if (fleetId) where.fleetId = fleetId;                        // per-armada scope
+  if (Object.keys(jWhere).length) where.journalEntry = jWhere;
+  const lines = await prisma.journalLine.findMany({ where, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, type: true, subtype: true } } } });
   const acc = {};
   for (const l of lines) { const c = l.chartAccount.code; if (!acc[c]) acc[c] = { code: c, name: l.chartAccount.name, type: l.chartAccount.type, subtype: l.chartAccount.subtype || '', debit: 0, credit: 0 }; acc[c].debit += Number(l.debit); acc[c].credit += Number(l.credit); }
   return Object.values(acc).sort((a, b) => a.code.localeCompare(b.code)).map((a) => ({ ...a, balance: ((a.debit - a.credit) * SIGN[a.type]) || 0 }));   // `|| 0` normalises -0 → 0
@@ -693,10 +697,13 @@ async function trialBalance(range) {
 async function balanceSheet(range) {
   const rows = await accountBalances(range);
   const sum = (t) => rows.filter((r) => r.type === t).reduce((s, r) => s + r.balance, 0);
+  const of = (t) => rows.filter((r) => r.type === t && r.balance).map((r) => ({ code: r.code, name: r.name, balance: r.balance }));
   const assets = sum('asset'), liabilities = sum('liability'), equityBase = sum('equity');
   const netIncome = sum('revenue') - sum('expense');
   const equity = equityBase + netIncome;   // retained earnings for the (yet-unclosed) period
-  return { assets, liabilities, equity, equityBase, netIncome, balanced: assets === liabilities + equity };
+  // Grouped per-account rows so the client renders authoritative figures with NO client-side recompute.
+  return { assets, liabilities, equity, equityBase, netIncome, balanced: assets === liabilities + equity,
+    assetRows: of('asset'), liabilityRows: of('liability'), equityRows: of('equity') };
 }
 // Finance receivables from the journal (Piutang Usaha balance) — MUST equal Σ customer Sisa Bon.
 async function receivablesBalance(range) { const rows = await accountBalances(range); const ar = rows.find((r) => r.code === AR); return ar ? ar.balance : 0; }
@@ -708,7 +715,11 @@ async function incomeStatement(range) {
   // reads the SAME accounts, so the two agree by construction (asserted in the costing tests).
   const hpp = rows.filter((r) => r.subtype === 'cogs').reduce((s, r) => s + r.balance, 0);
   const opex = expense - hpp;
-  return { revenue, expense, hpp, opex, grossProfit: revenue - hpp, profit: revenue - expense, margin: revenue ? +(((revenue - expense) / revenue) * 100).toFixed(1) : 0, rows: rows.filter((r) => r.type === 'revenue' || r.type === 'expense') };
+  const of = (pred) => rows.filter(pred).filter((r) => r.balance).map((r) => ({ code: r.code, name: r.name, balance: r.balance }));
+  // Grouped rows (revenue · HPP=cogs · opex=non-cogs expense) so the client renders server figures directly.
+  return { revenue, expense, hpp, opex, grossProfit: revenue - hpp, profit: revenue - expense, margin: revenue ? +(((revenue - expense) / revenue) * 100).toFixed(1) : 0,
+    rows: rows.filter((r) => r.type === 'revenue' || r.type === 'expense'),
+    revenueRows: of((r) => r.type === 'revenue'), hppRows: of((r) => r.type === 'expense' && r.subtype === 'cogs'), opexRows: of((r) => r.type === 'expense' && r.subtype !== 'cogs') };
 }
 
 // UMUR PIUTANG (AR aging). Standard FIFO: a customer's collections/write-downs pay their OLDEST bon

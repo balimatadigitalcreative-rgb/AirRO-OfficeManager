@@ -9,7 +9,7 @@ const accrual = require('../services/accrual.service');
 const subscription = require('../services/subscription.service');
 const depreciation = require('../services/depreciation.service');
 const costing = require('../services/costing.service');
-const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo });
+const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId });
 
 const trialBalance = asyncHandler(async (req, res) => res.json({ data: await service.trialBalance(range(req)) }));
 const balanceSheet = asyncHandler(async (req, res) => res.json({ data: await service.balanceSheet(range(req)) }));
