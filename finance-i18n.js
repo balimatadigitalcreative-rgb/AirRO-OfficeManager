@@ -547,6 +547,7 @@
       // Dashboard Keuangan (Ringkasan)
       'dash.nowScope': 'All accounts · now', 'dash.cashPos': 'Cash position by account', 'dash.viewAll': 'View all',
       'dash.totalCash': 'Total cash', 'dash.plCompare': 'Profit & loss — this month vs last', 'dash.trend12': '12-month trend',
+      'dash.unattr': 'Unassigned', 'dash.unattrHint': 'money on a deleted/renamed account — reassign it',
       'dash.ratios': 'Key ratios', 'dash.netMargin': 'Net margin', 'dash.grossMargin': 'Gross margin', 'dash.arTurnover': 'Receivables turnover',
       'dash.arAging': 'Receivables (aging)', 'dash.liabilities': 'Liabilities due', 'dash.needEngine': 'Needs the double-entry accounting engine — arrives with receivables integration.',
       // Entry-form journal preview (Rincian jurnal)
@@ -997,6 +998,7 @@
       // Dashboard Keuangan (Ringkasan)
       'dash.nowScope': 'Semua akun · kini', 'dash.cashPos': 'Posisi kas per akun', 'dash.viewAll': 'Lihat semua',
       'dash.totalCash': 'Total kas', 'dash.plCompare': 'Laba rugi — bulan ini vs lalu', 'dash.trend12': 'Tren 12 bulan',
+      'dash.unattr': 'Belum dipetakan', 'dash.unattrHint': 'dana pada akun terhapus/berganti — petakan ulang',
       'dash.ratios': 'Rasio ringkas', 'dash.netMargin': 'Margin bersih', 'dash.grossMargin': 'Margin kotor', 'dash.arTurnover': 'Perputaran piutang',
       'dash.arAging': 'Piutang (umur)', 'dash.liabilities': 'Kewajiban jatuh tempo', 'dash.needEngine': 'Perlu mesin pembukuan berpasangan — hadir bersama integrasi piutang.',
       // Rincian jurnal pada form input

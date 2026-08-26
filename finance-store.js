@@ -238,12 +238,28 @@
     let bal = +acct.opening || 0;
     entries.forEach((e) => {
       if (e.reference) return;   // non-cash "reference" cost (e.g. production cost in reference mode) never touches a cash balance
-      const aid = e.acct && ids.includes(e.acct) ? e.acct : ids[0];   // unassigned → first account
+      let aid;
+      if (!e.acct) aid = ids[0];                    // never-assigned (blank) → the primary account (single-account default)
+      else if (ids.includes(e.acct)) aid = e.acct;  // assigned to a known account
+      else return;                                  // assigned to a MISSING account (stale id) → unattributed; NEVER silently dumped onto accounts[0] (that made one account's balance — and "Total kas" — wrong)
       if (aid === acct.id) bal += (e.type === 'income' ? e.amount : -e.amount);
     });
     (transfers || []).forEach((t) => {
       if (t.from === acct.id) bal -= (+t.amount || 0);
       if (t.to === acct.id) bal += (+t.amount || 0);
+    });
+    return bal;
+  }
+  // Net of entries whose `acct` is SET but matches no current account (a data error — e.g. an account was
+  // deleted after entries referenced it, or a legacy/stale id). Surfaced as a "Belum dipetakan" line so
+  // "Total kas" is the EXACT sum of everything shown, never hidden inside a real account's balance.
+  //   Σ(acctBalance over all accounts) + unattributed(entries, accounts) === opening + every inflow − outflow
+  function unattributed(entries, accts) {
+    const ids = (accts || []).map((a) => a.id);
+    let bal = 0;
+    (entries || []).forEach((e) => {
+      if (e.reference) return;
+      if (e.acct && !ids.includes(e.acct)) bal += (e.type === 'income' ? e.amount : -e.amount);
     });
     return bal;
   }
@@ -282,7 +298,7 @@
     SESSION_KEY, USERS, ROLES, ROLE_COLORS, perms, normKasbon, setRoles, roleList, roleName, roleColor, landingScreen, initials, loadSession, setSession,
     USERS_KEY, SEED_USERS, loadUsers, saveUsers, newUserId,
     SETTINGS_KEY, DEFAULT_SETTINGS, loadSettings, saveSettings,
-    ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance,
+    ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance, unattributed,
     XFER_KEY, loadTransfers, saveTransfers, newXferId,
     SETORAN_KEY, FLEET_KEY, loadFleet, saveFleet, loadSetoran, saveSetoran, newSetoranId, setoranOf };
 })();

@@ -2,9 +2,12 @@
 const { useState, useRef, useEffect } = React;
 const AF = window.AIRRO;
 
-/* ---------------- Cashflow bar chart (income up / expense down) ---------------- */
+/* ---------------- Cashflow bar chart — GROUPED positive bars (income + expense both up from 0) ----------------
+   Income and expense are positive magnitudes, so both are drawn as positive bars from a single 0-baseline
+   (never one below zero, which read as "negative"). Leading empty months are trimmed so the real months
+   fill the width instead of being squeezed into a sliver. The month axis shows the year where it changes;
+   bars respond to hover AND tap (phones), and the height shrinks on small screens. */
 function CashflowChart({ data, range }) {
-  const view = range === '6M' ? data.slice(-6) : data;
   const [hover, setHover] = useState(null);
   const wrapRef = useRef(null);
   const [w, setW] = useState(800);
@@ -14,34 +17,35 @@ function CashflowChart({ data, range }) {
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
+  const T = (k, d) => (window.t ? window.t(k) : d);
+  const yr = (d) => (d && d.key ? String(d.key).slice(0, 4) : '');
 
-  const H = 280, padL = 38, padB = 26, padT = 10;
+  // Trim leading empty months so two real months don't get squeezed by ten blanks; keep everything from
+  // the first month with activity onward. If nothing has data, keep the full window (empty state).
+  const base = range === '6M' ? data.slice(-6) : data;
+  const firstData = base.findIndex((d) => d.rev || d.exp);
+  const view = firstData > 0 ? base.slice(firstData) : base;
+
+  // Height shrinks on phones so the chart doesn't dominate a screen carrying two bars.
+  const H = w < 480 ? 176 : w < 768 ? 216 : 280;
+  const padL = 40, padB = w < 480 ? 30 : 26, padT = 10;
   const innerH = H - padB - padT;
-  const maxVal = Math.max(1, ...view.map(d => Math.max(d.rev, d.exp)));
-  // adaptive "nice" ceiling: 1/2/5 × 10^n just above maxVal
-  const niceCeil = (m) => {
-    const pow = Math.pow(10, Math.floor(Math.log10(m)));
-    const f = m / pow;
-    const n = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
-    return n * pow;
-  };
+  const baseY = padT + innerH;
+  const maxVal = Math.max(1, ...view.map((d) => Math.max(d.rev, d.exp)));
+  const niceCeil = (m) => { const pow = Math.pow(10, Math.floor(Math.log10(m))); const f = m / pow; const n = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10; return n * pow; };
   const niceMax = niceCeil(maxVal);
-  const half = innerH / 2;
-  const zeroY = padT + half;
   const colW = (w - padL - 8) / view.length;
-  const barW = Math.min(26, colW * 0.42);
-
-  const yFor = (v, dir) => dir === 'up'
-    ? zeroY - (v / niceMax) * half
-    : zeroY + (v / niceMax) * half;
-
-  const ticks = [niceMax, niceMax / 2, 0, -niceMax / 2, -niceMax];
+  const barW = Math.min(15, colW * 0.3);          // two grouped bars per month
+  const gap = 2;
+  const hFor = (v) => Math.max(v > 0 ? 2 : 0, (v / niceMax) * innerH);
+  const ticks = [niceMax, niceMax / 2, 0];        // all ≥ 0 — no phantom negative axis
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
-      <svg width="100%" viewBox={`0 0 ${w} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      <svg width="100%" viewBox={`0 0 ${w} ${H}`} style={{ display: 'block', overflow: 'visible' }}
+        onMouseLeave={() => setHover(null)}>
         {ticks.map((t, i) => {
-          const y = zeroY - (t / niceMax) * half;
+          const y = baseY - (t / niceMax) * innerH;
           return (
             <g key={i}>
               <line x1={padL} y1={y} x2={w - 4} y2={y} stroke={t === 0 ? '#C5D5DD' : '#E7F1F5'} strokeWidth="1" />
@@ -54,22 +58,23 @@ function CashflowChart({ data, range }) {
         {view.map((d, i) => {
           const cx = padL + colW * i + colW / 2;
           const on = hover === i;
-          const revTop = yFor(d.rev, 'up');
-          const expBot = yFor(d.exp, 'down');
+          const revH = hFor(d.rev), expH = hFor(d.exp);
+          const showYear = i === 0 || yr(d) !== yr(view[i - 1]);
           return (
-            <g key={d.m} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }}>
+            <g key={d.key || d.m} onMouseEnter={() => setHover(i)} onClick={() => setHover(on ? null : i)} style={{ cursor: 'pointer' }}>
               <rect x={cx - colW / 2} y={padT} width={colW} height={innerH} fill="transparent" />
-              <rect x={cx - barW / 2} y={revTop} width={barW} height={Math.max(0, zeroY - revTop)}
-                rx="5" fill={on ? '#053F66' : '#065489'} style={{ transition: 'fill .15s' }} />
-              <rect x={cx - barW / 2} y={zeroY} width={barW} height={Math.max(0, expBot - zeroY)}
-                rx="5" fill={on ? '#1C8F8A' : '#22A7A1'} style={{ transition: 'fill .15s' }} />
-              <text x={cx} y={H - 6} textAnchor="middle" fontSize="11"
+              <rect x={cx - barW - gap / 2} y={baseY - revH} width={barW} height={revH}
+                rx="4" fill={on ? '#053F66' : '#065489'} style={{ transition: 'fill .15s' }} />
+              <rect x={cx + gap / 2} y={baseY - expH} width={barW} height={expH}
+                rx="4" fill={on ? '#1C8F8A' : '#22A7A1'} style={{ transition: 'fill .15s' }} />
+              <text x={cx} y={baseY + 15} textAnchor="middle" fontSize="11"
                 fill={on ? '#242E2C' : '#9AA3A0'} fontWeight={on ? 700 : 500} fontFamily="Poppins">{d.m}</text>
+              {showYear && <text x={cx} y={baseY + (w < 480 ? 27 : 25)} textAnchor="middle" fontSize="9" fill="#B7C2C7" fontFamily="Inter">{yr(d)}</text>}
             </g>
           );
         })}
       </svg>
-      {hover != null && (() => {
+      {hover != null && view[hover] && (() => {
         const cx = padL + colW * hover + colW / 2;
         const d = view[hover];
         const left = Math.max(8, Math.min(w - 168, cx - 80));
@@ -79,9 +84,9 @@ function CashflowChart({ data, range }) {
             background: '#fff', border: '1px solid var(--border)', borderRadius: 12,
             boxShadow: 'var(--shadow-md)', padding: '10px 12px', zIndex: 5,
           }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>{d.m} 2026</div>
-            <Row label="Revenue" val={AF.fmtFull(d.rev)} dot="#065489" />
-            <Row label="Expense" val={AF.fmtFull(d.exp)} dot="#22A7A1" />
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>{d.m} {yr(d)}</div>
+            <Row label={T('stat.income', 'Pemasukan')} val={AF.fmtFull(d.rev)} dot="#065489" />
+            <Row label={T('stat.expense', 'Pengeluaran')} val={AF.fmtFull(d.exp)} dot="#22A7A1" />
           </div>
         );
       })()}

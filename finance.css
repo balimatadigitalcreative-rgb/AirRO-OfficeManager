@@ -4091,6 +4091,8 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-acctline-name { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; font-weight: 600; }
 .fin-acctline-name em { font-style: normal; font-size: 11px; color: var(--text-faint); font-weight: 500; }
 .fin-acctline-bal { margin-left: auto; font-weight: 700; font-size: 14px; white-space: nowrap; }
+.fin-acctline.unattr .fin-acctline-bal { color: var(--amber-700, #B45309); }
+.fin-acctline.unattr .fin-acctline-name em { color: var(--amber-700, #B45309); font-weight: 600; }
 .fin-acctline.total { border-top: 2px solid var(--border); margin-top: 4px; padding-top: 12px; cursor: default; font-weight: 800; }
 .fin-acctline.total .fin-acctline-name { font-weight: 800; }
 .fin-acctline.total .fin-acctline-bal { color: var(--green-800); font-size: 15px; }
@@ -4158,11 +4160,20 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 /* Contrast: the KPI period scope carries meaning, so use --text-mut (#5E7480 ≈ 4.6:1 on white),
    not the decorative --text-faint (#93A6AE ≈ 2.6:1, below WCAG AA). */
 .fin-kpi-scope { color: var(--text-mut); }
-/* 375px guard for the P&L comparison: two Rupiah columns + a delta can exceed a phone's width. Below
-   480px drop the "last month" column (its Δ already conveys the change) so nothing scrolls sideways. */
-@media (max-width: 480px) {
-  .fin-cmp-head, .fin-cmp-row { grid-template-columns: 1fr auto 62px; }
-  .fin-cmp-mut, .fin-cmp-head span:nth-child(3) { display: none; }
+.fin-cmp-period { font-size: 11.5px; }
+/* Phone P&L comparison: a 4-column table (label · this · last · Δ) clips the delta badge on a phone.
+   Below 768px switch to a stacked CARD per row — label on its own line, this/last side by side, and the
+   delta badge on its OWN full-width line below (never a squeezed 4th column). The month comparison is
+   stated once in the card subtitle, so the badge itself shows just the percentage. */
+@media (max-width: 767px) {
+  .fin-cmp-head { display: none; }
+  .fin-cmp-row { grid-template-columns: 1fr 1fr; column-gap: var(--fs-3); row-gap: 3px; align-items: baseline; padding: 11px 0; }
+  .fin-cmp-lbl { grid-column: 1 / -1; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); }
+  .fin-cmp-strong { grid-column: 1 / 2; text-align: left; font-size: 15px; }
+  .fin-cmp-mut { grid-column: 2 / 3; display: block; text-align: right; }
+  .fin-cmp-row > .fin-r:last-child { grid-column: 1 / -1; text-align: left; margin-top: 2px; }
+  .delta-pill { white-space: nowrap; }
+  .delta-pill .delta-vs { display: none; }   /* just "−19,6%" — the "vs [month]" is in the card subtitle */
 }
 /* Belt-and-braces: no finance surface may scroll the page sideways on a phone. Wide content
    (tables) already lives in its own .fin-tablewrap (overflow-x:auto). */

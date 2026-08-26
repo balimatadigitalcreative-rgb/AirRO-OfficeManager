@@ -13,6 +13,9 @@ const Dw = () => DOW_L[window.I18N.lang] || DOW_L.en;
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FULLMON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// Localised full month name (follows the active UI language, not a hardcoded English list) — e.g.
+// "Agustus" in Indonesian, "August" in English. Intl is offline-safe; fall back to FULLMON.
+const monthName = (m0) => { const loc = (window.I18N && window.I18N.lang === 'en') ? 'en-US' : 'id-ID'; try { return new Date(2020, m0, 1).toLocaleString(loc, { month: 'long' }); } catch (e) { return FULLMON[m0]; } };
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // "Hari ini" untuk kalender, batas tanggal, & agregasi harian.
 // DEMO_TODAY: isi 'YYYY-MM-DD' untuk MEMBEKUKAN tanggal (mode demo dgn dataset
@@ -239,7 +242,7 @@ function DeltaPillF({ delta, invert }) {
   return (
     <span className={`delta-pill ${flat ? 'flat' : good ? 'pos' : 'neg'}`}>
       {!flat && (up ? <IconTrendUp s={11} /> : <IconTrendDown s={11} />)}
-      {up ? '+' : ''}{delta}% <em>{trF('rep.vsPrev')}</em>
+      {up ? '+' : ''}{delta}% <em className="delta-vs">{trF('rep.vsPrev')}</em>
     </span>
   );
 }
@@ -345,7 +348,7 @@ function TodayCard({ today, seeMoney = true }) {
   return (
     <div className="card today-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="sec-title" style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{trF('today.title')} · {new Date(TODAY + 'T00:00').getDate()} {Mn()[5]}</div>
+        <div className="sec-title" style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{trF('today.title')} · {new Date(TODAY + 'T00:00').getDate()} {Mn()[new Date(TODAY + 'T00:00').getMonth()]}</div>
         <span style={{ fontSize: 11.5, color: 'rgba(255,255,255,.6)' }}>{trF('today.entries', { n: today.count })}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
@@ -717,13 +720,15 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
   const shown = au === 'all' ? accounts : accounts.filter((a) => unitOfA(a) === au);   // 'shared' only matches 'all'
   const monthMut = (a) => {
     let inc = 0, out = 0; const fid = accounts[0] && accounts[0].id;
-    (entries || []).forEach((e) => { if (e.reference) return; const aid = e.acct && accounts.some((x) => x.id === e.acct) ? e.acct : fid; if (aid === a.id && (e.date || '').slice(0, 7) === thisMonth) { if (e.type === 'income') inc += e.amount; else out += e.amount; } });
+    (entries || []).forEach((e) => { if (e.reference) return; let aid; if (!e.acct) aid = fid; else if (accounts.some((x) => x.id === e.acct)) aid = e.acct; else return; if (aid === a.id && (e.date || '').slice(0, 7) === thisMonth) { if (e.type === 'income') inc += e.amount; else out += e.amount; } });
     (transfers || []).forEach((t) => { if ((t.date || '').slice(0, 7) === thisMonth) { if (t.to === a.id) inc += +t.amount || 0; if (t.from === a.id) out += +t.amount || 0; } });
     return { inc, out };
   };
   // Total over the DISPLAYED accounts; each balance is the account's full balance (computed
-  // against the FULL arrays), so per-unit totals sum to the combined total.
-  const total = shown.reduce((s, a) => s + FS.acctBalance(a, entries, accounts, transfers), 0);
+  // against the FULL arrays), so per-unit totals sum to the combined total. Stale-acct money is
+  // shown as its own "Belum dipetakan" line so the total is the exact sum of everything listed.
+  const unattr = FS.unattributed ? FS.unattributed(entries, accounts) : 0;
+  const total = shown.reduce((s, a) => s + FS.acctBalance(a, entries, accounts, transfers), 0) + unattr;
   const save = (a, remove) => {
     if (remove) { if (accounts.length <= 1) { setEdit(null); return; } if (!confirm(trF('ms.removeConfirm'))) return; setAccounts((p) => p.filter((x) => x.id !== a.id)); setEdit(null); return; }
     const clean = { ...a }; delete clean._new;
@@ -737,7 +742,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
   return (
     <div className="screen-enter">
       <div className="ms-total card">
-        <div><div style={{ fontSize: 12.5, color: 'rgba(255,255,255,.7)' }}>{trF('ms.totalBal')}</div><div className="tnum" style={{ fontSize: 28, fontWeight: 800, color: '#fff' }}>{fmt(total)}</div></div>
+        <div><div style={{ fontSize: 12.5, color: 'rgba(255,255,255,.7)' }}>{trF('ms.totalBal')}</div><div className="tnum" style={{ fontSize: 28, fontWeight: 800, color: '#fff' }}>{fmt(total)}</div>{unattr !== 0 && <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.82)', marginTop: 2 }}>{trF('dash.unattr')}: <span className="tnum">{fmtS(unattr)}</span> — {trF('dash.unattrHint')}</div>}</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {canEdit && <button className="btn btn-ghost" style={{ background: 'rgba(255,255,255,.14)', color: '#fff', border: 'none' }} onClick={() => setXfer(true)}><IconArrowUp s={16} />{trF('xf.title')}</button>}
           {canInterUnit && (units || []).filter((u) => u.active !== false).length > 1 && <button className="btn btn-ghost" style={{ background: 'rgba(255,255,255,.14)', color: '#fff', border: 'none' }} onClick={() => setIuOpen(true)}><IconRefresh s={16} />{(window.t && window.t('iu.btn')) || 'Antar-Unit'}</button>}
@@ -747,7 +752,7 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
       <div className="ms-grid">
         {shown.map((a) => {
           const bal = FS.acctBalance(a, entries, accounts, transfers);
-          const txn = entries.filter((e) => !e.reference && (e.acct || accounts[0].id) === a.id).length;
+          const txn = entries.filter((e) => { if (e.reference) return false; const aid = !e.acct ? (accounts[0] && accounts[0].id) : (accounts.some((x) => x.id === e.acct) ? e.acct : null); return aid === a.id; }).length;
           const mm = monthMut(a);
           return (
             <div key={a.id} className="ms-card card" onClick={() => setDetail(a)} style={{ cursor: 'pointer' }}>
@@ -853,9 +858,12 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
   // Per-account balance uses the FULL arrays — identical to FIN.MoneySpots — so the dashboard and the
   // Kas & Bank screen never disagree. Only the DISPLAYED set is the scoped one.
   const acctRows = uM(() => (shownAccounts || []).map((a) => ({ ...a, bal: FS.acctBalance(a, allEntries, allAccounts, transfers) })), [shownAccounts, allEntries, allAccounts, transfers]);
-  const totalCash = acctRows.reduce((s, a) => s + a.bal, 0);
+  // Money whose account was deleted/renamed (stale acct id) is NOT dumped onto the first account any
+  // more — it surfaces here so "Total kas" is the exact sum of every line shown (accounts + this line).
+  const unattr = uM(() => (FS.unattributed ? FS.unattributed(allEntries, allAccounts) : 0), [allEntries, allAccounts]);
+  const totalCash = acctRows.reduce((s, a) => s + a.bal, 0) + unattr;
   const netMargin = stats.income ? Math.round((stats.profit / stats.income) * 1000) / 10 : 0;
-  const curNm = FULLMON[+cur.split('-')[1] - 1], prvNm = FULLMON[+prv.split('-')[1] - 1];
+  const curNm = monthName(+cur.split('-')[1] - 1), prvNm = monthName(+prv.split('-')[1] - 1);
 
   const kpis = seeMoney ? [
     { key: 'cash', label: trF('stat.balance'), value: (totalCash < 0 ? '−' : '') + fmt(totalCash), scope: trF('dash.nowScope'), icon: 'IconWallet', tone: 'accent', drill: 'moneyspots' },
@@ -886,12 +894,19 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
                   <span className="tnum fin-acctline-bal">{fmt(a.bal)}</span>
                 </button>
               ))}
+              {unattr !== 0 && (
+                <button type="button" className="fin-acctline unattr" onClick={() => onDrill && onDrill('moneyspots')} title={trF('dash.unattrHint')}>
+                  <span className="fin-acctline-ic" style={{ background: 'var(--amber-600, #B45309)' }}>{Icn('IconWarn', { s: 15 })}</span>
+                  <span className="fin-acctline-name">{trF('dash.unattr')}<em>{trF('dash.unattrHint')}</em></span>
+                  <span className="tnum fin-acctline-bal">{fmtS(unattr)}</span>
+                </button>
+              )}
               <div className="fin-acctline total"><span className="fin-acctline-name">{trF('dash.totalCash')}</span><span className="tnum fin-acctline-bal">{fmt(totalCash)}</span></div>
             </div>
           </div>
 
           <div className="card fin-dash-card">
-            <div className="fin-dash-cardhead"><div className="sec-title">{trF('dash.plCompare')}</div></div>
+            <div className="fin-dash-cardhead"><div className="sec-title">{trF('dash.plCompare')}</div><span className="fin-kpi-scope fin-cmp-period">{curNm} vs {prvNm}</span></div>
             <div className="fin-cmp">
               <div className="fin-cmp-head"><span /><span className="fin-r">{curNm}</span><span className="fin-r">{prvNm}</span><span className="fin-r">Δ</span></div>
               {[['stat.income', mtd.income, lm.income, false], ['stat.expense', mtd.expense, lm.expense, true], ['stat.profit', mtd.profit, lm.profit, false]].map((r) => (
