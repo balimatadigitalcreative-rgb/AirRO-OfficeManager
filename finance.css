@@ -3774,8 +3774,8 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
   --fs-1: 4px; --fs-2: 8px; --fs-3: 12px; --fs-4: 16px; --fs-5: 20px; --fs-6: 24px; --fs-8: 32px; --fs-10: 40px;
   --fin-accent: var(--green-800);          /* THE one accent, aliased for finance scope */
   --fin-accent-soft: var(--mint-100);
-  --fin-row-h: 52px;                        /* comfortable density row height */
-  --fin-row-h-compact: 40px;
+  --fin-row-h: 44px;                        /* comfortable density row height (was 52 — a ledger needs to show more than ~12 lines) */
+  --fin-row-h-compact: 32px;                /* Padat: genuinely dense (~32px) */
 }
 
 /* ── The finance workspace header (title · scope · actions) shared by every accounting screen ── */
@@ -3825,8 +3825,11 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-trow.clickable { cursor: pointer; }
 .fin-trow.clickable:hover { background: var(--card-soft); }
 .fin-trow.active { background: var(--mint-100); box-shadow: inset 3px 0 0 var(--green-600); }
-.fin-td-desc { font-weight: 500; }
-.fin-td-sub { font-size: 11px; color: var(--text-faint); }
+/* Description + a muted sub-line. On desktop these were plain inline spans, so text ran together
+   ("Distribusi pelunasandist_txn"); make the sub its OWN block line — a clean secondary line, never
+   concatenated onto the description. Compact hides the sub (row is 32px). */
+.fin-td-desc { display: block; font-weight: 500; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; }
+.fin-td-sub { display: block; font-size: 11px; color: var(--text-faint); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
 /* Running-balance / total rows: subtle top rule; total row heavier. Never split across a print page. */
 .fin-trow.subtotal td { background: var(--card-soft); font-weight: 700; }
 .fin-trow.grand td { background: var(--surface); font-weight: 800; border-top: 2px solid var(--green-800); }
@@ -4207,25 +4210,65 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 
 /* ── Buku Besar (ledger) ── */
 .bb-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--fs-4); align-items: start; }
-.bb-picker { padding: var(--fs-4); position: sticky; top: 12px; }
-.bb-ledger { padding: 0; overflow: hidden; }
-.bb-tree-scroll { max-height: 60vh; overflow-y: auto; margin-top: var(--fs-2); }
-.bb-search { height: 34px; margin-bottom: var(--fs-2); }
-.bb-node { display: flex; align-items: center; gap: 4px; }
+/* Sticky, full-height account panel — ONE page scrollbar overall (no nested inner scroll). The panel
+   sticks to the top and, if the chart is taller than the viewport, the PAGE scrolls, not an inner bar. */
+.bb-picker { padding: var(--fs-4); position: sticky; top: 12px; align-self: start; max-height: calc(100vh - 96px); display: flex; flex-direction: column; }
+.bb-ledger { padding: 0; overflow: visible; }
+.bb-tree { display: flex; flex-direction: column; min-height: 0; }
+.bb-tree-scroll { margin-top: var(--fs-2); overflow-y: auto; min-height: 0; }   /* scrolls only the account list, only if it overflows the sticky panel — the ledger itself uses the page scrollbar */
+.bb-search { height: 34px; margin-bottom: var(--fs-2); flex: none; }
+.bb-node { display: flex; align-items: flex-start; gap: 4px; }
 .bb-node.lvl-1 { padding-left: 14px; } .bb-node.lvl-2 { padding-left: 28px; }
-.bb-caret { display: inline-flex; width: 18px; height: 22px; align-items: center; justify-content: center; border: none; background: none; color: var(--text-faint); cursor: pointer; transition: transform .12s; }
+.bb-caret { display: inline-flex; width: 18px; height: 26px; align-items: center; justify-content: center; border: none; background: none; color: var(--text-faint); cursor: pointer; transition: transform .12s; flex: none; }
 .bb-caret.open { transform: rotate(90deg); }
-.bb-caret-spacer { width: 18px; display: inline-block; }
-.bb-head { font-size: 12.5px; font-weight: 800; color: var(--text-mut); padding: 5px 4px; }
+.bb-caret-spacer { width: 18px; display: inline-block; flex: none; }
+.bb-head { font-size: 12.5px; font-weight: 800; color: var(--text-mut); padding: 6px 4px; line-height: 1.35; }
 .bb-head b, .bb-acct b { color: var(--text-faint); font-weight: 700; font-size: 11px; margin-right: 5px; }
-.bb-acct { display: block; width: 100%; text-align: left; border: none; background: none; font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; cursor: pointer; color: var(--text); }
+.bb-acct { display: block; width: 100%; text-align: left; border: none; background: none; font: inherit; font-size: 13px; line-height: 1.35; padding: 7px 8px; border-radius: 8px; cursor: pointer; color: var(--text); }
 .bb-acct:hover { background: var(--card-soft); }
 .bb-acct.on { background: var(--green-800); color: #fff; } .bb-acct.on b { color: rgba(255,255,255,.7); }
 .bb-table .fin-th, .bb-table .fin-td { padding-left: var(--fs-4); }
+
+/* One compact title block: the selected account is the heading (the topbar already says "Buku Besar"). */
+.bb-title { font-family: 'Poppins'; font-size: 19px; font-weight: 800; line-height: 1.1; display: flex; align-items: baseline; gap: 8px; }
+.bb-title-code { font-size: 13px; font-weight: 700; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.bb-ctx { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bb-ctx-answer { color: var(--text-mut); }
+.bb-ctx-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-faint); display: inline-block; opacity: .6; }
+
+/* Journal handle (ref, else short id) as a muted monospace chip — the ledger's main tracing column. */
+.bb-jchip { font-size: 11.5px; color: var(--text-mut); font-variant-numeric: tabular-nums; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+/* Description cell: normal-weight text, then the source type+id as a SEPARATE muted monospace chip. */
+.bb-cell-desc { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.bb-cell-desc .fin-td-desc { display: inline; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bb-srcchip { flex: none; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
+.bb-cell-date { display: none; }   /* date lives in the group separator; shown only in mobile cards */
+.fin-dense-compact .bb-srcchip { display: none; }   /* Padat: drop the source chip, the Jurnal column carries the handle */
+
+/* Date group separator — one subtle row per day instead of repeating the date on every line. */
+.bb-datesep td { padding: 6px var(--fs-4) 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); background: var(--card-soft); border-bottom: 1px solid var(--border-soft); border-top: 1px solid var(--border-soft); }
+.fin-dense-compact .bb-datesep td { padding: 3px var(--fs-4); }
+
+/* Running balance — the most important column: medium weight + a subtle left rule (ledger + trial balance). */
+.fin-table .bb-saldo, .fin-table th.bb-saldo { font-weight: 600; border-left: 1px solid var(--border-soft); }
+/* Opening-balance row pinned under the header so it stays visible while scrolling. */
+.bb-table .fin-trow.bb-open td { position: sticky; top: calc(var(--fin-stick, 0px) + 36px); z-index: 5; background: var(--card-soft); }
+/* Muted em-dash for the empty side of a debit/credit pair, aligned to the money column. */
+.fin-dash { color: var(--text-faint); }
+
 .bb-ref { font-size: 11.5px; color: var(--text-mut); font-variant-numeric: tabular-nums; }
 .acct-src { margin-top: var(--fs-3); font-size: 12px; color: var(--text-mut); }
 .acct-src b { color: var(--green-800); }
-@media (max-width: 1024px) { .bb-layout { grid-template-columns: 1fr; } .bb-picker { position: static; } .bb-tree-scroll { max-height: 40vh; } }
+@media (max-width: 1024px) { .bb-layout { grid-template-columns: 1fr; } .bb-picker { position: static; max-height: none; } .bb-tree-scroll { max-height: 40vh; } }
+/* Mobile cards (<768px): the date column is hidden in the table, so surface it inside each card, and
+   drop the desktop-only sticky opening row + saldo left-rule (each row is now its own card). */
+@media (max-width: 767px) {
+  .bb-cell-date { display: block; font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+  .fin-table.fin-cards .bb-datesep { display: none; }
+  .bb-cell-desc { flex-wrap: wrap; }
+  .bb-table .fin-trow.bb-open td { position: static; }
+  .fin-table.fin-cards .bb-saldo { border-left: none; }
+}
 
 /* ── Rekonsiliasi ── */
 .rc-stmt { padding: 6px 12px !important; width: 180px; } .rc-stmt input { font-size: 14px; }
@@ -4237,7 +4280,7 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .rc-panels { display: grid; grid-template-columns: 1fr 1fr; gap: var(--fs-4); }
 .rc-panel { padding: var(--fs-3) var(--fs-4); }
 .rc-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--fs-2); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); padding-bottom: var(--fs-2); border-bottom: 1px solid var(--border); margin-bottom: var(--fs-2); }
-.rc-list { display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto; }
+.rc-list { display: flex; flex-direction: column; }   /* no inner max-height/scroll — the page owns the one scrollbar (was max-height:52vh → three nested scrollbars) */
 .rc-row { display: grid; grid-template-columns: auto 82px 1fr auto auto; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
 .rc-panel .rc-row { grid-template-columns: auto 82px 1fr auto auto; }
 .rc-row.cleared, .rc-row.has-suggest, .rc-row.rc-srow { grid-template-columns: 82px 1fr auto auto; }   /* statement rows have no checkbox → 4 cols, always (fixes the no-suggestion misalignment) */

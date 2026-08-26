@@ -804,10 +804,12 @@ async function generalLedger({ code, dateFrom, dateTo, businessUnitId, fleetId, 
   const openLines = dateFrom ? await prisma.journalLine.findMany({ where: andScope({ chartAccountId: acct.id, ...scope, journalEntry: { date: { lt: dateFrom } } }, user), select: { debit: true, credit: true } }) : [];
   const opening = openLines.reduce((s, l) => s + (Number(l.debit) - Number(l.credit)), 0) * sign;
   const dw = {}; if (dateFrom) dw.gte = dateFrom; if (dateTo) dw.lte = dateTo;
-  const lines = await prisma.journalLine.findMany({ where: andScope({ chartAccountId: acct.id, ...scope, ...(Object.keys(dw).length ? { journalEntry: { date: dw } } : {}) }, user), include: { journalEntry: { select: { date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
+  const lines = await prisma.journalLine.findMany({ where: andScope({ chartAccountId: acct.id, ...scope, ...(Object.keys(dw).length ? { journalEntry: { date: dw } } : {}) }, user), include: { journalEntry: { select: { id: true, date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
   lines.sort((a, b) => (a.journalEntry.date || '').localeCompare(b.journalEntry.date || '') || a.id.localeCompare(b.id));
   let bal = opening;
-  const rows = lines.map((l) => { const dr = Number(l.debit), cr = Number(l.credit); bal += (dr - cr) * sign; return { date: l.journalEntry.date, ref: l.journalEntry.ref, description: l.journalEntry.description, sourceType: l.journalEntry.sourceType, sourceId: l.journalEntry.sourceId, debit: dr, credit: cr, balance: bal }; });
+  // journalId is the always-present tracing handle — the Buku Besar "Jurnal" column shows ref when the
+  // source set one, else the short journal id (a ledger must never render a permanently empty column).
+  const rows = lines.map((l) => { const dr = Number(l.debit), cr = Number(l.credit); bal += (dr - cr) * sign; return { date: l.journalEntry.date, journalId: l.journalEntry.id, ref: l.journalEntry.ref, description: l.journalEntry.description, sourceType: l.journalEntry.sourceType, sourceId: l.journalEntry.sourceId, debit: dr, credit: cr, balance: bal }; });
   return { account: { code: acct.code, name: acct.name, type: acct.type }, opening, rows, closing: bal };
 }
 
