@@ -336,7 +336,7 @@
             {code && led.state === 'error' && <ErrorCard onRetry={led.reload} />}
             {code && led.state === 'ready' && data && (
               <div className={`fin-tablewrap fin-dense-${dense}`}>
-                <table className="fin-table bb-table">
+                <table className="fin-table bb-table fin-cards">
                   <colgroup><col style={{ width: '104px' }} /><col style={{ width: '120px' }} /><col /><col style={{ width: '124px' }} /><col style={{ width: '124px' }} /><col style={{ width: '140px' }} /></colgroup>
                   <thead><tr>
                     <th className="fin-th">{trA('ms.date')}</th><th className="fin-th">{trA('acct.journalNo')}</th><th className="fin-th">{trA('ms.desc')}</th>
@@ -346,12 +346,12 @@
                     <tr className="fin-trow subtotal"><td className="fin-td" colSpan={5}>{trA('acct.opening')} · {period.label || period.start}</td><td className="fin-td fin-r tnum">{money(data.opening)}</td></tr>
                     {shown.map((r, i) => (
                       <tr key={i} className="fin-trow clickable" tabIndex={0} onClick={() => setDrill(r)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setDrill(r)}>
-                        <td className="fin-td tnum">{r.date}</td>
-                        <td className="fin-td"><span className="bb-ref tnum">{r.ref || '—'}</span></td>
-                        <td className="fin-td"><span className="fin-td-desc">{r.description || '—'}</span><span className="fin-td-sub">{r.sourceType}{r.sourceId ? ' · ' + String(r.sourceId).slice(0, 8) : ''}</span></td>
-                        <td className="fin-td fin-r tnum">{r.debit ? money(r.debit) : ''}</td>
-                        <td className="fin-td fin-r tnum">{r.credit ? money(r.credit) : ''}</td>
-                        <td className="fin-td fin-r tnum">{money(r.balance)}</td>
+                        <td className="fin-td tnum" data-label={trA('ms.date')}>{r.date}</td>
+                        <td className="fin-td" data-label={trA('acct.journalNo')}><span className="bb-ref tnum">{r.ref || '—'}</span></td>
+                        <td className="fin-td" data-label={trA('ms.desc')}><span className="fin-td-desc">{r.description || '—'}</span><span className="fin-td-sub">{r.sourceType}{r.sourceId ? ' · ' + String(r.sourceId).slice(0, 8) : ''}</span></td>
+                        <td className="fin-td fin-r tnum" data-label={trA('je.debit')}>{r.debit ? money(r.debit) : ''}</td>
+                        <td className="fin-td fin-r tnum" data-label={trA('je.credit')}>{r.credit ? money(r.credit) : ''}</td>
+                        <td className="fin-td fin-r tnum" data-label={trA('acct.runningBal')}>{money(r.balance)}</td>
                       </tr>
                     ))}
                     {rows.length === 0 && <tr><td className="fin-td" colSpan={6} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: 24 }}>{trA('acct.noMovement')}</td></tr>}
@@ -1826,5 +1826,56 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen, PayrollAccrualScreen, BalanceSheetScreen, IncomeStatementScreen };
+  // ── NERACA SALDO (trial balance / all-accounts general-ledger summary) — every account with its debit,
+  // credit and balance straight from the engine (trialBalance = accountBalances + totals + balanced), no
+  // client recompute. Cumulative-to-date; drill any account into its Buku Besar → journal → source. ──
+  function TrialBalanceScreen({ businessUnitId, fleetId, unitLabel }) {
+    const [period, setPeriod] = aS(defaultPeriod);
+    const [drill, setDrill] = aS(null);
+    const q = useAcct(() => ACC().trialBalance({ dateTo: period.end, businessUnitId, fleetId }), [period.end, businessUnitId, fleetId]);
+    const statusOf = usePeriodStatus();
+    if (q.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('fin.tbSoon')} />;
+    const d = q.data; const rows = (d && d.rows) || [];
+    const closedBadge = period.preset !== 'custom' && monthKey(period.start) === monthKey(period.end) ? statusOf(monthKey(period.end)) : null;
+    const doXLS = () => {
+      if (!d) return;
+      const M = [[trA('acct.code'), trA('acct.account'), trA('je.debit'), trA('je.credit'), trA('acct.runningBal')]];
+      rows.forEach((r) => M.push([r.code, r.name, r.debit || '', r.credit || '', r.balance]));
+      M.push([trA('ap.total'), '', d.totalDebit, d.totalCredit, '']);
+      exportXLS('Neraca Saldo', M, `AirRO-NeracaSaldo-${period.end}.xls`);
+    };
+    return (
+      <div className="screen-enter fin-scope" id="report-area">
+        <div className="fin-print-head print-only">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{IcA('Logo', { s: 30 })}<div><div style={{ fontSize: 19, fontWeight: 800 }}>{trA('t.finTB')}</div><div style={{ fontSize: 12.5, color: '#555' }}>{trA('bs.asOf')} {period.end}{unitLabel ? ' · ' + unitLabel : ''}</div></div></div>
+          <hr style={{ border: 'none', borderTop: '2px solid #065489', margin: '12px 0 4px' }} />
+        </div>
+        <div className="fin-head">
+          <div className="fin-head-titles"><h2>{trA('t.finTB')}</h2><div className="fin-head-scope">{IcA('IconCalendar', { s: 11 })} {trA('bs.asOf')} {period.end}{unitLabel ? ' · ' + unitLabel : ''}{closedBadge && closedBadge !== 'terbuka' ? <span> · <PeriodBadge status={closedBadge} /></span> : null}</div></div>
+          <div className="fin-head-actions"><PeriodBar value={period} onChange={setPeriod} /><button className="btn btn-ghost" disabled={!d} onClick={doXLS}>{IcA('IconDownload', { s: 16 })}<span className="fin-btn-lbl">XLSX</span></button><button className="btn btn-primary" disabled={!d} onClick={() => window.print()}>{IcA('IconReport', { s: 16 })}<span className="fin-btn-lbl">{trA('rep.print')}</span></button></div>
+        </div>
+        <div className="no-print"><ReportHeader answers={trA('rep.tbAnswers')} periodLabel={trA('bs.asOf') + ' ' + period.end} closed={closedBadge === 'terkunci' || closedBadge === 'tertutup'} /></div>
+        {q.state === 'loading' && <div className="card"><Skeleton n={12} /></div>}
+        {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
+        {q.state === 'ready' && d && (<>
+          <div className={`fin-bs-balance ${d.balanced ? 'ok' : 'bad'}`}>{d.balanced ? trA('tb.balancedOk') : trA('tb.balancedBad', { d: money(d.totalDebit - d.totalCredit) })}</div>
+          <div className="card"><div className="fin-tablewrap"><table className="fin-table fin-cards">
+            <thead><tr><th className="fin-th">{trA('acct.code')}</th><th className="fin-th">{trA('acct.account')}</th><th className="fin-th fin-r">{trA('je.debit')}</th><th className="fin-th fin-r">{trA('je.credit')}</th><th className="fin-th fin-r">{trA('acct.runningBal')}</th></tr></thead>
+            <tbody>{rows.map((r) => <tr key={r.code} className="fin-trow clickable" tabIndex={0} onClick={() => setDrill(r.code)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setDrill(r.code)}>
+              <td className="fin-td tnum" data-label={trA('acct.code')}>{r.code}</td>
+              <td className="fin-td" data-label={trA('acct.account')}>{r.name}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('je.debit')}>{r.debit ? money(r.debit) : ''}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('je.credit')}>{r.credit ? money(r.credit) : ''}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('acct.runningBal')}>{money(r.balance)}</td></tr>)}
+              {!rows.length && <tr><td className="fin-td" colSpan={5} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: 24 }}>{trA('acct.noMovement')}</td></tr>}
+            </tbody>
+            <tfoot><tr className="fin-trow grand"><td className="fin-td" colSpan={2} data-label="">{trA('ap.total')}</td><td className="fin-td fin-r tnum" data-label={trA('je.debit')}>{money(d.totalDebit)}</td><td className="fin-td fin-r tnum" data-label={trA('je.credit')}>{money(d.totalCredit)}</td><td className="fin-td" data-label="" /></tr></tfoot>
+          </table></div></div>
+        </>)}
+        {drill && <AcctDrill code={drill} dateTo={period.end} businessUnitId={businessUnitId} onClose={() => setDrill(null)} />}
+      </div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen, PayrollAccrualScreen, BalanceSheetScreen, IncomeStatementScreen, TrialBalanceScreen };
 })();

@@ -29,6 +29,7 @@ function navForRole(p, role) {
   if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-neraca', label: tr('nav.finBS'), icon: 'IconReport', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-labarugi', label: tr('nav.finIS'), icon: 'IconReport', grp: 'finance' });
+  if (p.reports) items.push({ id: 'acct-trialbalance', label: tr('nav.finTB'), icon: 'IconReport', grp: 'finance' });
   if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-payables', label: tr('nav.finAP'), icon: 'IconInvoice', grp: 'finance' });
   if (p.reports) items.push({ id: 'acct-subscriptions', label: tr('nav.finSubs'), icon: 'IconClock', grp: 'finance' });
@@ -1832,6 +1833,7 @@ function FApp() {
           )}
           {screen === 'acct-neraca' && p.reports && ACCT.BalanceSheetScreen && (<ACCT.BalanceSheetScreen unitLabel={activeUnitName} />)}
           {screen === 'acct-labarugi' && p.reports && ACCT.IncomeStatementScreen && (<ACCT.IncomeStatementScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} />)}
+          {screen === 'acct-trialbalance' && p.reports && ACCT.TrialBalanceScreen && (<ACCT.TrialBalanceScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} />)}
           {screen === 'reconcile' && p.reports && (<ACCT.ReconcileScreen accounts={accounts} />)}
           {screen === 'acct-mapping' && p.reports && (<ACCT.MappingScreen canEdit={user.role === 'owner' || user.role === 'gm'} />)}
           {screen === 'acct-backfill' && p.reports && (user.role === 'owner' || user.role === 'gm') && (<ACCT.BackfillScreen canRun={user.role === 'owner' || user.role === 'gm'} />)}
