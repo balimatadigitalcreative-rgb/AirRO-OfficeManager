@@ -636,18 +636,18 @@
               ? <div className="fin-empty-s" style={{ padding: 18 }}>{trA('tp.noneClosed')}</div>
               : (
                 <div className="fin-tablewrap">
-                  <table className="fin-table">
+                  <table className="fin-table fin-cards">
                     <colgroup><col style={{ width: '110px' }} /><col style={{ width: '110px' }} /><col /><col style={{ width: '150px' }} /><col style={{ width: '120px' }} /></colgroup>
                     <thead><tr><th className="fin-th">{trA('tp.month')}</th><th className="fin-th">{trA('tp.status')}</th><th className="fin-th">{trA('tp.closedBy')}</th><th className="fin-th">{trA('tp.closedAt')}</th><th className="fin-th fin-r">{trA('tp.action')}</th></tr></thead>
                     <tbody>
                       {periods.map((p) => (
                         <React.Fragment key={p.periodKey}>
                           <tr className="fin-trow">
-                            <td className="fin-td tnum">{p.periodKey}</td>
-                            <td className="fin-td"><PeriodBadge status={p.status} /></td>
-                            <td className="fin-td">{p.closedByName || '—'}{p.reopenedByName ? <span className="fin-td-sub">{trA('tp.reopenedBy', { n: p.reopenedByName })}</span> : null}</td>
-                            <td className="fin-td tnum">{p.closedAt ? String(p.closedAt).slice(0, 10) : '—'}</td>
-                            <td className="fin-td fin-r">
+                            <td className="fin-td tnum" data-label={trA('tp.month')}>{p.periodKey}</td>
+                            <td className="fin-td" data-label={trA('tp.status')}><PeriodBadge status={p.status} /></td>
+                            <td className="fin-td" data-label={trA('tp.closedBy')}>{p.closedByName || '—'}{p.reopenedByName ? <span className="fin-td-sub">{trA('tp.reopenedBy', { n: p.reopenedByName })}</span> : null}</td>
+                            <td className="fin-td tnum" data-label={trA('tp.closedAt')}>{p.closedAt ? String(p.closedAt).slice(0, 10) : '—'}</td>
+                            <td className="fin-td fin-r" data-label={trA('tp.action')}>
                               {p.status !== 'terbuka' && p.status !== 'terkunci' && isOwner && <button className="btn btn-ghost btn-xs" onClick={() => { setReopenFor(reopenFor === p.periodKey ? null : p.periodKey); setReason(''); setErr(''); }}>{trA('tp.reopen')}</button>}
                             </td>
                           </tr>
@@ -704,9 +704,9 @@
       const srcCls = it.source === 'none' ? 'bad' : (it.source === 'custom' ? 'custom' : 'default');
       return (
         <tr key={key} className={`fin-trow map-row map-${srcCls}`}>
-          <td className="fin-td"><b>{it.category}</b>{it.count ? <span className="fin-td-sub">{trA('map.entriesN', { n: it.count })}</span> : null}</td>
-          <td className="fin-td"><span className={`map-type map-type-${it.type}`}>{trA(it.type === 'income' ? 'map.income' : 'map.expense')}</span></td>
-          <td className="fin-td">
+          <td className="fin-td" data-label={trA('map.colCat')}><b>{it.category}</b>{it.count ? <span className="fin-td-sub">{trA('map.entriesN', { n: it.count })}</span> : null}</td>
+          <td className="fin-td" data-label={trA('map.colType')}><span className={`map-type map-type-${it.type}`}>{trA(it.type === 'income' ? 'map.income' : 'map.expense')}</span></td>
+          <td className="fin-td" data-label={trA('map.colAccount')}>
             {canEdit ? (
               <select className="fld map-pick" value={it.source === 'custom' ? it.code : ''} disabled={busy === key}
                 onChange={(e) => apply(it.category, it.type, e.target.value)} aria-label={trA('map.pickAccount')}>
@@ -715,7 +715,7 @@
               </select>
             ) : (<span className="tnum">{it.code ? it.code + ' · ' + (it.name || '') : trA('map.none')}</span>)}
           </td>
-          <td className="fin-td">
+          <td className="fin-td" data-label={trA('map.colSource')}>
             {it.source === 'none' ? <span className="map-badge bad">{IcA('IconWarn', { s: 12 })} {trA('map.unmapped')}</span>
               : it.source === 'custom' ? <span className="map-badge custom">{trA('map.custom')}</span>
               : <span className="map-badge default">{trA('map.builtin')}</span>}
@@ -736,7 +736,7 @@
             : (<>
               {err && <div className="add-err" style={{ margin: '4px 0 10px' }}><IconClose s={14} />{err}</div>}
               <div className="fin-tablewrap">
-                <table className="fin-table">
+                <table className="fin-table fin-cards">
                   <colgroup><col /><col style={{ width: '110px' }} /><col style={{ width: '260px' }} /><col style={{ width: '130px' }} /><col style={{ width: '90px' }} /></colgroup>
                   <thead><tr><th className="fin-th">{trA('map.colCat')}</th><th className="fin-th">{trA('map.colType')}</th><th className="fin-th">{trA('map.colAccount')}</th><th className="fin-th">{trA('map.colSource')}</th><th className="fin-th" /></tr></thead>
                   <tbody>{items.map(Row)}</tbody>
@@ -1064,20 +1064,22 @@
         <div className="card">
           <div className="ac-sec-head"><div className="sec-title" style={{ fontSize: 15 }}>{trA('ac.prepaidTitle')}</div><div className="ac-sec-act">{canRun && <button className="btn btn-ghost btn-sm" onClick={() => setSForm({ chartCode: '', total: '', months: 12, startDate: todayISO(), description: '' })}>{IcA('IconPlus', { s: 14 }) || '+'}{trA('ac.newPrepaid')}</button>}{canRun && pendingAmort && <button className="btn btn-primary btn-sm" disabled={busy === 'amort'} onClick={runAmort}>{IcA('IconRefresh', { s: 14 })}{busy === 'amort' ? trA('ac.running') : trA('ac.runAmort')}</button>}</div></div>
           {schedQ.state === 'loading' && <Skeleton n={4} />}
+          {schedQ.state === 'error' && <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={schedQ.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>}
           {schedQ.state === 'ready' && (scheds.length === 0
             ? <EmptyState title={trA('ac.prepaidEmpty')} body={trA('ac.prepaidEmptyB')} />
-            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('ac.colWhat')}</th><th className="fin-th">{trA('ac.colStart')}</th><th className="fin-th fin-r">{trA('ac.colMonthly')}</th><th className="fin-th fin-r">{trA('ac.colTotal')}</th><th className="fin-th">{trA('ac.colProgress')}</th></tr></thead>
-              <tbody>{scheds.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">{s.chartCode} · {s.description || ''}</td><td className="fin-td tnum">{s.startDate}</td><td className="fin-td fin-r tnum">{money(s.monthlyAmount)}</td><td className="fin-td fin-r tnum">{money(s.total)}</td><td className="fin-td"><span className="ac-prog">{s.postedMonths}/{s.months}</span>{s.remaining === 0 ? <span className="ap-badge ok">{trA('ac.done')}</span> : null}</td></tr>)}</tbody></table></div>)}
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('ac.colWhat')}</th><th className="fin-th">{trA('ac.colStart')}</th><th className="fin-th fin-r">{trA('ac.colMonthly')}</th><th className="fin-th fin-r">{trA('ac.colTotal')}</th><th className="fin-th">{trA('ac.colProgress')}</th></tr></thead>
+              <tbody>{scheds.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td" data-label={trA('ac.colWhat')}>{s.chartCode} · {s.description || ''}</td><td className="fin-td tnum" data-label={trA('ac.colStart')}>{s.startDate}</td><td className="fin-td fin-r tnum" data-label={trA('ac.colMonthly')}>{money(s.monthlyAmount)}</td><td className="fin-td fin-r tnum" data-label={trA('ac.colTotal')}>{money(s.total)}</td><td className="fin-td" data-label={trA('ac.colProgress')}><span className="ac-prog">{s.postedMonths}/{s.months}</span>{s.remaining === 0 ? <span className="ap-badge ok">{trA('ac.done')}</span> : null}</td></tr>)}</tbody></table></div>)}
         </div>
 
         {/* ACCRUED expenses */}
         <div className="card" style={{ marginTop: 14 }}>
           <div className="ac-sec-head"><div className="sec-title" style={{ fontSize: 15 }}>{trA('ac.accruedTitle')}</div>{canRun && <button className="btn btn-ghost btn-sm" onClick={() => setAForm({ chartCode: '', amount: '', date: todayISO(), reverseDate: '', description: '' })}>{IcA('IconPlus', { s: 14 }) || '+'}{trA('ac.newAccrued')}</button>}</div>
           {accrualsQ.state === 'loading' && <Skeleton n={3} />}
+          {accrualsQ.state === 'error' && <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={accrualsQ.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>}
           {accrualsQ.state === 'ready' && (accruals.length === 0
             ? <EmptyState title={trA('ac.accruedEmpty')} body={trA('ac.accruedEmptyB')} />
-            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('ac.colDate')}</th><th className="fin-th">{trA('ac.colWhat')}</th><th className="fin-th">{trA('ac.colReverse')}</th><th className="fin-th fin-r">{trA('ac.colAmount')}</th><th className="fin-th" /></tr></thead>
-              <tbody>{accruals.map((a) => <tr key={a.id} className="fin-trow"><td className="fin-td tnum">{a.date}</td><td className="fin-td">{a.chartCode} · {a.description || ''}</td><td className="fin-td tnum">{a.reverseDate}</td><td className="fin-td fin-r tnum">{money(a.amount)}</td><td className="fin-td fin-r">{canRun && <button className="btn btn-ghost btn-xs danger" onClick={() => voidAccrual(a.id)}>{trA('ac.void')}</button>}</td></tr>)}</tbody></table></div>)}
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('ac.colDate')}</th><th className="fin-th">{trA('ac.colWhat')}</th><th className="fin-th">{trA('ac.colReverse')}</th><th className="fin-th fin-r">{trA('ac.colAmount')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{accruals.map((a) => <tr key={a.id} className="fin-trow"><td className="fin-td tnum" data-label={trA('ac.colDate')}>{a.date}</td><td className="fin-td" data-label={trA('ac.colWhat')}>{a.chartCode} · {a.description || ''}</td><td className="fin-td tnum" data-label={trA('ac.colReverse')}>{a.reverseDate}</td><td className="fin-td fin-r tnum" data-label={trA('ac.colAmount')}>{money(a.amount)}</td><td className="fin-td fin-r">{canRun && <button className="btn btn-ghost btn-xs danger" onClick={() => voidAccrual(a.id)}>{trA('ac.void')}</button>}</td></tr>)}</tbody></table></div>)}
         </div>
 
         {aForm && <AccrualForm form={aForm} setForm={setAForm} onDone={() => { setAForm(null); accrualsQ.reload(); }} />}
@@ -1142,6 +1144,7 @@
         {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
         <div className="card">
           {q.state === 'loading' && <Skeleton n={5} />}
+          {q.state === 'error' && <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={q.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>}
           {q.state === 'ready' && (subs.length === 0
             ? <EmptyState title={trA('sb.emptyT')} body={trA('sb.emptyB')} actionLabel={canRun ? trA('sb.new') : null} onAction={canRun ? () => setForm({ supplierId: '', name: '', chartCode: '', amount: '', tax: '', cadence: 'monthly', interval: 1, startDate: todayISO(), endDate: '', dueDays: 0, remindDays: 3, autoIssue: true }) : null} />
             : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('sb.colName')}</th><th className="fin-th">{trA('sb.colCadence')}</th><th className="fin-th fin-r">{trA('sb.colAmount')}</th><th className="fin-th">{trA('sb.colNext')}</th><th className="fin-th">{trA('sb.colStatus')}</th><th className="fin-th" /></tr></thead>
@@ -1309,8 +1312,8 @@
               </div>
             )}
             <div className="sec-title" style={{ fontSize: 13, marginBottom: 6 }}>{trA('as.schedule')}</div>
-            <div className="fin-tablewrap" style={{ maxHeight: 260, overflow: 'auto' }}><table className="fin-table"><thead><tr><th className="fin-th">{trA('as.period')}</th><th className="fin-th fin-r">{trA('as.charge')}</th><th className="fin-th fin-r">{trA('as.colAccum')}</th><th className="fin-th fin-r">{trA('as.colBook')}</th><th className="fin-th" /></tr></thead>
-              <tbody>{(a.schedule || []).map((r) => <tr key={r.period} className="fin-trow"><td className="fin-td">{r.period}</td><td className="fin-td fin-r tnum">{money(r.charge)}</td><td className="fin-td fin-r tnum">{money(r.accumulated)}</td><td className="fin-td fin-r tnum">{money(r.bookValue)}</td><td className="fin-td">{r.posted ? <span className="ap-badge ok">{trA('as.postedBadge')}</span> : <span className="ap-badge default">{trA('as.future')}</span>}</td></tr>)}</tbody>
+            <div className="fin-tablewrap" style={{ maxHeight: 260, overflow: 'auto' }}><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('as.period')}</th><th className="fin-th fin-r">{trA('as.charge')}</th><th className="fin-th fin-r">{trA('as.colAccum')}</th><th className="fin-th fin-r">{trA('as.colBook')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{(a.schedule || []).map((r) => <tr key={r.period} className="fin-trow"><td className="fin-td" data-label={trA('as.period')}>{r.period}</td><td className="fin-td fin-r tnum" data-label={trA('as.charge')}>{money(r.charge)}</td><td className="fin-td fin-r tnum" data-label={trA('as.colAccum')}>{money(r.accumulated)}</td><td className="fin-td fin-r tnum" data-label={trA('as.colBook')}>{money(r.bookValue)}</td><td className="fin-td" data-label={trA('tp.status')}>{r.posted ? <span className="ap-badge ok">{trA('as.postedBadge')}</span> : <span className="ap-badge default">{trA('as.future')}</span>}</td></tr>)}</tbody>
             </table></div>
             {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
             {canRun && a.status === 'aktif' && !disp && <button className="btn btn-ghost btn-sm danger" style={{ marginTop: 10 }} onClick={() => setDisp({ date: todayISO(), proceeds: '', status: 'dijual' })}>{trA('as.dispose')}</button>}
@@ -1351,8 +1354,8 @@
           {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
           {preview && <>
             <div className="dist-hint" style={{ margin: '10px 0' }}>{trA('as.previewSummary', { ok: preview.validCount, bad: preview.invalidCount, total: preview.total })}</div>
-            <div className="fin-tablewrap" style={{ maxHeight: 300, overflow: 'auto' }}><table className="fin-table"><thead><tr><th className="fin-th">#</th><th className="fin-th">{trA('as.colCode')}</th><th className="fin-th">{trA('as.colName')}</th><th className="fin-th fin-r">{trA('as.colCost')}</th><th className="fin-th">{trA('as.status')}</th></tr></thead>
-              <tbody>{preview.rows.map((r) => <tr key={r.srcRow} className="fin-trow"><td className="fin-td">{r.srcRow}</td><td className="fin-td">{r.code || '—'}</td><td className="fin-td">{r.name || '—'}</td><td className="fin-td fin-r tnum">{money(r.acquisitionCost)}</td><td className="fin-td">{r.valid ? <span className="ap-badge ok">OK</span> : <span className="ap-badge bad" title={r.errors.join(', ')}>{r.errors[0]}</span>}</td></tr>)}</tbody>
+            <div className="fin-tablewrap" style={{ maxHeight: 300, overflow: 'auto' }}><table className="fin-table fin-cards"><thead><tr><th className="fin-th">#</th><th className="fin-th">{trA('as.colCode')}</th><th className="fin-th">{trA('as.colName')}</th><th className="fin-th fin-r">{trA('as.colCost')}</th><th className="fin-th">{trA('as.status')}</th></tr></thead>
+              <tbody>{preview.rows.map((r) => <tr key={r.srcRow} className="fin-trow"><td className="fin-td" data-label="#">{r.srcRow}</td><td className="fin-td" data-label={trA('as.colCode')}>{r.code || '—'}</td><td className="fin-td" data-label={trA('as.colName')}>{r.name || '—'}</td><td className="fin-td fin-r tnum" data-label={trA('as.colCost')}>{money(r.acquisitionCost)}</td><td className="fin-td" data-label={trA('as.status')}>{r.valid ? <span className="ap-badge ok">OK</span> : <span className="ap-badge bad" title={r.errors.join(', ')}>{r.errors[0]}</span>}</td></tr>)}</tbody>
             </table></div>
           </>}
         </div>
@@ -1395,11 +1398,12 @@
         {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
         <div className="card">
           {q.state === 'loading' && <Skeleton n={4} />}
+          {q.state === 'error' && <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={q.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>}
           {q.state === 'ready' && (data.length === 0
             ? <EmptyState title={trA('pc.emptyStdT')} body={trA('pc.emptyStdB')} icon="IconInvoice" actionLabel={canRun ? trA('pc.newStd') : null} onAction={canRun ? () => setForm(true) : null} />
-            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">v</th><th className="fin-th">{trA('pc.effFrom')}</th><th className="fin-th fin-r">{trA('pc.normalVol')}</th><th className="fin-th fin-r">{trA('pc.perUnit')}</th><th className="fin-th">{trA('pc.status')}</th><th className="fin-th" /></tr></thead>
-              <tbody>{data.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td">v{s.version}</td><td className="fin-td">{s.effectiveFrom}{s.effectiveTo ? ' → ' + s.effectiveTo : ''}</td><td className="fin-td fin-r tnum">{s.normalVolume}</td><td className="fin-td fin-r tnum">{money(s.perUnit)}</td>
-                <td className="fin-td"><span className={`ap-badge ${s.status === 'aktif' ? 'ok' : s.status === 'draft' ? 'warn' : 'default'}`}>{trA('pc.st_' + s.status)}</span></td>
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">v</th><th className="fin-th">{trA('pc.effFrom')}</th><th className="fin-th fin-r">{trA('pc.normalVol')}</th><th className="fin-th fin-r">{trA('pc.perUnit')}</th><th className="fin-th">{trA('pc.status')}</th><th className="fin-th" /></tr></thead>
+              <tbody>{data.map((s) => <tr key={s.id} className="fin-trow"><td className="fin-td" data-label="v">v{s.version}</td><td className="fin-td" data-label={trA('pc.effFrom')}>{s.effectiveFrom}{s.effectiveTo ? ' → ' + s.effectiveTo : ''}</td><td className="fin-td fin-r tnum" data-label={trA('pc.normalVol')}>{s.normalVolume}</td><td className="fin-td fin-r tnum" data-label={trA('pc.perUnit')}>{money(s.perUnit)}</td>
+                <td className="fin-td" data-label={trA('pc.status')}><span className={`ap-badge ${s.status === 'aktif' ? 'ok' : s.status === 'draft' ? 'warn' : 'default'}`}>{trA('pc.st_' + s.status)}</span></td>
                 <td className="fin-td fin-r">{canRun && s.status === 'draft' && <button className="btn btn-ghost btn-xs" disabled={!!busy} onClick={() => activate(s.id)}>{IcA('IconLock', { s: 12 })}{trA('pc.activate')}</button>}</td></tr>)}</tbody>
             </table></div>)}
         </div>
@@ -1452,6 +1456,7 @@
         {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
         <div className="card">
           {q.state === 'loading' && <Skeleton n={4} />}
+          {q.state === 'error' && <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={q.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>}
           {q.state === 'ready' && (data.length === 0
             ? <EmptyState title={trA('pc.emptyRunT')} body={trA('pc.emptyRunB')} icon="IconRefresh" actionLabel={canRun ? trA('pc.newRun') : null} onAction={canRun ? () => setForm(true) : null} />
             : <div className="pc-runs">{data.map((r) => (
@@ -1572,12 +1577,13 @@
         {err && <div className="add-err" style={{ marginBottom: 10 }}><IconClose s={14} />{err}</div>}
         <div className="card">
           {q.state === 'loading' && <Skeleton n={4} />}
+          {q.state === 'error' && <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={q.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>}
           {q.state === 'ready' && (data.length === 0
             ? <EmptyState title={trA('py.emptyT')} body={trA('py.emptyB')} icon="IconCustomers" actionLabel={canRun ? trA('py.new') : null} onAction={canRun ? () => setForm(true) : null} />
-            : <div className="fin-tablewrap"><table className="fin-table"><thead><tr><th className="fin-th">{trA('py.period')}</th><th className="fin-th fin-r">{trA('py.staff')}</th><th className="fin-th fin-r">{trA('py.net')}</th><th className="fin-th">{trA('py.status')}</th><th className="fin-th" /></tr></thead>
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('py.period')}</th><th className="fin-th fin-r">{trA('py.staff')}</th><th className="fin-th fin-r">{trA('py.net')}</th><th className="fin-th">{trA('py.status')}</th><th className="fin-th" /></tr></thead>
               <tbody>{data.map((p) => <tr key={p.id} className="fin-trow" style={{ cursor: 'pointer' }} onClick={() => setOpen(p.id)}>
-                <td className="fin-td">{p.period}</td><td className="fin-td fin-r tnum">{p.totals.count}</td><td className="fin-td fin-r tnum">{money(p.totals.net)}</td>
-                <td className="fin-td"><span className={`ap-badge ${PST[p.status] || 'default'}`}>{trA('py.st_' + p.status)}</span>{p.selfApproved ? <span className="cr-selfbadge" style={{ marginLeft: 6 }}>{trA('cr.selfApprovedBadge')}</span> : ''}</td>
+                <td className="fin-td" data-label={trA('py.period')}>{p.period}</td><td className="fin-td fin-r tnum" data-label={trA('py.staff')}>{p.totals.count}</td><td className="fin-td fin-r tnum" data-label={trA('py.net')}>{money(p.totals.net)}</td>
+                <td className="fin-td" data-label={trA('py.status')}><span className={`ap-badge ${PST[p.status] || 'default'}`}>{trA('py.st_' + p.status)}</span>{p.selfApproved ? <span className="cr-selfbadge" style={{ marginLeft: 6 }}>{trA('cr.selfApprovedBadge')}</span> : ''}</td>
                 <td className="fin-td fin-r">{IcA('IconCaret', { s: 15 })}</td></tr>)}</tbody>
             </table></div>)}
         </div>
@@ -1619,18 +1625,20 @@
           <div><div className="dist-cd-slbl">{trA('py.splitOpex')}</div><div className="dist-cd-sval">{money(t.opexGross || 0)}</div></div>
         </div>
         <div className="card">
-          {q.state !== 'ready' ? <Skeleton n={6} /> : <div className="fin-tablewrap"><table className="fin-table"><thead><tr>
+          {q.state === 'loading' ? <Skeleton n={6} />
+            : q.state === 'error' ? <div className="fin-error" style={{ padding: 18 }}><span className="fin-error-ic">{IcA('IconClose', { s: 20 })}</span><div className="fin-empty-t">{trA('rep.nodata')}</div><button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={q.reload}>{IcA('IconRefresh', { s: 15 })}{trA('acct.retry')}</button></div>
+            : <div className="fin-tablewrap"><table className="fin-table fin-cards"><thead><tr>
             <th className="fin-th">{trA('py.employee')}</th><th className="fin-th fin-r">{trA('py.basic')}</th><th className="fin-th fin-r">{trA('py.ot')}</th><th className="fin-th fin-r">{trA('py.bonus')}</th><th className="fin-th fin-r">{trA('py.allow')}</th><th className="fin-th fin-r">{trA('py.ded')}</th><th className="fin-th fin-r">{trA('py.cashbon')}</th><th className="fin-th fin-r">{trA('py.net')}</th><th className="fin-th">{trA('py.prod')}</th><th className="fin-th" /></tr></thead>
             <tbody>{(p.lines || []).map((l) => <tr key={l.id} className="fin-trow">
-              <td className="fin-td">{l.employeeName}</td>
-              <td className="fin-td fin-r tnum">{money(l.basicSalary)}</td>
-              <td className="fin-td fin-r tnum">{draft && canRun ? <input className="fld tnum py-inp" value={l.overtime || ''} onChange={(e) => edit(l.id, { overtime: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.overtime)}</td>
-              <td className="fin-td fin-r tnum">{draft && canRun ? <input className="fld tnum py-inp" value={l.bonus || ''} onChange={(e) => edit(l.id, { bonus: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.bonus)}</td>
-              <td className="fin-td fin-r tnum">{money(l.allowancesTotal)}</td>
-              <td className="fin-td fin-r tnum">{money(l.deductionsTotal)}</td>
-              <td className="fin-td fin-r tnum">{draft && canRun ? <input className="fld tnum py-inp" value={l.cashbonDeduction || ''} title={trA('py.outstanding', { amt: money(l.cashbonOutstanding || 0) })} onChange={(e) => edit(l.id, { cashbonDeduction: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.cashbonDeduction)}</td>
-              <td className="fin-td fin-r tnum"><b>{money(l.netPay)}</b></td>
-              <td className="fin-td">{draft && canRun ? <input type="checkbox" checked={l.isProduction} onChange={(e) => edit(l.id, { isProduction: e.target.checked })} /> : (l.isProduction ? <span className="ap-badge ok">COGS</span> : '—')}</td>
+              <td className="fin-td" data-label={trA('py.employee')}>{l.employeeName}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('py.basic')}>{money(l.basicSalary)}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('py.ot')}>{draft && canRun ? <input className="fld tnum py-inp" value={l.overtime || ''} onChange={(e) => edit(l.id, { overtime: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.overtime)}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('py.bonus')}>{draft && canRun ? <input className="fld tnum py-inp" value={l.bonus || ''} onChange={(e) => edit(l.id, { bonus: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.bonus)}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('py.allow')}>{money(l.allowancesTotal)}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('py.ded')}>{money(l.deductionsTotal)}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('py.cashbon')}>{draft && canRun ? <input className="fld tnum py-inp" value={l.cashbonDeduction || ''} title={trA('py.outstanding', { amt: money(l.cashbonOutstanding || 0) })} onChange={(e) => edit(l.id, { cashbonDeduction: +e.target.value.replace(/\D/g, '') || 0 })} /> : money(l.cashbonDeduction)}</td>
+              <td className="fin-td fin-r tnum" data-label={trA('py.net')}><b>{money(l.netPay)}</b></td>
+              <td className="fin-td" data-label={trA('py.prod')}>{draft && canRun ? <input type="checkbox" checked={l.isProduction} onChange={(e) => edit(l.id, { isProduction: e.target.checked })} /> : (l.isProduction ? <span className="ap-badge ok">COGS</span> : '—')}</td>
               <td className="fin-td fin-r"><button className="dist-link" onClick={() => setSlip(l)}>{trA('py.slip')}</button></td></tr>)}
             </tbody>
           </table></div>}
