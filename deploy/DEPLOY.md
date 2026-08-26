@@ -614,21 +614,66 @@ gunzip -c airro-YYYYMMDD-HHMMSS.db.gz > airro.db && sqlite3 airro.db '.tables'
 
 ### 4. Restore drill (prove backups are usable — touches nothing in production)
 ```bash
-bash deploy/restore-db.sh --drill            # newest local backup, into /tmp/restore-test.db
+bash deploy/restore-db.sh --drill                 # newest local backup
+bash deploy/restore-db.sh --drill <file.gz|.gpg>  # a specific archive (offsite .gpg decrypts first)
 ```
-Expected output (numbers should roughly match production):
+This is a **full restore-and-verify**, not just a gunzip check. It restores the backup into a
+**scratch database** (`~/airro-backups/restore-drill-scratch-<pid>.db`, named so `_db-guard`
+treats it as non-production and always removed on exit), then runs the exact two checks the
+deploy pipeline trusts — **against the restored copy**:
+
+1. `PRAGMA integrity_check` on the restored SQLite file (must be `ok`).
+2. `server/scripts/db-counts.js` on the scratch **and** on the live DB, and **diffs them**.
+3. `server/scripts/verify-invariants.js` on the scratch — all 10 cross-module accounting
+   invariants (trial balance, balance sheet, cash flow, AR/AP, gallon identity, journal integrity).
+
+Production is only ever **read** (one row count); it is never stopped or written.
+
+Expected output:
 ```
-==> DRILL — restoring '.../airro-YYYYMMDD-HHMMSS.db.gz' into /tmp/restore-test.db (production is NOT touched)
-==> Record counts in the restored copy:
+==> DRILL — restoring 'airro-YYYYMMDD-HHMMSS.db.gz' into scratch DB (production is NOT touched)
+    scratch: /root/airro-backups/restore-drill-scratch-4812.db
+    sqlite integrity_check: ok
+==> Quick record counts in the restored copy:
    User       7
    Entry      1284
-   Employee   19
-   Setoran    342
-✅ Drill OK — the backup gunzips cleanly and contains data. Nothing in production changed.
+   ...
+==> db-counts.js — restored copy vs production
+    restored : user=7 entry=1284 employee=19 setoran=342
+    production: user=7 entry=1284 employee=19 setoran=342
+    ✅ counts MATCH production (backup is a faithful snapshot)
+==> verify-invariants.js against the restored copy
+    ...
+    ✔ ALL 10 INVARIANTS HOLD
+    ✅ all invariants hold on the restored data
+==> Drill finished in 14s. Scratch DB removed; production untouched.
+✅ RESTORE DRILL PASSED — the newest backup restores, matches production, and verifies clean.
 ```
-Run this monthly. If the counts are 0 or the drill errors, your backups are not usable —
-fix it before you need them. (Compare against production:
-`sqlite3 server/prisma/prod.db 'SELECT COUNT(*) FROM "User";'`.)
+
+**How long it takes:** seconds. For a SQLite DB of the current size (~1–2 MB) the whole drill is
+**~10–30 s** — gunzip is instant, `db-counts` ~1 s, and `verify-invariants` (which replays every
+report through the app's own services) is the bulk. The script prints the exact elapsed on the
+last line each run, so you always have a current figure to plan around **under pressure**.
+
+**Reading the result:**
+- **Counts MATCH** → the backup is a faithful snapshot. **Counts DIFFER** is expected if writes
+  happened *after* the backup; only worry if a *recent* backup shows numbers **lower** than
+  production (data loss in the snapshot).
+- **Invariants FAIL / non-zero exit** → the backed-up data is internally inconsistent; the drill
+  exits non-zero so a cron/monitor catches it.
+
+**Requirements & caveats:**
+- Needs `sqlite3` on the VPS (`sudo apt-get install -y sqlite3`) for the integrity check and quick
+  counts; the two Node verifiers run regardless.
+- The backup's **schema must match the running code**. Drilling the *newest* backup right after a
+  deploy is always safe; to drill an **older** archive, check out the matching commit first (a
+  newer column the old snapshot lacks would otherwise error).
+- Run this **monthly**, and always **before** you'll need to rely on a restore (before a risky
+  migration, before an OS upgrade). Wire it to fail loudly:
+  ```bash
+  # 1st of the month, 03:00 — drill the newest backup; log, and flag on failure
+  0 3 1 * * /bin/bash /var/www/airrooffice/deploy/restore-db.sh --drill >> $HOME/airro-backups/drill.log 2>&1 || echo "$(date '+\%F \%T') RESTORE DRILL FAILED" >> $HOME/airro-backups/drill.log
+  ```
 
 ### 5. Monitoring
 Each run appends one line to `backup.log`:

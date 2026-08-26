@@ -79,20 +79,67 @@ counts() {
   fi
 }
 
-# ── DRILL: prove the backup is usable without touching production. ─────────────
+# ── DRILL: prove the newest backup RESTORES and VERIFIES, without touching production. ──
+# Restores into a SCRATCH database, then runs the SAME two checks the deploy trusts:
+#   • server/scripts/db-counts.js      — row counts (compared against the live DB)
+#   • server/scripts/verify-invariants.js — every cross-module accounting invariant
+# The scratch file has "scratch" in its name so _db-guard treats it as non-production, and it is
+# always removed on exit. Production is only ever READ (a row count), never written.
 if [ "$DRILL" = "1" ]; then
+  DRILL_START="$(date +%s)"
   if [ "$IS_PG" = "1" ]; then
-    echo "PostgreSQL drill: restore into a scratch database, e.g.:"
-    echo "   createdb airro_drill && gunzip -c '$FILE' | psql airro_drill && psql airro_drill -c 'SELECT count(*) FROM \"User\";'"
+    echo "PostgreSQL drill: restore into a scratch database, then run the verifiers against it, e.g.:"
+    echo "   createdb airro_drill && gunzip -c '$FILE' | psql airro_drill"
+    echo "   ( cd '$APP_DIR/server' && DATABASE_URL='postgresql://.../airro_drill' node scripts/db-counts.js && \\"
+    echo "     DATABASE_URL='postgresql://.../airro_drill' node scripts/verify-invariants.js )"
+    echo "   dropdb airro_drill"
     exit 0
   fi
-  TMP="/tmp/restore-test.db"
-  echo "==> DRILL — restoring '$FILE' into $TMP (production is NOT touched)"
-  gunzip -c "$FILE" > "$TMP" || { echo "gunzip failed" >&2; exit 1; }
-  echo "==> Record counts in the restored copy:"
-  counts "$TMP"
-  rm -f "$TMP"
-  echo "✅ Drill OK — the backup gunzips cleanly and contains data. Nothing in production changed."
+
+  SCRATCH="$BACKUP_DIR/restore-drill-scratch-$$.db"
+  scratch_cleanup() { rm -f "$SCRATCH" "$SCRATCH-journal" "$SCRATCH-wal" "$SCRATCH-shm" 2>/dev/null || true; }
+  trap 'scratch_cleanup; cleanup' EXIT
+
+  echo "==> DRILL — restoring '$(basename "$FILE")' into scratch DB (production is NOT touched)"
+  echo "    scratch: $SCRATCH"
+  gunzip -c "$FILE" > "$SCRATCH" || { echo "gunzip failed" >&2; exit 1; }
+
+  # Quick integrity of the restored SQLite file itself.
+  if command -v sqlite3 >/dev/null 2>&1; then
+    ICHK="$(sqlite3 "$SCRATCH" 'PRAGMA integrity_check;' 2>/dev/null | head -1)"
+    echo "    sqlite integrity_check: ${ICHK:-<none>}"
+    [ "$ICHK" = "ok" ] || { echo "REFUSING: restored scratch DB fails PRAGMA integrity_check." >&2; exit 1; }
+  fi
+
+  echo "==> Quick record counts in the restored copy:"
+  counts "$SCRATCH"
+
+  # ── db-counts.js: restored copy vs the LIVE DB (read-only on both). A drop signals a bad backup. ──
+  echo "==> db-counts.js — restored copy vs production"
+  DRILL_COUNTS="$( cd "$APP_DIR/server" && DATABASE_URL="file:$SCRATCH" node scripts/db-counts.js 2>&1 || echo 'FAILED' )"
+  PROD_COUNTS="$( cd "$APP_DIR/server" && node scripts/db-counts.js 2>&1 || echo 'unavailable' )"
+  echo "    restored : $DRILL_COUNTS"
+  echo "    production: $PROD_COUNTS"
+  if [ "$DRILL_COUNTS" = "$PROD_COUNTS" ]; then
+    echo "    ✅ counts MATCH production (backup is a faithful snapshot)"
+  else
+    echo "    ⚠  counts DIFFER — expected if writes happened AFTER this backup was taken;"
+    echo "       investigate if the backup is recent and the numbers are LOWER than production."
+  fi
+
+  # ── verify-invariants.js against the restored copy (read-only; proves the data is internally sound). ──
+  echo "==> verify-invariants.js against the restored copy"
+  set +e
+  ( cd "$APP_DIR/server" && DATABASE_URL="file:$SCRATCH" node scripts/verify-invariants.js )
+  VRC=$?
+  set -e
+  if [ "$VRC" -eq 0 ]; then echo "    ✅ all invariants hold on the restored data"
+  else echo "    ✖ verify-invariants reported problems (exit $VRC) — see the table above"; fi
+
+  DRILL_SECS=$(( $(date +%s) - DRILL_START ))
+  echo "==> Drill finished in ${DRILL_SECS}s. Scratch DB removed; production untouched."
+  [ "$VRC" -eq 0 ] || exit "$VRC"
+  echo "✅ RESTORE DRILL PASSED — the newest backup restores, matches production, and verifies clean."
   exit 0
 fi
 

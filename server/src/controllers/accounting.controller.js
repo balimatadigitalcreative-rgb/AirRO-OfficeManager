@@ -9,18 +9,20 @@ const accrual = require('../services/accrual.service');
 const subscription = require('../services/subscription.service');
 const depreciation = require('../services/depreciation.service');
 const costing = require('../services/costing.service');
-const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId });
+// range() carries the SESSION user (req.user) so services enforce per-unit/armada scope on the
+// caller — never trust businessUnitId/fleetId from the query as authorisation, only as a filter.
+const range = (req) => ({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId, user: req.user });
 
 const trialBalance = asyncHandler(async (req, res) => res.json({ data: await service.trialBalance(range(req)) }));
 const balanceSheet = asyncHandler(async (req, res) => res.json({ data: await service.balanceSheet(range(req)) }));
 const incomeStatement = asyncHandler(async (req, res) => res.json({ data: await service.incomeStatement(range(req)) }));
-const cashFlow = asyncHandler(async (req, res) => res.json({ data: await service.cashFlow({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId }) }));
+const cashFlow = asyncHandler(async (req, res) => res.json({ data: await service.cashFlow({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId, user: req.user }) }));
 const generalLedger = asyncHandler(async (req, res) => res.json({ data: await service.accountBalances(range(req)) }));
 const chart = asyncHandler(async (req, res) => res.json({ data: await service.chart() }));
 const receivables = asyncHandler(async (req, res) => res.json({ data: { balance: await service.receivablesBalance(range(req)) } }));
 const unmapped = asyncHandler(async (req, res) => res.json({ data: await service.unmappedCategories() }));
-const aging = asyncHandler(async (req, res) => res.json({ data: await service.agingReceivables({ asOf: req.query.asOf, fleetId: req.query.fleetId, businessUnitId: req.query.businessUnitId }) }));
-const ledger = asyncHandler(async (req, res) => res.json({ data: await service.generalLedger({ code: req.query.code, dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId }) }));
+const aging = asyncHandler(async (req, res) => res.json({ data: await service.agingReceivables({ asOf: req.query.asOf, fleetId: req.query.fleetId, businessUnitId: req.query.businessUnitId, user: req.user }) }));
+const ledger = asyncHandler(async (req, res) => res.json({ data: await service.generalLedger({ code: req.query.code, dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId, user: req.user }) }));
 const journal = asyncHandler(async (req, res) => res.json({ data: await service.journalFor({ sourceType: req.query.sourceType, sourceId: req.query.sourceId }) }));
 const periods = asyncHandler(async (req, res) => res.json({ data: await period.listPeriods() }));
 const periodChecklist = asyncHandler(async (req, res) => res.json({ data: await period.closeChecklist(+req.query.year, +req.query.month) }));
@@ -54,8 +56,8 @@ const billUpdate = asyncHandler(async (req, res) => res.json({ data: await bill.
 const billIssue = asyncHandler(async (req, res) => res.json({ data: await bill.issueBill(req.params.id, req.user) }));
 const billPay = asyncHandler(async (req, res) => res.json({ data: await bill.recordBillPayment(req.params.id, req.body, req.user) }));
 const billVoid = asyncHandler(async (req, res) => res.json({ data: await bill.voidBill(req.params.id, req.body, req.user) }));
-const apAging = asyncHandler(async (req, res) => res.json({ data: await bill.agingPayables({ asOf: req.query.asOf, businessUnitId: req.query.businessUnitId }) }));
-const apDue = asyncHandler(async (req, res) => res.json({ data: await bill.payablesDue({ asOf: req.query.asOf, days: req.query.days ? +req.query.days : 7 }) }));
+const apAging = asyncHandler(async (req, res) => res.json({ data: await bill.agingPayables({ asOf: req.query.asOf, businessUnitId: req.query.businessUnitId, user: req.user }) }));
+const apDue = asyncHandler(async (req, res) => res.json({ data: await bill.payablesDue({ asOf: req.query.asOf, days: req.query.days ? +req.query.days : 7, user: req.user }) }));
 const suppliersList = asyncHandler(async (req, res) => res.json(await bill.listSuppliers(req.query)));
 const supplierCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await bill.createSupplier(req.body, req.user) }));
 
@@ -81,7 +83,7 @@ const subsDue = asyncHandler(async (req, res) => res.json({ data: await subscrip
 
 // FIXED ASSETS & DEPRECIATION — register/list/detail + the monthly run, disposal, bulk import, and the
 // gallon-pool reconcile/loss. The service validates + posts; handlers pass through.
-const assetsList = asyncHandler(async (req, res) => res.json({ data: await depreciation.listAssets(req.query) }));
+const assetsList = asyncHandler(async (req, res) => res.json({ data: await depreciation.listAssets(req.query, req.user) }));
 const assetGet = asyncHandler(async (req, res) => res.json({ data: await depreciation.getAsset(req.params.id) }));
 const assetCreate = asyncHandler(async (req, res) => res.status(201).json({ data: await depreciation.createAsset(req.body, req.user) }));
 const assetDispose = asyncHandler(async (req, res) => res.json({ data: await depreciation.disposeAsset(req.params.id, req.body, req.user) }));

@@ -8,6 +8,10 @@ const ApiError = require('../utils/ApiError');
 const config = require('../config/env');
 const acc = require('./accounting.service');
 const accrual = require('./accrual.service');
+const { unitWhere } = require('../lib/scope');   // per-user business-unit access (bills are per-unit; no armada dimension)
+// Fold the SESSION user's unit scope into a bill `where`. businessUnitId from the query is only a
+// filter; the caller can never read a unit outside unitScopeOf(user).
+const withUnitScope = (where, user) => { const uw = unitWhere(user, 'businessUnitId'); return uw && Object.keys(uw).length ? { AND: [where, uw] } : where; };
 
 const PAYABLE = '2-1000';   // Utang Usaha
 const PPN_IN = '1-1500';    // PPN Masukan (recoverable input VAT)
@@ -190,7 +194,7 @@ async function listBills(query, user) {
   if (q.supplierId) where.supplierId = String(q.supplierId);
   if (q.dateFrom || q.dateTo) { where.billDate = {}; if (q.dateFrom) where.billDate.gte = q.dateFrom; if (q.dateTo) where.billDate.lte = q.dateTo; }
   if (q.businessUnitId) where.businessUnitId = String(q.businessUnitId);
-  const bills = await prisma.bill.findMany({ where, orderBy: [{ billDate: 'desc' }, { createdAt: 'desc' }], take: 500, include: { lines: true, payments: { select: { amount: true } }, supplier: { select: { name: true } } } });
+  const bills = await prisma.bill.findMany({ where: withUnitScope(where, user), orderBy: [{ billDate: 'desc' }, { createdAt: 'desc' }], take: 500, include: { lines: true, payments: { select: { amount: true } }, supplier: { select: { name: true } } } });
   // Outstanding summary for the header KPIs (open + overdue).
   const today = q.asOf || new Date().toISOString().slice(0, 10);
   let openTotal = 0, overdueTotal = 0;
@@ -218,11 +222,11 @@ function bucket(date, asOf) {
   const days = Math.floor((new Date(asOf + 'T00:00') - new Date((date || asOf) + 'T00:00')) / 86400000);
   return days <= 30 ? 'd0_30' : days <= 60 ? 'd31_60' : days <= 90 ? 'd61_90' : 'd90p';
 }
-async function agingPayables({ asOf, businessUnitId } = {}) {
+async function agingPayables({ asOf, businessUnitId, user } = {}) {
   const today = asOf || new Date().toISOString().slice(0, 10);
   const where = { status: { in: ['terbuka', 'sebagian'] } };
   if (businessUnitId) where.businessUnitId = String(businessUnitId);
-  const bills = await prisma.bill.findMany({ where, include: { payments: { select: { amount: true } }, supplier: { select: { id: true, name: true } } } });
+  const bills = await prisma.bill.findMany({ where: withUnitScope(where, user), include: { payments: { select: { amount: true } }, supplier: { select: { id: true, name: true } } } });
   const totals = { d0_30: 0, d31_60: 0, d61_90: 0, d90p: 0 };
   const bySup = {};
   for (const b of bills) {
@@ -240,11 +244,11 @@ async function payablesBalance() { const rows = await acc.accountBalances(); con
 
 // "JATUH TEMPO MINGGU INI" — unpaid bills due within the next 7 days (incl. already overdue), so nothing
 // is missed. Sorted soonest-first; flags overdue.
-async function payablesDue({ asOf, days = 7 } = {}) {
+async function payablesDue({ asOf, days = 7, user } = {}) {
   const today = asOf || new Date().toISOString().slice(0, 10);
   const until = new Date(today + 'T00:00'); until.setDate(until.getDate() + days);
   const untilStr = until.toISOString().slice(0, 10);
-  const bills = await prisma.bill.findMany({ where: { status: { in: ['terbuka', 'sebagian'] }, dueDate: { not: null, lte: untilStr } }, include: { payments: { select: { amount: true } }, supplier: { select: { name: true } } }, orderBy: { dueDate: 'asc' } });
+  const bills = await prisma.bill.findMany({ where: withUnitScope({ status: { in: ['terbuka', 'sebagian'] }, dueDate: { not: null, lte: untilStr } }, user), include: { payments: { select: { amount: true } }, supplier: { select: { name: true } } }, orderBy: { dueDate: 'asc' } });
   let total = 0;
   const rows = bills.map((b) => { const paid = (b.payments || []).reduce((s, x) => s + n(x.amount), 0); const outstanding = Math.max(0, n(b.total) - paid); total += outstanding; return { id: b.id, supplierName: b.supplier ? b.supplier.name : '', billNumber: b.billNumber || '', dueDate: b.dueDate, outstanding, overdue: b.dueDate < today }; }).filter((r) => r.outstanding > 0);
   return { asOf: today, until: untilStr, total, count: rows.length, rows };

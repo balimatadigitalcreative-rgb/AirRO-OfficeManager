@@ -11,6 +11,9 @@ const ApiError = require('../utils/ApiError');
 const config = require('../config/env');
 const acc = require('./accounting.service');
 const period = require('./period.service');
+const { unitWhere } = require('../lib/scope');   // per-user business-unit access (assets carry unit + fleet)
+// Confine an asset `where` to the SESSION user's units. query businessUnitId/fleetId stay filters only.
+const withUnitScope = (where, user) => { const uw = unitWhere(user, 'businessUnitId'); return uw && Object.keys(uw).length ? { AND: [where, uw] } : where; };
 
 const ACCUM = '1-1900', DEPR_OPEX = '6-8000', DEPR_COGS = '5-2000', GAIN = '4-3000', LOSS = '6-8500', MODAL = '3-1000', BANK = '1-1100';
 const CATEGORY_ASSET = { kendaraan: '1-1410', mesin_ro: '1-1420', bangunan: '1-1430', galon: '1-1440', peralatan: '1-1400', lainnya: '1-1400' };
@@ -151,14 +154,14 @@ async function createAsset(body, actor) {
   return assetClient(created, { policy: await firstMonthPolicy() });
 }
 
-async function listAssets(query) {
+async function listAssets(query, user) {
   const q = query || {};
   const where = {};
   if (CATEGORIES.includes(q.category)) where.category = q.category;
   if (STATUSES.includes(q.status)) where.status = q.status;
   if (q.businessUnitId) where.businessUnitId = q.businessUnitId;
   if (q.fleetId) where.fleetId = q.fleetId;
-  const rows = await prisma.fixedAsset.findMany({ where, orderBy: [{ code: 'asc' }], take: 1000 });
+  const rows = await prisma.fixedAsset.findMany({ where: withUnitScope(where, user), orderBy: [{ code: 'asc' }], take: 1000 });
   const policy = await firstMonthPolicy();
   const data = [];
   for (const a of rows) data.push(await assetClient(a, { policy }));

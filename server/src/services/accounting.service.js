@@ -7,6 +7,29 @@
 // HARD INVARIANT (asserted on every post): sum(debit) === sum(credit) per journal entry.
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
+const { unitWhere } = require('../lib/scope');   // per-user business-unit access (mirrors report.service)
+
+// ── SESSION SCOPE — a report read must NEVER exceed the caller's own business-unit / armada scope. A
+// request-supplied businessUnitId/fleetId can only NARROW within this, never widen past the session's
+// scope (the accounting-v2 reports previously trusted the query param, so a `reports` user scoped to one
+// unit could read another unit's financials). Full-access users (scope null) are unaffected. ──
+function fleetScopeArr(user) {
+  const raw = user && user.fleetScope;
+  if (raw == null || raw === 'all' || raw === '') return null;
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  try { const a = JSON.parse(raw); if (a === 'all') return null; if (Array.isArray(a)) return a.filter(Boolean); } catch (e) {}
+  return null;
+}
+function scopeWhere(user) {
+  if (!user) return {};
+  const parts = [];
+  const uw = unitWhere(user, 'businessUnitId');
+  if (uw && Object.keys(uw).length) parts.push(uw);
+  const fs = fleetScopeArr(user);
+  if (fs) parts.push({ fleetId: { in: fs } });
+  return parts.length ? { AND: parts } : {};
+}
+const andScope = (where, user) => { const s = scopeWhere(user); return Object.keys(s).length ? { AND: [where, s] } : where; };
 
 // ── Indonesian SMB chart of accounts (seed). code · name · type · parent(code) · subtype. ──
 // `subtype` drives the ARUS KAS (cash flow) classification (see CF_SECTION) — explicit + configurable
@@ -675,15 +698,15 @@ async function accountingStatus({ asOf } = {}) {
 
 // ── Reports (read the journal, never the cash book). ──
 const SIGN = { asset: 1, expense: 1, liability: -1, equity: -1, revenue: -1 };   // normal-balance sign for (debit − credit)
-async function accountBalances({ dateFrom, dateTo, businessUnitId, fleetId } = {}) {
+async function accountBalances({ dateFrom, dateTo, businessUnitId, fleetId, user } = {}) {
   const jWhere = {};
   if (dateFrom) (jWhere.date || (jWhere.date = {})).gte = dateFrom;
   if (dateTo) (jWhere.date || (jWhere.date = {})).lte = dateTo;
   const where = {};
-  if (businessUnitId) where.businessUnitId = businessUnitId;   // per-unit scope (journal lines carry the unit)
-  if (fleetId) where.fleetId = fleetId;                        // per-armada scope
+  if (businessUnitId) where.businessUnitId = businessUnitId;   // per-unit filter (journal lines carry the unit)
+  if (fleetId) where.fleetId = fleetId;                        // per-armada filter
   if (Object.keys(jWhere).length) where.journalEntry = jWhere;
-  const lines = await prisma.journalLine.findMany({ where, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, type: true, subtype: true } } } });
+  const lines = await prisma.journalLine.findMany({ where: andScope(where, user), select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, type: true, subtype: true } } } });
   const acc = {};
   for (const l of lines) { const c = l.chartAccount.code; if (!acc[c]) acc[c] = { code: c, name: l.chartAccount.name, type: l.chartAccount.type, subtype: l.chartAccount.subtype || '', debit: 0, credit: 0 }; acc[c].debit += Number(l.debit); acc[c].credit += Number(l.credit); }
   return Object.values(acc).sort((a, b) => a.code.localeCompare(b.code)).map((a) => ({ ...a, balance: ((a.debit - a.credit) * SIGN[a.type]) || 0 }));   // `|| 0` normalises -0 → 0
@@ -729,12 +752,12 @@ function agingBucket(date, asOf) {
   const days = Math.floor((new Date(asOf + 'T00:00') - new Date((date || asOf) + 'T00:00')) / 86400000);
   return days <= 30 ? 'd0_30' : days <= 60 ? 'd31_60' : days <= 90 ? 'd61_90' : 'd90p';
 }
-async function agingReceivables({ asOf, fleetId, businessUnitId } = {}) {
+async function agingReceivables({ asOf, fleetId, businessUnitId, user } = {}) {
   const today = asOf || new Date().toISOString().slice(0, 10);
   const where = { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true };
   if (fleetId) where.fleetId = fleetId;
   if (businessUnitId) where.businessUnitId = businessUnitId;
-  const txns = await prisma.distTransaction.findMany({ where, include: { corrections: { select: { deltaAmount: true, kind: true, active: true } }, customer: { select: { id: true, name: true } } } });
+  const txns = await prisma.distTransaction.findMany({ where: andScope(where, user), include: { corrections: { select: { deltaAmount: true, kind: true, active: true } }, customer: { select: { id: true, name: true } } } });
   const ids = txns.map((t) => t.id);
   const disputes = ids.length ? await prisma.distTransactionDispute.findMany({ where: { transactionId: { in: ids }, status: { in: DISPUTE_DEDUCTS }, reversedById: null, reversalOf: null }, select: { transactionId: true, disputedAmount: true } }) : [];
   const dd = {}; disputes.forEach((d) => { dd[d.transactionId] = (dd[d.transactionId] || 0) + Number(d.disputedAmount || 0); });
@@ -773,15 +796,15 @@ async function agingReceivables({ asOf, fleetId, businessUnitId } = {}) {
 // BUKU BESAR — one account's journal lines in date order with a RUNNING BALANCE (in the account's
 // normal-balance direction). `opening` is the balance carried in before dateFrom; `closing` reconciles
 // to accountBalances for that account. Each row keeps sourceType/sourceId for figure→journal→source.
-async function generalLedger({ code, dateFrom, dateTo, businessUnitId, fleetId } = {}) {
+async function generalLedger({ code, dateFrom, dateTo, businessUnitId, fleetId, user } = {}) {
   const acct = await prisma.chartAccount.findUnique({ where: { code } });
   if (!acct) return null;
   const sign = SIGN[acct.type];
   const scope = {}; if (businessUnitId) scope.businessUnitId = businessUnitId; if (fleetId) scope.fleetId = fleetId;   // unit/armada filters
-  const openLines = dateFrom ? await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, ...scope, journalEntry: { date: { lt: dateFrom } } }, select: { debit: true, credit: true } }) : [];
+  const openLines = dateFrom ? await prisma.journalLine.findMany({ where: andScope({ chartAccountId: acct.id, ...scope, journalEntry: { date: { lt: dateFrom } } }, user), select: { debit: true, credit: true } }) : [];
   const opening = openLines.reduce((s, l) => s + (Number(l.debit) - Number(l.credit)), 0) * sign;
   const dw = {}; if (dateFrom) dw.gte = dateFrom; if (dateTo) dw.lte = dateTo;
-  const lines = await prisma.journalLine.findMany({ where: { chartAccountId: acct.id, ...scope, ...(Object.keys(dw).length ? { journalEntry: { date: dw } } : {}) }, include: { journalEntry: { select: { date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
+  const lines = await prisma.journalLine.findMany({ where: andScope({ chartAccountId: acct.id, ...scope, ...(Object.keys(dw).length ? { journalEntry: { date: dw } } : {}) }, user), include: { journalEntry: { select: { date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
   lines.sort((a, b) => (a.journalEntry.date || '').localeCompare(b.journalEntry.date || '') || a.id.localeCompare(b.id));
   let bal = opening;
   const rows = lines.map((l) => { const dr = Number(l.debit), cr = Number(l.credit); bal += (dr - cr) * sign; return { date: l.journalEntry.date, ref: l.journalEntry.ref, description: l.journalEntry.description, sourceType: l.journalEntry.sourceType, sourceId: l.journalEntry.sourceId, debit: dr, credit: cr, balance: bal }; });
@@ -809,12 +832,12 @@ async function journalFor({ sourceType, sourceId } = {}) {
 // changes are working-capital adjustments (a credit sale nets to zero until collected). Sections come
 // from the ChartAccount subtype (CF_SECTION); an unclassified account with movement is reported in its
 // own bucket (still counted, so the statement always reconciles) rather than hidden inside Operasi.
-async function cashFlow({ dateFrom, dateTo, businessUnitId, fleetId } = {}) {
+async function cashFlow({ dateFrom, dateTo, businessUnitId, fleetId, user } = {}) {
   const lw = {};
   if (businessUnitId) lw.businessUnitId = businessUnitId;
   if (fleetId) lw.fleetId = fleetId;
   const rawMap = async (dateCond) => {
-    const lines = await prisma.journalLine.findMany({ where: { ...lw, ...(dateCond ? { journalEntry: { date: dateCond } } : {}) }, select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, subtype: true } } } });
+    const lines = await prisma.journalLine.findMany({ where: andScope({ ...lw, ...(dateCond ? { journalEntry: { date: dateCond } } : {}) }, user), select: { debit: true, credit: true, chartAccount: { select: { code: true, name: true, subtype: true } } } });
     const m = {};
     for (const l of lines) { const a = l.chartAccount; (m[a.code] || (m[a.code] = { code: a.code, name: a.name, subtype: a.subtype || '', raw: 0 })).raw += Number(l.debit) - Number(l.credit); }
     return m;
