@@ -3774,8 +3774,13 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
   --fs-1: 4px; --fs-2: 8px; --fs-3: 12px; --fs-4: 16px; --fs-5: 20px; --fs-6: 24px; --fs-8: 32px; --fs-10: 40px;
   --fin-accent: var(--green-800);          /* THE one accent, aliased for finance scope */
   --fin-accent-soft: var(--mint-100);
-  --fin-row-h: 44px;                        /* comfortable density row height (was 52 — a ledger needs to show more than ~12 lines) */
-  --fin-row-h-compact: 32px;                /* Padat: genuinely dense (~32px) */
+  /* Density is the whole point of a ledger. Nyaman 34px → ~20 rows in a 1080p statement area;
+     Padat 26px → ~30 rows. Never below 12px type — density comes from padding + leading, not size. */
+  --fin-row-h: 34px;
+  --fin-row-h-compact: 26px;
+  /* Machine identifiers (account codes, journal refs, source ids) are set in a real monospace face so
+     they read as a DIFFERENT KIND of information from the humanist-sans descriptions. */
+  --fin-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'Roboto Mono', Menlo, Consolas, monospace;
 }
 
 /* ── The finance workspace header (title · scope · actions) shared by every accounting screen ── */
@@ -3848,7 +3853,9 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-acct-row.lvl-2 { padding-left: var(--fs-10); color: var(--text-mut); }
 .fin-acct-caret { display: inline-flex; width: 18px; color: var(--text-faint); cursor: pointer; transition: transform .12s; }
 .fin-acct-caret.open { transform: rotate(90deg); }
-.fin-acct-code { font-variant-numeric: tabular-nums; color: var(--text-faint); font-size: 11.5px; margin-right: var(--fs-2); }
+/* Account code as a monospace identifier — a different KIND of token from the humanist-sans name
+   (shared across Neraca / Laba Rugi / Neraca Saldo / the account drill, so the statements read as a family). */
+.fin-acct-code { font-family: var(--fin-mono); letter-spacing: -.01em; color: var(--text-faint); font-size: 11px; margin-right: 9px; }
 
 /* ── RESPONSIVE BREAKPOINT SCALE — the ONE canonical set. CSS @media conditions cannot read var(),
    so this comment IS the contract; migrate ad-hoc finance breakpoints to these four values:
@@ -3886,10 +3893,19 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .btn-xs { min-height: 36px; }
 }
 
-/* ── Neraca (balance sheet) / Laba Rugi (income statement) statements ── */
+/* ── Neraca / Laba Rugi / Neraca Saldo — the SAME visual system as the ledger, so the four statements
+   read as one family: quiet uppercase section headers, humanist-sans line names with monospace codes,
+   the amount as the protagonist (medium weight), totals as furniture (a rule, not a coloured fill). ── */
 .fin-stmt-sec { padding: 0; overflow: hidden; }
-.fin-stmt-h { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mut); padding: 12px var(--fs-4) 8px; border-bottom: 1px solid var(--border); }
-.fin-stmt-sec .fin-td { height: auto; padding-top: 8px; padding-bottom: 8px; }
+.fin-stmt-h { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); padding: 12px var(--fs-4) 8px; border-bottom: 1px solid rgba(28,43,51,.12); }
+.fin-stmt-sec .fin-td { height: auto; padding-top: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(28,43,51,.05); }
+.fin-stmt-sec .fin-td.fin-r { font-size: 13.5px; font-weight: 550; color: var(--ink); }   /* the amount is the protagonist */
+.fin-stmt-sec .fin-trow.grand td { background: none; font-weight: 700; border-top: 1.5px solid rgba(28,43,51,.18); }
+/* Neraca Saldo (trial balance): mono code column + protagonist balance, matching the ledger. */
+.tb-code { font-family: var(--fin-mono); letter-spacing: -.01em; color: var(--text-mut); font-size: 12px; }
+.tb-table .fin-th { color: var(--text-faint); font-weight: 600; letter-spacing: .05em; border-bottom: 1px solid rgba(28,43,51,.12); }
+.tb-table .fin-td { border-bottom: 1px solid rgba(28,43,51,.05); }
+.tb-table .fin-trow.grand td { background: none; font-weight: 700; border-top: 1.5px solid rgba(28,43,51,.18); }
 .fin-bs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--fs-4); align-items: start; }
 .fin-bs-col { display: flex; flex-direction: column; gap: var(--fs-4); }
 .fin-is-grid { display: grid; grid-template-columns: 1fr; gap: var(--fs-4); }
@@ -4219,65 +4235,103 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 /* ═══════════ ACCOUNTING v2 SCREENS — Buku Besar · Rekonsiliasi · Tutup Buku ═══════════ */
 .fin-head-actions .rep-controls { margin: 0; }
 
-/* ── Buku Besar (ledger) ── */
-.bb-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--fs-4); align-items: start; }
-/* Sticky, full-height account panel — ONE page scrollbar overall (no nested inner scroll). The panel
-   sticks to the top and, if the chart is taller than the viewport, the PAGE scrolls, not an inner bar. */
-.bb-picker { padding: var(--fs-4); position: sticky; top: 12px; align-self: start; max-height: calc(100vh - 96px); display: flex; flex-direction: column; }
-.bb-ledger { padding: 0; overflow: visible; }
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   BUKU BESAR — designed as a financial instrument, not default table markup.
+   · Two FLAT panels (no cards, no shadows on data): a companion account picker + the ledger, held
+     apart by whitespace. · ONE accent (--green-800) used only for the selected account + focus.
+   · Typographic hierarchy: running balance is the protagonist, debit/credit secondary, description
+     tertiary, identifiers (mono) quaternary. Debit/credit are told apart by POSITION, never colour.
+   · Hairlines at low opacity; no zebra. Density from padding + leading (34/26px rows), type ≥ 12px.
+   ══════════════════════════════════════════════════════════════════════════════════════════════ */
+/* The one hairline weight used throughout: rgba(28,43,51,.06–.12) — never a solid grey line. */
+.bb-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
+
+/* ── Companion picker: sticky, full height, search pinned at top. Not a box — a quiet index. ── */
+.bb-picker { position: sticky; top: 8px; align-self: start; max-height: calc(100vh - 84px); display: flex; flex-direction: column; padding-right: 4px; border-right: 1px solid rgba(28, 43, 51, .07); }
+.bb-pick-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--text-faint); padding: 2px 2px 8px; }
 .bb-tree { display: flex; flex-direction: column; min-height: 0; }
-.bb-tree-scroll { margin-top: var(--fs-2); overflow-y: auto; min-height: 0; }   /* scrolls only the account list, only if it overflows the sticky panel — the ledger itself uses the page scrollbar */
-.bb-search { height: 34px; margin-bottom: var(--fs-2); flex: none; }
-.bb-node { display: flex; align-items: flex-start; gap: 4px; }
-.bb-node.lvl-1 { padding-left: 14px; } .bb-node.lvl-2 { padding-left: 28px; }
-.bb-caret { display: inline-flex; width: 18px; height: 26px; align-items: center; justify-content: center; border: none; background: none; color: var(--text-faint); cursor: pointer; transition: transform .12s; flex: none; }
+.bb-tree-scroll { overflow-y: auto; min-height: 0; padding-right: 2px; }
+.bb-search { height: 34px; margin-bottom: 10px; flex: none; }
+.bb-node { display: flex; align-items: flex-start; gap: 2px; }
+.bb-node.lvl-1 { padding-left: 12px; } .bb-node.lvl-2 { padding-left: 24px; }
+.bb-caret { display: inline-flex; width: 16px; height: 24px; align-items: center; justify-content: center; border: none; background: none; color: var(--text-faint); cursor: pointer; transition: transform .12s; flex: none; }
 .bb-caret.open { transform: rotate(90deg); }
-.bb-caret-spacer { width: 18px; display: inline-block; flex: none; }
-.bb-head { font-size: 12.5px; font-weight: 800; color: var(--text-mut); padding: 6px 4px; line-height: 1.35; }
-.bb-head b, .bb-acct b { color: var(--text-faint); font-weight: 700; font-size: 11px; margin-right: 5px; }
-.bb-acct { display: block; width: 100%; text-align: left; border: none; background: none; font: inherit; font-size: 13px; line-height: 1.35; padding: 7px 8px; border-radius: 8px; cursor: pointer; color: var(--text); }
-.bb-acct:hover { background: var(--card-soft); }
-.bb-acct.on { background: var(--green-800); color: #fff; } .bb-acct.on b { color: rgba(255,255,255,.7); }
-.bb-table .fin-th, .bb-table .fin-td { padding-left: var(--fs-4); }
+.bb-caret-spacer { width: 16px; display: inline-block; flex: none; }
+/* Hierarchy by WEIGHT + indentation, not boxes: parent = quiet uppercase-ish header, leaf = plain. */
+.bb-head { font-size: 11.5px; font-weight: 700; color: var(--text-mut); padding: 6px 4px 4px; line-height: 1.3; letter-spacing: .01em; }
+.bb-head b, .bb-acct b { font-family: var(--fin-mono); color: var(--text-faint); font-weight: 500; font-size: 10.5px; margin-right: 7px; letter-spacing: -.01em; }
+.bb-acct { display: block; width: 100%; text-align: left; border: none; background: none; font-family: inherit; font-size: 12.5px; line-height: 1.35; padding: 5px 8px 5px 6px; border-left: 2px solid transparent; cursor: pointer; color: var(--text); transition: color .12s, border-color .12s; }
+.bb-acct:hover { color: var(--green-800); }
+.bb-acct.on { color: var(--green-800); font-weight: 600; border-left-color: var(--green-800); }
+.bb-acct.on b { color: var(--green-700); }
+.bb-acct:focus-visible { outline: 2px solid var(--green-700); outline-offset: -2px; border-radius: 3px; }
 
-/* One compact title block: the selected account is the heading (the topbar already says "Buku Besar"). */
-.bb-title { font-family: 'Poppins'; font-size: 19px; font-weight: 800; line-height: 1.1; display: flex; align-items: baseline; gap: 8px; }
-.bb-title-code { font-size: 13px; font-weight: 700; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.bb-ctx { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.bb-ctx-answer { color: var(--text-mut); }
-.bb-ctx-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-faint); display: inline-block; opacity: .6; }
+/* ── Account identity strip — the reader's anchor: code (mono) · name · type · current balance. ── */
+.bb-idbar { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 4px 2px 14px; border-bottom: 1px solid rgba(28, 43, 51, .12); margin-bottom: 2px; }
+.bb-id-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.bb-id-code { font-family: var(--fin-mono); font-size: 12px; font-weight: 500; color: var(--text-mut); letter-spacing: -.01em; }
+.bb-id-name { font-family: 'Poppins'; font-size: 17px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.bb-id-type { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+.bb-id-bal { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex: none; }
+.bb-id-bal-lbl { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--text-faint); }
+.bb-id-bal-val { font-family: 'Poppins'; font-size: 19px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.bb-id-bal-val.neg { color: var(--neg); }
 
-/* Journal handle (ref, else short id) as a muted monospace chip — the ledger's main tracing column. */
-.bb-jchip { font-size: 11.5px; color: var(--text-mut); font-variant-numeric: tabular-nums; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
-/* Description cell: normal-weight text, then the source type+id as a SEPARATE muted monospace chip. */
-.bb-cell-desc { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.bb-cell-desc .fin-td-desc { display: inline; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bb-srcchip { flex: none; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
-.bb-cell-date { display: none; }   /* date lives in the group separator; shown only in mobile cards */
-.fin-dense-compact .bb-srcchip { display: none; }   /* Padat: drop the source chip, the Jurnal column carries the handle */
+/* ── The ledger table. table-layout:fixed + colgroup already guarantees column geometry. ── */
+.bb-table .fin-th, .bb-table .fin-td { padding-left: 2px; }
+.bb-table .fin-th:first-child, .bb-table .fin-td:first-child { padding-left: 4px; }
+.bb-table .fin-th:last-child, .bb-table .fin-td:last-child { padding-right: 4px; }
+.bb-table .fin-th { background: var(--surface); border-bottom: 1px solid rgba(28, 43, 51, .12); color: var(--text-faint); font-weight: 600; letter-spacing: .05em; }
+.bb-table .fin-trow { border: none; }
+.bb-table .fin-trow .fin-td { border-bottom: 1px solid rgba(28, 43, 51, .05); }   /* one hairline weight, no zebra */
+/* Hierarchy: balance = protagonist (medium, a touch larger), dr/cr secondary, desc tertiary. */
+.bb-table .fin-td-desc { font-size: 12.5px; font-weight: 450; color: var(--ink); }
+.bb-table .fin-td.fin-r { font-size: 13px; font-weight: 400; color: var(--ink); }
+.bb-table .bb-saldo { font-size: 13.5px; font-weight: 550; color: var(--ink); border-left: 1px solid rgba(28, 43, 51, .06); }
+.bb-table th.bb-saldo { font-weight: 600; }
+.bb-table .fin-r .fin-dash { color: var(--text-faint); font-weight: 400; }
+/* Identifiers are a DIFFERENT KIND of token: monospace, muted, smaller. No chip boxes — just type. */
+.bb-jchip { font-family: var(--fin-mono); font-size: 11px; color: var(--text-faint); letter-spacing: -.02em; white-space: nowrap; }
+.bb-cell-desc { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.bb-cell-desc .fin-td-desc { display: inline; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bb-srcchip { flex: none; font-family: var(--fin-mono); font-size: 10.5px; color: var(--text-faint); letter-spacing: -.02em; white-space: nowrap; opacity: .85; }
+.bb-cell-date { display: none; }
+.fin-dense-compact .bb-srcchip { display: none; }   /* Padat drops the source id; the Jurnal column keeps the handle */
 
-/* Date group separator — one subtle row per day instead of repeating the date on every line. */
-.bb-datesep td { padding: 6px var(--fs-4) 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); background: var(--card-soft); border-bottom: 1px solid var(--border-soft); border-top: 1px solid var(--border-soft); }
-.fin-dense-compact .bb-datesep td { padding: 3px var(--fs-4); }
+/* Row affordance revealed quietly on hover; the drill target reads as clickable before the click. */
+.bb-table .fin-trow.clickable:hover .fin-td { background: rgba(6, 84, 137, .035); }
+.bb-table .fin-trow.clickable:hover .fin-td:first-child { box-shadow: inset 2px 0 0 var(--green-700); }
+.bb-table .fin-trow.clickable:focus-visible { outline: 2px solid var(--green-700); outline-offset: -2px; }
 
-/* Running balance — the most important column: medium weight + a subtle left rule (ledger + trial balance). */
-.fin-table .bb-saldo, .fin-table th.bb-saldo { font-weight: 600; border-left: 1px solid var(--border-soft); }
-/* Opening-balance row pinned under the header so it stays visible while scrolling. */
-.bb-table .fin-trow.bb-open td { position: sticky; top: calc(var(--fin-stick, 0px) + 36px); z-index: 5; background: var(--card-soft); }
-/* Muted em-dash for the empty side of a debit/credit pair, aligned to the money column. */
+/* Date group: a single quiet hairline with the date set once in small caps — never repeated per row. */
+.bb-datesep td { padding: 12px 2px 4px; font-size: 10.5px; font-weight: 600; font-variant: small-caps; text-transform: lowercase; letter-spacing: .05em; color: var(--text-faint); border-top: 1px solid rgba(28, 43, 51, .06); }
+.bb-datesep:first-child td, .bb-open + .bb-datesep td { border-top: none; }
+.fin-dense-compact .bb-datesep td { padding: 7px 2px 3px; }
+
+/* Opening & closing are STATEMENT FURNITURE, not data rows: no fill, bracketing rules, sticky at the
+   top (opening, under the header) and bottom (closing) of the scroll area. A solid ground keeps them
+   legible while rows pass behind. */
+.bb-furn-lbl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--text-mut); }
+.bb-table .fin-trow.bb-open td { position: sticky; top: calc(var(--fin-stick, 0px) + 36px); z-index: 5; background: var(--surface); border-bottom: 1.5px solid rgba(28, 43, 51, .18); border-top: none; }
+.bb-table .fin-trow.bb-close td { position: sticky; bottom: 0; z-index: 5; background: var(--surface); border-top: 1.5px solid rgba(28, 43, 51, .18); border-bottom: none; padding-top: 2px; padding-bottom: 2px; }
+.bb-table .fin-trow.bb-open .bb-saldo, .bb-table .fin-trow.bb-close .bb-saldo { font-weight: 650; }
 .fin-dash { color: var(--text-faint); }
 
-.bb-ref { font-size: 11.5px; color: var(--text-mut); font-variant-numeric: tabular-nums; }
+/* Loading skeleton matches the final row height so nothing jumps when data lands. */
+.bb-skel .fin-skel-row { height: var(--fin-row-h); }
+.fin-dense-compact .bb-skel .fin-skel-row { height: var(--fin-row-h-compact); }
+
 .acct-src { margin-top: var(--fs-3); font-size: 12px; color: var(--text-mut); }
-.acct-src b { color: var(--green-800); }
-@media (max-width: 1024px) { .bb-layout { grid-template-columns: 1fr; } .bb-picker { position: static; max-height: none; } .bb-tree-scroll { max-height: 40vh; } }
+.acct-src b { color: var(--green-800); font-family: var(--fin-mono); }
+@media (max-width: 1024px) { .bb-layout { grid-template-columns: 1fr; gap: 16px; } .bb-picker { position: static; max-height: none; border-right: none; border-bottom: 1px solid rgba(28,43,51,.07); padding-bottom: 8px; } .bb-tree-scroll { max-height: 40vh; } }
 /* Mobile cards (<768px): the date column is hidden in the table, so surface it inside each card, and
-   drop the desktop-only sticky opening row + saldo left-rule (each row is now its own card). */
+   drop the desktop-only sticky furniture + saldo rule (each row is now its own card). */
 @media (max-width: 767px) {
+  .bb-idbar { flex-wrap: wrap; gap: 8px; }
   .bb-cell-date { display: block; font-size: 11px; color: var(--text-faint); margin-top: 2px; }
   .fin-table.fin-cards .bb-datesep { display: none; }
   .bb-cell-desc { flex-wrap: wrap; }
-  .bb-table .fin-trow.bb-open td { position: static; }
+  .bb-table .fin-trow.bb-open td, .bb-table .fin-trow.bb-close td { position: static; }
   .fin-table.fin-cards .bb-saldo { border-left: none; }
 }
 

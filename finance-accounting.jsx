@@ -327,14 +327,11 @@
           <hr style={{ border: 'none', borderTop: '2px solid #065489', margin: '12px 0 4px' }} />
         </div>
 
-        {/* ONE title block (the topbar already says "Buku Besar"): the selected account is the heading,
-            with subtitle + period + last-journal timestamp + closed badge on a single compact line. */}
+        {/* Slim toolbar — the account's identity lives in the sticky strip above the table (below), so the
+            page header carries only quiet context + the controls. The topbar already says "Buku Besar". */}
         <div className="fin-head bb-head">
           <div className="fin-head-titles">
-            <h2 className="bb-title">{data ? <><span className="bb-title-code tnum">{data.account.code}</span>{data.account.name}</> : trA('acct.pickAccount')}</h2>
             <div className="fin-head-scope bb-ctx">
-              <span className="bb-ctx-answer">{trA('rep.ledgerAnswers')}</span>
-              <span className="bb-ctx-dot" />
               <span>{IcA('IconCalendar', { s: 11 })} {period.label || `${period.start} – ${period.end}`}</span>
               {unitLabel ? <><span className="bb-ctx-dot" /><span>{unitLabel}</span></> : null}
               {lastWhen ? <><span className="bb-ctx-dot" /><span>{trA('rep.lastPosted', { when: lastWhen })}</span></> : null}
@@ -350,18 +347,30 @@
         </div>
 
         <div className="bb-layout">
-          <div className="card bb-picker">
-            <div className="sec-title" style={{ fontSize: 13, marginBottom: 8 }}>{trA('acct.chart')}</div>
+          <div className="bb-picker">
+            <div className="bb-pick-title">{trA('acct.chart')}</div>
             {chartQ.state === 'loading' && <Skeleton n={8} />}
             {chartQ.state === 'error' && <ErrorCard onRetry={chartQ.reload} />}
             {chartQ.state === 'ready' && <AccountTree chart={chartQ.data} selected={code} onSelect={setCode} />}
           </div>
 
-          <div className="card bb-ledger">
+          <div className="bb-ledger">
             {!code && <div className="fin-empty"><span className="fin-empty-ic">{IcA('IconInvoice', { s: 22 })}</span><div className="fin-empty-t">{trA('acct.pickAccount')}</div><div className="fin-empty-s">{trA('acct.pickAccountHint')}</div></div>}
-            {code && led.state === 'loading' && <Skeleton n={10} />}
+            {code && led.state === 'loading' && <div className="bb-skel"><Skeleton n={12} /></div>}
             {code && led.state === 'error' && <ErrorCard onRetry={led.reload} />}
-            {code && led.state === 'ready' && data && (
+            {code && led.state === 'ready' && data && (<>
+              {/* Account identity — code (mono) · name · type · current balance — anchors the reader. */}
+              <div className="bb-idbar">
+                <div className="bb-id-main">
+                  <span className="bb-id-code">{data.account.code}</span>
+                  <span className="bb-id-name">{data.account.name}</span>
+                  {data.account.type ? <span className="bb-id-type">{trA('acctType.' + data.account.type) || data.account.type}</span> : null}
+                </div>
+                <div className="bb-id-bal">
+                  <span className="bb-id-bal-lbl">{trA('acct.runningBal')}</span>
+                  <span className={`bb-id-bal-val tnum${data.closing < 0 ? ' neg' : ''}`}>{money(data.closing)}</span>
+                </div>
+              </div>
               <div className={`fin-tablewrap fin-dense-${dense}`}>
                 <table className="fin-table bb-table fin-cards">
                   <colgroup><col style={{ width: '140px' }} /><col /><col style={{ width: '132px' }} /><col style={{ width: '132px' }} /><col style={{ width: '152px' }} /></colgroup>
@@ -370,7 +379,7 @@
                     <th className="fin-th fin-r">{trA('je.debit')}</th><th className="fin-th fin-r">{trA('je.credit')}</th><th className="fin-th fin-r bb-saldo">{trA('acct.runningBal')}</th>
                   </tr></thead>
                   <tbody>
-                    <tr className="fin-trow subtotal bb-open"><td className="fin-td" colSpan={4}>{trA('acct.opening')} · {period.label || period.start}</td><td className="fin-td fin-r tnum bb-saldo">{money(data.opening)}</td></tr>
+                    <tr className="fin-trow bb-open"><td className="fin-td bb-furn-lbl" colSpan={4}>{trA('acct.opening')}</td><td className="fin-td fin-r tnum bb-saldo">{money(data.opening)}</td></tr>
                     {shown.map((r, i) => {
                       const jno = r.ref || (r.journalId ? '#' + String(r.journalId).slice(-6) : (r.sourceId ? '#' + String(r.sourceId).slice(-6) : '—'));
                       const newDay = i === 0 || shown[i - 1].date !== r.date;
@@ -388,12 +397,17 @@
                       );
                     })}
                     {rows.length === 0 && <tr><td className="fin-td" colSpan={5} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: 24 }}>{trA('acct.noMovement')}</td></tr>}
-                    <tr className="fin-trow grand"><td className="fin-td" colSpan={4}>{trA('acct.closing')} · {money(data.rows.reduce((s, r) => s + (r.debit || 0), 0))} / {money(data.rows.reduce((s, r) => s + (r.credit || 0), 0))}</td><td className="fin-td fin-r tnum bb-saldo">{money(data.closing)}</td></tr>
+                    <tr className="fin-trow bb-close">
+                      <td className="fin-td bb-furn-lbl" colSpan={2}>{trA('acct.closing')}</td>
+                      <td className="fin-td fin-r tnum" data-label={trA('je.debit')}>{moneyCell(data.rows.reduce((s, r) => s + (r.debit || 0), 0))}</td>
+                      <td className="fin-td fin-r tnum" data-label={trA('je.credit')}>{moneyCell(data.rows.reduce((s, r) => s + (r.credit || 0), 0))}</td>
+                      <td className="fin-td fin-r tnum bb-saldo" data-label={trA('acct.runningBal')}>{money(data.closing)}</td>
+                    </tr>
                   </tbody>
                 </table>
                 {visible < rows.length && <div ref={sentinel} className="fin-more">{trA('acct.showingOf', { a: visible, b: rows.length })}</div>}
               </div>
-            )}
+            </>)}
           </div>
         </div>
         {drill && <JournalDrill row={drill} onClose={() => setDrill(null)} onOpenEntry={onOpenEntry} />}
@@ -1904,10 +1918,10 @@
         {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
         {q.state === 'ready' && d && (<>
           <div className={`fin-bs-balance ${d.balanced ? 'ok' : 'bad'}`}>{d.balanced ? trA('tb.balancedOk') : trA('tb.balancedBad', { d: money(d.totalDebit - d.totalCredit) })}</div>
-          <div className="card"><div className={`fin-tablewrap fin-dense-${dense}`}><table className="fin-table fin-cards">
+          <div className="card"><div className={`fin-tablewrap fin-dense-${dense}`}><table className="fin-table fin-cards tb-table">
             <thead><tr><th className="fin-th">{trA('acct.code')}</th><th className="fin-th">{trA('acct.account')}</th><th className="fin-th fin-r">{trA('je.debit')}</th><th className="fin-th fin-r">{trA('je.credit')}</th><th className="fin-th fin-r bb-saldo">{trA('acct.runningBal')}</th></tr></thead>
             <tbody>{rows.map((r) => <tr key={r.code} className="fin-trow clickable" tabIndex={0} onClick={() => setDrill(r.code)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setDrill(r.code)}>
-              <td className="fin-td tnum" data-label={trA('acct.code')}>{r.code}</td>
+              <td className="fin-td" data-label={trA('acct.code')}><span className="tb-code">{r.code}</span></td>
               <td className="fin-td" data-label={trA('acct.account')}>{r.name}</td>
               <td className="fin-td fin-r tnum" data-label={trA('je.debit')}>{moneyCell(r.debit)}</td>
               <td className="fin-td fin-r tnum" data-label={trA('je.credit')}>{moneyCell(r.credit)}</td>
