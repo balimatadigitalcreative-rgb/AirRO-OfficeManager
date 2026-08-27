@@ -35,7 +35,7 @@ beforeAll(async () => {
   // (settled), one very old pending (beyond maxAgeDays), and one pending TODAY (not yet outstanding).
   await mkStop('bOut', biruCust, 'Biru', YEST, 'pending');
   await mkStop('bDone', biruCust, 'Biru', YEST, 'terkirim', { source: 'tambahan', transactionId: 'tx1' });
-  await mkStop('bToday', biruCust, 'Biru', TODAY, 'pending');
+  await mkStop('bToday', biru2, 'Biru', TODAY, 'pending');   // a TODAY stop on ANOTHER customer (not the one carried)
   await mkStop('bCanc', biru2, 'Biru', YEST, 'batal');
   await mkStop('bOld', biru2, 'Biru', OLD, 'pending');
   // Merah: a pending yesterday — must NOT appear for a Biru-scoped staff.

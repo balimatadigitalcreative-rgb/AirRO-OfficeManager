@@ -1385,6 +1385,36 @@ select.fld::-ms-expand { display: none; }
 .dist-carry-banner-txt { font-size: 13px; font-weight: 700; color: #92400e; }
 .dist-carry-banner .dist-link { margin-left: auto; white-space: nowrap; }
 .dist-close-carry { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: #92400e; background: var(--warn-bg, #fff7ed); border-radius: 9px; padding: 9px 12px; margin-bottom: 10px; }
+/* Multi-select on the carry list. */
+.dist-carry-search { display: flex; align-items: center; gap: 6px; margin-left: auto; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: 999px; padding: 4px 12px; color: var(--text-faint); }
+.dist-carry-search input { border: none; outline: none; background: none; font: inherit; font-size: 12.5px; width: 150px; max-width: 40vw; color: var(--ink); }
+.dist-carry-selrow { display: flex; align-items: center; gap: 14px; padding: 4px 4px 8px; border-bottom: 1px solid var(--border-soft); }
+.dist-check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; font-size: 12.5px; color: var(--text-mut); }
+.dist-check input { width: 18px; height: 18px; accent-color: var(--green-800); cursor: pointer; }
+.dist-carry-check { min-height: 0; }
+.dist-carry-row { align-items: flex-start; }
+.dist-carry-row.sel { background: rgba(6, 84, 137, .04); }
+/* Selection bar — inline on desktop, docked to the bottom on phones (44px targets, no h-scroll). */
+.dist-carry-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; background: var(--green-900, #04365a); color: #fff; border-radius: 12px; position: sticky; bottom: 8px; z-index: 5; }
+.dist-carry-bar-n { font-size: 13px; font-weight: 700; }
+.dist-carry-bar-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.dist-carry-bar .btn-ghost { background: rgba(255,255,255,.14); color: #fff; border-color: transparent; }
+.dist-carry-bar .btn-ghost:hover { background: rgba(255,255,255,.22); }
+/* Impact preview lines. */
+.dist-prev-line { font-size: 13px; padding: 5px 0; color: var(--ink); }
+.dist-prev-line.warn { color: #92400e; }
+.dist-prev-line.bad { color: var(--neg, #e5484d); }
+.dist-prev-fleets { margin-top: 8px; border-top: 1px solid var(--border-soft); padding-top: 8px; }
+.dist-prev-fleet { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; color: var(--text-mut); }
+/* Undo toast (15s). */
+.dist-carry-undo { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 14px; background: var(--ink, #1c2b33); color: #fff; border-radius: 12px; font-size: 13px; }
+.dist-carry-undo-btn { margin-left: auto; background: none; border: 1px solid rgba(255,255,255,.4); color: #fff; border-radius: 8px; padding: 5px 12px; font-weight: 700; cursor: pointer; }
+@media (max-width: 640px) {
+  .dist-carry-search { margin-left: 0; width: 100%; margin-top: 6px; }
+  .dist-carry-head { flex-wrap: wrap; }
+  .dist-carry-bar { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.28); }
+  .dist-carry-bar-actions .btn { min-height: 40px; }
+}
 /* Sidebar count badge on the Pengiriman nav item. */
 .nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--warn, #d97706); color: #fff; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 /* Report: repeated-skip frequency (Belum terkirim). */

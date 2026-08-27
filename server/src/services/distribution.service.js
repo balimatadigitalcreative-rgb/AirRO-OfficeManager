@@ -3926,10 +3926,38 @@ async function outstandingSummary(user, asOf) {
   let oldest = 0; for (const r of rows) { const u = daysBetweenISO(r.date, today); if (u > oldest) oldest = u; }
   return { count: rows.length, oldest };
 }
+// ── THE shared "kirim hari ini" core, used by BOTH the single-row action and the bulk endpoint (never a
+// second path). Places the customer on TODAY's route (idempotently) and settles the outstanding original.
+//   • a NON-batal stop already exists today (schedule or a prior carry) → 'sudah_ada' (never duplicated);
+//   • a cancelled tambahan slot exists today → reactivate it (recorded so UNDO can restore, not delete);
+//   • otherwise create a fresh tambahan stop.
+// `seqAlloc()` yields the route position and is called ONLY when a stop is actually placed. Returns the
+// per-row outcome + everything UNDO needs. The caller has already checked fleet scope + that `d` is outstanding.
+async function _carryToday(d, today, snap, seqAlloc) {
+  const active = await prisma.delivery.findFirst({ where: { date: today, customerId: d.customerId, status: { not: 'batal' } }, select: { id: true } });
+  let createdId = null, createdMode = null, createdPrior = null, outcome;
+  if (active) {
+    outcome = 'sudah_ada';   // already in today's route — resolve the original, add nothing
+  } else {
+    const cancelledSlot = await prisma.delivery.findUnique({ where: { date_customerId_source: { date: today, customerId: d.customerId, source: 'tambahan' } } });
+    const seq = seqAlloc ? seqAlloc() : 999;
+    if (cancelledSlot) {   // the tambahan slot is taken by a cancelled row → reactivate it (@@unique blocks a new one)
+      createdPrior = { status: cancelledSlot.status, seq: cancelledSlot.seq, qty: cancelledSlot.qty, note: cancelledSlot.note };
+      const r = await prisma.delivery.update({ where: { id: cancelledSlot.id }, data: { status: 'pending', seq, qty: d.qty, note: d.note } });
+      createdId = r.id; createdMode = 'reactivated';
+    } else {
+      const r = await prisma.delivery.create({ data: { date: today, customerId: d.customerId, source: 'tambahan', fleetId: d.fleetId, status: 'pending', seq, qty: d.qty, note: d.note, createdById: snap.actorId, createdByName: snap.actorName } });
+      createdId = r.id; createdMode = 'new';
+    }
+    outcome = 'ditambahkan';
+  }
+  await prisma.delivery.update({ where: { id: d.id }, data: { status: 'batal', pendingReason: `Dijadwalkan ulang ke ${today}` } });
+  await logAudit('pengiriman', `Carry-over ${outcome === 'sudah_ada' ? '(sudah ada di rute)' : 'dikirim hari ini'}: ${d.customer ? d.customer.name : ''}`, `Stop ${d.date} → ${today}`, snap, d.fleetId);
+  return { outcome, createdId, createdMode, createdPrior, priorStatus: d.status, priorReason: d.pendingReason || '' };
+}
+
 // Resolve ONE outstanding stop. Actions:
-//   kirim  → create TODAY's stop for the customer (source 'tambahan', idempotent via @@unique) and mark
-//            the ORIGINAL resolved ('batal' + a "rescheduled" reason) so it stops reappearing — never a
-//            silent duplicate. Re-running is a no-op (the original is already settled).
+//   kirim  → place on today's route (via _carryToday — the shared core) + settle the original.
 //   tunda  → keep the stop deferred ('ditunda', optional reason); it stays on the list as postponed.
 //   batal  → cancel it ('batal'); a reason is REQUIRED and written to pendingReason.
 async function resolveOutstanding(id, body, actor) {
@@ -3944,10 +3972,8 @@ async function resolveOutstanding(id, body, actor) {
   const snap = await actorSnap(actor);
   const nm = d.customer ? d.customer.name : '';
   if (action === 'kirim') {
-    const res = await addOrder({ customerId: d.customerId, date: today, qty: d.qty, note: d.note }, actor);   // creates today's tambahan stop (upsert)
-    await prisma.delivery.update({ where: { id }, data: { status: 'batal', pendingReason: `Dijadwalkan ulang ke ${today}` } });
-    await logAudit('pengiriman', `Carry-over dikirim hari ini: ${nm}`, `Stop ${d.date} → ${today}`, snap, d.fleetId);
-    return { ok: true, action, created: res.delivery, resolvedId: id, fleetId: d.fleetId };
+    const r = await _carryToday(d, today, snap, null);   // single row appends at the end of the route (seq 999)
+    return { ok: true, action, outcome: r.outcome, resolvedId: id, fleetId: d.fleetId };
   }
   if (action === 'tunda') {
     const reason = String(body.reason || '').slice(0, 300);
@@ -3960,6 +3986,157 @@ async function resolveOutstanding(id, body, actor) {
   await prisma.delivery.update({ where: { id }, data: { status: 'batal', pendingReason: reason.slice(0, 300) } });
   await logAudit('pengiriman', `Carry-over dibatalkan: ${nm}`, `Stop ${d.date} · ${reason}`, snap, d.fleetId);
   return { ok: true, action, resolvedId: id, fleetId: d.fleetId };
+}
+
+// ── BULK carry-over ──────────────────────────────────────────────────────────────────────────────
+const BULK_CARRY_CAP = 100;
+// Load the caller's selected rows, keeping ONLY those that are genuinely outstanding AND in the caller's
+// fleet scope — the client's id list is never trusted. Returns { valid, denied, settled, notFound }.
+async function _classifySelection(user, ids, today) {
+  const rows = await prisma.delivery.findMany({ where: { id: { in: ids } }, include: { customer: true } });
+  const byId = {}; rows.forEach((r) => { byId[r.id] = r; });
+  const valid = [], denied = [], settled = [], notFound = [];
+  for (const id of ids) {
+    const d = byId[id];
+    if (!d) { notFound.push(id); continue; }
+    if (!fleetAllows(user, d.fleetId)) { denied.push(d); continue; }                       // fleet scope, per row
+    if (d.transactionId || d.status === 'terkirim' || d.status === 'batal' || !(d.date < today)) { settled.push(d); continue; }
+    valid.push(d);
+  }
+  return { valid, denied, settled, notFound };
+}
+// IMPACT PREVIEW — never let the user confirm blind. Server-computed: how many will be added, which
+// customers already have a stop today, resulting total stops per fleet, and any row denied by scope.
+async function bulkCarryPreview(user, body) {
+  const ids = Array.isArray(body && body.ids) ? body.ids : [];
+  if (!ids.length) throw ApiError.badRequest('Tidak ada baris dipilih.');
+  if (ids.length > BULK_CARRY_CAP) throw ApiError.badRequest(`Maksimal ${BULK_CARRY_CAP} baris per proses (dipilih ${ids.length}).`);
+  const today = (body && body.date) || todayISO();
+  const { valid, denied, settled, notFound } = await _classifySelection(user, ids, today);
+  // Which selected customers already have a NON-batal stop today (schedule or an earlier carry)?
+  const custIds = [...new Set(valid.map((d) => d.customerId))];
+  const activeToday = custIds.length ? await prisma.delivery.findMany({ where: { date: today, customerId: { in: custIds }, status: { not: 'batal' } }, select: { customerId: true } }) : [];
+  const hasToday = new Set(activeToday.map((t) => t.customerId));
+  const willAdd = valid.filter((d) => !hasToday.has(d.customerId));
+  const already = valid.filter((d) => hasToday.has(d.customerId));
+  // Resulting total stops per fleet = current live stops today + the ones we'll add.
+  const fleets = [...new Set(valid.map((d) => d.fleetId || ''))];
+  const fleetRows = [];
+  for (const f of fleets) {
+    const current = await prisma.delivery.count({ where: { date: today, fleetId: f, status: { not: 'batal' } } });
+    const add = willAdd.filter((d) => (d.fleetId || '') === f).length;
+    fleetRows.push({ fleetId: f, current, add, total: current + add });
+  }
+  const nm = (d) => (d.customer ? d.customer.name : '');
+  return {
+    date: today, selected: ids.length, cap: BULK_CARRY_CAP,
+    willAdd: willAdd.length,
+    alreadyToday: already.map((d) => ({ id: d.id, customerName: nm(d), fleetId: d.fleetId || '' })),
+    denied: denied.map((d) => ({ id: d.id, customerName: nm(d), fleetId: d.fleetId || '' })),
+    settled: settled.length, notFound: notFound.length,
+    fleets: fleetRows.sort((a, b) => (a.fleetId || '~').localeCompare(b.fleetId || '~')),
+  };
+}
+// BULK KIRIM HARI INI — atomic per batch (no transaction: each row commits independently; a partial
+// failure rolls back nothing that already succeeded). Reuses _carryToday (the SAME core as the single
+// action). Route seq: appended AFTER today's existing stops, in the customers' route order (their original
+// seq), NOT click order. Returns per-row results + an UNDO payload (only successfully-added rows).
+async function bulkCarry(user, body) {
+  const ids = Array.isArray(body && body.ids) ? body.ids : [];
+  if (!ids.length) throw ApiError.badRequest('Tidak ada baris dipilih.');
+  if (ids.length > BULK_CARRY_CAP) throw ApiError.badRequest(`Maksimal ${BULK_CARRY_CAP} baris per proses (dipilih ${ids.length}) — kurangi pilihan Anda.`);
+  const today = (body && body.date) || todayISO();
+  const snap = await actorSnap(user);
+  const { valid, denied, settled, notFound } = await _classifySelection(user, ids, today);
+  // Per-fleet seq allocator: start after today's current max seq, hand out increasing positions.
+  const fleets = [...new Set(valid.map((d) => d.fleetId || ''))];
+  const nextSeq = {};
+  for (const f of fleets) { const m = await prisma.delivery.aggregate({ where: { date: today, fleetId: f }, _max: { seq: true } }); nextSeq[f] = (m._max.seq || 0); }
+  // Process in the CUSTOMERS' route order (original seq), not the order they were clicked.
+  const ordered = valid.slice().sort((a, b) => (a.fleetId || '').localeCompare(b.fleetId || '') || (a.seq - b.seq) || (a.customer && b.customer ? a.customer.name.localeCompare(b.customer.name) : 0));
+  const results = [], undo = [];
+  for (const d of ordered) {
+    try {
+      const r = await _carryToday(d, today, snap, () => ++nextSeq[d.fleetId || '']);
+      results.push({ id: d.id, status: r.outcome, customerName: d.customer ? d.customer.name : '', fleetId: d.fleetId || '' });
+      undo.push({ id: d.id, priorStatus: r.priorStatus, priorReason: r.priorReason, createdId: r.createdId, createdMode: r.createdMode, createdPrior: r.createdPrior });
+    } catch (e) {
+      results.push({ id: d.id, status: 'gagal', reason: (e && e.message) || 'error', customerName: d.customer ? d.customer.name : '', fleetId: d.fleetId || '' });
+    }
+  }
+  denied.forEach((d) => results.push({ id: d.id, status: 'gagal', reason: 'Armada di luar akses Anda.', customerName: d.customer ? d.customer.name : '', fleetId: d.fleetId || '' }));
+  settled.forEach((d) => results.push({ id: d.id, status: 'lewat', reason: 'Sudah selesai / bukan tunggakan.', customerName: d.customer ? d.customer.name : '' }));
+  notFound.forEach((id) => results.push({ id, status: 'gagal', reason: 'Tidak ditemukan.' }));
+  return {
+    date: today,
+    added: results.filter((r) => r.status === 'ditambahkan').length,
+    already: results.filter((r) => r.status === 'sudah_ada').length,
+    failed: results.filter((r) => r.status === 'gagal' || r.status === 'lewat').length,
+    results, undo: undo.length ? { items: undo } : null,
+  };
+}
+// BULK TUNDA / BATALKAN — one shared reason applied to the batch; batal REQUIRES a reason. Audited PER ROW
+// (each stop keeps its own trail), fleet-scoped per row. Never touches settled rows.
+async function bulkResolveOutstanding(user, body) {
+  const ids = Array.isArray(body && body.ids) ? body.ids : [];
+  const action = ['tunda', 'batal'].includes(body && body.action) ? body.action : null;
+  if (!action) throw ApiError.badRequest('Aksi tidak dikenal (tunda / batal).');
+  if (!ids.length) throw ApiError.badRequest('Tidak ada baris dipilih.');
+  if (ids.length > BULK_CARRY_CAP) throw ApiError.badRequest(`Maksimal ${BULK_CARRY_CAP} baris per proses (dipilih ${ids.length}).`);
+  const reason = String((body && body.reason) || '').trim();
+  if (action === 'batal' && !reason) throw ApiError.badRequest('Alasan pembatalan wajib diisi.');
+  const today = (body && body.date) || todayISO();
+  const snap = await actorSnap(user);
+  const { valid, denied, settled, notFound } = await _classifySelection(user, ids, today);
+  const results = [];
+  for (const d of valid) {
+    const nm = d.customer ? d.customer.name : '';
+    if (action === 'tunda') {
+      await prisma.delivery.update({ where: { id: d.id }, data: { status: 'ditunda', pendingReason: reason || d.pendingReason } });
+      await logAudit('pengiriman', `Carry-over ditunda (massal): ${nm}`, `Stop ${d.date}${reason ? ' · ' + reason : ''}`, snap, d.fleetId);
+    } else {
+      await prisma.delivery.update({ where: { id: d.id }, data: { status: 'batal', pendingReason: reason.slice(0, 300) } });
+      await logAudit('pengiriman', `Carry-over dibatalkan (massal): ${nm}`, `Stop ${d.date} · ${reason}`, snap, d.fleetId);
+    }
+    results.push({ id: d.id, status: 'ok', customerName: nm });
+  }
+  denied.forEach((d) => results.push({ id: d.id, status: 'gagal', reason: 'Armada di luar akses Anda.' }));
+  settled.forEach((d) => results.push({ id: d.id, status: 'lewat' }));
+  notFound.forEach((id) => results.push({ id, status: 'gagal', reason: 'Tidak ditemukan.' }));
+  return { action, done: results.filter((r) => r.status === 'ok').length, results };
+}
+// UNDO a bulk carry-over (15-second toast). Safe because nothing has been delivered: it removes the
+// newly-created today stops (or restores a reactivated slot) and restores each outstanding original to its
+// pre-carry state. Re-guards fleet scope per row and only touches rows still in the expected post-carry
+// state (so a stop delivered in the meantime, or already changed, is left alone).
+async function undoBulkCarry(user, body) {
+  const items = (body && Array.isArray(body.items)) ? body.items : [];
+  if (!items.length) throw ApiError.badRequest('Tidak ada yang bisa dibatalkan.');
+  const today = todayISO();
+  const snap = await actorSnap(user);
+  let restored = 0, removed = 0;
+  for (const it of items) {
+    const orig = await prisma.delivery.findUnique({ where: { id: String(it.id || '') } });
+    if (!orig || !fleetAllows(user, orig.fleetId)) continue;   // never touch out-of-scope
+    // Undo the placed stop: delete a freshly-created one; restore a reactivated slot to its prior state.
+    if (it.createdId) {
+      const c = await prisma.delivery.findUnique({ where: { id: String(it.createdId) } });
+      if (c && !c.transactionId && c.source === 'tambahan' && c.date === today && c.status !== 'terkirim') {
+        if (it.createdMode === 'reactivated' && it.createdPrior) {
+          await prisma.delivery.update({ where: { id: c.id }, data: { status: it.createdPrior.status, seq: it.createdPrior.seq, qty: it.createdPrior.qty, note: it.createdPrior.note } });
+        } else {
+          await prisma.delivery.delete({ where: { id: c.id } }); removed++;
+        }
+      }
+    }
+    // Restore the original outstanding row — only if it is still in the batal+rescheduled state we set.
+    if (orig.status === 'batal' && /dijadwalkan ulang/i.test(orig.pendingReason || '')) {
+      await prisma.delivery.update({ where: { id: orig.id }, data: { status: it.priorStatus || 'pending', pendingReason: it.priorReason || '' } });
+      restored++;
+    }
+  }
+  await logAudit('pengiriman', 'Batalkan carry-over massal (undo)', `${restored} tunggakan dipulihkan · ${removed} stop hari ini dihapus`, snap, '');
+  return { restored, removed };
 }
 
 // ── FIELD EXPENSES (pengeluaran lapangan) ────────────────────────────────────────
@@ -4174,7 +4351,7 @@ module.exports = {
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
-  outstandingDeliveries, outstandingSummary, resolveOutstanding,
+  outstandingDeliveries, outstandingSummary, resolveOutstanding, bulkCarry, bulkCarryPreview, bulkResolveOutstanding, undoBulkCarry,
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,
   parseLegacyDate, expandLegacyRow,

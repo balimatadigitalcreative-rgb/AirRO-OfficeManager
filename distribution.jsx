@@ -5982,32 +5982,98 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
 
 
 // CARRY-OVER — "Belum Terkirim": undelivered stops from previous days, pinned above today's route.
-// It fetches the server's outstanding list (the ONE rule lives there); the UI never re-derives it.
-// Renders NOTHING while loading or when empty — never an empty section. Sorted server-side by age desc.
+// Fetches the server's outstanding list (the ONE rule lives there; the UI never re-derives it) and adds a
+// MULTI-SELECT to move several stops into today at once — mirrors the Transaksi bulk pattern. Renders
+// NOTHING while loading or when empty. All bulk work is server-side (preview → confirm → undo).
 function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   const [res, setRes] = uSx(null);
-  const [busy, setBusy] = uSx('');
-  const [cancelId, setCancelId] = uSx(null);
+  const [busy, setBusy] = uSx('');           // single-row id in flight
+  const [cancelId, setCancelId] = uSx(null); // single-row batal reason input
   const [cancelReason, setCancelReason] = uSx('');
+  const [sel, setSel] = uSx({});             // id → true (survives sort/filter)
+  const [q, setQ] = uSx('');                 // filter within the section
+  const [preview, setPreview] = uSx(null);   // { data, ids } for the bulk-kirim impact modal
+  const [reasonFor, setReasonFor] = uSx(null); // { action:'tunda'|'batal', ids }
+  const [reasonTxt, setReasonTxt] = uSx('');
+  const [bulkBusy, setBulkBusy] = uSx(false);
+  const [undoT, setUndoT] = uSx(null);       // { msg, payload } — 15s undo toast
+  const undoTimer = React.useRef(null);
   const load = () => window.API.distribusi.deliveries.outstanding({ fleet: ef, asOf: today })
     .then((r) => setRes(r)).catch(() => setRes({ data: [], count: 0, oldest: 0 }));
-  uEx(() => { setRes(null); if (window.API && window.API.distribusi) load(); }, [ef, today, refreshKey]);
-  if (!res || !res.count) return null;   // loading or empty → render nothing
+  uEx(() => { setRes(null); setSel({}); setQ(''); if (window.API && window.API.distribusi) load(); }, [ef, today, refreshKey]);
+  uEx(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+  if (!res || !res.count) return null;
+
+  const data = res.data;
+  const ql = q.trim().toLowerCase();
+  const match = (s) => !ql || (s.customerName || '').toLowerCase().includes(ql) || (s.customerCode || '').toLowerCase().includes(ql);
+  const filtered = data.filter(match);
+  const dataIds = new Set(data.map((s) => s.id));
+  const filteredIds = new Set(filtered.map((s) => s.id));
+  const selIds = Object.keys(sel).filter((k) => sel[k] && dataIds.has(k));       // selected AND still present
+  const selVisible = selIds.filter((id) => filteredIds.has(id));
+  const hidden = selIds.length - selVisible.length;                              // selected but hidden by the filter
+  const allVisibleChecked = filtered.length > 0 && filtered.every((s) => sel[s.id]);
+  const toggle = (id) => setSel((m) => ({ ...m, [id]: !m[id] }));
+  const setMany = (ids, on) => setSel((m) => { const n = { ...m }; ids.forEach((id) => { n[id] = on; }); return n; });
+  const clearSel = () => setSel({});
+
   const act = (id, action, reason) => {
     setBusy(id);
     window.API.distribusi.deliveries.resolveOutstanding(id, { action, reason, asOf: today })
       .then(() => { setBusy(''); setCancelId(null); setCancelReason(''); load(); if (onResolved) onResolved(); })
       .catch(() => setBusy(''));
   };
+  const flashUndo = (r) => {
+    const msg = trD('dist.bulkResult', { a: r.added, b: r.already, c: r.failed });
+    if (r.undo && r.added > 0) {
+      setUndoT({ msg, payload: r.undo });
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      undoTimer.current = setTimeout(() => setUndoT(null), 15000);   // 15-second undo window
+    } else { setUndoT({ msg, payload: null }); if (undoTimer.current) clearTimeout(undoTimer.current); undoTimer.current = setTimeout(() => setUndoT(null), 4000); }
+  };
+  const openPreview = () => {
+    if (!selIds.length) return;
+    setBulkBusy(true);
+    window.API.distribusi.deliveries.bulkCarryPreview({ ids: selIds, date: today })
+      .then((r) => { setBulkBusy(false); setPreview({ data: r.data, ids: selIds }); })
+      .catch((e) => { setBulkBusy(false); setUndoT({ msg: (e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr'), payload: null }); setTimeout(() => setUndoT(null), 4000); });
+  };
+  const confirmCarry = () => {
+    setBulkBusy(true);
+    window.API.distribusi.deliveries.bulkCarry({ ids: preview.ids, date: today })
+      .then((r) => { setBulkBusy(false); setPreview(null); clearSel(); flashUndo(r.data); load(); if (onResolved) onResolved(); })
+      .catch((e) => { setBulkBusy(false); setPreview(null); setUndoT({ msg: (e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr'), payload: null }); setTimeout(() => setUndoT(null), 4000); });
+  };
+  const doUndo = () => {
+    const p = undoT && undoT.payload; if (!p) return;
+    setUndoT(null); if (undoTimer.current) clearTimeout(undoTimer.current);
+    window.API.distribusi.deliveries.undoCarry(p).then(() => { load(); if (onResolved) onResolved(); }).catch(() => {});
+  };
+  const submitReason = () => {
+    const action = reasonFor.action; const reason = reasonTxt.trim();
+    if (action === 'batal' && !reason) return;
+    setBulkBusy(true);
+    window.API.distribusi.deliveries.bulkResolveOutstanding({ ids: reasonFor.ids, action, reason: reason || undefined })
+      .then(() => { setBulkBusy(false); setReasonFor(null); setReasonTxt(''); clearSel(); load(); if (onResolved) onResolved(); })
+      .catch(() => { setBulkBusy(false); });
+  };
+
   return (
     <div className="card dist-card dist-carry">
       <div className="dist-carry-head">
         <span className="dist-carry-ic"><IconTruck s={16} /></span>
         <b>{trD('dist.carryHead', { n: res.count })}</b>
         {res.oldest ? <span className="dist-carry-oldest">{trD('dist.carryOldest', { d: res.oldest })}</span> : null}
+        <div className="dist-carry-search"><IconSearch s={14} /><input value={q} placeholder={trD('dist.carrySearch')} onChange={(e) => setQ(e.target.value)} /></div>
       </div>
-      {res.data.map((s) => (
-        <div key={s.id} className="dist-cust-row dist-carry-row">
+      <div className="dist-carry-selrow">
+        <label className="dist-check"><input type="checkbox" checked={allVisibleChecked} ref={(el) => { if (el) el.indeterminate = !allVisibleChecked && filtered.some((s) => sel[s.id]); }} onChange={() => setMany(filtered.map((s) => s.id), !allVisibleChecked)} /><span>{trD('dist.selectAllVisible')}</span></label>
+        {ql && filtered.length < data.length && <button type="button" className="dist-link" onClick={() => setMany(data.map((s) => s.id), true)}>{trD('dist.selectAllN', { n: data.length })}</button>}
+      </div>
+      {filtered.map((s) => (
+        <div key={s.id} className={`dist-cust-row dist-carry-row${sel[s.id] ? ' sel' : ''}`}>
+          <label className="dist-check dist-carry-check"><input type="checkbox" checked={!!sel[s.id]} onChange={() => toggle(s.id)} aria-label={s.customerName} /></label>
           <span className="dist-txn-av">{initialsOf(s.customerName)}</span>
           <div className="dist-cust-main">
             <div className="dist-txn-line1">{s.customerCode && <span className="dist-code">{s.customerCode}</span>}<span className="dist-txn-name">{s.customerName}</span><span className="dist-carry-age">{trD('dist.carryAge', { d: s.umur })}</span></div>
@@ -6030,6 +6096,58 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
           )}
         </div>
       ))}
+      {filtered.length === 0 && <div className="dist-empty" style={{ padding: 16 }}>{trD('dist.carryNoMatch')}</div>}
+
+      {selIds.length > 0 && (
+        <div className="dist-carry-bar">
+          <span className="dist-carry-bar-n">{trD('dist.nSelected', { n: selIds.length })}{hidden > 0 ? ' ' + trD('dist.nHidden', { m: hidden }) : ''}</span>
+          <div className="dist-carry-bar-actions">
+            <button type="button" className="btn btn-primary btn-sm" disabled={bulkBusy} onClick={openPreview}><IconCheck s={14} />{trD('dist.carryKirim')}</button>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={bulkBusy} onClick={() => { setReasonFor({ action: 'tunda', ids: selIds }); setReasonTxt(''); }}>{trD('dist.carryTunda')}</button>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={bulkBusy} onClick={() => { setReasonFor({ action: 'batal', ids: selIds }); setReasonTxt(''); }}><IconClose s={14} />{trD('dist.delivCancel')}</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={clearSel}>{trD('dist.cancel')}</button>
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <div className="modal-scrim" onClick={() => setPreview(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.carryKirim')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{today}</div></div><button className="jp-icon" onClick={() => setPreview(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <div className="dist-prev-line"><b>{numX(preview.data.willAdd)}</b> {trD('dist.prevWillAdd')}</div>
+              {preview.data.alreadyToday.length > 0 && <div className="dist-prev-line warn"><b>{preview.data.alreadyToday.length}</b> {trD('dist.prevAlready')}: {preview.data.alreadyToday.map((x) => x.customerName).join(', ')}</div>}
+              {preview.data.denied.length > 0 && <div className="dist-prev-line bad"><b>{preview.data.denied.length}</b> {trD('dist.prevDenied')}</div>}
+              {preview.data.settled > 0 && <div className="dist-prev-line">{trD('dist.prevSettled', { n: preview.data.settled })}</div>}
+              <div className="dist-prev-fleets">
+                {preview.data.fleets.map((f) => <div key={f.fleetId} className="dist-prev-fleet"><span>{f.fleetId || trD('dist.noFleet')}</span><span className="tnum">{f.current} → <b>{f.total}</b> {trD('rep.stops').toLowerCase()}</span></div>)}
+              </div>
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setPreview(null)}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={bulkBusy || preview.data.willAdd + preview.data.alreadyToday.length === 0} onClick={confirmCarry}>{bulkBusy ? '…' : trD('dist.prevConfirm', { n: preview.data.willAdd })}</button></div>
+          </div>
+        </div>
+      )}
+
+      {reasonFor && (
+        <div className="modal-scrim" onClick={() => setReasonFor(null)} style={{ zIndex: 200 }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{reasonFor.action === 'batal' ? trD('dist.delivCancel') : trD('dist.carryTunda')} · {trD('dist.nSelected', { n: reasonFor.ids.length })}</div><button className="jp-icon" onClick={() => setReasonFor(null)}><IconClose s={18} /></button></div>
+            <div className="modal-body">
+              <label className="fld-label">{trD('dist.pendingReason')}{reasonFor.action === 'batal' ? ' *' : ' (' + trD('dist.optional') + ')'}</label>
+              <input className="fld" autoFocus value={reasonTxt} maxLength={300} placeholder={trD('dist.closeReasonPh')} onChange={(e) => setReasonTxt(e.target.value)} />
+              <div className="dist-prev-line" style={{ marginTop: 8 }}>{trD('dist.bulkReasonNote')}</div>
+            </div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setReasonFor(null)}>{trD('dist.cancel')}</button><button className={`btn ${reasonFor.action === 'batal' ? 'btn-danger' : 'btn-primary'}`} disabled={bulkBusy || (reasonFor.action === 'batal' && !reasonTxt.trim())} onClick={submitReason}>{bulkBusy ? '…' : trD('dist.applyN', { n: reasonFor.ids.length })}</button></div>
+          </div>
+        </div>
+      )}
+
+      {undoT && (
+        <div className="dist-carry-undo">
+          <span>{undoT.msg}</span>
+          {undoT.payload && <button type="button" className="dist-carry-undo-btn" onClick={doUndo}>{trD('dist.undo')}</button>}
+        </div>
+      )}
     </div>
   );
 }

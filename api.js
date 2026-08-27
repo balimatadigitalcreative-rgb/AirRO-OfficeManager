@@ -321,6 +321,10 @@
         // Carry-over of undelivered stops from previous days.
         outstanding: (opts) => { const o = opts || {}; const p = []; if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); if (o.asOf) p.push('asOf=' + encodeURIComponent(o.asOf)); if (o.maxAgeDays) p.push('maxAgeDays=' + o.maxAgeDays); if (o.includeDitunda === false) p.push('includeDitunda=false'); return req('GET', '/distribusi/deliveries/outstanding' + (p.length ? '?' + p.join('&') : '')); },
         resolveOutstanding: (id, data) => req('POST', '/distribusi/deliveries/outstanding/' + id + '/resolve', data),   // { action:'kirim'|'tunda'|'batal', reason?, asOf? }
+        bulkCarryPreview: (data) => req('POST', '/distribusi/deliveries/outstanding/bulk-carry/preview', data),   // { ids[], date? }
+        bulkCarry: (data) => req('POST', '/distribusi/deliveries/outstanding/bulk-carry', data),                 // { ids[], date? }
+        bulkResolveOutstanding: (data) => req('POST', '/distribusi/deliveries/outstanding/bulk-resolve', data),  // { ids[], action:'tunda'|'batal', reason? }
+        undoCarry: (data) => req('POST', '/distribusi/deliveries/outstanding/undo-carry', data),                 // { items:[...] } from a bulkCarry result
       },
       // Delivery runs (rit): per-trip gallon out/in + reconciliation.
       runs: {

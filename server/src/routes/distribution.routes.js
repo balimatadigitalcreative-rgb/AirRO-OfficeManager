@@ -158,6 +158,11 @@ router.get('/deliveries', requireCap('distribusiPengiriman'), validate({ query: 
 // CARRY-OVER of undelivered stops. GET the actionable list (view-window carve-out — see the service);
 // POST resolves ONE (kirim = create today's stop + settle original / tunda / batal). BEFORE '/:id'.
 router.get('/deliveries/outstanding', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.outstandingQuery }), ctrl.outstandingDeliveries);
+// BULK carry-over of several outstanding stops in one action. preview → confirm; per-row guarded server-side.
+router.post('/deliveries/outstanding/bulk-carry/preview', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.bulkCarrySchema }), ctrl.bulkCarryPreview);
+router.post('/deliveries/outstanding/bulk-carry', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.bulkCarrySchema }), ctrl.bulkCarry);
+router.post('/deliveries/outstanding/bulk-resolve', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.bulkResolveSchema }), ctrl.bulkResolveOutstanding);
+router.post('/deliveries/outstanding/undo-carry', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.undoCarrySchema }), ctrl.undoBulkCarry);
 router.post('/deliveries/outstanding/:id/resolve', requireCap('distribusiPengiriman'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.outstandingResolveSchema }), ctrl.resolveOutstanding);
 router.post('/deliveries/order', requireCap('distribusiOrder'), validate({ body: ctrl.schemas.orderSchema }), ctrl.addOrder);
 router.put('/deliveries/reorder', requireCap('distribusiRute'), validate({ body: ctrl.schemas.reorderSchema }), ctrl.reorderDeliveries);
