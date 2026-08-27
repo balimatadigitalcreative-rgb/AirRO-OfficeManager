@@ -356,7 +356,7 @@ function Kpi({ icon, tile, fg, value, unit, label, cls, pill, pillCls, hero, sub
   );
 }
 
-function DistDashboard({ refreshKey, staffMode, canInput, canHistory, isOwner, onQuickInput, onOpenCustomers, onOpenTransactions, today, fleetScope, fleet, distFleet, setDistFleet }) {
+function DistDashboard({ refreshKey, staffMode, canInput, canHistory, isOwner, onQuickInput, onOpenCustomers, onOpenTransactions, onOpenDeliveries, today, fleetScope, fleet, distFleet, setDistFleet }) {
   const [sum, setSum] = uSx(null);
   const [loading, setLoading] = uSx(true);
   const [err, setErr] = uSx(false);
@@ -447,6 +447,13 @@ function DistDashboard({ refreshKey, staffMode, canInput, canHistory, isOwner, o
       {periodSelector}
       {staffMode && (
         <div className="dist-staff-banner"><span className="dist-staff-ic"><IconShield s={16} /></span><div><b>{trD('dist.staffMode')}</b><span>{trD('dist.staffModeSub')}</span></div></div>
+      )}
+      {sum.outstanding && sum.outstanding.count > 0 && (
+        <button type="button" className="dist-carry-banner" onClick={() => onOpenDeliveries && onOpenDeliveries()} disabled={!onOpenDeliveries}>
+          <span className="dist-carry-ic"><IconTruck s={17} /></span>
+          <span className="dist-carry-banner-txt">{trD('dist.carryDash', { n: sum.outstanding.count })}{sum.outstanding.oldest ? ' · ' + trD('dist.carryOldest', { d: sum.outstanding.oldest }) : ''}</span>
+          {onOpenDeliveries && <span className="dist-link">{trD('dist.carryOpen')} →</span>}
+        </button>
       )}
 
       <div className="dist-grid">
@@ -5974,6 +5981,59 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
 }
 
 
+// CARRY-OVER — "Belum Terkirim": undelivered stops from previous days, pinned above today's route.
+// It fetches the server's outstanding list (the ONE rule lives there); the UI never re-derives it.
+// Renders NOTHING while loading or when empty — never an empty section. Sorted server-side by age desc.
+function OutstandingSection({ ef, today, refreshKey, onResolved }) {
+  const [res, setRes] = uSx(null);
+  const [busy, setBusy] = uSx('');
+  const [cancelId, setCancelId] = uSx(null);
+  const [cancelReason, setCancelReason] = uSx('');
+  const load = () => window.API.distribusi.deliveries.outstanding({ fleet: ef, asOf: today })
+    .then((r) => setRes(r)).catch(() => setRes({ data: [], count: 0, oldest: 0 }));
+  uEx(() => { setRes(null); if (window.API && window.API.distribusi) load(); }, [ef, today, refreshKey]);
+  if (!res || !res.count) return null;   // loading or empty → render nothing
+  const act = (id, action, reason) => {
+    setBusy(id);
+    window.API.distribusi.deliveries.resolveOutstanding(id, { action, reason, asOf: today })
+      .then(() => { setBusy(''); setCancelId(null); setCancelReason(''); load(); if (onResolved) onResolved(); })
+      .catch(() => setBusy(''));
+  };
+  return (
+    <div className="card dist-card dist-carry">
+      <div className="dist-carry-head">
+        <span className="dist-carry-ic"><IconTruck s={16} /></span>
+        <b>{trD('dist.carryHead', { n: res.count })}</b>
+        {res.oldest ? <span className="dist-carry-oldest">{trD('dist.carryOldest', { d: res.oldest })}</span> : null}
+      </div>
+      {res.data.map((s) => (
+        <div key={s.id} className="dist-cust-row dist-carry-row">
+          <span className="dist-txn-av">{initialsOf(s.customerName)}</span>
+          <div className="dist-cust-main">
+            <div className="dist-txn-line1">{s.customerCode && <span className="dist-code">{s.customerCode}</span>}<span className="dist-txn-name">{s.customerName}</span><span className="dist-carry-age">{trD('dist.carryAge', { d: s.umur })}</span></div>
+            <div className="dist-txn-sub">{s.date}{s.phone ? ' · ' + s.phone : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}</div>
+            {s.pendingReason ? <div className="dist-deliv-reason"><IconInvoice s={11} />{trD('dist.pendingReason')}: {s.pendingReason}</div> : null}
+            {cancelId === s.id && (
+              <div className="dist-carry-cancel">
+                <input className="fld" autoFocus value={cancelReason} maxLength={300} placeholder={trD('dist.closeReasonPh')} onChange={(e) => setCancelReason(e.target.value)} />
+                <button type="button" className="btn btn-danger btn-sm" disabled={!cancelReason.trim() || busy === s.id} onClick={() => act(s.id, 'batal', cancelReason.trim())}>{trD('dist.delivCancel')}</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setCancelId(null); setCancelReason(''); }}>{trD('dist.cancel')}</button>
+              </div>
+            )}
+          </div>
+          {cancelId !== s.id && (
+            <div className="dist-deliv-actions">
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy === s.id} onClick={() => act(s.id, 'kirim')}><IconCheck s={13} />{trD('dist.carryKirim')}</button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy === s.id} onClick={() => act(s.id, 'tunda')}>{trD('dist.carryTunda')}</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setCancelId(s.id); setCancelReason(''); }}><IconClose s={13} />{trD('dist.delivCancel')}</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
@@ -6042,6 +6102,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
+      {/* Carry-over of yesterday's leftovers — pinned ABOVE today's route (renders nothing when empty). */}
+      <OutstandingSection ef={ef} today={today} refreshKey={refreshKey} onResolved={() => { reload(); if (onChanged) onChanged(); }} />
       <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />
       {closeouts.map((c) => (
         <div key={c.id} className="card dist-closed-banner">
@@ -6103,7 +6165,9 @@ function CloseoutModal({ date, fleet, pendingStops, onClose, onClosed }) {
   const [note, setNote] = uSx('');
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
+  const [carry, setCarry] = uSx(0);   // previous-day leftovers for THIS fleet — a non-blocking heads-up
   uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  uEx(() => { if (window.API && window.API.distribusi) window.API.distribusi.deliveries.outstanding({ fleet }).then((r) => setCarry(r.count || 0)).catch(() => {}); }, [fleet]);
   const allFilled = pendingStops.every((s) => String(reasons[s.id] || '').trim());
   const save = () => {
     if (!allFilled || saving) return;
@@ -6117,6 +6181,7 @@ function CloseoutModal({ date, fleet, pendingStops, onClose, onClosed }) {
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.closeDay')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{fleet} · {date}</div></div><button className="jp-icon" onClick={onClose}><IconClose s={18} /></button></div>
         <div className="modal-body">
+          {carry > 0 && <div className="dist-close-carry"><IconTruck s={15} />{trD('dist.closeCarryWarn', { n: carry })}</div>}
           {pendingStops.length > 0 ? (<>
             <div className="dist-close-warn"><IconInvoice s={15} />{trD('dist.closePendingWarn', { n: pendingStops.length })}</div>
             {pendingStops.map((s) => (
@@ -6174,6 +6239,12 @@ function DistDeliveryReport({ refreshKey, today, fleetScope, fleet, distFleet, s
       rows.push([trD('rep.cash'), trD('dist.cashLbl'), trD('dist.xferLbl'), trD('dist.fieldExpense'), trD('dist.netCash')]);
       rows.push(['', f.cash.tunai, f.cash.transfer, f.cash.expense, f.cash.net]);
     });
+    // "Belum terkirim" — repeated-skip frequency per customer (across the whole period).
+    if (rep.skips && rep.skips.length) {
+      rows.push([]); rows.push([trD('rep.skipsTitle')]);
+      rows.push([trD('cd.pelanggan'), trD('rep.fleet'), trD('rep.skipCount'), trD('rep.skipLast'), trD('dist.pendingReason')]);
+      rep.skips.forEach((g) => rows.push([g.customerName || '', g.fleetId || '', g.count, g.lastDate || '', (g.reasons || []).join(' | ')]));
+    }
     const csv = rows.map((r) => r.map((c) => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'laporan-pengiriman-' + rep.from + (rep.from !== rep.to ? '_' + rep.to : '') + '.csv';
@@ -6274,6 +6345,25 @@ function DistDeliveryReport({ refreshKey, today, fleetScope, fleet, distFleet, s
               </>)}
             </div>
           ))}
+          {/* BELUM TERKIRIM — repeated-skip frequency per customer over the period. Repeated skips of the
+              SAME customer are the pattern worth seeing; ≥3 reads hot. Includes history beyond the working
+              list's maxAgeDays (nothing lost). */}
+          {rep.skips && rep.skips.length > 0 && (
+            <div className="card dist-card rep-skips">
+              <div className="rep-skips-head"><span className="dist-carry-ic"><IconTruck s={16} /></span><b>{trD('rep.skipsTitle')}</b><span className="rep-skips-sub">{trD('rep.skipsSub')}</span></div>
+              <div className="rep-skips-table">
+                <div className="rep-skips-row head"><span>{trD('cd.pelanggan')}</span><span>{trD('rep.fleet')}</span><span className="fin-r">{trD('rep.skipCount')}</span><span>{trD('rep.skipLast')}</span></div>
+                {rep.skips.map((g, i) => (
+                  <div key={i} className="rep-skips-row">
+                    <span className="rep-skips-cust">{g.customerCode ? <span className="dist-code">{g.customerCode}</span> : null}{g.customerName || '—'}</span>
+                    <span className="rep-skips-fleet">{g.fleetId || '—'}</span>
+                    <span className="fin-r"><b className={g.count >= 3 ? 'rep-skip-hot' : ''}>{g.count}×</b></span>
+                    <span className="rep-skips-last">{g.lastDate}{g.reasons && g.reasons.length ? ' · ' + g.reasons[0] : ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>)}
       {toast && <div className="dist-toast no-print"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>

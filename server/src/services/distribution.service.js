@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/ApiError');
 const { normalizePhone } = require('../utils/phone');
-const { resolvePerms, viewWindowFrom, VIEW_CAPS } = require('../config/permissions');
+const { resolvePerms, viewWindowFrom, VIEW_CAPS, addDaysISO } = require('../config/permissions');
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
 const config = require('../config/env');           // ACCOUNTING v2 flag — live journal posting
 const acc = require('./accounting.service');       // the double-entry posting service (transaction-aware)
@@ -2735,6 +2735,7 @@ async function dashboardSummary(user, query) {
     todayCash, todayTransfer, todayCashByFleet,   // money-in split + per-fleet cash to reconcile
     todayExpense, todayNetCash,   // field expenses in the window + net cash to deposit (cash − expenses)
     customers, last7: series, series, recent, topCustomers, reminders,
+    outstanding: await outstandingSummary(user),   // carry-over leftovers — always "now" (not the dashboard window)
   };
 }
 
@@ -3878,6 +3879,89 @@ async function reorderDeliveries(user, body) {
   return { ok: true, count: seq };
 }
 
+// ══ CARRY-OVER of undelivered stops ══════════════════════════════════════════════════════════════
+// THE outstanding rule lives HERE and nowhere else — the UI never re-derives it; it calls the endpoints
+// below. A stop is OUTSTANDING when: its date is BEFORE `asOf` (today) AND its status is 'pending' or
+// 'ditunda' AND it has NO transactionId. 'batal' and 'terkirim' are settled and are never carried over.
+//
+// DELIBERATE view-window CARVE-OUT: an outstanding stop is TODAY's work even though its date is older, so
+// this query does NOT clamp to the caller's read window (resolveViewWindow). A staff limited to "hari ini"
+// would otherwise never see the very leftovers they must clear — the feature would be invisible to exactly
+// the people who need it. Fleet scope + capability STILL apply, and `maxAgeDays` bounds how far back the
+// ACTIONABLE list reaches (months-old stops are hygiene, not today's work — see the report for history).
+const OUTSTANDING_STATUSES = ['pending', 'ditunda'];
+const daysBetweenISO = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+function outstandingWhere(user, { asOf, maxAgeDays, fleet, includeDitunda } = {}) {
+  const today = asOf || todayISO();
+  const maxAge = Number.isFinite(+maxAgeDays) && +maxAgeDays > 0 ? Math.min(+maxAgeDays, 3650) : 30;
+  const statuses = includeDitunda === false || includeDitunda === 'false' || includeDitunda === '0' ? ['pending'] : OUTSTANDING_STATUSES;
+  return {
+    where: { date: { lt: today, gte: addDaysISO(today, -maxAge) }, status: { in: statuses }, transactionId: null, ...fleetWhere(user, 'fleetId', fleet) },
+    today, maxAge,
+  };
+}
+// GET /distribusi/deliveries/outstanding — the actionable carry-over list.
+async function outstandingDeliveries(user, query) {
+  const q = query || {};
+  const { where, today, maxAge } = outstandingWhere(user, { asOf: q.asOf, maxAgeDays: q.maxAgeDays, fleet: q.fleet, includeDitunda: q.includeDitunda });
+  const rows = await resilientFindMany(prisma.delivery, { where, include: { customer: true } }, 'outstanding');
+  const bon = await bonMapFor([...new Set(rows.map((r) => r.customerId))]);
+  const data = rows.map((r) => {
+    const c = r.customer || {};
+    return {
+      id: r.id, date: r.date, umur: daysBetweenISO(r.date, today), status: r.status, source: r.source, seq: r.seq,
+      customerId: r.customerId, customerName: c.name || '', customerCode: c.code || '', alamat: c.address || '', phone: c.phone || '',
+      fleetId: r.fleetId || '', qty: r.qty, note: r.note || '', pendingReason: r.pendingReason || '', sisaBon: bon[r.customerId] || 0,
+      mapsLink: mapsLinkOf(c), hasLocation: !!mapsLinkOf(c),
+    };
+  });
+  // Sort by age DESCENDING (oldest first — the most-overdue is the most urgent), then by route seq.
+  data.sort((a, b) => (b.umur - a.umur) || (a.seq - b.seq) || a.customerName.localeCompare(b.customerName));
+  return { data, count: data.length, oldest: data.length ? data[0].umur : 0, asOf: today, maxAgeDays: maxAge };
+}
+// Lightweight count+oldest for the dashboard card / sidebar badge (fleet-scoped, window carve-out, 30d).
+async function outstandingSummary(user, asOf) {
+  const { where, today } = outstandingWhere(user, { asOf });
+  const rows = await resilientFindMany(prisma.delivery, { where, select: { date: true } }, 'outstanding-count');
+  let oldest = 0; for (const r of rows) { const u = daysBetweenISO(r.date, today); if (u > oldest) oldest = u; }
+  return { count: rows.length, oldest };
+}
+// Resolve ONE outstanding stop. Actions:
+//   kirim  → create TODAY's stop for the customer (source 'tambahan', idempotent via @@unique) and mark
+//            the ORIGINAL resolved ('batal' + a "rescheduled" reason) so it stops reappearing — never a
+//            silent duplicate. Re-running is a no-op (the original is already settled).
+//   tunda  → keep the stop deferred ('ditunda', optional reason); it stays on the list as postponed.
+//   batal  → cancel it ('batal'); a reason is REQUIRED and written to pendingReason.
+async function resolveOutstanding(id, body, actor) {
+  const d = await prisma.delivery.findUnique({ where: { id }, include: { customer: true } });
+  if (!d) throw ApiError.notFound('Pengiriman tidak ditemukan.');
+  if (!fleetAllows(actor, d.fleetId)) throw ApiError.forbidden('Pengiriman di luar akses Anda.');
+  const action = ['kirim', 'tunda', 'batal'].includes(body && body.action) ? body.action : null;
+  if (!action) throw ApiError.badRequest('Aksi tidak dikenal (kirim / tunda / batal).');
+  const settled = d.status === 'terkirim' || d.status === 'batal' || !!d.transactionId;
+  if (settled) return { ok: true, already: true, resolvedId: id };   // idempotent — no duplicate work
+  const today = body.asOf || todayISO();
+  const snap = await actorSnap(actor);
+  const nm = d.customer ? d.customer.name : '';
+  if (action === 'kirim') {
+    const res = await addOrder({ customerId: d.customerId, date: today, qty: d.qty, note: d.note }, actor);   // creates today's tambahan stop (upsert)
+    await prisma.delivery.update({ where: { id }, data: { status: 'batal', pendingReason: `Dijadwalkan ulang ke ${today}` } });
+    await logAudit('pengiriman', `Carry-over dikirim hari ini: ${nm}`, `Stop ${d.date} → ${today}`, snap, d.fleetId);
+    return { ok: true, action, created: res.delivery, resolvedId: id, fleetId: d.fleetId };
+  }
+  if (action === 'tunda') {
+    const reason = String(body.reason || '').slice(0, 300);
+    await prisma.delivery.update({ where: { id }, data: { status: 'ditunda', pendingReason: reason || d.pendingReason } });
+    await logAudit('pengiriman', `Carry-over ditunda: ${nm}`, `Stop ${d.date}${reason ? ' · ' + reason : ''}`, snap, d.fleetId);
+    return { ok: true, action, resolvedId: id, fleetId: d.fleetId };
+  }
+  const reason = String(body.reason || '').trim();
+  if (!reason) throw ApiError.badRequest('Alasan pembatalan wajib diisi.');
+  await prisma.delivery.update({ where: { id }, data: { status: 'batal', pendingReason: reason.slice(0, 300) } });
+  await logAudit('pengiriman', `Carry-over dibatalkan: ${nm}`, `Stop ${d.date} · ${reason}`, snap, d.fleetId);
+  return { ok: true, action, resolvedId: id, fleetId: d.fleetId };
+}
+
 // ── FIELD EXPENSES (pengeluaran lapangan) ────────────────────────────────────────
 // Cash a delivery person paid out in the field (fuel/bensin, meals, parking…). Itemised, fleet-
 // scoped, append-only (a mistake is VOIDED with a reason + re-logged, never silently deleted). It
@@ -4015,7 +4099,7 @@ async function deliveryReport(user, query) {
   const runCorrs = await correctionsForRuns(runIds);
   const runs = runRows.map((r) => runClient(r, sold[r.id] || 0, runCorrs[r.id] || []));
   // 2) DELIVERY STOPS — planned vs terkirim vs batal/ditunda (+ reasons for the non-delivered)
-  const stopRows = await resilientFindMany(prisma.delivery, { where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, include: { customer: { select: { name: true } } }, orderBy: [{ date: 'asc' }, { seq: 'asc' }] }, 'report-stops');
+  const stopRows = await resilientFindMany(prisma.delivery, { where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, include: { customer: { select: { name: true, code: true } } }, orderBy: [{ date: 'asc' }, { seq: 'asc' }] }, 'report-stops');
   // 3) CLOSEOUTS (notes / kendala)
   const coRows = await prisma.deliveryCloseout.findMany({ where: { date: inRange, ...fleetWhere(user, 'fleetId', qFleet) }, orderBy: { date: 'asc' } });
   // 4) CASH — money-in split (tunai/transfer) + field expenses → net cash, per fleet
@@ -4027,7 +4111,7 @@ async function deliveryReport(user, query) {
   const F = (id) => (fleetMap[id] || (fleetMap[id] = {
     fleetId: id, runs: [], stops: { planned: 0, terkirim: 0, batal: 0, ditunda: 0, pending: 0 }, stopReasons: [],
     closeouts: [], cash: { tunai: 0, transfer: 0, expense: 0, net: 0 },
-    runTotals: { out: 0, sold: 0, full: 0, empty: 0, diff: 0 },
+    runTotals: { out: 0, sold: 0, full: 0, empty: 0, diff: 0 }, skipsByCust: {},
   }));
   runs.forEach((r) => { const f = F(r.fleetId); f.runs.push(r); f.runTotals.out += r.gallonsOut; f.runTotals.sold += r.sold; f.runTotals.full += (r.status === 'closed' ? r.gallonsFullReturned : 0); f.runTotals.empty += (r.status === 'closed' ? r.gallonsEmptyReturned : 0); f.runTotals.diff += (r.diff || 0); });
   stopRows.forEach((s) => {
@@ -4035,7 +4119,16 @@ async function deliveryReport(user, query) {
     f.stops.planned += 1;
     if (f.stops[s.status] != null) f.stops[s.status] += 1;
     if (s.status === 'batal' || s.status === 'ditunda' || s.status === 'pending') {
-      f.stopReasons.push({ date: s.date, customerName: s.customer ? s.customer.name : '', status: s.status, reason: s.pendingReason || s.note || '' });
+      const nm = s.customer ? s.customer.name : '';
+      f.stopReasons.push({ date: s.date, customerName: nm, status: s.status, reason: s.pendingReason || s.note || '' });
+      // "Belum terkirim" frequency: how often the SAME customer was skipped over the period (the pattern
+      // worth seeing). HYGIENE: the report counts ALL history in range — even stops older than the
+      // actionable-list maxAgeDays — so nothing is lost to the working list's cut-off.
+      const key = s.customerId;
+      const g = f.skipsByCust[key] || (f.skipsByCust[key] = { customerId: key, customerName: nm, customerCode: s.customer ? (s.customer.code || '') : '', count: 0, lastDate: '', reasons: [] });
+      g.count += 1;
+      if (s.date > g.lastDate) g.lastDate = s.date;
+      if (s.pendingReason && g.reasons.indexOf(s.pendingReason) < 0 && g.reasons.length < 5) g.reasons.push(s.pendingReason);
     }
   });
   coRows.forEach((c) => { F(c.fleetId || '').closeouts.push(closeoutClient(c)); });
@@ -4050,13 +4143,22 @@ async function deliveryReport(user, query) {
   Object.values(fleetMap).forEach((f) => { f.cash.net = f.cash.tunai - f.cash.expense; });
 
   const fleets = Object.values(fleetMap).sort((a, b) => (a.fleetId || '~').localeCompare(b.fleetId || '~'));
+  // Finalise the "Belum terkirim" skip-frequency: per fleet, most-skipped customer first; plus a combined
+  // cross-fleet list (each row tagged with its fleet) for the report's headline "repeated skips" table.
+  const skips = [];
+  fleets.forEach((f) => {
+    f.skips = Object.values(f.skipsByCust).sort((a, b) => (b.count - a.count) || (b.lastDate > a.lastDate ? 1 : -1));
+    delete f.skipsByCust;
+    f.skips.forEach((g) => skips.push({ ...g, fleetId: f.fleetId }));
+  });
+  skips.sort((a, b) => (b.count - a.count) || a.customerName.localeCompare(b.customerName));
   // Combined totals across fleets.
   const totals = {
     runs: fleets.reduce((a, f) => ({ out: a.out + f.runTotals.out, sold: a.sold + f.runTotals.sold, full: a.full + f.runTotals.full, empty: a.empty + f.runTotals.empty, diff: a.diff + f.runTotals.diff }), { out: 0, sold: 0, full: 0, empty: 0, diff: 0 }),
     stops: fleets.reduce((a, f) => ({ planned: a.planned + f.stops.planned, terkirim: a.terkirim + f.stops.terkirim, batal: a.batal + f.stops.batal, ditunda: a.ditunda + f.stops.ditunda, pending: a.pending + f.stops.pending }), { planned: 0, terkirim: 0, batal: 0, ditunda: 0, pending: 0 }),
     cash: fleets.reduce((a, f) => ({ tunai: a.tunai + f.cash.tunai, transfer: a.transfer + f.cash.transfer, expense: a.expense + f.cash.expense, net: a.net + f.cash.net }), { tunai: 0, transfer: 0, expense: 0, net: 0 }),
   };
-  return { from, to, period, fleets, totals };
+  return { from, to, period, fleets, totals, skips };
 }
 
 module.exports = {
@@ -4072,6 +4174,7 @@ module.exports = {
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
+  outstandingDeliveries, outstandingSummary, resolveOutstanding,
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,
   parseLegacyDate, expandLegacyRow,

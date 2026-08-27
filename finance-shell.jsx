@@ -229,6 +229,7 @@ function FApp() {
   const [pwModal, setPwModal] = uSh(false);   // self "Ganti Password" modal
   const [distTick, setDistTick] = uSh(0);      // bumps on a distribusi SSE event → dashboard/transaksi re-fetch
   const [deliveryAlerts, setDeliveryAlerts] = uSh([]);   // AlertBell: extra orders on today's board for the user's fleet
+  const [outstandingCount, setOutstandingCount] = uSh(0);   // carry-over: undelivered stops from previous days (sidebar badge)
   const [resetAlerts, setResetAlerts] = uSh([]);         // AlertBell: pending forgot-password requests (owner/GM)
   const [changeReqAlerts, setChangeReqAlerts] = uSh([]); // AlertBell: pending distribusi correction/void requests (approvers)
   const [acctAlerts, setAcctAlerts] = uSh([]);           // AlertBell: unmapped categories / journal drift (reports users, flag on)
@@ -599,12 +600,18 @@ function FApp() {
   // distTick: (a) helpers with the board cap → today's new extra orders; (b) admins with
   // the dashboard cap → any fleet that CLOSED the day with undelivered stops (+reason).
   uEh(() => {
-    if (!user || !(window.API && window.API.distribusi) || !(p.distribusiPengiriman || p.distribusiDashboard)) { setDeliveryAlerts([]); return; }
+    if (!user || !(window.API && window.API.distribusi) || !(p.distribusiPengiriman || p.distribusiDashboard)) { setDeliveryAlerts([]); setOutstandingCount(0); return; }
     let live = true; const acc = []; const jobs = [];
     if (p.distribusiPengiriman) jobs.push(window.API.distribusi.deliveries.board(FIN.TODAY, 'all').then((r) => {
       const extra = (r.data || []).filter((d) => d.source === 'tambahan' && d.status === 'pending');
       if (extra.length) acc.push({ id: 'deliv-extra', level: 'warn', icon: 'IconTruck', title: tr('nav.distDeliveries'), msg: tr('dist.newOrderAlert', { n: extra.length }) });
     }).catch(() => {}));
+    // Carry-over: undelivered stops from EARLIER days (fleet-scoped; the endpoint reaches past the read
+    // window on purpose). Drives the sidebar badge + a bell alert — "automatic visibility" of leftovers.
+    if (p.distribusiPengiriman) jobs.push(window.API.distribusi.deliveries.outstanding({ fleet: 'all' }).then((r) => {
+      if (live) setOutstandingCount(r.count || 0);
+      if (r.count) acc.push({ id: 'deliv-outstanding', level: 'warn', icon: 'IconTruck', title: tr('nav.distDeliveries'), msg: tr('dist.outstandingAlert', { n: r.count, d: r.oldest || 0 }) });
+    }).catch(() => { if (live) setOutstandingCount(0); }));
     if (p.distribusiDashboard) jobs.push(window.API.distribusi.deliveries.closeouts('date=' + FIN.TODAY).then((r) => {
       (r.data || []).filter((c) => c.pending > 0).forEach((c) => acc.push({ id: 'deliv-close-' + c.id, level: 'warn', icon: 'IconInvoice', title: tr('dist.closeDay'), msg: tr('dist.closeAlert', { fleet: c.fleetId, y: c.pending }) }));
     }).catch(() => {}));
@@ -1527,6 +1534,7 @@ function FApp() {
             {!collapsed && items.map((n) => (
               <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''}`} title={n.title || n.label} onClick={() => go(n.id)}>
                 {Ish(n.icon, { s: 20 })}<span>{n.label}</span>{n.soon && <span className="fin-badge-soon">{tr('fin.soonBadge')}</span>}
+                {n.id === 'dist-deliveries' && outstandingCount > 0 && <span className="nav-count" title={tr('dist.outstandingAlert', { n: outstandingCount, d: 0 })}>{outstandingCount}</span>}
               </button>
             ))}
           </div>
@@ -1633,7 +1641,8 @@ function FApp() {
               canInput={!!p.distribusiInput} canHistory={!!p.distribusiDashHistory}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onQuickInput={() => { go('dist-transactions', !p.distribusiInput); if (p.distribusiInput) setDistFormTick((t) => t + 1); }} onOpenCustomers={() => go('dist-customers', !p.distribusi)}
-              onOpenTransactions={() => go('dist-transactions', !(p.distribusiInput || p.distribusiKoreksi || p.distribusiExpense))} />
+              onOpenTransactions={() => go('dist-transactions', !(p.distribusiInput || p.distribusiKoreksi || p.distribusiExpense))}
+              onOpenDeliveries={p.distribusiPengiriman ? () => go('dist-deliveries') : null} />
           )}
           {screen === 'dist-transactions' && (p.distribusiInput || p.distribusiKoreksi || p.distribusiExpense) && (
             <DIST.Transactions refreshKey={distTick} openFormTick={distFormTick} today={FIN.TODAY}

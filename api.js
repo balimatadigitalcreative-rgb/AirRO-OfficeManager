@@ -318,6 +318,9 @@
         reorder: (data) => req('PUT', '/distribusi/deliveries/reorder', data),   // { date, fleet, order:[ids] }
         close: (data) => req('POST', '/distribusi/deliveries/close', data),      // { date, fleet, generalNote, reasons:{id:reason} }
         closeouts: (qs) => req('GET', '/distribusi/closeouts' + (qs ? '?' + qs : '')),
+        // Carry-over of undelivered stops from previous days.
+        outstanding: (opts) => { const o = opts || {}; const p = []; if (o.fleet && o.fleet !== 'all') p.push('fleet=' + encodeURIComponent(o.fleet)); if (o.asOf) p.push('asOf=' + encodeURIComponent(o.asOf)); if (o.maxAgeDays) p.push('maxAgeDays=' + o.maxAgeDays); if (o.includeDitunda === false) p.push('includeDitunda=false'); return req('GET', '/distribusi/deliveries/outstanding' + (p.length ? '?' + p.join('&') : '')); },
+        resolveOutstanding: (id, data) => req('POST', '/distribusi/deliveries/outstanding/' + id + '/resolve', data),   // { action:'kirim'|'tunda'|'batal', reason?, asOf? }
       },
       // Delivery runs (rit): per-trip gallon out/in + reconciliation.
       runs: {

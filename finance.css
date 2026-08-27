@@ -1370,6 +1370,37 @@ select.fld::-ms-expand { display: none; }
 .dist-closed-main b { font-size: 13.5px; }
 .dist-closed-sum { font-size: 12px; color: var(--text-mut); margin-top: 2px; }
 .dist-close-warn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: #b45309; background: var(--warn-bg, #fff7ed); border-radius: 9px; padding: 9px 12px; margin-bottom: 10px; }
+
+/* ── Carry-over of undelivered stops (Belum Terkirim) — amber accent throughout. ── */
+.dist-carry { border-left: 3px solid var(--warn, #d97706); }
+.dist-carry-head { display: flex; align-items: center; gap: 8px; padding: 10px 4px; font-size: 13.5px; }
+.dist-carry-head b { font-weight: 800; }
+.dist-carry-ic { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--warn-bg, #fff7ed); color: var(--warn, #b45309); flex: none; }
+.dist-carry-oldest { font-size: 11.5px; color: var(--text-mut); }
+.dist-carry-age { font-size: 11px; font-weight: 700; color: var(--warn, #b45309); background: var(--warn-bg, #fff7ed); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
+.dist-carry-cancel { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.dist-carry-cancel .fld { height: 34px; flex: 1; min-width: 140px; }
+.dist-carry-banner { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: var(--warn-bg, #fff7ed); border: 1px solid #fcd9a8; border-left: 3px solid var(--warn, #d97706); border-radius: 12px; padding: 11px 14px; cursor: pointer; font: inherit; margin-bottom: 14px; }
+.dist-carry-banner:disabled { cursor: default; }
+.dist-carry-banner-txt { font-size: 13px; font-weight: 700; color: #92400e; }
+.dist-carry-banner .dist-link { margin-left: auto; white-space: nowrap; }
+.dist-close-carry { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: #92400e; background: var(--warn-bg, #fff7ed); border-radius: 9px; padding: 9px 12px; margin-bottom: 10px; }
+/* Sidebar count badge on the Pengiriman nav item. */
+.nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--warn, #d97706); color: #fff; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+/* Report: repeated-skip frequency (Belum terkirim). */
+.rep-skips { margin-top: 14px; }
+.rep-skips-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.rep-skips-head b { font-weight: 800; font-size: 14px; }
+.rep-skips-sub { font-size: 11.5px; color: var(--text-mut); }
+.rep-skips-table { display: flex; flex-direction: column; }
+.rep-skips-row { display: grid; grid-template-columns: 1.6fr .8fr auto 1.4fr; gap: 10px; align-items: center; padding: 7px 2px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.rep-skips-row.head { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); border-bottom: 1px solid var(--border); }
+.rep-skips-row .fin-r { text-align: right; }
+.rep-skips-cust { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.rep-skips-last { color: var(--text-mut); font-size: 11.5px; }
+.rep-skip-hot { color: var(--neg, #e5484d); }
+@media (max-width: 640px) { .rep-skips-row { grid-template-columns: 1fr auto; } .rep-skips-row > .rep-skips-fleet, .rep-skips-row > .rep-skips-last { display: none; } }
+
 .dist-close-prow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border-soft); }
 .dist-close-pname { flex: 0 0 38%; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dist-close-prow .fld { flex: 1; }

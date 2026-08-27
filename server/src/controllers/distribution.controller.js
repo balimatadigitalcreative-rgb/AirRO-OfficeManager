@@ -185,6 +185,9 @@ const orderSchema = z.object({ customerId: z.string().min(1), date: DATE, qty: z
 const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), transactionId: z.string().min(1).optional() });
 const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), order: z.array(z.string().min(1)).max(2000) });
 const closeSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), generalNote: z.string().max(500).optional(), reasons: z.record(z.string().max(300)).optional() });
+// Carry-over of undelivered stops. `includeDitunda` accepts a string ('false'/'0') from the query.
+const outstandingQuery = z.object({ fleet: z.string().max(60).optional(), asOf: DATE.optional(), maxAgeDays: z.coerce.number().int().positive().max(3650).optional(), includeDitunda: z.union([z.boolean(), z.enum(['true', 'false', '0', '1'])]).optional() });
+const outstandingResolveSchema = z.object({ action: z.enum(['kirim', 'tunda', 'batal']), reason: z.string().max(300).optional(), asOf: DATE.optional() });
 const closeoutQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
 // Delivery runs (rit)
 const runOpenSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), gallonsOut: z.number().int().positive(), note: z.string().max(300).optional() });
@@ -352,6 +355,13 @@ const closeDay = asyncHandler(async (req, res) => {
   res.status(201).json({ data: r.closeout });
 });
 const listCloseouts = asyncHandler(async (req, res) => res.json(await service.listCloseouts(req.user, req.query)));
+// ── Carry-over of undelivered stops ──
+const outstandingDeliveries = asyncHandler(async (req, res) => res.json(await service.outstandingDeliveries(req.user, req.query)));
+const resolveOutstanding = asyncHandler(async (req, res) => {
+  const r = await service.resolveOutstanding(req.params.id, req.body, req.user);
+  bus.broadcast({ entity: 'distribusi', action: 'order', id: r.resolvedId || req.params.id, fleetId: r.fleetId || '' });   // refresh open boards + the sidebar badge
+  res.json({ data: r });
+});
 
 // ── Delivery runs (rit) ──
 // Location-based gallon: opname (physical count → correction), invariant, integrity guard.
@@ -428,12 +438,12 @@ module.exports = {
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, resetTotalPreview, resetTotalCommit, resetTotalRestore, openingRowsList, openingRowsBulkPreview, openingRowsBulk, openingRowsRestore, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
-  deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts, outstandingDeliveries, resolveOutstanding,
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
   createPaymentNotReceived, lossReport,
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, outstandingQuery, outstandingResolveSchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };
