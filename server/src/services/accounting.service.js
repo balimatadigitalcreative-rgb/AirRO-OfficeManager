@@ -826,6 +826,25 @@ async function journalFor({ sourceType, sourceId } = {}) {
   };
 }
 
+// JURNAL — a chronological list of posted journal entries in a period (read-only; the "Jurnal" tab in
+// Laporan). Scoped by unit/armada like every other report (a line carries the unit; an entry is listed if
+// it has ≥1 line in the caller's scope, and its `amount` is the Σ debit of those in-scope lines). No figure
+// is computed here that isn't already in the ledger — it is a different *view* of the same journal lines.
+async function journalList({ dateFrom, dateTo, businessUnitId, fleetId, user, limit } = {}) {
+  const jw = {};
+  if (dateFrom) (jw.date || (jw.date = {})).gte = dateFrom;
+  if (dateTo) (jw.date || (jw.date = {})).lte = dateTo;
+  const uw = {};
+  if (businessUnitId) uw.businessUnitId = businessUnitId;
+  if (fleetId) uw.fleetId = fleetId;
+  const where = andScope({ ...uw, ...(Object.keys(jw).length ? { journalEntry: jw } : {}) }, user);
+  const lines = await prisma.journalLine.findMany({ where, select: { debit: true, journalEntry: { select: { id: true, date: true, ref: true, description: true, sourceType: true, sourceId: true } } } });
+  const m = {};
+  for (const l of lines) { const je = l.journalEntry; const e = m[je.id] || (m[je.id] = { id: je.id, date: je.date, ref: je.ref || '', description: je.description || '', sourceType: je.sourceType, sourceId: je.sourceId, amount: 0 }); e.amount += Number(l.debit); }
+  const rows = Object.values(m).sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)));
+  return { rows: rows.slice(0, limit || 500), count: rows.length, total: rows.reduce((s, r) => s + r.amount, 0) };
+}
+
 // ARUS KAS (cash flow statement) — INDIRECT method, computed from the journal. Chosen over a
 // transaction-by-transaction direct build because the identity Δcash = −Σ Δ(non-cash accounts) holds
 // on any balanced ledger, so summing each non-cash account's period change and negating it gives the
@@ -887,5 +906,5 @@ module.exports = {
   CHART, CF_SECTION, CAT_MAP, seedChart, chartMap, chart, postJournal, reverseJournal, deleteJournal, postEntry, postTransfer, postDistExpense, postDistTransaction,
   distTxnLines, reconcileDistTxn, postDistAdjustment, customerBonRaw, postReceivablesReclass, backfill, startBackfillJob, runBackfillJob, backfillJobStatus, computeBackfillTotal, integrityCheck, unmappedCategories, categoryToCode, resolveCategoryCode,
   listCategoryMappings, setCategoryMapping, clearCategoryMapping, postableAccounts, accountingStatus,
-  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, journalFor, cashFlow,
+  accountBalances, trialBalance, balanceSheet, receivablesBalance, incomeStatement, agingReceivables, generalLedger, journalFor, journalList, cashFlow,
 };

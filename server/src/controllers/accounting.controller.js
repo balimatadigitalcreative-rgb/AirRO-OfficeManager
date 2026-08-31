@@ -24,6 +24,7 @@ const unmapped = asyncHandler(async (req, res) => res.json({ data: await service
 const aging = asyncHandler(async (req, res) => res.json({ data: await service.agingReceivables({ asOf: req.query.asOf, fleetId: req.query.fleetId, businessUnitId: req.query.businessUnitId, user: req.user }) }));
 const ledger = asyncHandler(async (req, res) => res.json({ data: await service.generalLedger({ code: req.query.code, dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId, user: req.user }) }));
 const journal = asyncHandler(async (req, res) => res.json({ data: await service.journalFor({ sourceType: req.query.sourceType, sourceId: req.query.sourceId }) }));
+const journalList = asyncHandler(async (req, res) => res.json({ data: await service.journalList({ dateFrom: req.query.dateFrom, dateTo: req.query.dateTo, businessUnitId: req.query.businessUnitId, fleetId: req.query.fleetId, user: req.user }) }));
 const periods = asyncHandler(async (req, res) => res.json({ data: await period.listPeriods() }));
 const periodChecklist = asyncHandler(async (req, res) => res.json({ data: await period.closeChecklist(+req.query.year, +req.query.month) }));
 const periodClose = asyncHandler(async (req, res) => res.json({ data: await period.closePeriod({ year: +req.body.year, month: +req.body.month, lock: !!req.body.lock }, req.user) }));
@@ -109,7 +110,7 @@ const costingInventory = asyncHandler(async (req, res) => res.json({ data: await
 const costingHpp = asyncHandler(async (req, res) => res.json({ data: await costing.monthlyHpp({ year: +req.query.year, month: +req.query.month }) }));
 const costingMargin = asyncHandler(async (req, res) => res.json({ data: await costing.marginAnalysis(req.query) }));
 
-module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
+module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, generalLedger, chart, journal, journalList, receivables, unmapped, backfill, backfillStatus, integrity, mappings, setMapping, clearMapping, status, aging, ledger, periods, periodChecklist, periodClose, periodReopen, reconciliation, reconcileMark,
   billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue, suppliersList, supplierCreate,
   accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize,
   subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun, subsDue,

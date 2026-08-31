@@ -399,6 +399,28 @@ function WaTemplatesPanel() {
   );
 }
 
+// MODE TAMPILAN — Sederhana (default) vs Lengkap. A per-user (per-device) VISIBILITY preference: it never
+// changes any figure, only whether journal-level detail (the entry form's debit/credit preview) shows by
+// default. Stored in localStorage via FIN.readFinMode/writeFinMode; new entry forms read it on open.
+function ModeCard() {
+  const [mode, setMode] = uSs(() => (window.FIN && FIN.readFinMode ? FIN.readFinMode() : 'sederhana'));
+  const pick = (m) => { if (window.FIN && FIN.writeFinMode) FIN.writeFinMode(m); setMode(m); };
+  return (
+    <div className="card alert-settings">
+      <div className="cat-group-head" style={{ marginBottom: 6 }}>
+        <span className="icon-tile" style={{ background: 'var(--mint-100)', color: 'var(--green-800)', flexShrink: 0 }}>{IcS('IconSettings', { s: 19 })}</span>
+        <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap' }}>{trS('set.modeTitle')}</div>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginBottom: 14 }}>{trS('set.modeIntro')}</div>
+      <div className="fin-denseg" style={{ marginBottom: 10 }}>
+        <button type="button" className={mode === 'sederhana' ? 'on' : ''} onClick={() => pick('sederhana')}>{trS('set.modeSimple')}</button>
+        <button type="button" className={mode === 'lengkap' ? 'on' : ''} onClick={() => pick('lengkap')}>{trS('set.modeFull')}</button>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{trS('set.modeNote')}</div>
+    </div>
+  );
+}
+
 function SettingsScreen({ cats, onChange, canWipe, canManageUnits, settings, onSettingsChange, entries, accounts, catLabel }) {
   const setIncome = (income) => onChange({ ...cats, income });
   const setExpense = (expense) => onChange({ ...cats, expense });
@@ -412,6 +434,8 @@ function SettingsScreen({ cats, onChange, canWipe, canManageUnits, settings, onS
         </div>
         <button className="btn btn-ghost" onClick={() => onChange({ income: FS.INCOME_CATS.map((c) => ({ ...c })), expense: FS.EXPENSE_CATS.map((c) => ({ ...c })) })}>{trS('set.restore')}</button>
       </div>
+
+      <ModeCard />
 
       <div className="cat-grid">
         <CatGroup title={trS('set.saleInc')} type="income" list={cats.income} onChange={setIncome} />

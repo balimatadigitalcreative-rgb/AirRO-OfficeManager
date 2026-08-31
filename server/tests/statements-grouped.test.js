@@ -54,4 +54,17 @@ describe('Neraca / Laba Rugi grouped statements', () => {
     expect(air.revenue).toBe(1000000);   // only 'air'
     expect(air.profit).toBe(500000);
   });
+
+  it('journalList lists the period entries chronologically and is unit-scoped (Jurnal tab)', async () => {
+    await seed('air');
+    await seed('mfg');
+    const all = await acc.journalList({});
+    expect(all.rows.length).toBe(6);                 // 3 entries per unit
+    const air = await acc.journalList({ businessUnitId: 'air' });
+    expect(air.rows.length).toBe(3);
+    const j1 = air.rows.find((r) => r.sourceId === 'j1air');
+    expect(j1.amount).toBe(1000000);                 // Σ in-scope debit of the entry
+    // newest-first ordering
+    expect(air.rows[0].date >= air.rows[air.rows.length - 1].date).toBe(true);
+  });
 });

@@ -19,6 +19,7 @@ router.get('/general-ledger', ctrl.generalLedger);   // all accounts (trial-bala
 router.get('/chart', ctrl.chart);                    // full chart of accounts (hierarchy) for the Buku Besar picker
 router.get('/ledger', ctrl.ledger);                  // ONE account — Buku Besar with running balance (?code=)
 router.get('/journal', ctrl.journal);                // one source's full balanced journal (?sourceType=&sourceId=) — drill
+router.get('/journal-list', ctrl.journalList);       // chronological journal entries in a period (the Jurnal tab)
 router.get('/aging', ctrl.aging);                    // Umur Piutang (AR aging buckets)
 router.get('/receivables', ctrl.receivables);
 

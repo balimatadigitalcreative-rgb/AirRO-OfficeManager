@@ -16,6 +16,10 @@ const FULLMON = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
 // Localised full month name (follows the active UI language, not a hardcoded English list) — e.g.
 // "Agustus" in Indonesian, "August" in English. Intl is offline-safe; fall back to FULLMON.
 const monthName = (m0) => { const loc = (window.I18N && window.I18N.lang === 'en') ? 'en-US' : 'id-ID'; try { return new Date(2020, m0, 1).toLocaleString(loc, { month: 'long' }); } catch (e) { return FULLMON[m0]; } };
+// MODE SEDERHANA (default) / LENGKAP — a per-user (per-device) VISIBILITY preference. It never changes a
+// figure; only whether journal-level detail (the entry form's debit/credit preview) shows by default.
+function readFinMode() { try { return localStorage.getItem('airro.fin.mode') === 'lengkap' ? 'lengkap' : 'sederhana'; } catch (e) { return 'sederhana'; } }
+function writeFinMode(m) { try { localStorage.setItem('airro.fin.mode', m === 'lengkap' ? 'lengkap' : 'sederhana'); } catch (e) {} }
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // "Hari ini" untuk kalender, batas tanggal, & agregasi harian.
 // DEMO_TODAY: isi 'YYYY-MM-DD' untuk MEMBEKUKAN tanggal (mode demo dgn dataset
@@ -76,7 +80,10 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
   const [proof, setProof] = uS(null);
   const [gallonQty, setGallonQty] = uS(0);   // "Pembelian Galon" stock qty (expense only)
   const [err, setErr] = uS(null);
-  const [showJournal, setShowJournal] = uS(false);   // "Rincian jurnal" — off by default (simple mode for staff)
+  // Journal preview default follows MODE: Sederhana (default) collapses it behind "Lihat jurnal";
+  // Lengkap expands it. The mode only changes VISIBILITY — the entry submitted (category + amount) and
+  // the journal the server posts are identical either way. See readFinMode().
+  const [showJournal, setShowJournal] = uS(() => readFinMode() === 'lengkap');
   const [coaQ, setCoaQ] = uS('');                     // chart-of-accounts search (by code or name)
   // Follow the global unit selector: when the active-unit context changes, default new entries
   // to it (until the user overrides for this entry).
@@ -958,4 +965,4 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
   );
 }
 
-window.FIN = { AddEntry, StatRow, MonitorCard, CategoryCard, TodayCard, EntriesList, MoneySpots, Dashboard, TODAY, MONTHS, FULLMON, fmt, fmtS, fmtC };
+window.FIN = { AddEntry, StatRow, MonitorCard, CategoryCard, TodayCard, EntriesList, MoneySpots, Dashboard, TODAY, MONTHS, FULLMON, fmt, fmtS, fmtC, readFinMode, writeFinMode };

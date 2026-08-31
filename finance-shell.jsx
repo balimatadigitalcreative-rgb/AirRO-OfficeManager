@@ -7,6 +7,8 @@ function Ish(name, props) { const C = window[name]; return C ? <C {...props} /> 
 // became a filter chip inside the Transaksi screen (nav item removed), so its deeplink lands there.
 const SCREEN_ALIAS = { 'dist-expenses': 'dist-transactions' };
 const normId = (id) => SCREEN_ALIAS[id] || id;
+// Which primary nav item "owns" a hidden hub-child screen (so it stays highlighted on that child).
+const HUB_OF = { ledger: 'reports', 'acct-neraca': 'reports', 'acct-labarugi': 'reports', 'acct-subscriptions': 'biaya-tetap', 'acct-accrual': 'biaya-tetap', 'acct-assets': 'biaya-tetap', moneyspots: 'entries' };
 
 function navForRole(p, role) {
   // User & role administration follows the `manageUsers` CAPABILITY only — never role===.
@@ -22,26 +24,33 @@ function navForRole(p, role) {
   //    until that engine's UI ships, so the information architecture is complete today with no dead
   //    links. (Kas & Bank stays a distinct item so account CRUD is never hidden — the spec folds it
   //    under "Transaksi (kas & bank)"; here it sits directly beneath Transaksi.)
+  // ── FINANCE — five PRIMARY items (daily/weekly surface). The many statement/back-office screens
+  //    still exist and stay navigable (deep links never 404), but are folded into two tabbed hubs
+  //    (Laporan, Biaya Tetap) + a collapsible "Pengaturan Akuntansi" group. `hidden:true` = a real,
+  //    navigable screen that is NOT drawn in the sidebar (it is reached via its hub's tabs). ──
   if (p.cashflow) items.push({ id: 'overview', label: tr('nav.finSummary'), icon: 'IconDashboard', grp: 'finance' });
   if (p.allEntries) items.push({ id: 'entries', label: tr('nav.finTransaksi'), icon: 'IconTx', grp: 'finance' });
-  if (p.cashflow) items.push({ id: 'moneyspots', label: tr('nav.moneyspots'), icon: 'IconWallet', grp: 'finance' });
-  if (p.reports) items.push({ id: 'ledger', label: tr('nav.finLedger'), icon: 'IconInvoice', grp: 'finance' });
-  if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-neraca', label: tr('nav.finBS'), icon: 'IconReport', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-labarugi', label: tr('nav.finIS'), icon: 'IconReport', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-trialbalance', label: tr('nav.finTB'), icon: 'IconReport', grp: 'finance' });
-  if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-payables', label: tr('nav.finAP'), icon: 'IconInvoice', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-subscriptions', label: tr('nav.finSubs'), icon: 'IconClock', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-accrual', label: tr('nav.finAccrual'), icon: 'IconRefresh', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-assets', label: tr('nav.finAssets'), icon: 'IconInvoice', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-costing', label: tr('nav.finCosting'), icon: 'IconRefresh', grp: 'finance' });
-  if (p.sdmPayrollLihat) items.push({ id: 'acct-payroll', label: tr('nav.finPayroll'), icon: 'IconCustomers', grp: 'finance' });
-  if (p.reports) items.push({ id: 'acct-mapping', label: tr('nav.finMap'), icon: 'IconInvoice', grp: 'finance' });
-  if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'finance' });
-  // Backfill is a one-time owner/GM migration tool (the server also enforces owner/GM), so it only
-  // shows for them — everyone else never needs it once live posting is on.
-  if (p.reports && (role === 'owner' || role === 'gm')) items.push({ id: 'acct-backfill', label: tr('nav.finBackfill'), icon: 'IconRefresh', grp: 'finance' });
+  if (p.reports) items.push({ id: 'reports', label: tr('nav.reports'), icon: 'IconReport', grp: 'finance' });          // Laporan (Neraca · Laba Rugi · Jurnal · Buku Besar · Arus Kas)
+  if (p.reports) items.push({ id: 'biaya-tetap', label: tr('nav.finRecurring'), icon: 'IconClock', grp: 'finance' });  // Langganan · Aset · Akrual
+  if (p.reports) items.push({ id: 'acct-costing', label: tr('nav.finCosting'), icon: 'IconRefresh', grp: 'finance' });  // HPP
+  // Kas & Bank folds into Transaksi (an account filter); its screen stays reachable for deep links.
+  if (p.cashflow) items.push({ id: 'moneyspots', label: tr('nav.moneyspots'), icon: 'IconWallet', grp: 'finance', hidden: true });
+  // Laporan hub tab-targets (deep-linkable) — hidden from the sidebar; the hub renders the right tab.
+  if (p.reports) items.push({ id: 'ledger', label: tr('nav.finLedger'), grp: 'finance', hidden: true });
+  if (p.reports) items.push({ id: 'acct-neraca', label: tr('nav.finBS'), grp: 'finance', hidden: true });
+  if (p.reports) items.push({ id: 'acct-labarugi', label: tr('nav.finIS'), grp: 'finance', hidden: true });
+  // Biaya Tetap tab-targets — hidden; the hub renders the right tab.
+  if (p.reports) items.push({ id: 'acct-subscriptions', label: tr('nav.finSubs'), grp: 'finance', hidden: true });
+  if (p.reports) items.push({ id: 'acct-accrual', label: tr('nav.finAccrual'), grp: 'finance', hidden: true });
+  if (p.reports) items.push({ id: 'acct-assets', label: tr('nav.finAssets'), grp: 'finance', hidden: true });
+  // ── SECONDARY — "Pengaturan Akuntansi" (monthly / rare / verification). Collapsed by default. ──
+  if (p.reports) items.push({ id: 'acct-payables', label: tr('nav.finAP'), icon: 'IconInvoice', grp: 'acctset' });
+  if (p.reports) items.push({ id: 'reconcile', label: tr('nav.finRekon'), icon: 'IconRefresh', grp: 'acctset' });
+  if (p.reports) items.push({ id: 'close', label: tr('nav.finClose'), icon: 'IconLock', grp: 'acctset' });
+  if (p.reports) items.push({ id: 'acct-trialbalance', label: tr('nav.finTB'), icon: 'IconReport', grp: 'acctset' });   // Neraca Saldo — a check
+  if (p.reports) items.push({ id: 'acct-mapping', label: tr('nav.finMap'), icon: 'IconInvoice', grp: 'acctset' });
+  if (p.sdmPayrollLihat) items.push({ id: 'acct-payroll', label: tr('nav.finPayroll'), icon: 'IconCustomers', grp: 'acctset' });
+  if (p.reports && (role === 'owner' || role === 'gm')) items.push({ id: 'acct-backfill', label: tr('nav.finBackfill'), icon: 'IconRefresh', grp: 'acctset' });
   if (p.employees) items.push({ id: 'employees', label: tr('nav.employees'), icon: 'IconCustomers', grp: 'hr' });
   if (p.employees) items.push({ id: 'hrcalendar', label: tr('nav.hrcalendar'), icon: 'IconCalendar', grp: 'hr' });
   if (p.payroll) items.push({ id: 'orientation', label: tr('nav.orientation'), icon: 'IconUserCircle', grp: 'hr' });
@@ -91,7 +100,7 @@ function navForRole(p, role) {
   if (p.gudangSupplier) items.push({ id: 'suppliers', label: tr('nav.suppliers'), icon: 'IconCustomers', grp: 'gudang' });
   return items;
 }
-const NAV_GROUPS = ['overview', 'finance', 'hr', 'distribusi', 'gudang', 'admin'];
+const NAV_GROUPS = ['overview', 'finance', 'acctset', 'hr', 'distribusi', 'gudang', 'admin'];
 
 // Placeholder for accounting-v2 screens (Buku Besar · Rekonsiliasi · Tutup Buku) whose backend
 // (double-entry engine) is built but whose UI ships in a later stage. Keeps the workflow nav honest:
@@ -222,6 +231,10 @@ function FApp() {
   const [cats, setCats] = uSh(() => { try { const c = localStorage.getItem('airro_cats_cache_v1'); if (c) { const o = JSON.parse(c); if (o && Array.isArray(o.income) && Array.isArray(o.expense)) return o; } } catch (e) {} return FS.loadCats(); });
   const [settings, setSettings] = uSh(() => FS.loadSettings());
   const [screen, setScreen] = uSh('overview');
+  // Laporan / Biaya Tetap hubs: which tab is active. Seeded from the screen id so an old deep-link
+  // (#acct-neraca, #ledger, #acct-assets …) opens the hub on the right tab; tab clicks are local.
+  const [laporanTab, setLaporanTab] = uSh('neraca');
+  const [biayaTab, setBiayaTab] = uSh('langganan');
   const [gran, setGran] = uSh('month');
   const [anchor, setAnchor] = uSh(FIN.TODAY);
   const [drawer, setDrawer] = uSh(false);
@@ -584,6 +597,14 @@ function FApp() {
     const t = setTimeout(check, 15000);   // first check shortly after load (don't race hydration)
     return () => { alive = false; clearInterval(iv); clearTimeout(t); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
   }, []);
+
+  // Seed the Laporan / Biaya Tetap hub tab from an incoming screen id (old deep-links land on the tab).
+  uEh(() => {
+    const L = { 'acct-neraca': 'neraca', 'acct-labarugi': 'labarugi', ledger: 'bukubesar' };
+    const B = { 'acct-subscriptions': 'langganan', 'acct-accrual': 'akrual', 'acct-assets': 'aset' };
+    if (L[screen]) setLaporanTab(L[screen]);
+    if (B[screen]) setBiayaTab(B[screen]);
+  }, [screen]);
 
   // If the active screen isn't one the user may access (perms changed, a stale landing, or
   // a deep-linked feature), fall back to their first available screen — never render a
@@ -1523,16 +1544,17 @@ function FApp() {
     <>
       <div className="brand"><Logo s={32} /><div className="brand-lockup"><div className="brand-name">AirRO</div><div className="brand-desc">Reverse Osmosis</div></div></div>
       {NAV_GROUPS.map((g) => {
-        const items = NAV.filter((n) => n.grp === g);
+        const items = NAV.filter((n) => n.grp === g && !n.hidden);   // hidden = navigable-but-not-drawn (hub tab targets)
         if (!items.length) return null;
-        const collapsed = navOpen[g] === false;
+        // "Pengaturan Akuntansi" starts collapsed — it is monthly/rare work, not the daily surface.
+        const collapsed = navOpen[g] === false || (navOpen[g] === undefined && g === 'acctset');
         return (
           <div key={g} className="nav-section">
             <button className={`nav-label nav-label-btn ${collapsed ? 'collapsed' : ''}`} onClick={() => toggleGrp(g)}>
               <span>{tr('navgrp.' + g)}</span><IconCaret s={13} />
             </button>
             {!collapsed && items.map((n) => (
-              <button key={n.id} className={`nav-item ${screen === n.id ? 'on' : ''}`} title={n.title || n.label} onClick={() => go(n.id)}>
+              <button key={n.id} className={`nav-item ${screen === n.id || HUB_OF[screen] === n.id ? 'on' : ''}`} title={n.title || n.label} onClick={() => go(n.id)}>
                 {Ish(n.icon, { s: 20 })}<span>{n.label}</span>{n.soon && <span className="fin-badge-soon">{tr('fin.soonBadge')}</span>}
                 {n.id === 'dist-deliveries' && outstandingCount > 0 && <span className="nav-count" title={tr('dist.outstandingAlert', { n: outstandingCount, d: 0 })}>{outstandingCount}</span>}
               </button>
@@ -1569,7 +1591,13 @@ function FApp() {
     setoran: { t: tr('t.setoran'), s: tr('s.setoran') },
     entries: { t: tr('nav.finTransaksi'), s: tr('s.entries') },
     reports: { t: tr('t.reports'), s: tr('s.reports') },
-    ledger: { t: tr('t.finLedger'), s: tr('s.finLedger') },
+    'biaya-tetap': { t: tr('nav.finRecurring'), s: tr('s.finRecurring') },
+    ledger: { t: tr('t.reports'), s: tr('s.reports') },
+    'acct-neraca': { t: tr('t.reports'), s: tr('s.reports') },
+    'acct-labarugi': { t: tr('t.reports'), s: tr('s.reports') },
+    'acct-subscriptions': { t: tr('nav.finRecurring'), s: tr('s.finRecurring') },
+    'acct-accrual': { t: tr('nav.finRecurring'), s: tr('s.finRecurring') },
+    'acct-assets': { t: tr('nav.finRecurring'), s: tr('s.finRecurring') },
     reconcile: { t: tr('t.finRekon'), s: tr('s.finRekon') },
     close: { t: tr('t.finClose'), s: tr('s.finClose') },
     payroll: { t: tr('t.payroll'), s: tr('s.payroll') },
@@ -1777,6 +1805,13 @@ function FApp() {
             </div>
           )}
 
+          {/* TRANSAKSI folds Kas & Bank in as a tab (not a separate nav item): Catatan · Kas & Bank. */}
+          {(screen === 'entries' || screen === 'moneyspots') && (p.allEntries || p.cashflow) && (
+            <div className="lap-tabs no-print">
+              {p.allEntries && <button type="button" className={`lap-tab ${screen === 'entries' ? 'on' : ''}`} onClick={() => go('entries')}>{tr('entries.tabRecords')}</button>}
+              {p.cashflow && <button type="button" className={`lap-tab ${screen === 'moneyspots' ? 'on' : ''}`} onClick={() => go('moneyspots')}>{tr('nav.moneyspots')}</button>}
+            </div>
+          )}
           {screen === 'entries' && p.allEntries && (
             <div className="screen-enter">
               <FIN.StatRow stats={stats} seeMoney={p.seeMoney} deltas={deltas} />
@@ -1828,9 +1863,22 @@ function FApp() {
             </div>
           )}
 
-          {screen === 'reports' && p.reports && (
-            <REPORTS.ReportsScreen entries={reportEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={scopedStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} onOpenEntry={p.edit ? editEntryRow : null} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} businessUnitId={activeUnit === 'all' ? undefined : activeUnit} />
-          )}
+          {/* LAPORAN hub — Neraca · Laba Rugi · Jurnal · Buku Besar · Arus Kas as tabs in one viewer.
+              Each tab is the EXISTING screen unchanged (same server calls → identical figures); the hub
+              only adds the tab bar. Old deep-links (#acct-neraca, #acct-labarugi, #ledger) open the
+              matching tab via the seeding effect above. */}
+          {(screen === 'reports' || screen === 'ledger' || screen === 'acct-neraca' || screen === 'acct-labarugi') && p.reports && (<>
+            <div className="lap-tabs no-print">
+              {[['neraca', tr('nav.finBS')], ['labarugi', tr('nav.finIS')], ['jurnal', tr('nav.finJournal')], ['bukubesar', tr('nav.finLedger')], ['aruskas', tr('nav.finCashflow')]].map(([k, l]) => (
+                <button key={k} type="button" className={`lap-tab ${laporanTab === k ? 'on' : ''}`} onClick={() => setLaporanTab(k)}>{l}</button>
+              ))}
+            </div>
+            {laporanTab === 'neraca' && ACCT.BalanceSheetScreen && <ACCT.BalanceSheetScreen unitLabel={activeUnitName} />}
+            {laporanTab === 'labarugi' && ACCT.IncomeStatementScreen && <ACCT.IncomeStatementScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} />}
+            {laporanTab === 'jurnal' && ACCT.JournalScreen && <ACCT.JournalScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} onOpenEntry={p.edit ? editEntryRow : null} />}
+            {laporanTab === 'bukubesar' && <ACCT.LedgerScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} onOpenEntry={() => go('entries')} />}
+            {laporanTab === 'aruskas' && <REPORTS.ReportsScreen entries={reportEntries} catMap={catMap} userName={user.name} rates={hrdRates} staff={scopedStaff} payrollPosted={payrollPosted} payrollTotal={hrdTotals.companyCost} payrollLabel={curPayLabel} onPostPayroll={() => postPayroll(hrdTotals.companyCost, curPayLabel)} onOpenEntry={p.edit ? editEntryRow : null} unitLabel={activeUnit === 'all' ? null : (businessUnits.find((u) => u.id === activeUnit) || {}).name} businessUnitId={activeUnit === 'all' ? undefined : activeUnit} />}
+          </>)}
 
           {screen === 'thr' && p.payroll && (
             <COMPANY.ThrScreen staff={scopedStaff} rates={hrdRates} setRates={applyRates} today={FIN.TODAY} posted={thrPosted} onPost={postThr} canPost={p.addEntry || p.payroll} canEdit={p.payroll} />
@@ -1838,19 +1886,26 @@ function FApp() {
 
           {/* ACCOUNTING v2 workflow screens (double-entry). Each fetches from the flag-gated /accounting
               API and shows the informative "coming soon" card itself when the flag is off (404). */}
-          {screen === 'ledger' && p.reports && (
-            <ACCT.LedgerScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} onOpenEntry={() => go('entries')} />
-          )}
-          {screen === 'acct-neraca' && p.reports && ACCT.BalanceSheetScreen && (<ACCT.BalanceSheetScreen unitLabel={activeUnitName} />)}
-          {screen === 'acct-labarugi' && p.reports && ACCT.IncomeStatementScreen && (<ACCT.IncomeStatementScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} />)}
+          {/* Buku Besar / Neraca / Laba Rugi are now TABS inside the Laporan hub (above). Neraca Saldo
+              stays its own screen under "Pengaturan Akuntansi" as a verification check. */}
           {screen === 'acct-trialbalance' && p.reports && ACCT.TrialBalanceScreen && (<ACCT.TrialBalanceScreen businessUnitId={activeUnit === 'all' ? undefined : activeUnit} fleetId={distFleet && distFleet !== 'all' ? distFleet : undefined} unitLabel={activeUnitName} />)}
           {screen === 'reconcile' && p.reports && (<ACCT.ReconcileScreen accounts={accounts} />)}
           {screen === 'acct-mapping' && p.reports && (<ACCT.MappingScreen canEdit={user.role === 'owner' || user.role === 'gm'} />)}
           {screen === 'acct-backfill' && p.reports && (user.role === 'owner' || user.role === 'gm') && (<ACCT.BackfillScreen canRun={user.role === 'owner' || user.role === 'gm'} />)}
           {screen === 'acct-payables' && p.reports && ACCT.PayablesScreen && (<ACCT.PayablesScreen canRun={!!p.reports} accounts={accounts} />)}
-          {screen === 'acct-accrual' && p.reports && ACCT.AccrualScreen && (<ACCT.AccrualScreen canRun={!!p.reports} />)}
-          {screen === 'acct-subscriptions' && p.reports && ACCT.SubscriptionScreen && (<ACCT.SubscriptionScreen canRun={!!p.reports} />)}
-          {screen === 'acct-assets' && p.reports && ACCT.AssetsScreen && (<ACCT.AssetsScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} />)}
+          {/* BIAYA TETAP hub — "recurring costs that post themselves": Langganan · Aset & Penyusutan ·
+              Akrual & Prabayar as tabs. Each tab is the EXISTING screen unchanged. Old deep-links open the
+              matching tab. */}
+          {(screen === 'biaya-tetap' || screen === 'acct-subscriptions' || screen === 'acct-accrual' || screen === 'acct-assets') && p.reports && (<>
+            <div className="lap-tabs no-print">
+              {[['langganan', tr('nav.finSubs')], ['aset', tr('nav.finAssets')], ['akrual', tr('nav.finAccrual')]].map(([k, l]) => (
+                <button key={k} type="button" className={`lap-tab ${biayaTab === k ? 'on' : ''}`} onClick={() => setBiayaTab(k)}>{l}</button>
+              ))}
+            </div>
+            {biayaTab === 'langganan' && ACCT.SubscriptionScreen && <ACCT.SubscriptionScreen canRun={!!p.reports} />}
+            {biayaTab === 'aset' && ACCT.AssetsScreen && <ACCT.AssetsScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} />}
+            {biayaTab === 'akrual' && ACCT.AccrualScreen && <ACCT.AccrualScreen canRun={!!p.reports} />}
+          </>)}
           {screen === 'acct-costing' && p.reports && ACCT.CostingScreen && (<ACCT.CostingScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} />)}
           {screen === 'acct-payroll' && p.sdmPayrollLihat && ACCT.PayrollAccrualScreen && (<ACCT.PayrollAccrualScreen canRun={!!p.sdmPayrollKelola} canApprove={!!p.sdmPayrollSetujui} />)}
           {screen === 'close' && p.reports && (<ACCT.CloseScreen isOwner={user.role === 'owner'} onNav={go} />)}
@@ -1876,14 +1931,14 @@ function FApp() {
       </main>
 
       <nav className="mobile-nav">
-        {NAV.slice(0, 4).map((n) => (
+        {NAV.filter((n) => !n.hidden).slice(0, 4).map((n) => (
           <button key={n.id} className={`mnav ${screen === n.id ? 'on' : ''}`} onClick={() => go(n.id)}>{Ish(n.icon, { s: 22 })}<span>{n.label}</span></button>
         ))}
         {/* "Menu" opens the drawer with EVERY permitted menu (finance + HR + admin),
             so nothing is unreachable on mobile. Highlighted when the drawer is open
             OR the current screen isn't one of the 4 quick items. Logout lives in the
             drawer's user chip. */}
-        <button className={`mnav ${drawer || !NAV.slice(0, 4).some((n) => n.id === screen) ? 'on' : ''}`} onClick={openDrawer}><IconMenu s={22} /><span>{tr('nav.more')}</span></button>
+        <button className={`mnav ${drawer || !NAV.filter((n) => !n.hidden).slice(0, 4).some((n) => n.id === screen) ? 'on' : ''}`} onClick={openDrawer}><IconMenu s={22} /><span>{tr('nav.more')}</span></button>
       </nav>
 
       {toast && <FToast msg={toast} onDone={() => setToast(null)} />}

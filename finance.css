@@ -4296,6 +4296,14 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 /* ═══════════ ACCOUNTING v2 SCREENS — Buku Besar · Rekonsiliasi · Tutup Buku ═══════════ */
 .fin-head-actions .rep-controls { margin: 0; }
 
+/* Laporan / Biaya Tetap hub tab bar — one viewer, several statements. Quiet, scrollable on phones. */
+.lap-tabs { display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; border-bottom: 1px solid rgba(28,43,51,.10); margin-bottom: var(--fs-4); scrollbar-width: none; }
+.lap-tabs::-webkit-scrollbar { display: none; }
+.lap-tab { flex: 0 0 auto; border: none; background: none; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--text-mut); padding: 9px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; transition: color .12s, border-color .12s; }
+.lap-tab:hover { color: var(--green-800); }
+.lap-tab.on { color: var(--green-800); border-bottom-color: var(--green-800); }
+.lap-tab:focus-visible { outline: 2px solid var(--green-700); outline-offset: -2px; border-radius: 4px; }
+
 /* ══════════════════════════════════════════════════════════════════════════════════════════════
    BUKU BESAR — designed as a financial instrument, not default table markup.
    · Two FLAT panels (no cards, no shadows on data): a companion account picker + the ledger, held

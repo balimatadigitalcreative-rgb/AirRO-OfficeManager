@@ -1936,5 +1936,51 @@
     );
   }
 
-  window.ACCT = { LedgerScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen, PayrollAccrualScreen, BalanceSheetScreen, IncomeStatementScreen, TrialBalanceScreen };
+  // JURNAL — chronological posted journal entries for the period (the "Jurnal" tab in Laporan).
+  // Read-only: it lists the SAME journal lines the ledger/statements read, grouped by entry.
+  function JournalScreen({ businessUnitId, fleetId, unitLabel, onOpenEntry }) {
+    const [period, setPeriod] = aS(defaultPeriod);
+    const [drill, setDrill] = aS(null);
+    const q = useAcct(() => ACC().journalList({ dateFrom: period.start, dateTo: period.end, businessUnitId, fleetId }), [period.start, period.end, businessUnitId, fleetId]);
+    if (q.state === 'gated') return <GatedCard icon="IconInvoice" body={trA('fin.ledgerSoon')} />;
+    const d = q.data; const rows = (d && d.rows) || [];
+    const jno = (r) => r.ref || (r.id ? '#' + String(r.id).slice(-6) : '—');
+    const doXLS = () => {
+      if (!d) return;
+      const M = [[trA('ms.date'), trA('acct.journalNo'), trA('ms.desc'), trA('acct.source'), trA('bs.amount')]];
+      rows.forEach((r) => M.push([r.date, jno(r), r.description, r.sourceType + (r.sourceId ? ' · ' + r.sourceId : ''), r.amount]));
+      exportXLS('Jurnal', M, `AirRO-Jurnal-${period.start}.xls`);
+    };
+    return (
+      <div className="screen-enter fin-scope" id="report-area">
+        <div className="fin-print-head print-only">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{IcA('Logo', { s: 30 })}<div><div style={{ fontSize: 19, fontWeight: 800 }}>{trA('nav.finJournal')}</div><div style={{ fontSize: 12.5, color: '#555' }}>{period.label || period.start + '–' + period.end}{unitLabel ? ' · ' + unitLabel : ''}</div></div></div>
+          <hr style={{ border: 'none', borderTop: '2px solid #065489', margin: '12px 0 4px' }} />
+        </div>
+        <div className="fin-head">
+          <div className="fin-head-titles"><h2>{trA('nav.finJournal')}</h2><div className="fin-head-scope">{IcA('IconCalendar', { s: 11 })} {period.label || `${period.start} – ${period.end}`}{unitLabel ? ' · ' + unitLabel : ''}</div></div>
+          <div className="fin-head-actions"><PeriodBar value={period} onChange={setPeriod} /><button className="btn btn-ghost" disabled={!d} onClick={doXLS}>{IcA('IconDownload', { s: 16 })}<span className="fin-btn-lbl">XLSX</span></button><button className="btn btn-primary" disabled={!d} onClick={() => window.print()}>{IcA('IconReport', { s: 16 })}<span className="fin-btn-lbl">{trA('rep.print')}</span></button></div>
+        </div>
+        <div className="no-print"><ScreenIntro answers={trA('rep.journalAnswers')} /></div>
+        {q.state === 'loading' && <div className="card"><Skeleton n={12} /></div>}
+        {q.state === 'error' && <ErrorCard onRetry={q.reload} />}
+        {q.state === 'ready' && d && (
+          <div className="card"><div className="fin-tablewrap"><table className="fin-table fin-cards tb-table">
+            <colgroup><col style={{ width: '112px' }} /><col style={{ width: '120px' }} /><col /><col style={{ width: '150px' }} /></colgroup>
+            <thead><tr><th className="fin-th">{trA('ms.date')}</th><th className="fin-th">{trA('acct.journalNo')}</th><th className="fin-th">{trA('ms.desc')}</th><th className="fin-th fin-r bb-saldo">{trA('bs.amount')}</th></tr></thead>
+            <tbody>{rows.map((r, i) => <tr key={i} className="fin-trow clickable" tabIndex={0} onClick={() => setDrill(r)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setDrill(r)}>
+              <td className="fin-td tnum" data-label={trA('ms.date')}>{r.date}</td>
+              <td className="fin-td" data-label={trA('acct.journalNo')}><span className="bb-jchip tnum">{jno(r)}</span></td>
+              <td className="fin-td" data-label={trA('ms.desc')}><span className="bb-cell-desc"><span className="fin-td-desc">{r.description || '—'}</span><span className="bb-srcchip tnum">{r.sourceType}{r.sourceId ? ' · ' + String(r.sourceId).slice(0, 8) : ''}</span></span></td>
+              <td className="fin-td fin-r tnum bb-saldo" data-label={trA('bs.amount')}>{money(r.amount)}</td></tr>)}
+              {rows.length === 0 && <tr><td className="fin-td" colSpan={4} style={{ textAlign: 'center', color: 'var(--text-faint)', padding: 24 }}>{trA('acct.noMovement')}</td></tr>}
+            </tbody>
+          </table></div></div>
+        )}
+        {drill && <JournalDrill row={{ date: drill.date, ref: drill.ref, description: drill.description, sourceType: drill.sourceType, sourceId: drill.sourceId }} onClose={() => setDrill(null)} onOpenEntry={onOpenEntry} />}
+      </div>
+    );
+  }
+
+  window.ACCT = { LedgerScreen, JournalScreen, ReconcileScreen, CloseScreen, MappingScreen, BackfillScreen, WorkflowPanel, SubsDueCard, ReportHeader, ScreenIntro, InfoDot, PayablesScreen, AccrualScreen, SubscriptionScreen, AssetsScreen, CostingScreen, PayrollAccrualScreen, BalanceSheetScreen, IncomeStatementScreen, TrialBalanceScreen };
 })();

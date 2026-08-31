@@ -113,6 +113,7 @@
       generalLedger: (p) => req('GET', '/accounting/general-ledger' + acctQs(p)),   // all accounts w/ balances
       chart: () => req('GET', '/accounting/chart'),                       // full chart of accounts (hierarchy)
       journal: (p) => req('GET', '/accounting/journal' + acctQs(p)),      // { sourceType, sourceId } — full balanced journal (drill)
+      journalList: (p) => req('GET', '/accounting/journal-list' + acctQs(p)),   // { dateFrom, dateTo, businessUnitId?, fleetId? } — Jurnal tab
       trialBalance: (p) => req('GET', '/accounting/trial-balance' + acctQs(p)),   // { rows[], totalDebit, totalCredit, balanced }
       balanceSheet: (p) => req('GET', '/accounting/balance-sheet' + acctQs(p)),    // Neraca — { assets, liabilities, equity, netIncome, balanced, assetRows[], liabilityRows[], equityRows[] }
       incomeStatement: (p) => req('GET', '/accounting/income-statement' + acctQs(p)),  // Laba Rugi — { revenue, hpp, opex, grossProfit, profit, margin, revenueRows[], hppRows[], opexRows[] } · { dateFrom, dateTo, businessUnitId?, fleetId? }
