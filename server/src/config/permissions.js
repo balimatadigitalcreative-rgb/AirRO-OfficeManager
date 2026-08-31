@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true,
     // View-window (time-restriction): Pemilik sees all history + Sisa Bon.
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     'distribusi.galon.reset_total': true,   // OWNER ONLY — clean-slate reset of the whole gallon ledger
@@ -32,7 +32,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true,
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     gudangView: true, gudangDamage: true, gudangReport: true,
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -220,6 +220,11 @@ function deriveDistribusiCaps(perms, role) {
   // but an owner/GM must never LOSE them just because their stored blob predates the cap).
   if (p.distribusiDashHistory === undefined) p.distribusiDashHistory = isOwnerGm;
   if (p.distribusiPengirimanReport === undefined) p.distribusiPengirimanReport = isOwnerGm;
+  // "Belum Terkirim" (carry-over of undelivered stops) is a BACK-OFFICE/admin decision, NOT part of the
+  // field team's daily route — so it is its OWN cap, defaulting TRUE only for owner/GM and NEVER derived
+  // from distribusiPengiriman (the daily-route cap field staff hold). A field user with only
+  // distribusiPengiriman therefore gets FALSE here and cannot see or act on the carry-over surfaces.
+  if (p.distribusiBelumTerkirim === undefined) p.distribusiBelumTerkirim = isOwnerGm;
   if (p.distribusiBonAdjust === undefined) p.distribusiBonAdjust = isOwnerGm;
   // Creating balance ADJUSTMENTS (penyesuaian). The old SINGLE cap `distribusiPenyesuaian` covered BOTH
   // gallon and bon, which forced handing helper staff the power to alter customer DEBT just to correct

@@ -45,7 +45,9 @@ beforeAll(async () => {
   // to fleet Biru only. fleetScope must be set BEFORE login so the token carries it.
   const s = await reg({ name: 'Sopir Biru', username: 'staff_out', password: 'secret123', role: 'finance' });
   staffId = s.user.id;
-  await prisma.user.update({ where: { id: staffId }, data: { permissions: JSON.stringify({ distribusiPengiriman: true }), fleetScope: JSON.stringify(['Biru']) } });
+  // Back-office user SCOPED to Biru + limited to today's window — holds the carry-over cap so we can test
+  // fleet scope + the view-window carve-out (the cap split itself is covered in delivery-cap-split.test.js).
+  await prisma.user.update({ where: { id: staffId }, data: { permissions: JSON.stringify({ distribusiPengiriman: true, distribusiBelumTerkirim: true }), fleetScope: JSON.stringify(['Biru']) } });
   staff = await login('staff_out', 'secret123');
 });
 afterAll(() => prisma.$disconnect());

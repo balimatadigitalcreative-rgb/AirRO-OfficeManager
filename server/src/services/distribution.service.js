@@ -2735,7 +2735,10 @@ async function dashboardSummary(user, query) {
     todayCash, todayTransfer, todayCashByFleet,   // money-in split + per-fleet cash to reconcile
     todayExpense, todayNetCash,   // field expenses in the window + net cash to deposit (cash − expenses)
     customers, last7: series, series, recent, topCustomers, reminders,
-    outstanding: await outstandingSummary(user),   // carry-over leftovers — always "now" (not the dashboard window)
+    // Carry-over leftovers — always "now" (not the dashboard window). GATED: only a back-office user with
+    // distribusiBelumTerkirim may see the count; for everyone else it is null so the number never leaks
+    // through this summary (the dashboard card + sidebar badge read it, and both are gated too).
+    outstanding: (await actorHasCap(user, 'distribusiBelumTerkirim')) ? await outstandingSummary(user) : null,
   };
 }
 

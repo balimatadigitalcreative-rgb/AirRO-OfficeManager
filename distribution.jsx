@@ -6152,7 +6152,7 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   );
 }
 
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canBelumTerkirim, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [closeouts, setCloseouts] = uSx([]);
@@ -6220,8 +6220,9 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
-      {/* Carry-over of yesterday's leftovers — pinned ABOVE today's route (renders nothing when empty). */}
-      <OutstandingSection ef={ef} today={today} refreshKey={refreshKey} onResolved={() => { reload(); if (onChanged) onChanged(); }} />
+      {/* Carry-over — a BACK-OFFICE surface (distribusiBelumTerkirim); hidden entirely for field staff who
+          hold only distribusiPengiriman. Renders nothing when empty, so the screen stays clean either way. */}
+      {canBelumTerkirim && <OutstandingSection ef={ef} today={today} refreshKey={refreshKey} onResolved={() => { reload(); if (onChanged) onChanged(); }} />}
       <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />
       {closeouts.map((c) => (
         <div key={c.id} className="card dist-closed-banner">
@@ -6271,21 +6272,21 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       </div>
       {orderOpen && <DeliveryOrderModal date={date} customers={custs} onClose={() => setOrderOpen(false)} onSaved={() => { setOrderOpen(false); flash(trD('dist.orderSaved')); reload(); if (onChanged) onChanged(); }} />}
       {txnStop && <DeliveryTxnModal stop={txnStop} today={date} onClose={() => setTxnStop(null)} onCreated={(txn) => { const st = txnStop; setTxnStop(null); mark(st.id, 'terkirim', txn.id); flash(trD('dist.delivSentTxn')); }} />}
-      {closeOpen && closeFleet && <CloseoutModal date={date} fleet={closeFleet} pendingStops={pendingStops} onClose={() => setCloseOpen(false)} onClosed={() => { setCloseOpen(false); flash(trD('dist.closeDone')); reload(); if (onChanged) onChanged(); }} />}
+      {closeOpen && closeFleet && <CloseoutModal date={date} fleet={closeFleet} pendingStops={pendingStops} canBelumTerkirim={canBelumTerkirim} onClose={() => setCloseOpen(false)} onClosed={() => { setCloseOpen(false); flash(trD('dist.closeDone')); reload(); if (onChanged) onChanged(); }} />}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
   );
 }
 // Day-closeout report. All delivered → optional note only. Any pending → a required
 // reason per undelivered stop before the day can be closed (kept as 'ditunda').
-function CloseoutModal({ date, fleet, pendingStops, onClose, onClosed }) {
+function CloseoutModal({ date, fleet, pendingStops, canBelumTerkirim, onClose, onClosed }) {
   const [reasons, setReasons] = uSx({});
   const [note, setNote] = uSx('');
   const [saving, setSaving] = uSx(false);
   const [err, setErr] = uSx('');
   const [carry, setCarry] = uSx(0);   // previous-day leftovers for THIS fleet — a non-blocking heads-up
   uEx(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
-  uEx(() => { if (window.API && window.API.distribusi) window.API.distribusi.deliveries.outstanding({ fleet }).then((r) => setCarry(r.count || 0)).catch(() => {}); }, [fleet]);
+  uEx(() => { if (canBelumTerkirim && window.API && window.API.distribusi) window.API.distribusi.deliveries.outstanding({ fleet }).then((r) => setCarry(r.count || 0)).catch(() => {}); }, [fleet, canBelumTerkirim]);
   const allFilled = pendingStops.every((s) => String(reasons[s.id] || '').trim());
   const save = () => {
     if (!allFilled || saving) return;

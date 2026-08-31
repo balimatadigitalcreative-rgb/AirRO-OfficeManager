@@ -30,7 +30,7 @@ beforeAll(async () => {
   await resetDb();
   gm = (await reg({ name: 'Boss', username: 'gm_bulk', password: 'secret123', role: 'gm' })).token;
   const s = await reg({ name: 'Sopir Biru', username: 'staff_bulk', password: 'secret123', role: 'finance' });
-  await prisma.user.update({ where: { id: s.user.id }, data: { permissions: JSON.stringify({ distribusiPengiriman: true }), fleetScope: JSON.stringify(['Biru']) } });
+  await prisma.user.update({ where: { id: s.user.id }, data: { permissions: JSON.stringify({ distribusiPengiriman: true, distribusiBelumTerkirim: true }), fleetScope: JSON.stringify(['Biru']) } });
   staffBiru = await login('staff_bulk', 'secret123');
 });
 afterAll(() => prisma.$disconnect());

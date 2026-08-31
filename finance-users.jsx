@@ -51,6 +51,7 @@ const CAPS = [
   ['distribusiDashHistory', 'distribusi', 'Lihat Periode Sebelumnya', 'Melihat periode dashboard yang lampau.', 0],
   ['distribusiCashIntegrasi', 'distribusi', 'Lihat Integrasi Kas', 'Melihat integrasi distribusi ↔ kas.', 0],
   ['distribusiPengiriman', 'distribusi', 'Papan Pengiriman', 'Membuka papan pengiriman (rit).', 0],
+  ['distribusiBelumTerkirim', 'distribusi', 'Belum Terkirim (carry-over)', 'Melihat & memindahkan pengiriman tertunggak hari sebelumnya ke rute hari ini — keputusan back office, terpisah dari Papan Pengiriman.', 2],
   ['distribusiPengirimanReport', 'distribusi', 'Laporan Pengiriman', 'Membuka laporan pengiriman.', 0],
   ['distribusiAudit', 'distribusi', 'Log Audit', 'Melihat log audit distribusi.', 0],
   ['distribusiInput', 'distribusi', 'Input Transaksi', 'Mencatat transaksi distribusi.', 1],

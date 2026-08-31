@@ -600,15 +600,15 @@ function FApp() {
   // distTick: (a) helpers with the board cap → today's new extra orders; (b) admins with
   // the dashboard cap → any fleet that CLOSED the day with undelivered stops (+reason).
   uEh(() => {
-    if (!user || !(window.API && window.API.distribusi) || !(p.distribusiPengiriman || p.distribusiDashboard)) { setDeliveryAlerts([]); setOutstandingCount(0); return; }
+    if (!user || !(window.API && window.API.distribusi) || !(p.distribusiPengiriman || p.distribusiDashboard || p.distribusiBelumTerkirim)) { setDeliveryAlerts([]); setOutstandingCount(0); return; }
     let live = true; const acc = []; const jobs = [];
     if (p.distribusiPengiriman) jobs.push(window.API.distribusi.deliveries.board(FIN.TODAY, 'all').then((r) => {
       const extra = (r.data || []).filter((d) => d.source === 'tambahan' && d.status === 'pending');
       if (extra.length) acc.push({ id: 'deliv-extra', level: 'warn', icon: 'IconTruck', title: tr('nav.distDeliveries'), msg: tr('dist.newOrderAlert', { n: extra.length }) });
     }).catch(() => {}));
-    // Carry-over: undelivered stops from EARLIER days (fleet-scoped; the endpoint reaches past the read
-    // window on purpose). Drives the sidebar badge + a bell alert — "automatic visibility" of leftovers.
-    if (p.distribusiPengiriman) jobs.push(window.API.distribusi.deliveries.outstanding({ fleet: 'all' }).then((r) => {
+    // Carry-over: undelivered stops from EARLIER days — its OWN back-office cap (distribusiBelumTerkirim),
+    // NOT the field-route cap. Field staff never fetch it, so no badge/alert leaks to the delivery team.
+    if (p.distribusiBelumTerkirim) jobs.push(window.API.distribusi.deliveries.outstanding({ fleet: 'all' }).then((r) => {
       if (live) setOutstandingCount(r.count || 0);
       if (r.count) acc.push({ id: 'deliv-outstanding', level: 'warn', icon: 'IconTruck', title: tr('nav.distDeliveries'), msg: tr('dist.outstandingAlert', { n: r.count, d: r.oldest || 0 }) });
     }).catch(() => { if (live) setOutstandingCount(0); }));
@@ -617,7 +617,7 @@ function FApp() {
     }).catch(() => {}));
     Promise.all(jobs).then(() => { if (live) setDeliveryAlerts(acc); });
     return () => { live = false; };
-  }, [user, p.distribusiPengiriman, p.distribusiDashboard, distTick]);
+  }, [user, p.distribusiPengiriman, p.distribusiDashboard, p.distribusiBelumTerkirim, distTick]);
   // Forgot-password requests (AlertBell) — user admins only (matches the manageUsers-gated
   // endpoint). Poll lightly; refresh on nav.
   uEh(() => {
@@ -1665,6 +1665,7 @@ function FApp() {
           )}
           {screen === 'dist-deliveries' && p.distribusiPengiriman && (
             <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}
+              canBelumTerkirim={!!p.distribusiBelumTerkirim}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}
