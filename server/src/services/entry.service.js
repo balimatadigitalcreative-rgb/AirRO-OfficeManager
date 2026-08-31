@@ -8,6 +8,23 @@ const businessUnit = require('./businessUnit.service');   // Stage 3: unit label
 const period = require('./period.service');   // ACCOUNTING v2: reject edits in a closed period (flag-gated)
 const { unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor } = require('../lib/scope');   // per-user business-unit access (Stage A/B)
 
+// WRITE-PATH GUARD (closes the "Belum dipetakan" root cause): the cash book keys an entry to its
+// money-spot with the plain string Entry.acct. Historically that could be ANY string ("bca", "cash", a
+// name from an import, or an id for an account that didn't exist yet) — with no FK, nothing rejected it,
+// so a later account delete/rename orphaned those rows. Now every write validates a NON-EMPTY acct
+// against a LIVE Account id. Blank/unset is still allowed (the client falls back to the primary account).
+async function assertValidAcct(acct) {
+  const a = acct == null ? '' : String(acct).trim();
+  if (!a) return;
+  // Enforce ONLY once an account list exists. A fresh/bootstrap install (or a legacy trial before accounts
+  // were persisted server-side) has no rows to validate against, and the schema deliberately allowed an
+  // account that lives only client-side — so with zero accounts we can't (and mustn't) reject. In
+  // production the accounts are always synced first, so a non-matching acct is exactly the orphan bug.
+  if ((await prisma.account.count()) === 0) return;
+  const exists = await prisma.account.findUnique({ where: { id: a }, select: { id: true } });
+  if (!exists) throw ApiError.badRequest(`Akun "${a}" tidak dikenal — pilih akun kas/bank yang ada (bukan nama atau id lama).`, { unknownAcct: a });
+}
+
 // Build a Prisma `where` clause from validated list filters.
 function buildWhere(q) {
   const where = {};
@@ -81,6 +98,8 @@ async function getById(id, user) {
 // cannot forge who created a record, and the snapshot reflects the real user then.
 async function create(data, actor) {
   await period.assertPeriodOpen(data.date, 'menambah transaksi');   // closed period → 400 (flag-gated)
+  await assertValidAcct(data.acct);   // never persist an entry pointing at a non-existent account
+
   const userId = actor && actor.id;
   const snap = { createdById: userId || null };
   if (userId) {
@@ -114,6 +133,7 @@ async function update(id, data, actor) {
   // Never let a PATCH overwrite the original creator snapshot (the fields aren't in
   // the update schema anyway, but strip defensively).
   const { createdById, createdByName, createdByRole, ...safe } = data;
+  if (Object.prototype.hasOwnProperty.call(safe, 'acct')) await assertValidAcct(safe.acct);   // a PATCH can't repoint to a dead account
   // Only re-resolve the unit when the request carries it, so a normal edit that omits it keeps
   // the entry's current unit (never silently reset to "Air"). Stage B: a scoped user can't MOVE a
   // record into a unit they can't access.

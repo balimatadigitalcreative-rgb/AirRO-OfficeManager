@@ -28,7 +28,7 @@ async function run() {
 
   // Orphaned = acct is set (non-empty) AND not a live account id. A blank/null acct legitimately falls
   // back to the primary account, so it is NOT orphaned.
-  const entries = await prisma.entry.findMany({ select: { id: true, date: true, type: true, amount: true, acct: true, note: true, category: true, createdByName: true } });
+  const entries = await prisma.entry.findMany({ select: { id: true, date: true, type: true, amount: true, acct: true, note: true, category: true, createdByName: true, createdByRole: true, createdAt: true, meta: true } });
   const orphans = entries.filter((e) => e.acct && String(e.acct).trim() && !liveIds.has(e.acct));
 
   const byAcct = {};
@@ -50,10 +50,18 @@ async function run() {
     for (const g of Object.values(byAcct).sort((a, b) => a.net - b.net)) {
       console.log(`   acct="${g.acct}"  ${g.count} rows  ${g.first}…${g.last}  in ${rupiah(g.income)}  out ${rupiah(g.expense)}  NET ${rupiah(g.net)}`);
     }
-    console.log(`\n   ── the ${Math.min(orphans.length, 40)} rows (date · type · amount · acct · note) ──`);
+    console.log(`\n   ── the ${Math.min(orphans.length, 40)} rows — ORIGIN (createdAt · createdBy · meta) tells the write path ──`);
     orphans.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 40).forEach((e) => {
-      console.log(`   ${e.date}  ${e.type.padEnd(7)} ${rupiah(Number(e.amount)).padStart(15)}  acct=${e.acct}  ${e.category || ''} ${e.note ? '· ' + e.note.slice(0, 40) : ''}`);
+      const when = e.createdAt ? new Date(e.createdAt).toISOString().slice(0, 16).replace('T', ' ') : '—';
+      const who = e.createdByName ? `${e.createdByName}${e.createdByRole ? '/' + e.createdByRole : ''}` : '(no creator — likely import/seed/migration)';
+      console.log(`   ${e.date}  ${e.type.padEnd(7)} ${rupiah(Number(e.amount)).padStart(15)}  acct=${e.acct}  ${e.category || ''} ${e.note ? '· ' + e.note.slice(0, 32) : ''}`);
+      console.log(`        created ${when}  by ${who}${e.meta ? '  meta=' + String(e.meta).slice(0, 60) : ''}`);
     });
+    // Origin summary: group by creator, so "all import" vs "manual entry" is obvious at a glance.
+    const byWho = {}; orphans.forEach((e) => { const k = e.createdByName || '(none)'; byWho[k] = (byWho[k] || 0) + 1; });
+    console.log(`\n   origin by creator: ${Object.entries(byWho).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+    const createdSpan = orphans.map((e) => e.createdAt).filter(Boolean).sort();
+    if (createdSpan.length) console.log(`   createdAt span: ${new Date(createdSpan[0]).toISOString().slice(0, 10)} … ${new Date(createdSpan[createdSpan.length - 1]).toISOString().slice(0, 10)}`);
     console.log(`\n   Σ NET of orphaned entries (== dashboard "Belum dipetakan"): ${rupiah(net)}\n`);
   }
 

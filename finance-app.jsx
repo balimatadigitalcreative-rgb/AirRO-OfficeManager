@@ -772,7 +772,10 @@ function MoneySpots({ accounts, setAccounts, entries, transfers, setTransfers, c
               </div>
               <div className="ms-name">{a.name}</div>
               <div className="ms-sub">{a.type === 'bank' ? (a.number || trF('ms.bank')) : trF('ms.cash')}</div>
-              <div className="tnum ms-bal">{fmt(bal)}</div>
+              <div className={`tnum ms-bal ${bal < 0 ? 'neg' : ''}`}>{bal < 0 ? '−' + fmt(Math.abs(bal)) : fmt(bal)}</div>
+              {bal < 0 && (
+                <div className="ms-neg-hint">{Icn('IconWarn', { s: 12 })}<span>{trF('ms.negHint')}</span>{canEdit && <button type="button" className="dist-link" onClick={(ev) => { ev.stopPropagation(); setEdit(a); }}>{trF('ms.setOpening')}</button>}</div>
+              )}
               <div className="ms-flow"><span className="amt-pos tnum">+{fmt(mm.inc)}</span><span className="amt-neg tnum">−{fmt(mm.out)}</span></div>
               <div className="ms-txn">{txn} {trF('ms.txns')} · {trF('ms.thisMonth') || 'bulan ini'}</div>
             </div>

@@ -67,6 +67,25 @@ describe('remediation: remap the orphaned entries to a live account', () => {
   });
 });
 
+describe('write-path guard: an entry can no longer be saved with an unknown acct', () => {
+  it('rejects acct that is not a live account (the string-name / old-id root cause)', async () => {
+    const bad = await request(app).post('/api/v1/entries').set(auth(gm)).send({ type: 'expense', amount: 100000, date: '2026-08-09', category: 'Fuel', acct: 'ghost-name-not-an-id' });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.message).toMatch(/tidak dikenal/i);
+  });
+  it('accepts a valid account id, and accepts a blank acct (falls back to the primary)', async () => {
+    const ok = await request(app).post('/api/v1/entries').set(auth(gm)).send({ type: 'income', amount: 100000, date: '2026-08-09', category: 'Refill', acct: 'cash' });
+    expect(ok.status).toBe(201);
+    const blank = await request(app).post('/api/v1/entries').set(auth(gm)).send({ type: 'income', amount: 50000, date: '2026-08-09', category: 'Refill' });
+    expect(blank.status).toBe(201);
+  });
+  it('a PATCH cannot repoint an entry to a dead account', async () => {
+    const made = await request(app).post('/api/v1/entries').set(auth(gm)).send({ type: 'income', amount: 70000, date: '2026-08-09', category: 'Refill', acct: 'cash' });
+    const r = await request(app).patch('/api/v1/entries/' + made.body.data.id).set(auth(gm)).send({ acct: 'ghostacct' });
+    expect(r.status).toBe(400);
+  });
+});
+
 describe('the guided-migration delete path (reassignTo) never orphans', () => {
   it('DELETE with reassignTo remaps then deletes in one transaction', async () => {
     await request(app).put('/api/v1/accounts/sync').set(auth(gm)).send({ items: [acctItem('cash', 'Cash', 'cash', 0), acctItem('mandiri', 'Mandiri', 'bank', 0)] });

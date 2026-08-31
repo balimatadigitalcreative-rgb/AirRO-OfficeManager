@@ -18,7 +18,7 @@ beforeAll(async () => {
   gm = o.token;
   kasId = (await request(app).post('/api/v1/accounts').set(auth(gm)).send({ name: 'Kas', type: 'cash', opening: 0 })).body.data.id;
   bankId = (await request(app).post('/api/v1/accounts').set(auth(gm)).send({ name: 'BCA', type: 'bank', opening: 0 })).body.data.id;
-  const mkE = (type, amount, category, date, extra) => request(app).post('/api/v1/entries').set(auth(gm)).send({ type, amount, category, acct: 'cash', date, note: category, ...(extra || {}) });
+  const mkE = (type, amount, category, date, extra) => request(app).post('/api/v1/entries').set(auth(gm)).send({ type, amount, category, acct: kasId, date, note: category, ...(extra || {}) });
   // AUGUST — operating activity: a cash sale, a cash expense, a gallon (inventory) purchase, a credit
   // sale (bon, no cash) and a partial collection (pelunasan, cash in).
   await mkE('income', 500000, 'Refill', '2026-08-05');
