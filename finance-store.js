@@ -263,6 +263,18 @@
     });
     return bal;
   }
+  // THE cash-on-hand figure — the ONE number every screen must show for "cash". It is the exact sum of
+  // what a user sees in Kas & Bank: Σ(per-account balance over the SHOWN accounts) + the "Belum
+  // dipetakan" line. Unlike a naive opening+income−expense, it honours account attribution AND transfers
+  // and excludes non-cash reference rows — so it reconciles to verify-invariants' per-account cash check.
+  // The low-cash alert, the dashboard "Total kas" card and the Kas & Bank total all call THIS, so they
+  // can never disagree. `shownAccounts` is the scoped set on display; `allAccounts` is every account
+  // (so an entry pointing at an out-of-scope account is not miscounted as unattributed).
+  function cashOnHand(shownAccounts, entries, allAccounts, transfers) {
+    const accts = allAccounts || shownAccounts;
+    const sum = (shownAccounts || []).reduce((s, a) => s + acctBalance(a, entries, accts, transfers), 0);
+    return sum + unattributed(entries, accts);
+  }
   // The actual orphaned entries behind `unattributed` — so "Belum dipetakan" can be OPENED (drill to each
   // source, remap to a live account). Grouped preview: rows + the distinct dangling acct ids + net.
   function unattributedRows(entries, accts) {
@@ -307,7 +319,7 @@
     SESSION_KEY, USERS, ROLES, ROLE_COLORS, perms, normKasbon, setRoles, roleList, roleName, roleColor, landingScreen, initials, loadSession, setSession,
     USERS_KEY, SEED_USERS, loadUsers, saveUsers, newUserId,
     SETTINGS_KEY, DEFAULT_SETTINGS, loadSettings, saveSettings,
-    ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance, unattributed, unattributedRows,
+    ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance, unattributed, unattributedRows, cashOnHand,
     XFER_KEY, loadTransfers, saveTransfers, newXferId,
     SETORAN_KEY, FLEET_KEY, loadFleet, saveFleet, loadSetoran, saveSetoran, newSetoranId, setoranOf };
 })();

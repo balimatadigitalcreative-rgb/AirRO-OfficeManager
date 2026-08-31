@@ -43,6 +43,7 @@ const FILES = [
   'finance-i18n.js',
   'finance-period.js',
   'finance-entry-source.js',
+  'finance-totals.js',
   'data.js',
   'finance-store.js',
   'finance-hrd.js',

@@ -1281,20 +1281,23 @@ function FApp() {
   // still counted in CASH (they moved money between accounts and net to zero, so combined cash is
   // unchanged). In a single-unit view every leg counts as that unit's real income/expense.
   const computeStats = (ents, accts, combined) => {
-    let balIn = 0, balOut = 0, pIn = 0, pOut = 0;
-    ents.forEach((e) => {
-      if (!e.reference) { if (e.type === 'income') balIn += e.amount; else balOut += e.amount; }   // cash: always
-      if (e.date >= range.start && e.date <= range.end && !(combined && e.interUnit)) {              // P&L: eliminate internal legs when combined
-        if (e.type === 'income') pIn += e.amount; else pOut += e.amount;
-      }
-    });
-    const profit = pIn - pOut;
+    let balIn = 0, balOut = 0;
+    ents.forEach((e) => { if (!e.reference) { if (e.type === 'income') balIn += e.amount; else balOut += e.amount; } });   // cash inflow/outflow (opening added below)
+    // Period Pemasukan/Pengeluaran come from the SHARED reducer — the SAME function the Transaksi
+    // screen uses — so Ringkasan and Transaksi can never drift (guarded by finance-totals.test.js).
+    const pl = FTOT.periodTotals(ents, range.start, range.end, combined);
+    const profit = pl.income - pl.expense;
     const openingTotal = accts.reduce((s, a) => s + (+a.opening || 0), 0);
-    return { balance: openingTotal + balIn - balOut, opening: openingTotal, totalIn: balIn, totalOut: balOut, income: pIn, expense: pOut, profit, margin: pIn ? Math.round((profit / pIn) * 1000) / 10 : 0, monLabel: periodLbl };
+    return { balance: openingTotal + balIn - balOut, opening: openingTotal, totalIn: balIn, totalOut: balOut, income: pl.income, expense: pl.expense, profit, margin: pl.income ? Math.round((profit / pl.income) * 1000) / 10 : 0, monLabel: periodLbl };
   };
   // Cash Balance = REAL cash on hand = opening balances + every inflow − every outflow (all-time),
   // over the SCOPED sets. NOT the same as Net Profit (period income − expense, no opening).
   const stats = uMh(() => computeStats(scopedEntries, scopedAccounts, activeUnit === 'all'), [scopedEntries, scopedAccounts, activeUnit, range.start, range.end, periodLbl]);
+  // THE cash figure — one number for every "cash" reader (low-cash alert, dashboard "Total kas", Kas &
+  // Bank total). It is Σ per-account balance over the shown accounts + "Belum dipetakan", honouring
+  // account attribution + transfers (unlike stats.balance, an opening+income−expense proxy that ignored
+  // both — the source of the "two different cash numbers on one screen" bug). Matches invariant #12.
+  const cashOnHand = uMh(() => FS.cashOnHand(scopedAccounts, entries, accounts, transfers), [scopedAccounts, entries, accounts, transfers]);
   // Reports read a P&L-only view: in "Semua" the inter-unit legs are removed entirely (they are
   // internal), while a single-unit report keeps that unit's own leg.
   const reportEntries = uMh(() => (activeUnit === 'all' ? entries.filter((e) => !e.interUnit) : scopedEntries), [entries, scopedEntries, activeUnit]);
@@ -1377,7 +1380,6 @@ function FApp() {
   // The Setoran tab renders the underlying Setoran records (per fleet per day) so it can show armada
   // detail; filter them to the active period. Read-only — corrections live in Distribusi → Setoran.
   const setoranRowsPeriod = uMh(() => (setoran || []).filter((r) => r.date >= range.start && r.date <= range.end), [setoran, range.start, range.end]);
-  const txnSumOf = (rows) => rows.reduce((a, e) => { if (e.type === 'income') a.income += e.amount; else a.expense += e.amount; return a; }, { income: 0, expense: 0 });
 
   const prevAgg = uMh(() => {
     const [y, m] = monthKey.split('-').map(Number);
@@ -1523,8 +1525,8 @@ function FApp() {
   // in-memory from the setoran REST table and never persisted.)
 
   const alerts = uMh(() => p.seeMoney
-    ? ALERTS.computeAlerts({ entries, balance: stats.balance, monthIncome: monthStats.income, monthExpense: monthStats.expense, month: monthKey, thresholds: settings, fmt: FIN.fmt, lang })
-    : [], [entries, stats.balance, monthStats, monthKey, settings, p.seeMoney, lang]);
+    ? ALERTS.computeAlerts({ entries, balance: cashOnHand, monthIncome: monthStats.income, monthExpense: monthStats.expense, month: monthKey, thresholds: settings, fmt: FIN.fmt, lang })
+    : [], [entries, cashOnHand, monthStats, monthKey, settings, p.seeMoney, lang]);
 
   // "Aktivitas Saya": the current user's own recent creations, gathered from the
   // records already loaded in shell state and filtered by createdById (stable
@@ -1777,7 +1779,7 @@ function FApp() {
               {/* Dashboard Keuangan — KPI cards (each states its period scope + drills to the ledger),
                   cash position per account, P&L month-vs-last, 12-month trend, ratios. All over the
                   cash-book figures the shell already computes; AR/liabilities gated to the engine. */}
-              <FIN.Dashboard stats={stats} deltas={deltas} shownAccounts={scopedAccounts} allAccounts={accounts} allEntries={entries} transfers={transfers} plEntries={scopedEntries} breakdown={breakdown} periodLbl={periodLbl} seeMoney={p.seeMoney} onDrill={go}
+              <FIN.Dashboard stats={stats} cashOnHand={cashOnHand} deltas={deltas} shownAccounts={scopedAccounts} allAccounts={accounts} allEntries={entries} transfers={transfers} plEntries={scopedEntries} breakdown={breakdown} periodLbl={periodLbl} seeMoney={p.seeMoney} onDrill={go}
                 onOpenEntry={p.edit ? editEntryRow : null}
                 onReload={p.settings ? () => { reloadEntries(); reloadAccounts(); } : null} />
               {/* Per-unit breakdown — only in the combined view. Its columns sum EXACTLY to the
@@ -1835,8 +1837,10 @@ function FApp() {
             // Split for DISPLAY only. Both sides are the same Entry data, post the same journals and
             // feed the same reports/balances; the combined line below always shows the real position.
             const tabRows = txnTab === 'setoran' ? setoranPeriod : txnTab === 'operasional' ? opsPeriod : periodEntries;
-            const tabSum = txnSumOf(tabRows);
-            const combined = txnSumOf(periodEntries);   // == the old single-list total
+            // Per-tab and combined both come from the SHARED reducer with the SAME scope as Ringkasan,
+            // so the combined figure is byte-for-byte the Ringkasan Pemasukan/Pengeluaran (= stats).
+            const tabSum = FTOT.periodTotals(tabRows, range.start, range.end, activeUnit === 'all');
+            const combined = { income: stats.income, expense: stats.expense };   // == Ringkasan
             const openDist = () => go('setoran');
             return (
               <div className="screen-enter">
@@ -1846,7 +1850,7 @@ function FApp() {
                   ))}
                 </div>
                 <div className="txn-splitnote">{tr('txn.splitNote')}</div>
-                {p.seeMoney && <FIN.TxnSummary income={tabSum.income} expense={tabSum.expense} combinedIncome={combined.income} combinedExpense={combined.expense} />}
+                {p.seeMoney && <FIN.TxnSummary tab={txnTab} income={tabSum.income} expense={tabSum.expense} combinedIncome={combined.income} combinedExpense={combined.expense} />}
                 <div style={{ marginTop: 16 }}>
                   {txnTab === 'setoran'
                     ? <FIN.SetoranMirror rows={setoranRowsPeriod} onOpenDist={openDist} />

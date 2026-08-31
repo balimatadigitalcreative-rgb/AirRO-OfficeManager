@@ -483,7 +483,11 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
 // Per-tab summary: the ACTIVE tab's own income/expense/net ("Sesuai tab aktif"), plus a persistent
 // combined line so splitting the view never hides the real cash position. The combined figures are
 // the period's full total — identical to the old single list.
-function TxnSummary({ income, expense, combinedIncome, combinedExpense }) {
+function TxnSummary({ tab, income, expense, combinedIncome, combinedExpense }) {
+  // Label the per-tab total with EXACTLY what it covers, so a partial tab is never mistaken for the
+  // whole. The combined line (== Ringkasan Pemasukan/Pengeluaran) is shown alongside on a partial tab
+  // so the real position is always in view; on "Semua" the per-tab total already IS the combined.
+  const perLbl = tab === 'operasional' ? trF('txn.perOps') : tab === 'setoran' ? trF('txn.perSetoran') : trF('txn.perAll');
   const row = (lbl, inc, exp, cls) => (
     <div className={`txn-sum-row ${cls}`}>
       <span className="txn-sum-lbl">{lbl}</span>
@@ -494,8 +498,8 @@ function TxnSummary({ income, expense, combinedIncome, combinedExpense }) {
   );
   return (
     <div className="txn-summary card">
-      {row(trF('txn.perTab'), income, expense, 'txn-sum-tab')}
-      {row(trF('txn.combined'), combinedIncome, combinedExpense, 'txn-sum-combined')}
+      {row(perLbl, income, expense, 'txn-sum-tab')}
+      {tab !== 'semua' && row(trF('txn.combined'), combinedIncome, combinedExpense, 'txn-sum-combined')}
     </div>
   );
 }
@@ -1036,7 +1040,7 @@ function UnattributedModal({ accounts, entries, canEdit, onClose, onOpenEntry, o
   );
 }
 
-function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, transfers, plEntries, breakdown, periodLbl, seeMoney, onDrill, onReload, onOpenEntry }) {
+function Dashboard({ stats, cashOnHand, deltas, shownAccounts, allAccounts, allEntries, transfers, plEntries, breakdown, periodLbl, seeMoney, onDrill, onReload, onOpenEntry }) {
   const cur = monKeyOf(TODAY), prv = prevMonKey(cur);
   const mtd = uM(() => monthAgg(plEntries, cur), [plEntries, cur]);
   const lm = uM(() => monthAgg(plEntries, prv), [plEntries, prv]);
@@ -1047,7 +1051,10 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
   // Money whose account was deleted/renamed (stale acct id) is NOT dumped onto the first account any
   // more — it surfaces here so "Total kas" is the exact sum of every line shown (accounts + this line).
   const unattr = uM(() => (FS.unattributed ? FS.unattributed(allEntries, allAccounts) : 0), [allEntries, allAccounts]);
-  const totalCash = acctRows.reduce((s, a) => s + a.bal, 0) + unattr;
+  // "Total kas" is the SHARED cash figure (FS.cashOnHand) — the same number the low-cash alert and Kas &
+  // Bank use, so one screen never shows two cash totals. The per-account list (acctRows) + unattr below
+  // sum to exactly this by construction; the shell passes it in so there is a single source.
+  const totalCash = cashOnHand != null ? cashOnHand : (acctRows.reduce((s, a) => s + a.bal, 0) + unattr);
   const [showUnattr, setShowUnattr] = uS(false);
   const netMargin = stats.income ? Math.round((stats.profit / stats.income) * 1000) / 10 : 0;
   const curNm = monthName(+cur.split('-')[1] - 1), prvNm = monthName(+prv.split('-')[1] - 1);
