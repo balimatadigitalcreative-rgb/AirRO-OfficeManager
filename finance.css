@@ -338,8 +338,13 @@
 .gran-seg { display: inline-flex; background: var(--card-soft); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
 .gran-btn { font-size: 12px; font-weight: 600; color: var(--text-mut); padding: 6px 11px; border-radius: 999px; transition: all .14s; white-space: nowrap; }
 .gran-btn.on { background: var(--green-800); color: #fff; }
-.delta-pill { display: inline-flex; align-items: center; gap: 3px; margin-top: 7px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.delta-pill { display: inline-flex; align-items: center; gap: 3px; margin-top: 7px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; white-space: nowrap; flex: 0 0 auto; }
 .delta-pill em { font-style: normal; font-weight: 500; opacity: .7; }
+/* Small status badges/pills carry a single short label — never let one wrap mid-text (a half-wrapped
+   badge reads as broken). They live in flex-wrap containers, so the whole badge reflows instead. */
+.co-pend-badge, .rep-pill, .dist-badge, .dist-noloc-badge, .dist-incomplete-badge, .dist-inactive-badge,
+.ori-badge, .salary-unset-badge, .run-corr-badge, .run-open-badge, .fin-badge-soon, .map-badge, .appr-route,
+.pill-mut, .ed-log-pill, .rep-runrow span { white-space: nowrap; }
 .delta-pill.pos { background: var(--pos-bg); color: var(--green-800); }
 .delta-pill.neg { background: var(--neg-bg); color: var(--neg); }
 .delta-pill.flat { background: var(--card-soft); color: var(--text-mut); }
@@ -4168,8 +4173,23 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .fin-acctline-name { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; font-weight: 600; }
 .fin-acctline-name em { font-style: normal; font-size: 11px; color: var(--text-faint); font-weight: 500; }
 .fin-acctline-bal { margin-left: auto; font-weight: 700; font-size: 14px; white-space: nowrap; }
+.fin-acctline.unattr { cursor: pointer; }
 .fin-acctline.unattr .fin-acctline-bal { color: var(--amber-700, #B45309); }
 .fin-acctline.unattr .fin-acctline-name em { color: var(--amber-700, #B45309); font-weight: 600; }
+.fin-acctline-caret { color: var(--text-faint); flex: 0 0 auto; margin-left: 8px; }
+/* "Belum dipetakan" inspector modal. */
+.unattr-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-mut); margin-bottom: 10px; }
+.unattr-chip { font-size: 11px; background: var(--warn-bg, #fff7ed); color: var(--amber-700, #B45309); border-radius: 5px; padding: 1px 6px; }
+.unattr-rows { display: flex; flex-direction: column; max-height: 46vh; overflow-y: auto; border: 1px solid var(--border-soft); border-radius: var(--r-md); }
+.unattr-row { display: grid; grid-template-columns: 92px auto 1fr auto; gap: 10px; align-items: center; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border-soft); font: inherit; font-size: 12.5px; padding: 8px 12px; }
+.unattr-row:last-child { border-bottom: none; }
+.unattr-row.clickable { cursor: pointer; }
+.unattr-row.clickable:hover { background: var(--card-soft); }
+.unattr-row-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-mut); }
+.unattr-row-acct { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--text-faint); }
+.unattr-remap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.unattr-remap .fld { width: auto; min-width: 140px; height: 38px; }
+@media (max-width: 640px) { .unattr-row { grid-template-columns: 1fr auto; } .unattr-row-note { display: none; } }
 .fin-acctline.total { border-top: 2px solid var(--border); margin-top: 4px; padding-top: 12px; cursor: default; font-weight: 800; }
 .fin-acctline.total .fin-acctline-name { font-weight: 800; }
 .fin-acctline.total .fin-acctline-bal { color: var(--green-800); font-size: 15px; }

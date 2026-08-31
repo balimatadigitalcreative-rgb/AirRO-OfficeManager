@@ -55,9 +55,23 @@ async function update(id, data, user) {
   return prisma.account.update({ where: { id }, data: safe });
 }
 
-async function remove(id, user) {
+async function remove(id, user, reassignTo) {
   await getById(id, user);   // 404 if out of the actor's unit scope (Stage B)
-  // Detach entries/transfers rather than cascade-deleting financial history.
+  // GUARD (mirrors the sync guard): an account referenced by cash-book entries (Entry.acct — a plain
+  // string, no FK) must not be deleted, or those entries orphan into "Belum dipetakan". Refuse unless a
+  // live `reassignTo` account is given, then remap the entries to it in the SAME transaction, then delete.
+  const referenced = await prisma.entry.count({ where: { acct: id } });
+  if (referenced > 0) {
+    const dest = reassignTo && reassignTo !== id ? await prisma.account.findUnique({ where: { id: reassignTo } }) : null;
+    if (!dest) throw ApiError.conflict(`Akun ini dipakai ${referenced} transaksi — pindahkan transaksinya ke akun lain dulu.`, { referenced });
+    await prisma.$transaction([
+      prisma.entry.updateMany({ where: { acct: id }, data: { acct: reassignTo, accountId: reassignTo } }),
+      prisma.entry.updateMany({ where: { accountId: id }, data: { accountId: reassignTo } }),
+      prisma.account.delete({ where: { id } }),
+    ]).catch(() => { throw ApiError.conflict('Account is referenced by transfers; reassign or delete those first'); });
+    return { deleted: true, reassigned: referenced };
+  }
+  // Detach the legacy FK, then delete. (No `acct`-referenced entries here, so nothing orphans.)
   await prisma.$transaction([
     prisma.entry.updateMany({ where: { accountId: id }, data: { accountId: null } }),
     prisma.account.delete({ where: { id } }),
@@ -65,6 +79,28 @@ async function remove(id, user) {
     // Transfers FK is required, so block deletion if the account is referenced.
     throw ApiError.conflict('Account is referenced by transfers; reassign or delete those first');
   });
+  return { deleted: true };
+}
+
+// REMEDIATION for "Belum dipetakan": remap every cash-book entry on `fromAcct` to a LIVE account `toAcct`.
+// `dryRun` previews (count + net) without writing. Only the account attribution changes — never an amount,
+// date, or type — so no figure is invented; the accounting-v2 journal (keyed on chart-account codes) is
+// untouched. `fromAcct` is typically an orphaned/deleted id; `toAcct` MUST be a live account.
+async function remapAccount(body, user) {
+  const from = String((body && body.fromAcct) || '').trim();
+  const to = String((body && body.toAcct) || '').trim();
+  const dryRun = !!(body && body.dryRun);
+  if (!from) throw ApiError.badRequest('Akun sumber wajib diisi.');
+  const dest = to ? await getById(to, user).catch(() => null) : null;
+  if (!dest) throw ApiError.badRequest('Akun tujuan tidak ditemukan (harus akun yang masih ada).');
+  if (to === from) throw ApiError.badRequest('Akun tujuan harus berbeda dari sumber.');
+  const rows = await prisma.entry.findMany({ where: { acct: from }, select: { type: true, amount: true } });
+  const income = rows.filter((r) => r.type === 'income').reduce((s, r) => s + Number(r.amount), 0);
+  const expense = rows.filter((r) => r.type === 'expense').reduce((s, r) => s + Number(r.amount), 0);
+  const preview = { fromAcct: from, toAcct: to, toName: dest.name, count: rows.length, income, expense, net: income - expense };
+  if (dryRun) return { dryRun: true, ...preview };
+  if (rows.length) await prisma.entry.updateMany({ where: { acct: from }, data: { acct: to, accountId: to } });
+  return { remapped: rows.length, ...preview };
 }
 
 // balance = opening + Σ(income) − Σ(expense) + Σ(transfers in) − Σ(transfers out)
@@ -89,4 +125,4 @@ async function balance(id, user) {
   };
 }
 
-module.exports = { list, getById, create, update, remove, balance };
+module.exports = { list, getById, create, update, remove, balance, remapAccount };

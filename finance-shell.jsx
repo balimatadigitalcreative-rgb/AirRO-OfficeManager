@@ -1760,7 +1760,9 @@ function FApp() {
               {/* Dashboard Keuangan — KPI cards (each states its period scope + drills to the ledger),
                   cash position per account, P&L month-vs-last, 12-month trend, ratios. All over the
                   cash-book figures the shell already computes; AR/liabilities gated to the engine. */}
-              <FIN.Dashboard stats={stats} deltas={deltas} shownAccounts={scopedAccounts} allAccounts={accounts} allEntries={entries} transfers={transfers} plEntries={scopedEntries} breakdown={breakdown} periodLbl={periodLbl} seeMoney={p.seeMoney} onDrill={go} />
+              <FIN.Dashboard stats={stats} deltas={deltas} shownAccounts={scopedAccounts} allAccounts={accounts} allEntries={entries} transfers={transfers} plEntries={scopedEntries} breakdown={breakdown} periodLbl={periodLbl} seeMoney={p.seeMoney} onDrill={go}
+                onOpenEntry={p.edit ? editEntryRow : null}
+                onReload={p.settings ? () => { reloadEntries(); reloadAccounts(); } : null} />
               {/* Per-unit breakdown — only in the combined view. Its columns sum EXACTLY to the
                   StatRow above (the Stage-3 invariant). Clicking a unit focuses the whole view. */}
               {p.seeMoney && activeUnit === 'all' && unitStats.length > 1 && (

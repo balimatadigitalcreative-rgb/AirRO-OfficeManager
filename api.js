@@ -76,7 +76,10 @@
     onUnauthorized: null,   // set by the cloud adapter; called on any non-login 401
     getToken, setToken, ping, login, me, logout, changePassword, updateProfile, forgot,
     auth: { login, me, logout, changePassword, updateProfile, forgot },
-    accounts: collection('accounts'),
+    accounts: Object.assign(collection('accounts'), {
+      remap: (data) => req('POST', '/accounts/remap', data),   // { fromAcct, toAcct, dryRun? } — fix "Belum dipetakan"
+      removeReassign: (id, reassignTo) => req('DELETE', '/accounts/' + id + (reassignTo ? '?reassignTo=' + encodeURIComponent(reassignTo) : '')),
+    }),
     transfers: collection('transfers'),
     entries: collection('entries'),
     categories: collection('categories'),

@@ -81,6 +81,31 @@ async function run() {
     + (ic.duplicateCount ? `\n     duplicate: ${ic.duplicate.slice(0, 8).map((x) => `[${x.type || 'dup'}] ${x.sourceType}:${x.sourceId}${x.count > 1 ? ' ×' + x.count : ''}`).join(' · ')}` : '')
     + (ic.baselinelessAdjustments ? `\n     (informational, not failing: ${ic.baselinelessAdjustments} baseline-less adjustment(s) — lunas / zero-AR, no overstatement)` : ''));
 
+  // 11. Cash book: NO entry references a deleted/renamed account (the "Belum dipetakan" bug). An entry
+  //     keys its money-spot with the plain string Entry.acct (no FK), so a deleted account silently
+  //     orphans its entries. A blank acct legitimately falls back to the primary account and is fine.
+  const cbAccounts = await prisma.account.findMany({ select: { id: true, name: true, opening: true, sortOrder: true } });
+  const liveAcct = new Set(cbAccounts.map((a) => a.id));
+  const primaryAcct = cbAccounts.length ? cbAccounts.slice().sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))[0].id : null;
+  const cbEntries = await prisma.entry.findMany({ select: { type: true, amount: true, acct: true, date: true } });
+  const orphanEntries = cbEntries.filter((e) => e.acct && String(e.acct).trim() && !liveAcct.has(e.acct));
+  const orphanNet = orphanEntries.reduce((s, e) => s + (e.type === 'income' ? 1 : -1) * Number(e.amount), 0);
+  const orphanBy = {}; orphanEntries.forEach((e) => { orphanBy[e.acct] = (orphanBy[e.acct] || 0) + 1; });
+  check('cash book: 0 entries referencing a non-existent account', orphanEntries.length === 0,
+    `${orphanEntries.length} orphaned entr(y/ies), net ${rupiah(orphanNet)}` + (orphanEntries.length ? ` · acct ids: ${Object.entries(orphanBy).map(([k, v]) => `${k}(${v})`).join(', ')} — run scripts/orphaned-cashbook-entries.js` : ''));
+
+  // 12. No cash/bank account balance is negative (opening + Σ entries by acct + Σ transfers). Cash can
+  //     never be negative; a negative bank balance is a data error worth surfacing here, not on a dashboard.
+  const cbTransfers = await prisma.transfer.findMany({ select: { fromId: true, toId: true, amount: true } }).catch(() => []);
+  const negs = [];
+  for (const a of cbAccounts) {
+    let bal = Number(a.opening || 0);
+    for (const e of cbEntries) { const aid = !e.acct ? primaryAcct : (liveAcct.has(e.acct) ? e.acct : null); if (aid === a.id) bal += (e.type === 'income' ? 1 : -1) * Number(e.amount); }
+    for (const t of cbTransfers) { if (t.toId === a.id) bal += Number(t.amount); if (t.fromId === a.id) bal -= Number(t.amount); }
+    if (bal < 0) negs.push(`${a.name} ${rupiah(bal)}`);
+  }
+  check('no cash/bank account balance is negative', negs.length === 0, negs.length ? negs.join(' · ') : 'all account balances ≥ 0');
+
   // ── print ──
   console.log(`\nCROSS-MODULE INVARIANTS  ·  HPP month: ${month}\n`);
   let failed = 0;

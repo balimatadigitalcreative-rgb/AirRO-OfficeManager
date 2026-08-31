@@ -15,6 +15,8 @@ router.get('/:id/balance', validate({ params: ctrl.schemas.idParams }), ctrl.bal
 router.put('/sync', requireCap('settings'), validate({ body: ctrl.schemas.syncSchema }), ctrl.sync);
 
 // Accounts are managed under Settings in the UI → gate writes on 'settings'.
+// Remediation: remap cash-book entries off a deleted/renamed acct id onto a live account ("Belum dipetakan").
+router.post('/remap', requireCap('settings'), validate({ body: ctrl.schemas.remapSchema }), ctrl.remap);
 router.post('/', requireCap('settings'), validate({ body: ctrl.schemas.createSchema }), ctrl.create);
 router.patch('/:id', requireCap('settings'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.updateSchema }), ctrl.update);
 router.delete('/:id', requireCap('settings'), validate({ params: ctrl.schemas.idParams }), ctrl.remove);

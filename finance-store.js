@@ -263,6 +263,15 @@
     });
     return bal;
   }
+  // The actual orphaned entries behind `unattributed` — so "Belum dipetakan" can be OPENED (drill to each
+  // source, remap to a live account). Grouped preview: rows + the distinct dangling acct ids + net.
+  function unattributedRows(entries, accts) {
+    const ids = (accts || []).map((a) => a.id);
+    const rows = (entries || []).filter((e) => !e.reference && e.acct && !ids.includes(e.acct));
+    const acctIds = [...new Set(rows.map((e) => e.acct))];
+    const net = rows.reduce((s, e) => s + (e.type === 'income' ? e.amount : -e.amount), 0);
+    return { rows, acctIds, net, count: rows.length };
+  }
 
   // ---- account transfers (move money between spots, not income/expense) ----
   const XFER_KEY = 'airro_transfers_v1';
@@ -298,7 +307,7 @@
     SESSION_KEY, USERS, ROLES, ROLE_COLORS, perms, normKasbon, setRoles, roleList, roleName, roleColor, landingScreen, initials, loadSession, setSession,
     USERS_KEY, SEED_USERS, loadUsers, saveUsers, newUserId,
     SETTINGS_KEY, DEFAULT_SETTINGS, loadSettings, saveSettings,
-    ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance, unattributed,
+    ACCT_KEY, loadAccts, saveAccts, resetAccts, newAcctId, acctBalance, unattributed, unattributedRows,
     XFER_KEY, loadTransfers, saveTransfers, newXferId,
     SETORAN_KEY, FLEET_KEY, loadFleet, saveFleet, loadSetoran, saveSetoran, newSetoranId, setoranOf };
 })();

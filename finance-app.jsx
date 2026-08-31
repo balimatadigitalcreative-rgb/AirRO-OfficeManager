@@ -246,10 +246,13 @@ function DeltaPillF({ delta, invert }) {
   if (delta == null) return null;
   const up = delta > 0, flat = delta === 0;
   const good = invert ? !up : up;
+  // The badge is a single non-wrapping unit showing only the percentage. The "vs previous period"
+  // comparison is stated ONCE in the card header (e.g. "Agustus vs Juli"), so repeating it on every
+  // row/KPI was redundant AND clipped the pill; it now lives only in the accessible title/tooltip.
   return (
-    <span className={`delta-pill ${flat ? 'flat' : good ? 'pos' : 'neg'}`}>
+    <span className={`delta-pill ${flat ? 'flat' : good ? 'pos' : 'neg'}`} title={`${up ? '+' : ''}${delta}% ${trF('rep.vsPrev')}`}>
       {!flat && (up ? <IconTrendUp s={11} /> : <IconTrendDown s={11} />)}
-      {up ? '+' : ''}{delta}% <em className="delta-vs">{trF('rep.vsPrev')}</em>
+      {up ? '+' : ''}{delta}%
     </span>
   );
 }
@@ -857,7 +860,62 @@ function GatedMini({ icon, title, note }) {
   );
 }
 
-function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, transfers, plEntries, breakdown, periodLbl, seeMoney, onDrill }) {
+// "Belum dipetakan" is now OPENABLE: it lists the orphaned entries (each drills to its source) and offers
+// the remediation — remap them onto a live account (BCA), which repairs the corrupted attribution without
+// touching any amount/date. An unexplained 18-million line the owner cannot open is worse than none.
+function UnattributedModal({ accounts, entries, canEdit, onClose, onOpenEntry, onReload }) {
+  const info = FS.unattributedRows ? FS.unattributedRows(entries, accounts) : { rows: [], acctIds: [], net: 0, count: 0 };
+  const [target, setTarget] = uS((accounts[0] && accounts[0].id) || '');
+  const [busy, setBusy] = uS(false);
+  const [err, setErr] = uS('');
+  uE(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  const acctName = (id) => (accounts.find((a) => a.id === id) || {}).name || id;
+  const apply = async () => {
+    if (!target || !window.API || !window.API.accounts) return;
+    setBusy(true); setErr('');
+    try {
+      for (const from of info.acctIds) await window.API.accounts.remap({ fromAcct: from, toAcct: target });
+      if (onReload) await onReload();
+      onClose();
+    } catch (e) { setBusy(false); setErr((e && e.body && e.body.error && e.body.error.message) || trF('dist.loadErr') || 'Gagal'); }
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 220 }}>
+      <div className="modal-card fin-scope" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+        <div className="modal-head">
+          <div><div style={{ fontSize: 16, fontWeight: 800 }}>{trF('dash.unattr')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)' }}>{trF('dash.unattrLong')}</div></div>
+          <button className="icon-btn" onClick={onClose}>{Icn('IconClose', { s: 18 })}</button>
+        </div>
+        <div className="modal-body">
+          <div className="unattr-sum">{trF('dash.unattrSum', { n: info.count })} · <span className={`tnum ${info.net < 0 ? 'amt-neg' : ''}`}>{fmtS(info.net)}</span> · {info.acctIds.map((id) => <span key={id} className="unattr-chip tnum">{id}</span>)}</div>
+          <div className="unattr-rows">
+            {info.rows.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map((e, i) => (
+              <button key={e.id || i} type="button" className={`unattr-row ${onOpenEntry ? 'clickable' : ''}`} onClick={() => onOpenEntry && onOpenEntry(e)}>
+                <span className="unattr-row-date tnum">{e.date}</span>
+                <span className={`unattr-row-amt tnum ${e.type === 'expense' ? 'amt-neg' : 'amt-pos'}`}>{e.type === 'expense' ? '−' : '+'}{fmt(e.amount)}</span>
+                <span className="unattr-row-note">{e.category ? e.category : ''}{e.note ? ' · ' + e.note : ''}</span>
+                <span className="unattr-row-acct tnum">{e.acct}</span>
+              </button>
+            ))}
+            {info.count === 0 && <div className="fin-empty-s" style={{ padding: 16 }}>{trF('dash.unattrClean')}</div>}
+          </div>
+          {canEdit && info.count > 0 && (
+            <div className="unattr-remap">
+              <span>{trF('dash.unattrRemapTo')}</span>
+              <select className="fld" value={target} onChange={(ev) => setTarget(ev.target.value)}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <button type="button" className="btn btn-primary" disabled={busy || !target} onClick={apply}>{busy ? '…' : trF('dash.unattrRemap', { name: acctName(target) })}</button>
+            </div>
+          )}
+          {err && <div className="add-err" style={{ marginTop: 8 }}>{Icn('IconClose', { s: 14 })}{err}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, transfers, plEntries, breakdown, periodLbl, seeMoney, onDrill, onReload, onOpenEntry }) {
   const cur = monKeyOf(TODAY), prv = prevMonKey(cur);
   const mtd = uM(() => monthAgg(plEntries, cur), [plEntries, cur]);
   const lm = uM(() => monthAgg(plEntries, prv), [plEntries, prv]);
@@ -869,6 +927,7 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
   // more — it surfaces here so "Total kas" is the exact sum of every line shown (accounts + this line).
   const unattr = uM(() => (FS.unattributed ? FS.unattributed(allEntries, allAccounts) : 0), [allEntries, allAccounts]);
   const totalCash = acctRows.reduce((s, a) => s + a.bal, 0) + unattr;
+  const [showUnattr, setShowUnattr] = uS(false);
   const netMargin = stats.income ? Math.round((stats.profit / stats.income) * 1000) / 10 : 0;
   const curNm = monthName(+cur.split('-')[1] - 1), prvNm = monthName(+prv.split('-')[1] - 1);
 
@@ -902,10 +961,11 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
                 </button>
               ))}
               {unattr !== 0 && (
-                <button type="button" className="fin-acctline unattr" onClick={() => onDrill && onDrill('moneyspots')} title={trF('dash.unattrHint')}>
+                <button type="button" className="fin-acctline unattr" onClick={() => setShowUnattr(true)} title={trF('dash.unattrHint')}>
                   <span className="fin-acctline-ic" style={{ background: 'var(--amber-600, #B45309)' }}>{Icn('IconWarn', { s: 15 })}</span>
-                  <span className="fin-acctline-name">{trF('dash.unattr')}<em>{trF('dash.unattrHint')}</em></span>
+                  <span className="fin-acctline-name">{trF('dash.unattr')}<em>{trF('dash.unattrOpen')}</em></span>
                   <span className="tnum fin-acctline-bal">{fmtS(unattr)}</span>
+                  <span className="fin-acctline-caret">{Icn('IconCaret', { s: 14 })}</span>
                 </button>
               )}
               <div className="fin-acctline total"><span className="fin-acctline-name">{trF('dash.totalCash')}</span><span className="tnum fin-acctline-bal">{fmt(totalCash)}</span></div>
@@ -961,6 +1021,7 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
           </div>
         </div>
       )}
+      {showUnattr && <UnattributedModal accounts={allAccounts} entries={allEntries} canEdit={!!onReload} onClose={() => setShowUnattr(false)} onOpenEntry={onOpenEntry} onReload={onReload} />}
     </div>
   );
 }
