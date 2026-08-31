@@ -48,6 +48,10 @@ const listQuerySchema = z.object({
   since: z.string().optional(),
   search: z.string().max(120).optional(),
   businessUnit: z.string().max(60).optional(),   // Stage 3: filter to one unit (server-side option)
+  // Transaksi split (presentation): 'setoran' = distribution-deposit rows, 'operasional' = the rest,
+  // 'all' (default) = both. Classified via the SHARED predicate. Persisted entries are operasional
+  // (setoran rows live client-side), so 'setoran' returns none here — the client merges the deposit rows.
+  source: z.enum(['all', 'setoran', 'operasional']).optional(),
 });
 
 const idParams = z.object({ id: z.string().min(1) });

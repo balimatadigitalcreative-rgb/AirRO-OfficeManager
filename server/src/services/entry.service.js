@@ -7,6 +7,7 @@ const distribution = require('./distribution.service');   // gallon-purchase mov
 const businessUnit = require('./businessUnit.service');   // Stage 3: unit label on each entry (default "Air")
 const period = require('./period.service');   // ACCOUNTING v2: reject edits in a closed period (flag-gated)
 const { unitWhere, canAccessUnit, assertCanAccessUnit, writableUnitFor } = require('../lib/scope');   // per-user business-unit access (Stage A/B)
+const FINSRC = require('../../../finance-entry-source.js');   // SHARED setoran/operasional predicate (same file the client bundles) — never duplicated
 
 // WRITE-PATH GUARD (closes the "Belum dipetakan" root cause): the cash book keys an entry to its
 // money-spot with the plain string Entry.acct. Historically that could be ANY string ("bca", "cash", a
@@ -78,10 +79,17 @@ async function list(q, user) {
     prisma.entry.count({ where }),
   ]);
 
+  // Stamp every row with its source (setoran | operasional) via the SHARED predicate, and honour an
+  // optional ?source= filter. The classifier is tag/meta-based (not a SQL column), so the filter is
+  // applied after the query; the client loads the full set (limit 2000), so the page holds all rows.
+  let data = items.map((e) => Object.assign(shapeCreator(e), { source: FINSRC.entrySource(e) }));
+  let outTotal = total;
+  if (q.source && q.source !== 'all') { data = data.filter((e) => e.source === q.source); outTotal = data.length; }
+
   return {
-    data: items.map(shapeCreator),
+    data,
     now: new Date().toISOString(),   // lets the client run an incremental (?since=) poll
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 },
+    pagination: { page, limit, total: outTotal, totalPages: Math.ceil(outTotal / limit) || 1 },
   };
 }
 
@@ -99,6 +107,10 @@ async function getById(id, user) {
 async function create(data, actor) {
   await period.assertPeriodOpen(data.date, 'menambah transaksi');   // closed period → 400 (flag-gated)
   await assertValidAcct(data.acct);   // never persist an entry pointing at a non-existent account
+  // Finance only creates OPERASIONAL entries. A setoran (deposit) belongs to the distribution flow;
+  // accepting a parallel setoran record here is how double-counting starts (item 4). Reject it and
+  // point the user to Distribusi → Setoran instead. Uses the shared predicate (meta/tag/id prefix).
+  if (FINSRC.isSetoranEntry(data)) throw ApiError.badRequest('Setoran dicatat lewat Distribusi → Setoran, bukan di sini — supaya tidak tercatat dua kali.', { belongsTo: 'setoran' });
 
   const userId = actor && actor.id;
   const snap = { createdById: userId || null };
@@ -134,6 +146,8 @@ async function update(id, data, actor) {
   // the update schema anyway, but strip defensively).
   const { createdById, createdByName, createdByRole, ...safe } = data;
   if (Object.prototype.hasOwnProperty.call(safe, 'acct')) await assertValidAcct(safe.acct);   // a PATCH can't repoint to a dead account
+  // …nor turn an operasional entry INTO a setoran row (item 4 — one place to book a deposit).
+  if (FINSRC.isSetoranEntry(safe)) throw ApiError.badRequest('Setoran dicatat lewat Distribusi → Setoran, bukan di sini — supaya tidak tercatat dua kali.', { belongsTo: 'setoran' });
   // Only re-resolve the unit when the request carries it, so a normal edit that omits it keeps
   // the entry's current unit (never silently reset to "Air"). Stage B: a scoped user can't MOVE a
   // record into a unit they can't access.

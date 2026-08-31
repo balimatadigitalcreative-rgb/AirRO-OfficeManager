@@ -469,6 +469,21 @@ function SettingsScreen({ cats, onChange, canWipe, canManageUnits, settings, onS
         </div>
       )}
 
+      {/* Transaksi display preference — which tab (Semua/Setoran/Operasional) opens first. Presentation
+          only: it changes no figure, just the default view on the Transaksi screen. */}
+      {settings && (
+        <div className="card alert-settings">
+          <div className="cat-group-head" style={{ marginBottom: 6 }}>
+            <span className="icon-tile" style={{ background: 'var(--mint-100)', color: 'var(--green-800)', flexShrink: 0 }}>{IcS('IconList', { s: 19 })}</span>
+            <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap' }}>{trS('txn.defaultTab')}</div>
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginBottom: 12 }}>{trS('txn.defaultTabHint')}</div>
+          <window.UI.Dropdown value={window.FINSRC.normalizeTab(settings.txnDefaultTab) || 'operasional'}
+            options={[{ value: 'operasional', label: trS('txn.tabOps') }, { value: 'setoran', label: trS('txn.tabSetoran') }, { value: 'semua', label: trS('txn.tabAll') }]}
+            onChange={(v) => onSettingsChange({ ...settings, txnDefaultTab: v })} />
+        </div>
+      )}
+
       {/* WhatsApp message templates (shared across the business). */}
       <WaTemplatesPanel />
 

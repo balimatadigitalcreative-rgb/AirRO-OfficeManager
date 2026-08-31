@@ -387,10 +387,17 @@ function byLine(e) {
 }
 
 /* ---------------- Entries ledger (grouped by day) ---------------- */
-function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, canDelete = true, canEdit = false }) {
+function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, canDelete = true, canEdit = false, showSource = false }) {
   const [f, setF] = uS('all');
   const [q, setQ] = uS('');
   const info = (k) => FS.catInfo(catMap, k);
+  // In the combined "Semua" view, badge each row with its source so setoran (deposit) rows and any
+  // non-bookkeeping "sumber lain" row (an inter-unit leg) are never silently mixed in. Presentation
+  // only — the classification comes from the SHARED predicate (window.FINSRC).
+  const srcChip = (e) => !showSource ? null
+    : window.FINSRC.isSetoranEntry(e) ? <span className="txn-chip txn-chip-setoran">{trF('txn.chipSetoran')}</span>
+    : window.FINSRC.isOtherSource(e) ? <span className="txn-chip txn-chip-other">{trF('txn.chipOther')}</span>
+    : null;
   let rows = entries;
   if (f !== 'all') rows = rows.filter((e) => e.type === f);
   if (q) rows = rows.filter((e) => (info(e.category).label + e.note).toLowerCase().includes(q.toLowerCase()));
@@ -448,7 +455,7 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
                 <div key={e.id} className="entry-row">
                   <span className="icon-tile" style={{ width: 38, height: 38, borderRadius: 11, background: isInc ? 'var(--pos-bg)' : '#EAF1F4', color: isInc ? 'var(--green-800)' : '#5E7A88' }}>{Icn(c.icon, { s: 18 })}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}</div>
+                    <div className="entry-cat-line" style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}{srcChip(e)}</div>
                     <div style={{ fontSize: 11.5, color: 'var(--text-mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.note}</div>
                     {byLine(e)}
                   </div>
@@ -468,6 +475,117 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* ---------------- Transaksi split (presentation only) ---------------- */
+// Per-tab summary: the ACTIVE tab's own income/expense/net ("Sesuai tab aktif"), plus a persistent
+// combined line so splitting the view never hides the real cash position. The combined figures are
+// the period's full total — identical to the old single list.
+function TxnSummary({ income, expense, combinedIncome, combinedExpense }) {
+  const row = (lbl, inc, exp, cls) => (
+    <div className={`txn-sum-row ${cls}`}>
+      <span className="txn-sum-lbl">{lbl}</span>
+      <span className="txn-sum-cell amt-pos tnum">+{fmtC(inc)}</span>
+      <span className="txn-sum-cell amt-neg tnum">−{fmtC(exp)}</span>
+      <span className="txn-sum-cell txn-sum-net tnum">{fmtS(inc - exp)}</span>
+    </div>
+  );
+  return (
+    <div className="txn-summary card">
+      {row(trF('txn.perTab'), income, expense, 'txn-sum-tab')}
+      {row(trF('txn.combined'), combinedIncome, combinedExpense, 'txn-sum-combined')}
+    </div>
+  );
+}
+
+// OPERASIONAL tab — the owner's own bookkeeping: a real columnar table with a running balance, where
+// entry/edit/categorise happen. Columns: Tanggal · Kategori · Akun · Keterangan · Masuk · Keluar ·
+// Saldo berjalan · Bukti · [Edit] [Hapus]. Below 768px it collapses to cards (the .fin-cards engine).
+function OperasionalTable({ entries, accounts, catMap, canEdit, canDelete, onEdit, onDelete }) {
+  const info = (k) => FS.catInfo(catMap, k);
+  const acctName = (id) => (accounts.find((a) => a.id === id) || {}).name || '—';
+  // Running balance = cumulative net over the operasional rows oldest→newest (a passbook aid; the
+  // authoritative per-account cash position stays in Kas & Bank). Show newest-first, each row's
+  // balance-as-of-that-row.
+  const asc = entries.slice().sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  let run = 0; const withRun = asc.map((e) => { run += e.type === 'income' ? e.amount : -e.amount; return { e, run }; });
+  const rows = withRun.slice().reverse();
+  const actionsCol = canEdit || canDelete;
+  if (!rows.length) return <div className="card" style={{ padding: 18 }}><div className="txn-empty">{trF('entries.none')}</div></div>;
+  return (
+    <div className="card txn-tablecard">
+      <div className="fin-table-wrap">
+        <table className="fin-table fin-cards txn-ops-table">
+          <thead><tr>
+            <th>{trF('ms.date')}</th><th>{trF('txn.cat')}</th><th>{trF('txn.acct')}</th><th>{trF('ms.desc')}</th>
+            <th className="fin-r">{trF('ms.in')}</th><th className="fin-r">{trF('ms.out')}</th><th className="fin-r">{trF('txn.run')}</th>
+            <th>{trF('txn.proof')}</th>{actionsCol && <th aria-label={trF('a11y.actions') || ''}></th>}
+          </tr></thead>
+          <tbody>
+            {rows.map(({ e, run }) => { const isInc = e.type === 'income'; const c = info(e.category); return (
+              <tr key={e.id} className="fin-trow">
+                <td className="fin-td" data-label={trF('ms.date')}>{fmtDate(e.date)}<span className="txn-time tnum"> {e.time}</span></td>
+                <td className="fin-td" data-label={trF('txn.cat')}><span className="txn-cat">{Icn(c.icon, { s: 15 })}{c.label}</span></td>
+                <td className="fin-td" data-label={trF('txn.acct')}>{acctName(e.acct)}</td>
+                <td className="fin-td" data-label={trF('ms.desc')}><span className="fin-td-desc">{e.note || '—'}</span></td>
+                <td className="fin-td fin-r tnum amt-pos" data-label={trF('ms.in')}>{isInc ? fmtC(e.amount) : ''}</td>
+                <td className="fin-td fin-r tnum amt-neg" data-label={trF('ms.out')}>{!isInc ? fmtC(e.amount) : ''}</td>
+                <td className="fin-td fin-r tnum txn-run" data-label={trF('txn.run')}>{fmtS(run)}</td>
+                <td className="fin-td" data-label={trF('txn.proof')}>{e.proof
+                  ? <button className="entry-proof" title={trF('att.view')} onClick={() => window.UI._viewProof(e.proof)}>{e.proof.isImg && e.proof.data ? <img src={e.proof.data} alt="" /> : <IconInvoice s={15} />}</button>
+                  : <span className="txn-noproof">—</span>}</td>
+                {actionsCol && <td className="fin-td fin-r txn-actions" data-label="">
+                  {canEdit && <button className="edit-btn" title={trF('a11y.edit')} aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
+                  {canDelete && <button className="del-btn" title={trF('a11y.delete')} aria-label={trF('a11y.delete')} onClick={() => onDelete(e.id)}><IconClose s={15} /></button>}
+                </td>}
+              </tr>
+            ); })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// SETORAN tab — a READ-ONLY mirror of the distribution deposits that feed the cash book. It renders the
+// underlying Setoran records (per fleet per day), not the aggregated cash rows, so it can show armada
+// detail. Corrections belong in Distribusi → Setoran, so every row drills there and there is no edit.
+// NOTE: the Setoran record has no "Petugas", cash/transfer split, or reconciliation-state field — so
+// Petugas shows the recorder when known and Status is "Tercatat" (the derived cash row is posted);
+// these are honest mappings, not invented data.
+function SetoranMirror({ rows, onOpenDist }) {
+  const sorted = rows.slice().sort((a, b) => (b.date + (b.armada || '')).localeCompare(a.date + (a.armada || '')));
+  return (
+    <div className="card txn-tablecard">
+      <div className="txn-setoran-note">{Icn('IconLock', { s: 14 })}<span>{trF('txn.setoranReadonly')}</span></div>
+      {sorted.length === 0
+        ? <div className="txn-setoran-empty">
+            <div className="txn-empty">{trF('txn.setoranEmpty')}</div>
+            <button className="btn btn-ghost" onClick={() => onOpenDist()}><IconTruck s={15} />{trF('txn.goDist')}</button>
+          </div>
+        : <div className="fin-table-wrap"><table className="fin-table fin-cards txn-setoran-table">
+            <thead><tr>
+              <th>{trF('ms.date')}</th><th>{trF('st.armada')}</th><th>{trF('txn.petugas')}</th>
+              <th className="fin-r">{trF('st.cash')}</th><th className="fin-r">{trF('st.galon')}</th><th className="fin-r">{trF('st.setoran')}</th>
+              <th>{trF('txn.status')}</th><th aria-label=""></th>
+            </tr></thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.id} className="fin-trow">
+                  <td className="fin-td" data-label={trF('ms.date')}>{fmtDate(r.date)}</td>
+                  <td className="fin-td" data-label={trF('st.armada')}><span className="txn-cat">{Icn('IconTruck', { s: 14 })}{r.armada || '—'}</span></td>
+                  <td className="fin-td" data-label={trF('txn.petugas')}>{(r.createdBy && r.createdBy.name) || r.createdByName || '—'}</td>
+                  <td className="fin-td fin-r tnum" data-label={trF('st.cash')}>{fmtC(+r.cash || 0)}</td>
+                  <td className="fin-td fin-r tnum" data-label={trF('st.galon')}>{(+r.galon || 0).toLocaleString('id-ID')}</td>
+                  <td className="fin-td fin-r tnum strong" data-label={trF('st.setoran')}>{fmtC(FS.setoranOf(r))}</td>
+                  <td className="fin-td" data-label={trF('txn.status')}><span className="txn-chip txn-chip-ok">{trF('txn.statusRecorded')}</span></td>
+                  <td className="fin-td fin-r"><button className="btn btn-ghost btn-xs" onClick={() => onOpenDist(r)}>{trF('txn.openInDist')}</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>}
     </div>
   );
 }
@@ -1029,4 +1147,4 @@ function Dashboard({ stats, deltas, shownAccounts, allAccounts, allEntries, tran
   );
 }
 
-window.FIN = { AddEntry, StatRow, MonitorCard, CategoryCard, TodayCard, EntriesList, MoneySpots, Dashboard, TODAY, MONTHS, FULLMON, fmt, fmtS, fmtC, readFinMode, writeFinMode };
+window.FIN = { AddEntry, StatRow, MonitorCard, CategoryCard, TodayCard, EntriesList, TxnSummary, OperasionalTable, SetoranMirror, MoneySpots, Dashboard, TODAY, MONTHS, FULLMON, fmt, fmtS, fmtC, readFinMode, writeFinMode };

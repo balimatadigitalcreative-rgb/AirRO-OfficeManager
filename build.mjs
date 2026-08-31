@@ -42,6 +42,7 @@ const builtAt = new Date().toISOString();
 const FILES = [
   'finance-i18n.js',
   'finance-period.js',
+  'finance-entry-source.js',
   'data.js',
   'finance-store.js',
   'finance-hrd.js',

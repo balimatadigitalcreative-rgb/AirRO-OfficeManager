@@ -1362,6 +1362,23 @@ function FApp() {
   const recent = uMh(() => scopedEntries.slice().sort(FS.byNewest).slice(0, 12), [scopedEntries]);
   const periodEntries = uMh(() => scopedEntries.filter((e) => e.date >= range.start && e.date <= range.end).sort(FS.byNewest), [scopedEntries, range.start, range.end]);
 
+  // TRANSAKSI split (presentation only) — [Semua] [Setoran] [Operasional]. Setoran are deposits from
+  // distribusi; operasional is the owner's own bookkeeping. Default tab is configurable
+  // (settings.txnDefaultTab), falling back to "operasional" (what the finance user came to do). The
+  // active tab lives in the URL (?tab=) so a view survives refresh and can be shared.
+  const [txnTab, setTxnTab] = uSh(FINSRC.normalizeTab(new URLSearchParams(location.search).get('tab')) || FINSRC.normalizeTab(settings.txnDefaultTab) || 'operasional');
+  const changeTxnTab = (t) => {
+    t = FINSRC.normalizeTab(t) || 'operasional'; setTxnTab(t);
+    try { history.replaceState(history.state || { screen: 'entries' }, '', location.pathname + '?tab=' + t + '#' + (screenRef.current || 'entries')); } catch (e) {}
+  };
+  // The two sides come straight from the SHARED predicate — a TOTAL split, so ops ∪ setoran === all.
+  const opsPeriod = uMh(() => periodEntries.filter((e) => FINSRC.entrySource(e) === 'operasional'), [periodEntries]);
+  const setoranPeriod = uMh(() => periodEntries.filter((e) => FINSRC.entrySource(e) === 'setoran'), [periodEntries]);
+  // The Setoran tab renders the underlying Setoran records (per fleet per day) so it can show armada
+  // detail; filter them to the active period. Read-only — corrections live in Distribusi → Setoran.
+  const setoranRowsPeriod = uMh(() => (setoran || []).filter((r) => r.date >= range.start && r.date <= range.end), [setoran, range.start, range.end]);
+  const txnSumOf = (rows) => rows.reduce((a, e) => { if (e.type === 'income') a.income += e.amount; else a.expense += e.amount; return a; }, { income: 0, expense: 0 });
+
   const prevAgg = uMh(() => {
     const [y, m] = monthKey.split('-').map(Number);
     let pm = m - 1, py = y; if (pm <= 0) { pm = 12; py--; }
@@ -1814,14 +1831,32 @@ function FApp() {
               {p.cashflow && <button type="button" className={`lap-tab ${screen === 'moneyspots' ? 'on' : ''}`} onClick={() => go('moneyspots')}>{tr('nav.moneyspots')}</button>}
             </div>
           )}
-          {screen === 'entries' && p.allEntries && (
-            <div className="screen-enter">
-              <FIN.StatRow stats={stats} seeMoney={p.seeMoney} deltas={deltas} />
-              <div style={{ marginTop: 16 }}>
-                <FIN.EntriesList entries={periodEntries} onDelete={del} onEdit={editEntryRow} filterable title={tr('entries.titleMonth', { m: periodLbl })} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
+          {screen === 'entries' && p.allEntries && (() => {
+            // Split for DISPLAY only. Both sides are the same Entry data, post the same journals and
+            // feed the same reports/balances; the combined line below always shows the real position.
+            const tabRows = txnTab === 'setoran' ? setoranPeriod : txnTab === 'operasional' ? opsPeriod : periodEntries;
+            const tabSum = txnSumOf(tabRows);
+            const combined = txnSumOf(periodEntries);   // == the old single-list total
+            const openDist = () => go('setoran');
+            return (
+              <div className="screen-enter">
+                <div className="txn-tabs seg no-print" role="tablist">
+                  {[['semua', tr('txn.tabAll')], ['setoran', tr('txn.tabSetoran')], ['operasional', tr('txn.tabOps')]].map(([k, lbl]) => (
+                    <button key={k} type="button" role="tab" aria-selected={txnTab === k} className={`seg-btn ${txnTab === k ? 'on' : ''}`} onClick={() => changeTxnTab(k)}>{lbl}</button>
+                  ))}
+                </div>
+                <div className="txn-splitnote">{tr('txn.splitNote')}</div>
+                {p.seeMoney && <FIN.TxnSummary income={tabSum.income} expense={tabSum.expense} combinedIncome={combined.income} combinedExpense={combined.expense} />}
+                <div style={{ marginTop: 16 }}>
+                  {txnTab === 'setoran'
+                    ? <FIN.SetoranMirror rows={setoranRowsPeriod} onOpenDist={openDist} />
+                    : txnTab === 'operasional'
+                      ? <FIN.OperasionalTable entries={opsPeriod} accounts={accounts} catMap={catMap} canEdit={p.edit} canDelete={p.delete} onEdit={editEntryRow} onDelete={del} />
+                      : <FIN.EntriesList entries={periodEntries} onDelete={del} onEdit={editEntryRow} filterable showSource title={tr('entries.titleMonth', { m: periodLbl })} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {screen === 'projects' && p.company && p.reset && (
             <COMPANY.ProjectsScreen projects={projects} setProjects={applyProjects} canEdit={true} />
