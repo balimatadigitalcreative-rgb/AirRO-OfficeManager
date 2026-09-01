@@ -150,7 +150,7 @@ async function chartMap(db = prisma) { const rows = await db.chartAccount.findMa
 // deleted; corrections/voids append a reversing entry instead — see reconcileDistTxn / reverseJournal).
 async function deleteJournal(sourceType, sourceId, db = prisma) {
   const existing = await db.journalEntry.findFirst({ where: { sourceType, sourceId: sourceId || null } });
-  if (existing) await db.journalEntry.delete({ where: { id: existing.id } });
+  if (existing) { await db.journalEntry.delete({ where: { id: existing.id } }); bustStatusCache(); }   // ledger changed → status cache stale
 }
 
 // The single balanced-journal writer. `lines` = [{ code, debit?, credit?, businessUnitId?, fleetId? }].
@@ -178,6 +178,7 @@ async function postJournal({ sourceType, sourceId, date, ref, description, actor
     // "newly posted" (backfill) see a true no-op on a re-run. `replace` overwrites (the mutable reclass).
     if (existing) { if (!replace) return null; await db.journalEntry.delete({ where: { id: existing.id } }); }
   }
+  bustStatusCache();   // a real posting is about to happen → the status roll-up is now stale
   try {
     return await db.journalEntry.create({ data: {
       sourceType, sourceId: sourceId || null, date, ref: ref || '', description: (description || '').slice(0, 500), reversalOf: reversalOf || null,
@@ -661,16 +662,34 @@ async function clearCategoryMapping({ categoryKey, type }) {
 // One roll-up that powers the "Alur Kerja" workflow panel + every report screen's header line: when
 // journals were last posted, whether the books balance, drift/unmapped/unreconciled counts, and
 // whether the month BEFORE `asOf` (the one that should be closed) is closed.
-async function accountingStatus({ asOf } = {}) {
-  const [last, journalCount, integrity, unmapped] = await Promise.all([
+// The status roll-up's EXPENSIVE half — the whole trial balance + integrity check over every journal
+// line (multi-second on a large ledger) — depends ONLY on the journals, so it is cached in-process and
+// busted on every journal write (postJournal/deleteJournal call bustStatusCache). A short TTL is a
+// backstop. The CHEAP, freshness-sensitive fields (priorClosed, unreconciled, unmapped, subs) are NOT
+// cached — they change via period close / reconciliation / mapping, so they are recomputed every call.
+// This turns the endpoint's dozens of 7–8s calls into one heavy compute + cheap reads, with no staleness.
+let _jstatCache = null;   // { at, lastPostedAt, journalCount, trialBalanced, integrity } — journal-derived only
+const STATUS_TTL_MS = 60000;
+function bustStatusCache() { _jstatCache = null; }
+async function journalStatus() {
+  if (_jstatCache && (Date.now() - _jstatCache.at) < STATUS_TTL_MS) return _jstatCache;
+  const [last, journalCount, integrity] = await Promise.all([
     prisma.journalEntry.findFirst({ orderBy: { postedAt: 'desc' }, select: { postedAt: true } }),
     prisma.journalEntry.count(),
     integrityCheck(),
-    unmappedCategories(),
   ]);
-  let unreconciled = 0, trialBalanced = true;
-  try { unreconciled = (await require('./reconciliation.service').unreconciledBankTotal()).count || 0; } catch (e) { /* bank rec optional */ }
+  let trialBalanced = true;
   try { trialBalanced = (await trialBalance()).balanced === true; } catch (e) { /* empty ledger balances */ }
+  _jstatCache = { at: Date.now(), lastPostedAt: last ? last.postedAt : null, journalCount,
+    trialBalanced, integrity: { ok: integrity.ok, missing: integrity.missingCount, orphan: integrity.orphanCount } };
+  return _jstatCache;
+}
+
+async function accountingStatus({ asOf } = {}) {
+  const js = await journalStatus();   // cached expensive half (busted on journal writes)
+  const unmapped = await unmappedCategories();
+  let unreconciled = 0;
+  try { unreconciled = (await require('./reconciliation.service').unreconciledBankTotal()).count || 0; } catch (e) { /* bank rec optional */ }
   let priorMonth = null, priorClosed = false;
   const base = /^\d{4}-\d{2}/.test(String(asOf || '')) ? String(asOf) : null;
   if (base) {
@@ -690,8 +709,7 @@ async function accountingStatus({ asOf } = {}) {
     subs.forEach((s) => { if (s.nextRunDate <= addD(t, s.remindDays != null ? s.remindDays : 3)) { subsRemind++; subsRemindTotal += Number(s.amount) + Number(s.tax); } });
   } catch (e) { /* subscriptions optional */ }
   return {
-    lastPostedAt: last ? last.postedAt : null, journalCount, trialBalanced,
-    integrity: { ok: integrity.ok, missing: integrity.missingCount, orphan: integrity.orphanCount },
+    lastPostedAt: js.lastPostedAt, journalCount: js.journalCount, trialBalanced: js.trialBalanced, integrity: js.integrity,
     unmappedCount: unmapped.length, unreconciled, priorMonth, priorClosed, subsRemind, subsRemindTotal,
   };
 }

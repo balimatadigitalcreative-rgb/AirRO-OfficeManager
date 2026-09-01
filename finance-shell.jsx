@@ -711,15 +711,15 @@ function FApp() {
   };
   const addSetoran = (rec) => {
     setSetoran((prev) => [{ ...rec }, ...prev.filter((x) => x.id !== rec.id)]);   // optimistic
-    window.API.setoran.create(setoranToApi(rec)).then(reloadSetoran).catch(() => { setToast(tr('st.syncErr')); reloadSetoran(); });
+    window.API.setoran.create(setoranToApi(rec)).then(reloadSetoran).catch((err) => showWriteErr(err, reloadSetoran));
   };
   const editSetoran = (rec) => {
     setSetoran((prev) => prev.map((x) => (x.id === rec.id ? { ...x, ...rec } : x)));   // optimistic
-    window.API.setoran.update(rec.id, setoranToApi(rec)).then(reloadSetoran).catch(() => { setToast(tr('st.syncErr')); reloadSetoran(); });
+    window.API.setoran.update(rec.id, setoranToApi(rec)).then(reloadSetoran).catch((err) => showWriteErr(err, reloadSetoran));
   };
   const removeSetoran = (id) => {
     setSetoran((prev) => prev.filter((x) => x.id !== id));   // optimistic
-    window.API.setoran.remove(id).then(reloadSetoran).catch(() => { setToast(tr('st.syncErr')); reloadSetoran(); });
+    window.API.setoran.remove(id).then(reloadSetoran).catch((err) => showWriteErr(err, reloadSetoran));
   };
   // Initial load + light realtime poll (only for users with setoran access). Poll
   // pauses while the tab is hidden and refreshes immediately when it regains focus.
@@ -769,24 +769,37 @@ function FApp() {
       if (r && Array.isArray(r.data)) { const rows = r.data.map(apiToEntry); setRealEntries(rows); try { localStorage.setItem('airro_cashbook_cache_v1', JSON.stringify(rows)); } catch (e) {} }
     }).catch(() => {});
   };
-  // On failure: a 403 means the server refused (missing addEntry/edit/delete cap) —
-  // tell the user plainly; anything else is a transient network error that retries.
-  // Either way reloadEntries() re-syncs the optimistic change to the server's truth
-  // (a rejected delete reappears; a rejected add drops back out).
-  const entryErr = (op) => (err) => {
-    const key = err && err.status === 403 ? (op === 'delete' ? 'toast.noDeletePerm' : 'toast.noPerm')
-      : (err && err.status === 413) ? 'att.saveTooBig'   // payload too large → almost always the proof photo
-      : 'st.syncErr';
-    setToast(tr(key));
-    reloadEntries();
+  // A write can fail two very different ways, and conflating them is the "shown an outage that did not
+  // exist" bug: a NETWORK failure (no response / timeout / 5xx) is genuinely "server tidak terjangkau"
+  // and worth retrying; a 4xx is the server ANSWERING and rejecting the payload — its real message must
+  // be shown, and retrying it forever is pointless. `!err.status` catches ApiOffline (no status set).
+  const isNetworkErr = (err) => !!(err && (err.offline || !err.status || err.status >= 500));
+  // Surface a write failure: log the body (always), then either the offline toast (network) or the
+  // server's ACTUAL message (4xx). `reload` re-syncs the optimistic change to the server's truth.
+  const showWriteErr = (err, reload, permKey) => {
+    try { console.error('[write] failed', err && err.status, err && err.body); } catch (e) {}
+    if (reload) reload();
+    if (isNetworkErr(err)) { setToast(tr('st.syncErr')); return; }
+    const key = err.status === 403 ? (permKey || 'toast.noPerm') : err.status === 413 ? 'att.saveTooBig' : null;
+    setToast(key ? tr(key) : ((err && err.message) || tr('st.saveFailed')));
   };
+  // Edit/delete failures: toast the real reason (never queue a rejected 4xx). Add is handled in addEntry
+  // so the form can also show the message inline on the offending field.
+  const entryErr = (op) => (err) => showWriteErr(err, reloadEntries, op === 'delete' ? 'toast.noDeletePerm' : 'toast.noPerm');
   const addEntry = (e) => {
-    if (isDerivedEntry(e.id)) return;   // derived rows are in-memory only
+    if (isDerivedEntry(e.id)) return Promise.resolve();   // derived rows are in-memory only
     // Stamp the creator optimistically (the server does the authoritative stamp from
     // the token); reloadEntries then replaces it with the server's snapshot.
     const optimistic = { ...apiToEntry(entryToApi(e)), createdBy: e.createdBy || (user ? { name: user.name, role: user.role } : null), createdById: e.createdById || (user ? user.id : undefined), createdAt: e.createdAt || Date.now() };
     setRealEntries((prev) => [optimistic, ...prev.filter((x) => x.id !== e.id)]);
-    if (window.API && window.API.entries) window.API.entries.create(entryToApi(e)).then(reloadEntries).catch(entryErr('add'));
+    if (!(window.API && window.API.entries)) return Promise.resolve();
+    return window.API.entries.create(entryToApi(e)).then(reloadEntries).catch((err) => {
+      showWriteErr(err, reloadEntries);
+      // A 4xx is a real rejection — REJECT so the form keeps the input and shows the message inline on
+      // the field. A network error is swallowed (optimistic row stays; treated as pending), so the caller
+      // still resolves and the form clears — the entry is on screen and will re-sync.
+      if (!isNetworkErr(err)) throw err;
+    });
   };
   const editEntry = (e) => {
     if (isDerivedEntry(e.id)) return;
@@ -1205,7 +1218,11 @@ function FApp() {
 
   // New manual entries default to the active-unit context (Air when "Semua"). The AddEntry
   // form also carries its own selector; this is the fallback so a unit is always stamped.
-  const add = (e) => { addEntry({ ...e, businessUnitId: e.businessUnitId || unitDefaultForNew() }); setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })); };
+  // Returns the write promise so the form can await it — clear on success, show the server's message
+  // inline on a 4xx. The "saved" toast fires only when the write is accepted (or optimistically queued
+  // offline), never when the server rejected the payload.
+  const add = (e) => addEntry({ ...e, businessUnitId: e.businessUnitId || unitDefaultForNew() })
+    .then(() => setToast(tr(e.type === 'income' ? 'toast.incomeSaved' : 'toast.expenseSaved', { amt: FIN.fmt(e.amount) })));
   // Upsert one staff into the roster (used by orientation actions + detail edits).
   const upsertStaff = (s) => applyStaff((prev) => { const clean = { ...s }; delete clean._isNew; return prev.find((x) => x.id === s.id) ? prev.map((x) => x.id === s.id ? clean : x) : [...prev, clean]; });
   // ---- Orientation actions (new-hire lifecycle) ----

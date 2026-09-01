@@ -93,6 +93,10 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
   const accent = type === 'income' ? '#065489' : '#E5484D';
 
   uE(() => { if (!cats.find((c) => c.key === cat)) setCat(cats[0] && cats[0].key); }, [type, incomeCats, expenseCats]);
+  // Keep the selected account valid: if the accounts list loads/changes after mount and the current
+  // selection is no longer a live account id, snap back to the first real account. This prevents the
+  // "Akun —" dash + the server's "Akun … tidak dikenal" 400 from a stale default.
+  uE(() => { if (!ACCTS.find((a) => a.id === acct)) setAcct(ACCTS[0] && ACCTS[0].id); }, [accounts]);
 
   const switchType = (t) => { setType(t); const list = t === 'income' ? INC : EXP; setCat(list[0] && list[0].key); };
   const catLabel = (k) => { const c = cats.find((x) => x.key === k); return c ? c.label : k; };
@@ -109,18 +113,27 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
     if (date > TODAY) return trF('val.dateFuture');
     return null;
   };
-  const submit = () => {
+  const [saving, setSaving] = uS(false);
+  const submit = async () => {
     const e = validate();
     if (e) { setErr(e); return; }
-    setErr(null);
+    // Never send an acct that is not one of the live accounts — that is the server's "Akun … tidak
+    // dikenal" 400 (and the "Akun —" dash). If the selection went stale, fall back to the first account.
+    const acctId = ACCTS.find((a) => a.id === acct) ? acct : (ACCTS[0] && ACCTS[0].id);
+    setErr(null); setSaving(true);
     const now = new Date();
-    onAdd({
-      id: 'e' + Date.now().toString(36), type, category: cat, amount, note: note.trim() || catLabel(cat), acct, proof,
-      businessUnitId: unit || 'air',
-      gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0,
-      method: ACCTS.find((a) => a.id === acct) ? (ACCTS.find((a) => a.id === acct).type === 'cash' ? 'Cash' : 'Transfer') : 'Cash', date, time: String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'),
-    });
-    setAmount(0); setNote(''); setProof(null); setGallonQty(0);
+    try {
+      await Promise.resolve(onAdd({
+        id: 'e' + Date.now().toString(36), type, category: cat, amount, note: note.trim() || catLabel(cat), acct: acctId, proof,
+        businessUnitId: unit || 'air',
+        gallonQty: type === 'expense' ? Math.max(0, +gallonQty || 0) : 0,
+        method: ACCTS.find((a) => a.id === acctId) ? (ACCTS.find((a) => a.id === acctId).type === 'cash' ? 'Cash' : 'Transfer') : 'Cash', date, time: String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'),
+      }));
+      setAmount(0); setNote(''); setProof(null); setGallonQty(0);   // clear ONLY on success
+    } catch (ex) {
+      // 4xx — show the server's real message inline (the summary banner), not "server tidak terjangkau".
+      setErr((ex && ex.message) || trF('add.saveFailed') || 'Gagal menyimpan — coba lagi.');
+    } finally { setSaving(false); }
   };
 
   return (
@@ -234,8 +247,8 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
 
       {err && <div className="add-err" role="alert"><IconClose s={14} />{err}</div>}
 
-      <button className="btn save-btn" style={{ background: accent }} onClick={submit}>
-        <IconPlus s={18} />{trF(type === 'income' ? 'add.saveIncome' : 'add.saveExpense')}
+      <button className="btn save-btn" style={{ background: accent }} onClick={submit} disabled={saving}>
+        <IconPlus s={18} />{saving ? '…' : trF(type === 'income' ? 'add.saveIncome' : 'add.saveExpense')}
       </button>
     </div>
   );
