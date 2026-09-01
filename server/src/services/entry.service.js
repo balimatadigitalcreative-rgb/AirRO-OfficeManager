@@ -105,6 +105,15 @@ async function getById(id, user) {
 // request body, and the name/role are read from the DB at input time — so a client
 // cannot forge who created a record, and the snapshot reflects the real user then.
 async function create(data, actor) {
+  // IDEMPOTENT on the client-supplied id (the cash book sends a stable id per entry). If a create is
+  // RETRIED — the classic "entry saved, but the connection dropped before the client saw the 201, so it
+  // sends the same request again" — return the row that already exists instead of a second copy. This is
+  // checked FIRST so a retry succeeds even if the period has since closed, and the atomic original
+  // already posted the journal + gallon movement (never re-run here). See tests/entry-idempotency.
+  if (data.id) {
+    const existing = await prisma.entry.findUnique({ where: { id: data.id } });
+    if (existing) return shapeCreator(existing);
+  }
   await period.assertPeriodOpen(data.date, 'menambah transaksi');   // closed period → 400 (flag-gated)
   await assertValidAcct(data.acct);   // never persist an entry pointing at a non-existent account
   // Finance only creates OPERASIONAL entries. A setoran (deposit) belongs to the distribution flow;
@@ -125,11 +134,24 @@ async function create(data, actor) {
   await businessUnit.assertModuleEnabledForUser(actor, businessUnitId, 'finance');   // module toggle (full-access users bypass)
   // LIVE POSTING: the cash-book entry AND its double-entry journal are written in ONE transaction, so
   // a source can never exist without its journal and a failure rolls back both (flag-gated).
-  const entry = await prisma.$transaction(async (tx) => {
-    const e = await tx.entry.create({ data: { ...data, businessUnitId, ...snap } });
-    if (config.accountingV2) await acc.postEntry(e, actor, tx);
-    return e;
-  });
+  let entry;
+  try {
+    entry = await prisma.$transaction(async (tx) => {
+      const e = await tx.entry.create({ data: { ...data, businessUnitId, ...snap } });
+      if (config.accountingV2) await acc.postEntry(e, actor, tx);
+      return e;
+    });
+  } catch (err) {
+    // Idempotency for the CONCURRENT race the pre-check can't see: two identical retries arrive before
+    // either commits, both pass the existence check, one wins and the other hits the unique-id
+    // constraint (P2002). Treat that as success — the row is already saved (with its journal). Any other
+    // error is real and propagates.
+    if (data.id && err && err.code === 'P2002') {
+      const existing = await prisma.entry.findUnique({ where: { id: data.id } });
+      if (existing) return shapeCreator(existing);
+    }
+    throw err;
+  }
   // A "Pembelian Galon" expense mirrors into the gallon ledger (purchase movement).
   if (entry.type === 'expense' && +entry.gallonQty > 0) await distribution.syncPurchaseMovement(entry.id, entry.gallonQty, actor);
   return shapeCreator(entry);

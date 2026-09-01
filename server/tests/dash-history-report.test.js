@@ -42,7 +42,15 @@ describe('A — dashboard today-only default + history capability', () => {
     // any wider period / date / range is CLAMPED to today (200 + clamped:true), never a 403
     const chk = async (qs) => { const r = await request(app).get('/api/v1/distribusi/dashboard/summary?' + qs).set(auth(h)); expect(r.status).toBe(200); expect(r.body.data.clamped).toBe(true); expect(r.body.data.effectiveTo).toBe(TODAY); expect(r.body.data.effectiveFrom).toBe(TODAY); return r; };
     await chk('period=week');
-    await chk('period=month');
+    // period=month runs [firstOfMonth .. today]; on the 1st that IS just today, so clamping is correctly
+    // a no-op that day. Assert the security invariant always (bounded to today) and the flag date-correctly.
+    {
+      const r = await request(app).get('/api/v1/distribusi/dashboard/summary?period=month').set(auth(h));
+      expect(r.status).toBe(200);
+      expect(r.body.data.effectiveFrom).toBe(TODAY);
+      expect(r.body.data.effectiveTo).toBe(TODAY);
+      expect(r.body.data.clamped).toBe(TODAY.slice(8, 10) !== '01');
+    }
     await chk('date=' + YESTERDAY);
     await chk('period=range&dateFrom=' + YESTERDAY + '&dateTo=' + TODAY);
   });

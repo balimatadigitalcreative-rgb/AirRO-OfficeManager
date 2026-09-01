@@ -411,6 +411,29 @@ grep -E 'DEPLOY (PASS|FAIL)' deploy/deploy.log | tail -10   # deploy history
 grep -A12 'DEPLOY FAIL' deploy/deploy.log | tail -20        # why the last one failed
 ```
 
+### ⚠️ Never run `npm ci` / `npm install` by hand and walk away
+`npm ci` **deletes `node_modules`** — including the generated Prisma client at
+`node_modules/.prisma/client`. If it is not regenerated, the API cannot boot:
+`Error: Cannot find module '.prisma/client/default'`, pm2 crash-loops, and every user
+sees **"Server tidak terjangkau"**. This is the 1 Sep outage — caused by a **manual**
+`npm ci`, **not** by `update.sh` (the pipeline regenerates the client and health-gates the
+restart, rolling back on failure).
+
+Two guards now make this safe:
+1. `server/package.json` has a **`postinstall": "prisma generate"`** script and `prisma`
+   is a normal **dependency**, so *any* `npm ci`/`npm install` in `server/` regenerates the
+   client automatically — even `--omit=dev`.
+2. `update.sh` still runs `npx prisma generate` explicitly after every install (belt and
+   suspenders) and refuses to finish unless `/api/v1/health` returns 200 (else it rolls back).
+
+If you must touch deps by hand, always regenerate and reload:
+```bash
+cd /var/www/airrooffice/server && npm ci && npx prisma generate && cd .. \
+  && npm run build && pm2 startOrReload deploy/ecosystem.config.js --update-env \
+  && curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:4000/api/v1/health
+```
+…but the supported path is always `bash deploy/update.sh`.
+
 ### If a deploy fails
 The script already rolled the code back and re-checked health. To confirm and dig in:
 ```bash

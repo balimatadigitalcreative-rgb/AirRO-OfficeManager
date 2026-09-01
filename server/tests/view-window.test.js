@@ -70,7 +70,9 @@ describe('view-window — server enforcement', () => {
     const r = await dash(staff, 'period=month');
     expect(r.status).toBe(200);
     const b = r.body.data;
-    expect(b.clamped).toBe(true);
+    // month runs [firstOfMonth .. today]; on the 1st it IS today, so the clamp is correctly a no-op that
+    // day. The security invariant (bounded to today) holds every day; the flag is asserted date-correctly.
+    expect(b.clamped).toBe(TODAY.slice(8, 10) !== '01');
     expect(b.effectiveFrom).toBe(TODAY);
     expect(b.recent.every((x) => x.txnDate === TODAY)).toBe(true);
     expect(b.series.every((s) => s.date === TODAY)).toBe(true);
