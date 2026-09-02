@@ -4503,3 +4503,11 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 @media (max-width: 767px) {
   .txn-ops-table.fin-cards .txn-actions { justify-content: flex-start; }
 }
+/* Entry moved to Transaksi: toolbar (tabs + New), the Ringkasan CTA, and read-only recent rows. */
+.txn-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.txn-new-btn { flex: 0 0 auto; }
+.catat-btn { width: 100%; justify-content: center; margin-bottom: 14px; }
+.entry-row-link { cursor: pointer; border-radius: 10px; }
+.entry-row-link:hover { background: var(--card-soft); }
+.entry-row-link:focus-visible { outline: 2px solid var(--green-600); outline-offset: -2px; }
+.entry-golink { display: inline-flex; align-items: center; color: var(--text-faint); }

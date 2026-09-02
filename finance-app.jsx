@@ -66,11 +66,11 @@ function finDeriveJournal({ type, amount, category, acctType, gallonQty }) {
 }
 
 /* ---------------- Add entry form ---------------- */
-function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit }) {
+function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit, defaultType, onClose }) {
   const INC = incomeCats && incomeCats.length ? incomeCats : FS.INCOME_CATS;
   const EXP = expenseCats && expenseCats.length ? expenseCats : FS.EXPENSE_CATS;
   const ACCTS = accounts && accounts.length ? accounts : [{ id: 'cash', name: 'Cash' }];
-  const [type, setType] = uS('income');
+  const [type, setType] = uS(defaultType === 'expense' ? 'expense' : 'income');
   const [amount, setAmount] = uS(0);
   const [cat, setCat] = uS(INC[0].key);
   const [acct, setAcct] = uS(ACCTS[0].id);
@@ -138,7 +138,10 @@ function AddEntry({ onAdd, incomeCats, expenseCats, accounts, units, defaultUnit
 
   return (
     <div className="card add-card fin-scope">
-      <div className="sec-title" style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>{trF('add.title')}</div>
+      <div className="sec-title" style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{trF('add.title')}</span>
+        {onClose && <button type="button" className="jp-icon" aria-label={trF('common.cancel') || 'Close'} onClick={onClose}><IconClose s={18} /></button>}
+      </div>
       <div className="type-toggle">
         <button className={`tt-btn ${type === 'income' ? 'on inc' : ''}`} onClick={() => switchType('income')}>
           <IconCoinIn s={17} />{trF('add.income')}
@@ -400,7 +403,7 @@ function byLine(e) {
 }
 
 /* ---------------- Entries ledger (grouped by day) ---------------- */
-function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, canDelete = true, canEdit = false, showSource = false }) {
+function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, canDelete = true, canEdit = false, showSource = false, onRowClick = null }) {
   const [f, setF] = uS('all');
   const [q, setQ] = uS('');
   const info = (k) => FS.catInfo(catMap, k);
@@ -462,10 +465,11 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
               // the per-entry modal — editing there persists, avoiding the old "account
               // won't save" revert. Delete stays hidden (remove the Setoran row instead).
               const derived = /^st(inc|mfg)-/.test(String(e.id || ''));
-              const showEdit = canEdit;
-              const showDel = canDelete && !derived;
+              // Read-only (Ringkasan) rows: the whole row links into Transaksi; no inline edit/delete.
+              const showEdit = canEdit && !onRowClick;
+              const showDel = canDelete && !derived && !onRowClick;
               return (
-                <div key={e.id} className="entry-row">
+                <div key={e.id} className={`entry-row${onRowClick ? ' entry-row-link' : ''}`} {...(onRowClick ? { role: 'button', tabIndex: 0, onClick: () => onRowClick(e), onKeyDown: (ev) => { if (ev.key === 'Enter') onRowClick(e); } } : {})}>
                   <span className="icon-tile" style={{ width: 38, height: 38, borderRadius: 11, background: isInc ? 'var(--pos-bg)' : '#EAF1F4', color: isInc ? 'var(--green-800)' : '#5E7A88' }}>{Icn(c.icon, { s: 18 })}</span>
                   <div style={{ minWidth: 0 }}>
                     <div className="entry-cat-line" style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}{srcChip(e)}</div>
@@ -474,13 +478,14 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
                   </div>
                   <span className="tnum entry-time" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{e.time}</span>
                   {e.proof
-                    ? <button className="entry-proof" title={trF('att.view')} onClick={() => window.UI._viewProof(e.proof)}>{e.proof.isImg && e.proof.data ? <img src={e.proof.data} alt="" /> : <IconInvoice s={15} />}</button>
+                    ? <button className="entry-proof" title={trF('att.view')} onClick={(ev) => { ev.stopPropagation(); window.UI._viewProof(e.proof); }}>{e.proof.isImg && e.proof.data ? <img src={e.proof.data} alt="" /> : <IconInvoice s={15} />}</button>
                     : <span className="entry-proof empty" aria-hidden="true" />}
                   <span className={`tnum ${isInc ? 'amt-pos' : 'amt-neg'}`} style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}>{fmtS(isInc ? e.amount : -e.amount)}</span>
                   <div className="entry-actions">
-                    {showEdit && <button className="edit-btn" title={derived ? (trF('entries.editSetoran') || 'Kelola di Setoran') : (trF('a11y.edit') || 'Edit')} aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
-                    {showDel && <button className="del-btn" title="Delete" aria-label={trF('a11y.delete')} onClick={() => onDelete(e.id)}><IconClose s={15} /></button>}
-                    {!showEdit && !showDel && <span className="del-spacer" />}
+                    {showEdit && <button className="edit-btn" title={derived ? (trF('entries.editSetoran') || 'Kelola di Setoran') : (trF('a11y.edit') || 'Edit')} aria-label={trF('a11y.edit')} onClick={(ev) => { ev.stopPropagation(); onEdit(e); }}><IconPencil s={15} /></button>}
+                    {showDel && <button className="del-btn" title="Delete" aria-label={trF('a11y.delete')} onClick={(ev) => { ev.stopPropagation(); onDelete(e.id); }}><IconClose s={15} /></button>}
+                    {onRowClick && <span className="entry-golink" aria-hidden="true">{Icn('IconCaret', { s: 15 })}</span>}
+                    {!showEdit && !showDel && !onRowClick && <span className="del-spacer" />}
                   </div>
                 </div>
               );

@@ -1398,6 +1398,27 @@ function FApp() {
   // detail; filter them to the active period. Read-only — corrections live in Distribusi → Setoran.
   const setoranRowsPeriod = uMh(() => (setoran || []).filter((r) => r.date >= range.start && r.date <= range.end), [setoran, range.start, range.end]);
 
+  // ENTRY FORM lives ONLY on Transaksi now (Ringkasan is read-only). It is opened by [Transaksi Baru]
+  // or the shareable deep link ?new=income|expense (which survives refresh — keepSearch keeps the query
+  // when the hash already resolves to #entries). The global period + active unit are shell state, so
+  // they carry across the Ringkasan→Transaksi jump with nothing retyped.
+  const [txnFormOpen, setTxnFormOpen] = uSh(() => !!new URLSearchParams(location.search).get('new'));
+  const [txnNewType, setTxnNewType] = uSh(() => (new URLSearchParams(location.search).get('new') === 'income' ? 'income' : 'expense'));
+  const setTxnForm = (open, type) => {
+    setTxnFormOpen(open); if (type) setTxnNewType(type);
+    try {
+      const url = open ? location.pathname + '?new=' + (type || txnNewType || 'expense') + '#entries' : location.pathname + '#entries';
+      history.replaceState(history.state || { screen: 'entries' }, '', url);
+    } catch (e) {}
+  };
+  // [Catat Transaksi] on Ringkasan → go to Transaksi with the form open (period + unit already global).
+  const catatTransaksi = (type) => { go('entries'); setTxnForm(true, type || 'expense'); };
+  // Deep-link / redirect (item 5): a ?new= link (even an old one that lands on another screen) opens the
+  // form on Transaksi rather than 404ing. Runs once on mount.
+  uEh(() => {
+    if (new URLSearchParams(location.search).get('new') && screenRef.current !== 'entries') { go('entries'); setTxnFormOpen(true); }
+  }, []);
+
   const prevAgg = uMh(() => {
     const [y, m] = monthKey.split('-').map(Number);
     let pm = m - 1, py = y; if (pm <= 0) { pm = 12; py--; }
@@ -1831,12 +1852,19 @@ function FApp() {
               )}
               <div className="fin-grid">
                 <div className="fin-col">
-                  {p.addEntry ? <FIN.AddEntry onAdd={add} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={allowedUnits} defaultUnit={unitDefaultForNew()} /> : null}
-                  <FIN.EntriesList entries={recent} onDelete={del} onEdit={editEntryRow} title={tr('recent.title')} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />
+                  {/* Ringkasan is READ-ONLY: entry happens in Transaksi. This primary button jumps there
+                      with the form open (period + unit carry over via global state). */}
+                  {p.addEntry && (
+                    <button type="button" className="btn btn-primary catat-btn" onClick={() => catatTransaksi('expense')}>
+                      <IconPlus s={18} />{tr('add.catat')}
+                    </button>
+                  )}
+                  {/* Catatan Terbaru — read-only; each row links into Transaksi (no inline edit/delete). */}
+                  <FIN.EntriesList entries={recent} title={tr('recent.title')} catMap={catMap} canDelete={false} canEdit={false} onRowClick={() => go('entries')} />
                 </div>
                 <div className="fin-col">
                   {/* The 12-month trend + expense donut now live in the dashboard above; keep the
-                      at-a-glance "today" card next to the add form and recent-entries list. */}
+                      at-a-glance "today" card beside the recent-entries list. */}
                   <FIN.TodayCard today={today} seeMoney={p.seeMoney} />
                 </div>
               </div>
@@ -1861,11 +1889,23 @@ function FApp() {
             const openDist = () => go('setoran');
             return (
               <div className="screen-enter">
-                <div className="txn-tabs seg no-print" role="tablist">
-                  {[['semua', tr('txn.tabAll')], ['setoran', tr('txn.tabSetoran')], ['operasional', tr('txn.tabOps')]].map(([k, lbl]) => (
-                    <button key={k} type="button" role="tab" aria-selected={txnTab === k} className={`seg-btn ${txnTab === k ? 'on' : ''}`} onClick={() => changeTxnTab(k)}>{lbl}</button>
-                  ))}
+                {/* ENTRY POINT: the form lives HERE only. Opened by [Transaksi Baru] or the ?new= deep
+                    link; it creates OPERASIONAL entries, and the new row shows in the list below at once. */}
+                <div className="txn-toolbar no-print">
+                  <div className="txn-tabs seg" role="tablist">
+                    {[['semua', tr('txn.tabAll')], ['setoran', tr('txn.tabSetoran')], ['operasional', tr('txn.tabOps')]].map(([k, lbl]) => (
+                      <button key={k} type="button" role="tab" aria-selected={txnTab === k} className={`seg-btn ${txnTab === k ? 'on' : ''}`} onClick={() => changeTxnTab(k)}>{lbl}</button>
+                    ))}
+                  </div>
+                  {p.addEntry && !txnFormOpen && (
+                    <button type="button" className="btn btn-primary txn-new-btn" onClick={() => setTxnForm(true, 'expense')}><IconPlus s={17} />{tr('txn.new')}</button>
+                  )}
                 </div>
+                {p.addEntry && txnFormOpen && (
+                  <div style={{ marginBottom: 16 }}>
+                    <FIN.AddEntry key={txnNewType} onAdd={add} defaultType={txnNewType} onClose={() => setTxnForm(false)} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={allowedUnits} defaultUnit={unitDefaultForNew()} />
+                  </div>
+                )}
                 <div className="txn-splitnote">{tr('txn.splitNote')}</div>
                 {p.seeMoney && <FIN.TxnSummary tab={txnTab} income={tabSum.income} expense={tabSum.expense} combinedIncome={combined.income} combinedExpense={combined.expense} />}
                 <div style={{ marginTop: 16 }}>
