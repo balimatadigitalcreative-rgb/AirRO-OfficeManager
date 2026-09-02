@@ -4531,3 +4531,18 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .cr-reassign-note { color: var(--text-faint); }
 .cr-kind.reassign { background: #E7F0F7; color: #0B5FA5; }
 @media (max-width: 560px) { .dist-reassign-impact { grid-template-columns: 1fr; } }
+/* Gross-profit ladder (Summary): Penjualan − HPP = Laba kotor − Beban ops = Laba bersih. */
+.gp-ladder { padding: 14px 16px; }
+.gp-ladder-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.gp-line { display: grid; grid-template-columns: 18px 1fr auto auto; align-items: center; gap: 10px; width: 100%; padding: 9px 6px; background: none; border: none; border-bottom: 1px solid var(--border-soft, rgba(15,30,45,.07)); cursor: pointer; text-align: left; font: inherit; }
+.gp-line:hover { background: var(--card-soft); }
+.gp-op { font-size: 15px; font-weight: 700; color: var(--text-faint); text-align: center; }
+.gp-label { font-size: 13.5px; color: var(--text-mut); }
+.gp-val { font-size: 15px; font-weight: 700; text-align: right; min-width: 120px; }
+.gp-line.sub .gp-label, .gp-line.sub .gp-val { font-weight: 600; }
+.gp-line.result { background: var(--card-soft); border-radius: 8px; margin-top: 2px; }
+.gp-line.result .gp-label { color: var(--text); font-weight: 700; }
+.gp-line.result .gp-val { font-family: 'Poppins', system-ui, sans-serif; font-size: 17px; font-weight: 800; }
+.gp-line.strong .gp-val { font-size: 20px; color: var(--green-800); }
+.gp-line.strong.result { background: var(--pos-bg, #E6F4EA); }
+.gp-note { font-size: 11.5px; color: var(--text-faint); margin-top: 10px; line-height: 1.4; }

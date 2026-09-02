@@ -507,7 +507,7 @@ function TxnSummary({ tab, income, expense, combinedIncome, combinedExpense, per
   // so the real position is always in view; on "Semua" the per-tab total already IS the combined.
   // These are PERIOD figures (only entries dated in the selected period — no carry-over), so they wear
   // the period chip; the cumulative cash position lives in Kas & Bank / the "Saldo Berjalan" column.
-  const perLbl = tab === 'operasional' ? trF('txn.perOps') : tab === 'setoran' ? trF('txn.perSetoran') : trF('txn.perAll');
+  const perLbl = tab === 'operasional' ? trF('txn.perOps') : tab === 'produksi' ? trF('txn.perProduksi') : tab === 'setoran' ? trF('txn.perSetoran') : trF('txn.perAll');
   const row = (lbl, inc, exp, cls) => (
     <div className={`txn-sum-row ${cls}`}>
       <span className="txn-sum-lbl">{lbl}</span>
@@ -569,8 +569,10 @@ function OperasionalTable({ entries, accounts, catMap, canEdit, canDelete, onEdi
                   ? <button className="entry-proof" title={trF('att.view')} onClick={() => window.UI._viewProof(e.proof)}>{e.proof.isImg && e.proof.data ? <img src={e.proof.data} alt="" /> : <IconInvoice s={15} />}</button>
                   : <span className="txn-noproof">—</span>}</td>
                 {actionsCol && <td className="fin-td fin-r txn-actions" data-label="">
-                  {canEdit && <button className="edit-btn" title={trF('a11y.edit')} aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
-                  {canDelete && <button className="del-btn" title={trF('a11y.delete')} aria-label={trF('a11y.delete')} onClick={() => onDelete(e.id)}><IconClose s={15} /></button>}
+                  {/* Setoran-derived rows (stmfg-/stinc-) are recomputed from the Setoran table — never
+                      edited/deleted here; they can appear in the Produksi tab (the daily production cost). */}
+                  {canEdit && !/^st(inc|mfg)-/.test(String(e.id || '')) && <button className="edit-btn" title={trF('a11y.edit')} aria-label={trF('a11y.edit')} onClick={() => onEdit(e)}><IconPencil s={15} /></button>}
+                  {canDelete && !/^st(inc|mfg)-/.test(String(e.id || '')) && <button className="del-btn" title={trF('a11y.delete')} aria-label={trF('a11y.delete')} onClick={() => onDelete(e.id)}><IconClose s={15} /></button>}
                 </td>}
               </tr>
             ); })}
@@ -1075,7 +1077,7 @@ function UnattributedModal({ accounts, entries, canEdit, onClose, onOpenEntry, o
   );
 }
 
-function Dashboard({ stats, cashOnHand, deltas, shownAccounts, allAccounts, allEntries, transfers, plEntries, breakdown, periodLbl, seeMoney, onDrill, onReload, onOpenEntry }) {
+function Dashboard({ stats, cashOnHand, deltas, ladder, ladderDeltas, shownAccounts, allAccounts, allEntries, transfers, plEntries, breakdown, periodLbl, seeMoney, onDrill, onReload, onOpenEntry }) {
   const cur = monKeyOf(TODAY), prv = prevMonKey(cur);
   const mtd = uM(() => monthAgg(plEntries, cur), [plEntries, cur]);
   const lm = uM(() => monthAgg(plEntries, prv), [plEntries, prv]);
@@ -1094,15 +1096,26 @@ function Dashboard({ stats, cashOnHand, deltas, shownAccounts, allAccounts, allE
   const netMargin = stats.income ? Math.round((stats.profit / stats.income) * 1000) / 10 : 0;
   const curNm = monthName(+cur.split('-')[1] - 1), prvNm = monthName(+prv.split('-')[1] - 1);
 
+  // Cash is CUMULATIVE (KINI) — kept as its own card. The period P&L now reads as a gross-profit
+  // ladder (below), not flat income/expense tiles. Non-money users keep the two count-only tiles.
   const kpis = seeMoney ? [
     { key: 'cash', label: trF('stat.balance'), value: (totalCash < 0 ? '−' : '') + fmt(totalCash), scope: trF('dash.nowScope'), icon: 'IconWallet', tone: 'accent', drill: 'moneyspots' },
-    { key: 'income', label: trF('stat.income'), value: fmt(stats.income), scope: periodLbl, icon: 'IconCoinIn', tone: 'pos', cls: 'amt-pos', delta: deltas && deltas.income, drill: 'entries' },
-    { key: 'expense', label: trF('stat.expense'), value: fmt(stats.expense), scope: periodLbl, icon: 'IconCoinOut', tone: 'neg', cls: 'amt-neg', delta: deltas && deltas.expense, invert: true, drill: 'entries' },
-    { key: 'profit', label: trF('stat.profit'), value: fmtS(stats.profit), scope: periodLbl, icon: 'IconTrendUp', tone: stats.profit >= 0 ? 'pos' : 'neg', cls: stats.profit >= 0 ? 'amt-pos' : 'amt-neg', delta: deltas && deltas.profit, drill: 'entries' },
   ] : [
     { key: 'income', label: trF('stat.income'), value: fmt(stats.income), scope: periodLbl, icon: 'IconCoinIn', tone: 'pos', cls: 'amt-pos', delta: deltas && deltas.income, drill: 'entries' },
     { key: 'expense', label: trF('stat.expense'), value: fmt(stats.expense), scope: periodLbl, icon: 'IconCoinOut', tone: 'neg', cls: 'amt-neg', delta: deltas && deltas.expense, invert: true, drill: 'entries' },
   ];
+  const L = ladder || { penjualan: stats.income, produksi: 0, operasional: stats.expense, lain: 0, labaKotor: stats.income, labaBersih: stats.profit };
+  const LD = ladderDeltas || {};
+  // The gross-profit ladder: Penjualan − Biaya produksi = Laba kotor − Beban operasional = Laba bersih.
+  // Income is GROSS (never netted). Deductions are secondary; the two results are emphasised. Every line
+  // drills into the transactions behind it.
+  const ladderLines = [
+    { key: 'penjualan', op: '', label: trF('dash.penjualan'), value: fmt(L.penjualan), delta: LD.penjualan, drill: 'entries:setoran' },
+    { key: 'produksi', op: '−', label: trF('dash.biayaProduksi'), value: fmt(L.produksi), delta: LD.produksi, invert: true, sub: true, drill: 'entries:produksi' },
+    { key: 'labaKotor', op: '=', label: trF('dash.labaKotor'), value: fmtS(L.labaKotor), delta: LD.labaKotor, result: true, drill: 'entries' },
+    { key: 'operasional', op: '−', label: trF('dash.bebanOps'), value: fmt(L.operasional), delta: LD.operasional, invert: true, sub: true, drill: 'entries:operasional' },
+  ].concat(L.lain ? [{ key: 'lain', op: '−', label: trF('dash.lain'), value: fmt(L.lain), sub: true, drill: 'entries' }] : [])
+   .concat([{ key: 'labaBersih', op: '=', label: trF('dash.labaBersih'), value: fmtS(L.labaBersih), delta: LD.labaBersih, result: true, strong: true, drill: 'entries' }]);
   const donutPal = ['#065489', '#0B7EB1', '#138FB3', '#8DD3D0', '#3FB8B2', '#DDF7F6'];
 
   return (
@@ -1110,6 +1123,21 @@ function Dashboard({ stats, cashOnHand, deltas, shownAccounts, allAccounts, allE
       <div className="fin-kpi-grid">
         {kpis.map((c) => <DashKpi key={c.key} {...c} onClick={onDrill ? () => onDrill(c.drill) : undefined} />)}
       </div>
+
+      {seeMoney && (
+        <div className="card gp-ladder">
+          <div className="gp-ladder-head"><span className="sec-title">{trF('dash.plLadder')}</span><span className="period-chip">{periodLbl}</span></div>
+          {ladderLines.map((r) => (
+            <button key={r.key} type="button" className={`gp-line ${r.result ? 'result' : ''} ${r.strong ? 'strong' : ''} ${r.sub ? 'sub' : ''}`} onClick={() => onDrill && onDrill(r.drill)}>
+              <span className="gp-op">{r.op}</span>
+              <span className="gp-label">{r.label}</span>
+              {r.delta !== undefined && r.delta !== null ? <DeltaPillF delta={r.delta} invert={r.invert} /> : <span />}
+              <span className={`gp-val tnum ${r.result ? '' : r.invert ? 'amt-neg' : 'amt-pos'}`}>{r.value}</span>
+            </button>
+          ))}
+          <div className="gp-note">{trF('dash.ladderNote')}</div>
+        </div>
+      )}
 
       {seeMoney && (
         <div className="fin-dash-grid">

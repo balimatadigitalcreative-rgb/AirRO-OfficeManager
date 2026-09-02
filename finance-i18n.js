@@ -560,6 +560,8 @@
       'fin.closeSoon': 'Period close locks a reconciled month so figures can no longer change. It ships with the accounting engine.',
       // Dashboard Keuangan (Ringkasan)
       'dash.nowScope': 'All accounts · now', 'dash.cashPos': 'Cash position by account', 'dash.viewAll': 'View all',
+      'dash.plLadder': 'Profit & loss', 'dash.penjualan': 'Sales (setoran)', 'dash.biayaProduksi': 'Production cost (COGS)', 'dash.labaKotor': 'Gross profit', 'dash.bebanOps': 'Operating expenses', 'dash.lain': 'Other', 'dash.labaBersih': 'Net profit',
+      'dash.ladderNote': 'A plain-language summary — the Journal, General Ledger and P&L keep the authoritative detail. Every line is clickable.',
       'dash.totalCash': 'Total cash', 'dash.plCompare': 'Profit & loss — this month vs last', 'dash.trend12': '12-month trend',
       'dash.unattr': 'Unassigned', 'dash.unattrHint': 'money on a deleted/renamed account — reassign it', 'dash.unattrOpen': 'tap to open & fix',
       'dash.unattrLong': 'Entries pointing at an account that was deleted or renamed. Reassign them to the correct account.', 'dash.unattrSum': '{n} entr(y/ies)', 'dash.unattrClean': 'Nothing unassigned.', 'dash.unattrRemapTo': 'Reassign all to:', 'dash.unattrRemap': 'Reassign to {name}',
@@ -747,6 +749,7 @@
       'entries.search': 'Search entries…', 'entries.all': 'all', 'entries.income': 'income',
       'entries.expense': 'expense', 'entries.none': 'No entries found.', 'entries.titleMonth': 'Entries · {m}', 'entries.tabRecords': 'Records', 'entries.editSetoran': 'Auto from Setoran — manage there', 'entries.derivedInfo': 'This entry is auto-generated from Setoran — edit it in the Setoran screen.',
       'txn.tabAll': 'All', 'txn.tabSetoran': 'Deposits', 'txn.tabOps': 'Operational', 'txn.new': 'New Transaction', 'txn.cumTag': 'to date',
+      'txn.tabProduksi': 'Production', 'txn.perProduksi': 'Production cost only',
       'txn.perOps': 'Operational only · deposits excluded', 'txn.perSetoran': 'Deposits only · operational excluded', 'txn.perAll': 'All sources (deposits + operational)',
       'txn.combined': 'Combined — matches Ringkasan',
       'txn.splitNote': 'Deposits and operational entries are split for display only — reports still combine both.',
@@ -1025,6 +1028,8 @@
       'fin.closeSoon': 'Tutup buku mengunci bulan yang sudah direkonsiliasi agar angka tidak berubah lagi. Hadir bersama mesin akuntansi.',
       // Dashboard Keuangan (Ringkasan)
       'dash.nowScope': 'Semua akun · kini', 'dash.cashPos': 'Posisi kas per akun', 'dash.viewAll': 'Lihat semua',
+      'dash.plLadder': 'Laba rugi', 'dash.penjualan': 'Penjualan (setoran)', 'dash.biayaProduksi': 'Biaya produksi (HPP)', 'dash.labaKotor': 'Laba kotor', 'dash.bebanOps': 'Beban operasional', 'dash.lain': 'Lain-lain', 'dash.labaBersih': 'Laba bersih',
+      'dash.ladderNote': 'Ringkasan bahasa sederhana — Jurnal, Buku Besar & Laba Rugi tetap detail resmi. Tiap baris bisa diklik.',
       'dash.totalCash': 'Total kas', 'dash.plCompare': 'Laba rugi — bulan ini vs lalu', 'dash.trend12': 'Tren 12 bulan',
       'dash.unattr': 'Belum dipetakan', 'dash.unattrHint': 'dana pada akun terhapus/berganti — petakan ulang', 'dash.unattrOpen': 'ketuk untuk buka & perbaiki',
       'dash.unattrLong': 'Transaksi yang menunjuk ke akun yang sudah dihapus atau berganti. Petakan ulang ke akun yang benar.', 'dash.unattrSum': '{n} transaksi', 'dash.unattrClean': 'Tidak ada yang belum dipetakan.', 'dash.unattrRemapTo': 'Petakan semua ke:', 'dash.unattrRemap': 'Petakan ke {name}',
@@ -1631,6 +1636,7 @@
       'entries.search': 'Cari catatan…', 'entries.all': 'semua', 'entries.income': 'pemasukan',
       'entries.expense': 'pengeluaran', 'entries.none': 'Catatan tidak ditemukan.', 'entries.titleMonth': 'Catatan · {m}', 'entries.tabRecords': 'Catatan', 'entries.editSetoran': 'Otomatis dari Setoran — kelola di sana', 'entries.derivedInfo': 'Catatan ini otomatis dari Setoran — ubah di layar Setoran.',
       'txn.tabAll': 'Semua', 'txn.tabSetoran': 'Setoran', 'txn.tabOps': 'Operasional', 'txn.new': 'Transaksi Baru', 'txn.cumTag': 'KINI',
+      'txn.tabProduksi': 'Produksi', 'txn.perProduksi': 'Biaya produksi saja',
       'txn.perOps': 'Operasional saja · setoran tidak termasuk', 'txn.perSetoran': 'Setoran saja · operasional tidak termasuk', 'txn.perAll': 'Semua sumber (setoran + operasional)',
       'txn.combined': 'Gabungan — sama dengan Ringkasan',
       'txn.splitNote': 'Setoran dan operasional dipisah untuk tampilan saja — laporan tetap menggabungkan keduanya.',

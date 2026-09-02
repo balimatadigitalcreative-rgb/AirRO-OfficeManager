@@ -1355,6 +1355,28 @@ function FApp() {
     return { income: PERIOD.pctDelta(cur.income, prv.income), expense: PERIOD.pctDelta(cur.expense, prv.expense), profit: PERIOD.pctDelta(cur.profit, prv.profit) };
   }, [scopedEntries, gran, anchor, range.start, range.end]);
 
+  // GROSS-PROFIT LADDER — Penjualan − Biaya produksi (HPP) = Laba kotor − Beban operasional = Laba
+  // bersih. It PARTITIONS the same period-scoped set `stats` sums (income + expense, inter-unit legs
+  // eliminated in the combined view), via the ONE shared classifier (FCLS), so Income is never netted
+  // and the parts reconcile: penjualan == stats.income; produksi+operasional+lain == stats.expense;
+  // labaBersih == stats.profit. Same helper feeds the 12-month trend + the Transaksi tabs.
+  const prodCats = uMh(() => FCLS.buildProdCats(cats), [cats]);
+  const ladderRows = (start, end) => scopedEntries.filter((e) => e.date >= start && e.date <= end && !(activeUnit === 'all' && e.interUnit));
+  const ladder = uMh(() => FCLS.split(ladderRows(range.start, range.end), prodCats), [scopedEntries, range.start, range.end, activeUnit, prodCats]);
+  const ladderDeltas = uMh(() => {
+    const pm = PERIOD.prevMatched(gran, anchor, null, null, FIN.TODAY);
+    const curEnd = pm.curEnd < range.end ? pm.curEnd : range.end;
+    const cur = FCLS.split(ladderRows(range.start, curEnd), prodCats);
+    const prv = FCLS.split(ladderRows(pm.start, pm.end), prodCats);
+    return { penjualan: PERIOD.pctDelta(cur.penjualan, prv.penjualan), produksi: PERIOD.pctDelta(cur.produksi, prv.produksi), operasional: PERIOD.pctDelta(cur.operasional, prv.operasional), labaKotor: PERIOD.pctDelta(cur.labaKotor, prv.labaKotor), labaBersih: PERIOD.pctDelta(cur.labaBersih, prv.labaBersih) };
+  }, [scopedEntries, gran, anchor, range.start, range.end, activeUnit, prodCats]);
+  // Drill from a ladder line (or KPI) into the transactions behind it: 'entries:<tab>' opens Transaksi
+  // on that tab so the owner can immediately see which rows make the number up.
+  const drillTo = (target) => {
+    if (typeof target === 'string' && target.indexOf('entries:') === 0) { const tab = target.slice(8); go('entries'); setTxnForm(false); changeTxnTab(tab); return; }
+    go(target);
+  };
+
   const curMonthKey = FIN.TODAY.slice(0, 7);
   const curPayLabel = FIN.MONTHS[+curMonthKey.split('-')[1] - 1] + ' ' + curMonthKey.split('-')[0];
 
@@ -1394,6 +1416,9 @@ function FApp() {
   // The two sides come straight from the SHARED predicate — a TOTAL split, so ops ∪ setoran === all.
   const opsPeriod = uMh(() => periodEntries.filter((e) => FINSRC.entrySource(e) === 'operasional'), [periodEntries]);
   const setoranPeriod = uMh(() => periodEntries.filter((e) => FINSRC.entrySource(e) === 'setoran'), [periodEntries]);
+  // Function split (FCLS) for the Setoran · Produksi · Operasional tabs — one vocabulary with the ladder.
+  const produksiPeriod = uMh(() => periodEntries.filter((e) => window.FCLS.classify(e, window.FCLS.buildProdCats(cats)) === 'produksi'), [periodEntries, cats]);
+  const operasionalPeriod = uMh(() => periodEntries.filter((e) => { const k = window.FCLS.classify(e, window.FCLS.buildProdCats(cats)); return k === 'operasional' || k === 'lain'; }), [periodEntries, cats]);
   // The Setoran tab renders the underlying Setoran records (per fleet per day) so it can show armada
   // detail; filter them to the active period. Read-only — corrections live in Distribusi → Setoran.
   const setoranRowsPeriod = uMh(() => (setoran || []).filter((r) => r.date >= range.start && r.date <= range.end), [setoran, range.start, range.end]);
@@ -1838,7 +1863,7 @@ function FApp() {
               {/* Dashboard Keuangan — KPI cards (each states its period scope + drills to the ledger),
                   cash position per account, P&L month-vs-last, 12-month trend, ratios. All over the
                   cash-book figures the shell already computes; AR/liabilities gated to the engine. */}
-              <FIN.Dashboard stats={stats} cashOnHand={cashOnHand} deltas={deltas} shownAccounts={scopedAccounts} allAccounts={accounts} allEntries={entries} transfers={transfers} plEntries={scopedEntries} breakdown={breakdown} periodLbl={periodLbl} seeMoney={p.seeMoney} onDrill={go}
+              <FIN.Dashboard stats={stats} cashOnHand={cashOnHand} deltas={deltas} ladder={ladder} ladderDeltas={ladderDeltas} shownAccounts={scopedAccounts} allAccounts={accounts} allEntries={entries} transfers={transfers} plEntries={scopedEntries} breakdown={breakdown} periodLbl={periodLbl} seeMoney={p.seeMoney} onDrill={drillTo}
                 onOpenEntry={p.edit ? editEntryRow : null}
                 onReload={p.settings ? () => { reloadEntries(); reloadAccounts(); } : null} />
               {/* Per-unit breakdown — only in the combined view. Its columns sum EXACTLY to the
@@ -1902,7 +1927,7 @@ function FApp() {
           {screen === 'entries' && p.allEntries && (() => {
             // Split for DISPLAY only. Both sides are the same Entry data, post the same journals and
             // feed the same reports/balances; the combined line below always shows the real position.
-            const tabRows = txnTab === 'setoran' ? setoranPeriod : txnTab === 'operasional' ? opsPeriod : periodEntries;
+            const tabRows = txnTab === 'setoran' ? setoranPeriod : txnTab === 'produksi' ? produksiPeriod : txnTab === 'operasional' ? operasionalPeriod : periodEntries;
             // Per-tab and combined both come from the SHARED reducer with the SAME scope as Ringkasan,
             // so the combined figure is byte-for-byte the Ringkasan Pemasukan/Pengeluaran (= stats).
             const tabSum = FTOT.periodTotals(tabRows, range.start, range.end, activeUnit === 'all');
@@ -1914,7 +1939,7 @@ function FApp() {
                     link; it creates OPERASIONAL entries, and the new row shows in the list below at once. */}
                 <div className="txn-toolbar no-print">
                   <div className="txn-tabs seg" role="tablist">
-                    {[['semua', tr('txn.tabAll')], ['setoran', tr('txn.tabSetoran')], ['operasional', tr('txn.tabOps')]].map(([k, lbl]) => (
+                    {[['semua', tr('txn.tabAll')], ['setoran', tr('txn.tabSetoran')], ['produksi', tr('txn.tabProduksi')], ['operasional', tr('txn.tabOps')]].map(([k, lbl]) => (
                       <button key={k} type="button" role="tab" aria-selected={txnTab === k} className={`seg-btn ${txnTab === k ? 'on' : ''}`} onClick={() => changeTxnTab(k)}>{lbl}</button>
                     ))}
                   </div>
@@ -1932,9 +1957,11 @@ function FApp() {
                 <div style={{ marginTop: 16 }}>
                   {txnTab === 'setoran'
                     ? <FIN.SetoranMirror rows={setoranRowsPeriod} onOpenDist={openDist} />
-                    : txnTab === 'operasional'
-                      ? <FIN.OperasionalTable entries={opsPeriod} accounts={accounts} catMap={catMap} canEdit={p.edit} canDelete={p.delete} onEdit={editEntryRow} onDelete={del} runningById={opsRunningById} negAccts={openingNeededAccts} onFixOpening={() => go('moneyspots')} />
-                      : <FIN.EntriesList entries={periodEntries} onDelete={del} onEdit={editEntryRow} filterable showSource title={tr('entries.titleMonth', { m: periodLbl })} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />}
+                    : txnTab === 'produksi'
+                      ? <FIN.OperasionalTable entries={produksiPeriod} accounts={accounts} catMap={catMap} canEdit={p.edit} canDelete={p.delete} onEdit={editEntryRow} onDelete={del} runningById={opsRunningById} negAccts={openingNeededAccts} onFixOpening={() => go('moneyspots')} />
+                      : txnTab === 'operasional'
+                        ? <FIN.OperasionalTable entries={operasionalPeriod} accounts={accounts} catMap={catMap} canEdit={p.edit} canDelete={p.delete} onEdit={editEntryRow} onDelete={del} runningById={opsRunningById} negAccts={openingNeededAccts} onFixOpening={() => go('moneyspots')} />
+                        : <FIN.EntriesList entries={periodEntries} onDelete={del} onEdit={editEntryRow} filterable showSource title={tr('entries.titleMonth', { m: periodLbl })} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />}
                 </div>
               </div>
             );
