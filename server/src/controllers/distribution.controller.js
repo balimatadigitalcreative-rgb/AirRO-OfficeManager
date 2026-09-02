@@ -124,6 +124,15 @@ const voidSchema = z.object({ reason: z.string().trim().min(1, 'reason is requir
 // Change-request inbox filter + the reject note (rejection requires a reason).
 const changeReqQuery = z.object({ status: z.enum(['pending', 'approved', 'rejected']).optional(), fleet: z.string().max(60).optional() });
 const rejectSchema = z.object({ note: z.string().trim().min(1, 'note is required').max(1000) });
+// Pindahkan ke pelanggan lain (reassign). Preview needs no catatan; submit REQUIRES catatan (reason optional).
+const reassignBase = z.object({
+  fromCustomerId: z.string().min(1), toCustomerId: z.string().min(1),
+  transactionIds: z.array(z.string().min(1)).min(1, 'pilih minimal satu transaksi').max(200),
+  priceMode: z.enum(['keep', 'recalc']).optional().default('keep'),
+  reason: z.string().trim().max(1000).optional(),
+});
+const reassignPreviewSchema = reassignBase.extend({ note: z.string().trim().max(1000).optional() });
+const reassignSchema = reassignBase.extend({ note: z.string().trim().min(1, 'catatan wajib diisi').max(1000) });
 // Toggle a transaction between ARCHIVE (legacy=true) and ACTIVE (legacy=false); reason required.
 const archiveSchema = z.object({ legacy: z.boolean(), bonCounted: z.boolean().optional(), reason: z.string().trim().min(1, 'reason is required').max(1000) });
 // PELUNASAN TIDAK DITERIMA — the customer paid but the money never reached the company. Reason and a
@@ -302,6 +311,8 @@ const requestVoid = asyncHandler(async (req, res) => { const r = await service.r
 // DRY-RUN preview of a correction (live nominal + sisa-bon impact) — persists nothing. Same cap as the
 // request itself; the reason is not required to preview, so it uses a reason-optional schema.
 const previewCorrection = asyncHandler(async (req, res) => { res.json({ data: await service.previewCorrection(req.params.id, req.body, req.user) }); });
+const previewReassign = asyncHandler(async (req, res) => { res.json({ data: await service.previewReassign(req.body, req.user) }); });
+const requestReassign = asyncHandler(async (req, res) => { const r = await service.requestReassign(req.body, req.user); bcast('changereq', r.id); res.status(201).json({ data: r }); });
 const listChangeRequests = asyncHandler(async (req, res) => res.json(await service.listChangeRequests(req.user, req.query)));
 const approveChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'approve', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
 const rejectChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'reject', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
@@ -445,7 +456,7 @@ module.exports = {
   listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
-  listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
+  listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, previewReassign, requestReassign, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, resetTotalPreview, resetTotalCommit, resetTotalRestore, openingRowsList, openingRowsBulkPreview, openingRowsBulk, openingRowsRestore, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts, outstandingDeliveries, resolveOutstanding,
   bulkCarryPreview, bulkCarry, bulkResolveOutstanding, undoBulkCarry,
@@ -455,5 +466,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };

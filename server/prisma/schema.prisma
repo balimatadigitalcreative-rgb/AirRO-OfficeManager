@@ -1326,9 +1326,12 @@ model DistChangeRequest {
   id            String   @id @default(cuid())
   transactionId String
   fleetId       String   @default("")            // fleet scope (copied from the txn) — approval respects it
-  kind          String                           // 'correction' | 'void'
+  kind          String                           // 'correction' | 'void' | 'reassign' | 'cost_standard'
   status        String   @default("pending")     // pending | approved | rejected
-  payload       String   @default("{}")          // requested input fields (correction) or {} (void)
+  // requested input fields (correction) · {} (void) · { fromCustomerId, toCustomerId, transactionIds[],
+  // priceMode:'keep'|'recalc', note } (reassign — move txns to another customer; transactionId holds the
+  // first, the payload the full list)
+  payload       String   @default("{}")
   reason        String                           // required — why the change is requested
   // Requester snapshot at submit time — server-stamped from the token, never the client body.
   requestedById   String?

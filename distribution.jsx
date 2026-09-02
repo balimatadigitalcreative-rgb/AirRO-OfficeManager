@@ -948,6 +948,16 @@ function useDistCorrection({ canPrice, onDone, flash, onFindBatch }) {
   const [voidReason, setVoidReason] = uSx('');
   const [voidSaving, setVoidSaving] = uSx(false);
   const [preview, setPreview] = uSx(null);      // server dry-run { newAmount, oldSisaBon, newSisaBon, wouldGoNegative, ... }
+  // PINDAHKAN KE PELANGGAN LAIN (reassign) — move one/several txns of ONE wrong customer to the right one.
+  const [reTxns, setReTxns] = uSx(null);        // array of txns being moved (all from the same customer)
+  const [reTo, setReTo] = uSx('');              // destination customerId
+  const [reReason, setReReason] = uSx('');      // optional
+  const [reNote, setReNote] = uSx('');          // REQUIRED (catatan)
+  const [rePrice, setRePrice] = uSx('keep');    // 'keep' | 'recalc'
+  const [reConfirm, setReConfirm] = uSx('');    // typed confirmation (destination name)
+  const [reCusts, setReCusts] = uSx([]);        // active customers for the picker
+  const [rePrev, setRePrev] = uSx(null);        // server dry-run impact
+  const [reSaving, setReSaving] = uSx(false);
   const flashFn = flash || (() => {});
   const done = () => { if (onDone) onDone(); };
 
@@ -1000,6 +1010,40 @@ function useDistCorrection({ canPrice, onDone, flash, onFindBatch }) {
     window.API.distribusi.transactions.void(voidTxn.id, { reason: voidReason.trim() })
       .then(() => { setVoidSaving(false); setVoidTxn(null); setVoidReason(''); flashFn(trD('dist.voidReqSent')); done(); })
       .catch((e) => { setVoidSaving(false); flashFn((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  };
+
+  // ── Reassign flow ──────────────────────────────────────────────────────────
+  const reFrom = reTxns && reTxns[0] ? reTxns[0].customer : null;
+  const reFromId = reTxns && reTxns[0] ? reTxns[0].customerId : null;
+  const reFleet = reTxns && reTxns[0] ? (reTxns[0].fleetId || (reTxns[0].customer && reTxns[0].customer.armada)) : null;
+  const reToCust = reCusts.find((c) => c.id === reTo) || null;
+  const openReassign = (txns) => {
+    const arr = Array.isArray(txns) ? txns : [txns];
+    setReTxns(arr); setReTo(''); setReReason(''); setReNote(''); setRePrice('keep'); setReConfirm(''); setRePrev(null);
+    // Active customers of the same fleet, minus the source, for the searchable picker.
+    const fleet = arr[0].fleetId || (arr[0].customer && arr[0].customer.armada) || undefined;
+    window.API.distribusi.customers.list(fleet, undefined, {})
+      .then((r) => setReCusts((r.data || []).filter((c) => c.active !== false && c.id !== arr[0].customerId)))
+      .catch(() => setReCusts([]));
+  };
+  const reValid = reTxns && reTo && reTo !== reFromId && reNote.trim() && reToCust && reConfirm.trim().toLowerCase() === (reToCust.name || '').trim().toLowerCase();
+  // Debounced server dry-run whenever the destination or price mode changes — the impact is server-computed.
+  uEx(() => {
+    if (!reTxns || !reTo || reTo === reFromId) { setRePrev(null); return; }
+    let alive = true;
+    const h = setTimeout(() => {
+      window.API.distribusi.reassign.preview({ fromCustomerId: reFromId, toCustomerId: reTo, transactionIds: reTxns.map((t) => t.id), priceMode: rePrice })
+        .then((r) => { if (alive) setRePrev(r.data || null); })
+        .catch(() => { if (alive) setRePrev(null); });
+    }, 200);
+    return () => { alive = false; clearTimeout(h); };
+  }, [reTxns && reTxns.map((t) => t.id).join(','), reTo, rePrice]);
+  const commitReassign = () => {
+    if (!reValid || reSaving) return;
+    setReSaving(true);
+    window.API.distribusi.reassign.submit({ fromCustomerId: reFromId, toCustomerId: reTo, transactionIds: reTxns.map((t) => t.id), priceMode: rePrice, reason: reReason.trim(), note: reNote.trim() })
+      .then(() => { setReSaving(false); setReTxns(null); setRePrev(null); flashFn(trD('dist.reassignReqSent')); done(); })
+      .catch((e) => { setReSaving(false); flashFn((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
 
   // The recomputed nominal shown to the user prefers the SERVER value (preview.newAmount) once it has
@@ -1098,9 +1142,61 @@ function useDistCorrection({ canPrice, onDone, flash, onFindBatch }) {
         </div>
       </div>
     )}
+    {/* PINDAHKAN KE PELANGGAN LAIN (reassign) — NOT a rename. Moves the selected txns to another
+        customer; both Sisa Bon adjust. Server-computed impact preview + typed confirmation + approval. */}
+    {reTxns && (
+      <div className="modal-scrim" onClick={() => setReTxns(null)} style={{ zIndex: 200 }}>
+        <div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('dist.reassignT')}</div><div style={{ fontSize: 12.5, color: 'var(--text-mut)', marginTop: 3 }}>{reFrom ? reFrom.name : ''} · {reTxns.length} {trD('dist.reassignTxnCount')}</div></div><button className="jp-icon" onClick={() => setReTxns(null)}><IconClose s={18} /></button></div>
+          <div className="modal-body">
+            <div className="dist-infobox"><IconClock s={16} /><span>{trD('dist.reassignInfo')}</span></div>
+            <label className="fld-label">{trD('dist.reassignTo')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <UI.Dropdown value={reTo} searchable placeholder={trD('dist.reassignPick')} onChange={setReTo}
+              options={reCusts.map((c) => ({ value: c.id, label: (c.code ? c.code + ' · ' : '') + c.name, search: custSearchStr(c) }))} />
+            {/* Price handling — the two customers may have different harga/galon. Default: keep the billed price. */}
+            <label className="fld-label">{trD('dist.reassignPrice')}</label>
+            <div className="seg" style={{ maxWidth: 360 }}>
+              <button type="button" className={`seg-btn ${rePrice === 'keep' ? 'on' : ''}`} onClick={() => setRePrice('keep')}>{trD('dist.reassignKeep')}</button>
+              <button type="button" className={`seg-btn ${rePrice === 'recalc' ? 'on' : ''}`} onClick={() => setRePrice('recalc')}>{trD('dist.reassignRecalc')}</button>
+            </div>
+            {/* Server-computed IMPACT — both customers' Sisa Bon before→after, gallons, and how many later
+                rows shift on each side. Never let the user confirm blind. */}
+            {rePrev && (
+              <div className="dist-reassign-impact">
+                {[rePrev.fromCustomer, rePrev.toCustomer].map((c, i) => (
+                  <div key={i} className="dist-reassign-side">
+                    <div className="dist-reassign-name">{c.code ? c.code + ' · ' : ''}{c.name}</div>
+                    <div className="dist-reassign-line"><span>{trD('dist.sisaBon')}</span><b className="tnum">{rpFull(c.sisaBonBefore)} → {rpFull(c.sisaBonAfter)}</b></div>
+                    <div className="dist-reassign-sub">{trD('dist.reassignGallons')}: {c.gallonsBefore} → {c.gallonsAfter} · {trD('dist.reassignLater', { n: c.laterRows })}</div>
+                  </div>
+                ))}
+                {rePrice === 'recalc' && rePrev.movedNewTotal !== rePrev.movedOldTotal && (
+                  <div className="dist-reassign-price">{trD('dist.reassignPriceNote')}: {rpFull(rePrev.movedOldTotal)} → {rpFull(rePrev.movedNewTotal)}</div>
+                )}
+                {rePrev.blocks && rePrev.blocks.length > 0 && (
+                  <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{rePrev.blocks.map((b) => b.type === 'invoice' ? trD('dist.reassignBlockInv', { ref: b.ref, inv: b.invoice }) : trD('dist.reassignBlockPeriod', { ref: b.ref, p: b.period })).join(' · ')}</div>
+                )}
+              </div>
+            )}
+            <label className="fld-label">{trD('dist.reassignReason')}</label>
+            <input className="fld" value={reReason} placeholder={trD('dist.reassignReasonPh')} onChange={(e) => setReReason(e.target.value)} />
+            <label className="fld-label">{trD('dist.reassignNote')} <span style={{ color: 'var(--neg)' }}>*</span></label>
+            <textarea className="fld" style={{ height: 60, padding: 12, resize: 'vertical' }} value={reNote} placeholder={trD('dist.reassignNotePh')} onChange={(e) => setReNote(e.target.value)} />
+            {reToCust && (<>
+              <label className="fld-label">{trD('dist.reassignConfirm', { name: reToCust.name })} <span style={{ color: 'var(--neg)' }}>*</span></label>
+              <input className="fld" value={reConfirm} placeholder={reToCust.name} onChange={(e) => setReConfirm(e.target.value)} />
+            </>)}
+          </div>
+          <div className="modal-foot">
+            <button className="btn btn-ghost" onClick={() => setReTxns(null)}>{trD('dist.cancel')}</button>
+            <button className="btn btn-primary" disabled={!reValid || reSaving || (rePrev && rePrev.blocks && rePrev.blocks.length > 0)} onClick={commitReassign}>{reSaving ? '…' : trD('dist.reassignSubmit')}</button>
+          </div>
+        </div>
+      </div>
+    )}
   </>);
 
-  return { openCorrect, openVoid, modals, corrTxn, voidTxn };
+  return { openCorrect, openVoid, openReassign, modals, corrTxn, voidTxn, reTxns };
 }
 
 function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, canHardDelete, canArchive, canExpense, canPrice, canHapus, refreshKey, openFormTick, onChanged, fleetScope, fleet, distFleet, setDistFleet, userName, canViewAll, canView7, canViewMonth, canViewSisaBon, maxLookback, nav, histTick }) {
@@ -2001,7 +2097,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 
       {/* SLIDE-OVER detail panel + advanced filters + bulk-cancel — rendered outside the flow. */}
       {detailTxn && !detailTxn._exp && <TxDetailPanel txn={detailTxn} custById={custById} idx={detailIdx} total={txSorted.length} canKoreksi={canKoreksi} canVoid={canVoid} canArchive={canArchive} canHardDelete={canHardDelete} userName={userName}
-        onClose={closeSlide} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => corrFlow.openCorrect(t)} onVoid={(t) => corrFlow.openVoid(t)} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
+        onClose={closeSlide} onMove={moveDetail} onPrint={(t) => window.API.distribusi.customers.get(t.customerId).then((r) => setPrintFor2({ txn: (r.data.transactions || []).find((x) => x.id === t.id) || t, custObj: r.data })).catch(() => setPrintFor2({ txn: t }))} onKoreksi={(t) => corrFlow.openCorrect(t)} onVoid={(t) => corrFlow.openVoid(t)} onReassign={(t) => corrFlow.openReassign([t])} onArchive={(t) => { setArchTxn({ ...t, toLegacy: !t.legacy }); setArchReason(''); setArchBon(false); }} onDelete={(t) => { setDelTxn(t); setDelReason(''); setDelConfirm(''); setDelPw(''); setDelErr(''); }} flash={flash} />}
       {advOpen && <TxAdvancedPanel onClose={() => setAdvOpen(false)} minAmt={minAmt} setMinAmt={setMinAmt} maxAmt={maxAmt} setMaxAmt={setMaxAmt} flagNote={flagNote} setFlagNote={setFlagNote} flagCorr={flagCorr} setFlagCorr={setFlagCorr} custFilter={custFilter} setCustFilter={setCustFilter} custOpts={custOpts} onClear={clearAll} anyFilter={anyFilter} />}
       {bulkVoid && <TxBulkModal action={bulkVoid.action} ids={bulkVoid.ids} onClose={() => setBulkVoid(null)} onDone={onBulkDone} />}
       {bulkUndo && (
@@ -2091,7 +2187,7 @@ function DistTransactions({ today, staffMode, canInput, canKoreksi, canVoid, can
 }
 
 // Slide-over transaction detail — full row info, correction/dispute trail, actions. j/k moves rows.
-function TxDetailPanel({ txn, custById, idx, total, canKoreksi, canVoid, canArchive, canHardDelete, userName, onClose, onMove, onPrint, onKoreksi, onVoid, onArchive, onDelete, flash }) {
+function TxDetailPanel({ txn, custById, idx, total, canKoreksi, canVoid, canArchive, canHardDelete, userName, onClose, onMove, onPrint, onKoreksi, onVoid, onReassign, onArchive, onDelete, flash }) {
   const t = txn;
   const voided = t.status === 'void';
   const pending = !voided && t.pendingRequest;
@@ -2124,7 +2220,8 @@ function TxDetailPanel({ txn, custById, idx, total, canKoreksi, canVoid, canArch
             {voided ? <span className="dist-badge void">{trD('tx.st.dibatalkan')}</span> : t.legacy ? <span className="dist-badge arsip">{trD('dist.arsip')}</span> : <span className="dist-badge lock"><IconLock s={10} />{trD('dist.txLocked')}</span>}
             {pending ? <span className="dist-badge pending"><IconClock s={10} />{trD('dist.pendingBadge')}</span> : null}
             {t.dispute && DISPUTE_META[t.dispute.status] ? <span className={'dist-badge ' + DISPUTE_META[t.dispute.status].cls}>{trD(DISPUTE_META[t.dispute.status].label)}</span> : null}
-            {corrections.length ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
+            {corrections.some((c) => c.kind === 'reassign') ? <span className="dist-badge corr"><IconTruck s={10} />{trD('dist.reassignBadge')}</span> : null}
+            {corrections.some((c) => c.kind !== 'reassign') ? <span className="dist-badge corr"><IconPencil s={10} />{trD('dist.corrected')}</span> : null}
           </div>
           <div className="tx-dp-amt tnum">{voided ? <s>{rpFull(amt)}</s> : rpFull(amt)}</div>
           {kv(trD('dist.fCust'), cname + (ccode ? ' · ' + ccode : ''))}
@@ -2135,7 +2232,7 @@ function TxDetailPanel({ txn, custById, idx, total, canKoreksi, canVoid, canArch
           {kv(trD('cd.expandSrc'), t.legacy ? trD('cd.srcImpor') + (t.importBatchId ? ' · ' + t.importBatchId : '') : trD('cd.srcManual'))}
           {t.note ? kv(trD('cd.expandNote'), t.note) : null}
           {voided ? kv(trD('tx.st.dibatalkan'), (t.voidReason || '—') + (t.voidedByName ? ' · ' + t.voidedByName : '')) : null}
-          {pending ? <div className="dist-infobox" style={{ marginTop: 8 }}><IconClock s={15} /><span>{trD(t.pendingRequest.kind === 'void' ? 'dist.pendVoidLine' : 'dist.pendCorrLine', { who: t.pendingRequest.requestedByName || '—' })}</span></div> : null}
+          {pending ? <div className="dist-infobox" style={{ marginTop: 8 }}><IconClock s={15} /><span>{trD(t.pendingRequest.kind === 'void' ? 'dist.pendVoidLine' : t.pendingRequest.kind === 'reassign' ? 'dist.pendReassignLine' : 'dist.pendCorrLine', { who: t.pendingRequest.requestedByName || '—' })}</span></div> : null}
           {corrections.length > 0 && <div className="tx-dp-trail"><div className="tx-dp-trail-h"><IconPencil s={12} />{trD('tx.corrTrail')}</div>{corrections.map((c, i) => <div key={i} className="tx-dp-trail-row"><b>{c.reason || '—'}</b><div className="tx-dp-trail-meta">{c.actorName || '—'} · {fmtDateShort(c.createdAt)}</div></div>)}</div>}
           {t.dispute && (t.dispute.trail || []).length > 0 && <div className="tx-dp-trail"><div className="tx-dp-trail-h"><IconWarn s={12} />{trD('disp.trailTitle')}</div>{(t.dispute.trail || []).map((x) => <div key={x.id} className="tx-dp-trail-row"><b>{dispReasonLabel(x.reason)}</b><div className="tx-dp-trail-meta">{x.raisedByName || '—'} · {fmtDateShort(x.createdAt)}{x.note ? ' · ' + x.note : ''}</div></div>)}</div>}
         </div>
@@ -2143,6 +2240,7 @@ function TxDetailPanel({ txn, custById, idx, total, canKoreksi, canVoid, canArch
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPrint(t)}><IconDownload s={13} />{trD('cd.printNota')}</button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={copy}><IconInvoice s={13} />{trD('cd.copyDetail')}</button>
           {showKoreksi && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onKoreksi(t)}><IconPencil s={13} />{trD('dist.korek')}</button>}
+          {showKoreksi && onReassign && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onReassign({ ...t, customer: { name: cname, code: ccode, armada: t.fleetId } })}><IconTruck s={13} />{trD('dist.reassignBtn')}</button>}
           {showVoid && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => onVoid(t)}><IconClose s={13} />{trD('dist.voidBtn')}</button>}
           {canArchive && !voided && !pending && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onArchive(t)}><IconInvoice s={13} />{trD(t.legacy ? 'dist.makeActive' : 'dist.makeArchive')}</button>}
           {canHardDelete && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => onDelete(t)}><IconTrash s={13} />{trD('dist.hardDelBtn')}</button>}
@@ -4089,6 +4187,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                     Bon); the server enforces the real guards. Reuses the shared engine; the modal needs
                     the customer name/code, so pass them along with the row. */}
                 {canKoreksi && !t.voided && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm" onClick={() => corrFlow.openCorrect({ ...t, customer: { name: d.name, code: d.code } })}><IconPencil s={13} />{trD(t.legacy ? 'cd.korekBtnArsip' : 'cd.korekBtn')}</button>}
+                {canKoreksi && !t.voided && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm" onClick={() => corrFlow.openReassign([{ ...t, customer: { name: d.name, code: d.code, armada: d.armada || t.fleetId } }])}><IconTruck s={13} />{trD('dist.reassignBtn')}</button>}
                 {canVoid && !t.voided && !t.pendingRequest && <button type="button" className="btn btn-ghost btn-sm danger" onClick={() => corrFlow.openVoid({ ...t, customer: { name: d.name, code: d.code } })}><IconClose s={13} />{trD('cd.voidBtn')}</button>}
                 {/* Dispute action — capability-gated (hidden, not disabled). Only when the row isn't
                     already under an active dispute and isn't voided/pelunasan-loss. */}
@@ -4116,6 +4215,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
       adjustments.forEach((a) => { activity.push({ at: a.createdAt, t: trD('cd.actAdjust', { kind: a.kind === 'bon' ? trD('adj.kindBon') : trD('adj.kindGalon') }) + ' · ' + (a.kind === 'bon' ? rpFull(a.before) + '→' + rpFull(a.after) : numX(a.before) + '→' + numX(a.after)), who: a.createdByName, tone: 'adj' }); if (a.approvedAt) activity.push({ at: a.approvedAt, t: trD('cd.actAdjustApproved'), who: a.approvedByName, tone: 'adj' }); });
       (d.priceAdjustments || []).forEach((b) => activity.push({ at: b.createdAt, t: trD('cd.actPrice') + ' · ' + rpFull(b.oldPrice) + '→' + rpFull(b.newPrice), who: b.actorName, tone: 'bon' }));
       txAll.filter((t) => t.voided).forEach((t) => activity.push({ at: t.voidedAt, t: trD('cd.actVoid') + ' · ' + txnCode(t), who: t.voidedByName, tone: 'rev' }));
+      // Reassigned INTO this customer — the moved txn now here carries a 'reassign' correction (old→this).
+      txAll.forEach((t) => (t.corrections || []).filter((c) => c.kind === 'reassign').forEach((c) => { let ov = {}; try { ov = JSON.parse(c.oldValue || '{}'); } catch (e) {} activity.push({ at: c.createdAt, t: trD('cd.actReassignIn', { from: ov.customerCode || ov.customerName || '—' }) + ' · ' + txnCode(t), who: c.actorName, tone: 'adj' }); }));
       // Self-approved disputes surface here with the badge (approver == the txn's original handler).
       txAll.filter((t) => t.dispute && t.dispute.selfApproved && t.dispute.approvedAt).forEach((t) => activity.push({ at: t.dispute.approvedAt, t: trD('cd.actSelfApprove') + ' · ' + txnCode(t), who: t.dispute.approvedByName, tone: 'rev', self: true }));
     }
@@ -6893,13 +6994,16 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
               return (
                 <div key={r.id} className={`card cr-card ${r.status}`}>
                   <div className="cr-head">
-                    <span className={`cr-kind ${r.kind}`}>{r.kind === 'void' ? <><IconClose s={12} />{trD('cr.kindVoid')}</> : <><IconPencil s={12} />{trD('cr.kindCorrection')}</>}</span>
-                    <span className="cr-ref">{r.txnRef}</span>
-                    <span className="cr-cust">{r.customerCode ? r.customerCode + ' · ' : ''}{r.customerName}</span>
+                    <span className={`cr-kind ${r.kind}`}>{r.kind === 'void' ? <><IconClose s={12} />{trD('cr.kindVoid')}</> : r.kind === 'reassign' ? <><IconTruck s={12} />{trD('cr.kindReassign')}</> : <><IconPencil s={12} />{trD('cr.kindCorrection')}</>}</span>
+                    <span className="cr-ref">{r.kind === 'reassign' ? trD('dist.reassignTxnN', { n: r.count }) : r.txnRef}</span>
+                    <span className="cr-cust">{r.kind === 'reassign' ? ((r.fromCustomerCode ? r.fromCustomerCode + ' · ' : '') + r.fromCustomerName + ' → ' + (r.toCustomerCode ? r.toCustomerCode + ' · ' : '') + r.toCustomerName) : (r.customerCode ? r.customerCode + ' · ' : '') + r.customerName}</span>
                     <span style={{ flex: 1 }} />
                     {r.selfApproved && <span className="cr-selfbadge" title={trD('cr.selfApprovedHint')}><IconWarn s={11} />{trD('cr.selfApprovedBadge')}</span>}
                     {r.status !== 'pending' && statusBadge(r.status)}
                   </div>
+                  {r.kind === 'reassign' ? (
+                    <div className="cr-reassign">{trD('dist.reassignPriceMode')}: <b>{r.priceMode === 'recalc' ? trD('dist.reassignRecalc') : trD('dist.reassignKeep')}</b>{r.note ? <span className="cr-reassign-note"> · {r.note}</span> : null}</div>
+                  ) : (<>
                   <div className="cr-amounts">
                     <div><span>{trD('dist.total')}</span><b className="tnum">{rpFull(r.current ? r.current.amount : 0)}</b></div>
                     <div className="cr-arrow"><IconCaret s={16} style={{ transform: 'rotate(-90deg)' }} /></div>
@@ -6907,6 +7011,7 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
                     <div className="cr-delta"><span>{trD('dist.korekDelta')}</span><b className={`tnum ${down ? 'amt-neg' : r.delta > 0 ? 'amt-pos' : ''}`}>{r.delta >= 0 ? '+' : ''}{rpFull(r.delta)}</b></div>
                   </div>
                   {fieldChips(r)}
+                  </>)}
                   {/* METHOD flip + its sisa-bon consequence — the decisive line for the approver. */}
                   {r.methodChanged && (
                     <div className={`cr-method ${r.wouldGoNegative ? 'warn' : ''}`}>

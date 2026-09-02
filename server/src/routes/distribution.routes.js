@@ -88,6 +88,11 @@ router.post('/transactions', requireCap('distribusiInput'), validate({ body: ctr
 router.post('/transactions/:id/corrections/preview', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionPreviewSchema }), ctrl.previewCorrection);
 router.post('/transactions/:id/corrections', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.correctionSchema }), ctrl.requestCorrection);
 router.post('/transactions/:id/void', requireCap('distribusiVoid'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.voidSchema }), ctrl.requestVoid);
+// PINDAHKAN KE PELANGGAN LAIN (reassign) — submit under distribusiKoreksi (same tier as a correction);
+// approval reuses the shared /change-requests/:id/approve|reject below. Defined BEFORE the ':id' routes
+// so 'reassign' is never captured as an id.
+router.post('/change-requests/reassign/preview', requireCap('distribusiKoreksi'), validate({ body: ctrl.schemas.reassignPreviewSchema }), ctrl.previewReassign);
+router.post('/change-requests/reassign', requireCap('distribusiKoreksi'), validate({ body: ctrl.schemas.reassignSchema }), ctrl.requestReassign);
 // Change-request inbox + decisions — approver-only (distribusiApprove), fleet-scoped, server-enforced.
 router.get('/change-requests', requireCap('distribusiApprove'), validate({ query: ctrl.schemas.changeReqQuery }), ctrl.listChangeRequests);
 router.post('/change-requests/:id/approve', requireCap('distribusiApprove'), validate({ params: ctrl.schemas.idParams }), ctrl.approveChangeRequest);

@@ -15,6 +15,7 @@ const { resolvePerms, viewWindowFrom, VIEW_CAPS, addDaysISO } = require('../conf
 const { cycleOf } = require('./cashbon.rules');   // payroll cycle (16→15) for the "periode berjalan" scope
 const config = require('../config/env');           // ACCOUNTING v2 flag — live journal posting
 const acc = require('./accounting.service');       // the double-entry posting service (transaction-aware)
+const period = require('./period.service');        // Tutup Buku — a reassign into a closed month is blocked
 const { resolveUnitId } = require('./businessUnit.service');   // business-unit label (defaults to 'air')
 const { resilientFindMany } = require('../lib/resilientFind');   // one bad row must not blank a whole list
 
@@ -1604,6 +1605,25 @@ async function changeRequestClient(req, txnMaybe) {
       selfApproved: !!req.selfApproved, createdAt: req.createdAt ? new Date(req.createdAt).getTime() : null,
     };
   }
+  if (req.kind === 'reassign') {
+    let p = {}; try { p = JSON.parse(req.payload || '{}'); } catch (e) {}
+    const [fromC, toC] = await Promise.all([
+      p.fromCustomerId ? prisma.customer.findUnique({ where: { id: p.fromCustomerId }, select: { name: true, code: true } }) : null,
+      p.toCustomerId ? prisma.customer.findUnique({ where: { id: p.toCustomerId }, select: { name: true, code: true } }) : null,
+    ]);
+    return {
+      id: req.id, kind: 'reassign', status: req.status, fleetId: req.fleetId || '', reason: req.reason,
+      fromCustomerId: p.fromCustomerId || null, toCustomerId: p.toCustomerId || null,
+      fromCustomerName: fromC ? fromC.name : '', fromCustomerCode: fromC ? fromC.code : '',
+      toCustomerName: toC ? toC.name : '', toCustomerCode: toC ? toC.code : '',
+      customerName: fromC ? fromC.name : '', txnRef: shortRefServer(req.transactionId),
+      transactionIds: p.transactionIds || [], count: (p.transactionIds || []).length, priceMode: p.priceMode || 'keep', note: p.note || '',
+      requestedBy: req.requestedByName ? { name: req.requestedByName, role: req.requestedByRole || null } : null, requestedById: req.requestedById || null,
+      decidedBy: req.decidedByName ? { name: req.decidedByName, role: req.decidedByRole || null } : null,
+      decisionNote: req.decisionNote || '', decidedAt: req.decidedAt ? new Date(req.decidedAt).getTime() : null,
+      selfApproved: !!req.selfApproved, createdAt: req.createdAt ? new Date(req.createdAt).getTime() : null,
+    };
+  }
   const txn = txnMaybe || await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true, code: true } } } });
   let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
   const sale = txn && isGallonSale(txn);
@@ -1662,6 +1682,14 @@ async function pendingRequestsByTxn(ids) {
     id: p.id, kind: p.kind, reason: p.reason || '', requestedByName: p.requestedByName || null, requestedByRole: p.requestedByRole || null,
     requestedById: p.requestedById || null, createdAt: p.createdAt ? new Date(p.createdAt).getTime() : null,
   }; });
+  // A REASSIGN request keys to only its first txn in `transactionId`, but it pends EVERY txn in its
+  // payload — surface the badge on all of them so no moved row looks free to edit while pending.
+  const idset = new Set(ids);
+  const reassigns = await prisma.distChangeRequest.findMany({ where: { status: 'pending', kind: 'reassign' }, select: { id: true, payload: true, reason: true, requestedByName: true, requestedByRole: true, requestedById: true, createdAt: true } });
+  reassigns.forEach((p) => { let ids2 = []; try { ids2 = JSON.parse(p.payload || '{}').transactionIds || []; } catch (e) {} ids2.forEach((tid) => { if (idset.has(tid) && !out[tid]) out[tid] = {
+    id: p.id, kind: 'reassign', reason: p.reason || '', requestedByName: p.requestedByName || null, requestedByRole: p.requestedByRole || null,
+    requestedById: p.requestedById || null, createdAt: p.createdAt ? new Date(p.createdAt).getTime() : null,
+  }; }); });
   return out;
 }
 
@@ -1780,6 +1808,9 @@ async function decideChangeRequest(id, decision, body, actor) {
     await logAudit('koreksi', `Setujui aktivasi standar biaya${isSelfStd ? ' [MANDIRI]' : ''}`, `standar ${payload.standardId || req.transactionId} v${payload.version || '?'}`, snap, '', isSelfStd);
     return changeRequestClient(updated);
   }
+  // REASSIGN (move transactions to another customer) reuses this same engine (inbox/approve/reject/audit)
+  // but spans TWO customers + possibly several txns — handled in its own applier.
+  if (req.kind === 'reassign') return decideReassign(req, decision, body, actor, snap);
   const txn = await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true } } } });
   if (!txn) throw ApiError.notFound('Transaction not found');
   // SEGREGATION OF DUTIES — a requester may not approve their OWN request, UNLESS the owner granted
@@ -1889,6 +1920,148 @@ async function decideChangeRequest(id, decision, body, actor) {
   const fresh = await prisma.distChangeRequest.findUnique({ where: { id } });
   const out = await changeRequestClient(fresh);
   return { ...out, sisaBon: await customerBonBalance(txn.customerId), gallonsHeld: await gallonBalanceOf(txn.customerId) };
+}
+
+// ── PINDAHKAN KE PELANGGAN LAIN (reassign one/several transactions to another customer) ──────────────
+// NOT a rename: it MOVES selected DistTransactions from the wrong customer to the right one, so BOTH
+// customers' Sisa Bon, running balances and gallon ledger follow and the AR reclass posts on both sides.
+// Reuses the DistChangeRequest approval engine (kind='reassign'); applied only on approval.
+const PRICE_MODES = ['keep', 'recalc'];
+
+// The SAME function preview and apply both call — so the dry-run is exactly what the books will do.
+// Loads both customers + the txns, runs the structural guards (throw), and returns the full impact plus
+// a `blocks[]` of soft blockers (issued invoice / closed period) the caller decides to throw on.
+async function computeReassign(body, actor) {
+  const fromId = String(body.fromCustomerId || ''), toId = String(body.toCustomerId || '');
+  const txnIds = Array.isArray(body.transactionIds) ? [...new Set(body.transactionIds.map(String))] : [];
+  const priceMode = PRICE_MODES.includes(body.priceMode) ? body.priceMode : 'keep';
+  if (!fromId || !toId) throw ApiError.badRequest('Pilih pelanggan asal dan tujuan.');
+  if (fromId === toId) throw ApiError.badRequest('Pelanggan tujuan harus berbeda dari pelanggan asal.');
+  if (!txnIds.length) throw ApiError.badRequest('Pilih minimal satu transaksi untuk dipindahkan.');
+  const [fromC, toC] = await Promise.all([prisma.customer.findUnique({ where: { id: fromId } }), prisma.customer.findUnique({ where: { id: toId } })]);
+  if (!fromC) throw ApiError.notFound('Pelanggan asal tidak ditemukan.');
+  if (!toC) throw ApiError.notFound('Pelanggan tujuan tidak ditemukan.');
+  if (toC.active === false) throw ApiError.badRequest('Pelanggan tujuan non-aktif — pilih pelanggan yang aktif.');
+  if (!fleetAllows(actor, fromC.armada)) throw ApiError.notFound('Pelanggan asal tidak ditemukan.');   // out of fleet scope
+  const txns = await prisma.distTransaction.findMany({ where: { id: { in: txnIds } }, include: { corrections: true, customer: { select: { name: true, code: true } } } });
+  if (txns.length !== txnIds.length) throw ApiError.badRequest('Sebagian transaksi tidak ditemukan.');
+  for (const t of txns) {
+    if (t.customerId !== fromId) throw ApiError.badRequest('Semua transaksi harus milik pelanggan asal yang sama.');
+    if (t.status === 'void') throw ApiError.badRequest('Transaksi yang sudah dibatalkan tidak bisa dipindahkan.');
+    if (!fleetAllows(actor, t.fleetId)) throw ApiError.notFound('Transaksi di luar akses Anda.');
+  }
+  const ded = await disputeDeductions({ customerId: fromId });
+  const destPrice = Number(toC.masterPrice || 0);
+  let fromBonDelta = 0, toBonDelta = 0, gallonNet = 0, movedOldTotal = 0, movedNewTotal = 0;
+  const rows = [];
+  for (const t of txns) {
+    const sale = isGallonSale(t);
+    const pd = priceDelta(t.corrections);
+    const recalcAmount = (sale && priceMode === 'recalc') ? int(t.qty * destPrice) : t.amount;
+    let g = { gallonOut: 0, gallonIn: 0 };
+    if (sale) g = await currentGallonsOf(t.id);
+    gallonNet += (g.gallonOut || 0) - (g.gallonIn || 0);
+    if (t.bonCounted && t.method === 'bon') {
+      fromBonDelta -= Math.max(0, t.amount + pd - (ded[t.id] || 0));
+      toBonDelta += Math.max(0, recalcAmount + pd - (ded[t.id] || 0));
+    } else if (t.bonCounted && t.method === 'pelunasan') {
+      fromBonDelta += t.amount; toBonDelta -= t.amount;   // a pelunasan lowers sisa bon → removing it RAISES `from`
+    }
+    movedOldTotal += t.amount; movedNewTotal += recalcAmount;
+    rows.push({ id: t.id, ref: shortRefServer(t.id), txnDate: t.txnDate, qty: t.qty, method: t.method, sale,
+      oldAmount: t.amount, destPrice, recalcAmount, priceChanges: recalcAmount !== t.amount, gallonOut: g.gallonOut || 0, gallonIn: g.gallonIn || 0 });
+  }
+  const [fromRaw, toRaw, fromGal, toGal] = await Promise.all([acc.customerBonRaw(fromId), acc.customerBonRaw(toId), gallonBalanceOf(fromId), gallonBalanceOf(toId)]);
+  const earliest = rows.map((r) => r.txnDate).sort()[0] || '';
+  const movedSet = new Set(rows.map((r) => r.id));
+  const laterCount = async (cid, exclude) => {
+    const rr = await prisma.distTransaction.findMany({ where: { customerId: cid, ...BON_TXN }, select: { id: true, txnDate: true } });
+    return rr.filter((r) => (r.txnDate || '') >= earliest && !exclude.has(r.id)).length;
+  };
+  const blocks = [];
+  for (const t of txns) {
+    const inv = await invoiceOf(t.id);
+    if (inv) blocks.push({ txnId: t.id, ref: shortRefServer(t.id), type: 'invoice', invoice: inv });
+    let closed = false; try { await period.assertPeriodOpen(t.txnDate, 'memindahkan transaksi'); } catch (e) { closed = true; }
+    if (closed) blocks.push({ txnId: t.id, ref: shortRefServer(t.id), type: 'period', period: (t.txnDate || '').slice(0, 7) });
+  }
+  return {
+    fromCustomer: { id: fromId, name: fromC.name, code: fromC.code, sisaBonBefore: Math.max(0, fromRaw), sisaBonAfter: Math.max(0, fromRaw + fromBonDelta), gallonsBefore: fromGal, gallonsAfter: fromGal - gallonNet, laterRows: await laterCount(fromId, movedSet) },
+    toCustomer: { id: toId, name: toC.name, code: toC.code, sisaBonBefore: Math.max(0, toRaw), sisaBonAfter: Math.max(0, toRaw + toBonDelta), gallonsBefore: toGal, gallonsAfter: toGal + gallonNet, laterRows: await laterCount(toId, new Set()) },
+    priceMode, rows, count: rows.length, movedOldTotal, movedNewTotal, blocks,
+  };
+}
+
+async function previewReassign(body, actor) { return computeReassign(body, actor); }   // persists nothing
+
+async function requestReassign(body, actor) {
+  const impact = await computeReassign(body, actor);
+  if (impact.blocks.length) {
+    const inv = impact.blocks.find((b) => b.type === 'invoice');
+    if (inv) throw ApiError.badRequest(`Transaksi ${inv.ref} ada di dalam faktur ${inv.invoice} — pakai jalur nota kredit, bukan pemindahan.`, { blocks: impact.blocks });
+    throw ApiError.badRequest('Periode salah satu transaksi sudah ditutup (Tutup Buku) — tidak bisa dipindahkan.', { blocks: impact.blocks });
+  }
+  const note = String(body.note || '').trim();
+  if (!note) throw ApiError.badRequest('Catatan wajib diisi.');   // catatan REQUIRED (reason optional)
+  const txnIds = impact.rows.map((r) => r.id);
+  const pendings = await prisma.distChangeRequest.findMany({ where: { status: 'pending' }, select: { transactionId: true, kind: true, payload: true } });
+  for (const p of pendings) {
+    const ids = new Set([p.transactionId]);
+    if (p.kind === 'reassign') { try { (JSON.parse(p.payload || '{}').transactionIds || []).forEach((x) => ids.add(x)); } catch (e) {} }
+    if (txnIds.some((x) => ids.has(x))) throw ApiError.badRequest('Sebagian transaksi sudah menunggu persetujuan.');
+  }
+  const snap = await actorSnap(actor);
+  const fleetId = (await prisma.distTransaction.findUnique({ where: { id: txnIds[0] }, select: { fleetId: true } })).fleetId || '';
+  const payload = { fromCustomerId: impact.fromCustomer.id, toCustomerId: impact.toCustomer.id, transactionIds: txnIds, priceMode: impact.priceMode, note, reason: String(body.reason || '').trim() };
+  const req = await prisma.distChangeRequest.create({ data: {
+    transactionId: txnIds[0], fleetId, kind: 'reassign', status: 'pending', payload: JSON.stringify(payload), reason: note,
+    requestedById: snap.actorId, requestedByName: snap.actorName, requestedByRole: snap.actorRole,
+  } });
+  await logAudit('koreksi', `Pengajuan pindah pelanggan: ${impact.fromCustomer.name} → ${impact.toCustomer.name}`, `${txnIds.length} transaksi · harga: ${impact.priceMode} · ${note}`, snap, fleetId);
+  return changeRequestClient(req);
+}
+
+async function decideReassign(req, decision, body, actor, snap) {
+  let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
+  if (decision === 'reject') {
+    const note = String(body.note || '').trim();
+    if (!note) throw ApiError.badRequest('Alasan penolakan wajib diisi.');
+    const updated = await prisma.distChangeRequest.update({ where: { id: req.id }, data: { status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date() } });
+    await logAudit('koreksi', 'Tolak pindah pelanggan', note, snap, req.fleetId);
+    return changeRequestClient(updated);
+  }
+  // approve → re-validate against the CURRENT state, then apply atomically.
+  const impact = await computeReassign({ fromCustomerId: payload.fromCustomerId, toCustomerId: payload.toCustomerId, transactionIds: payload.transactionIds, priceMode: payload.priceMode }, actor);
+  if (impact.blocks.length) {
+    const inv = impact.blocks.find((b) => b.type === 'invoice');
+    throw ApiError.badRequest(inv ? `Transaksi ${inv.ref} kini ada di faktur ${inv.invoice} — tidak bisa dipindahkan.` : 'Periode transaksi sudah ditutup — tidak bisa dipindahkan.', { blocks: impact.blocks });
+  }
+  const isSelf = !!(req.requestedById && actor && req.requestedById === actor.id);
+  if (isSelf) assertSelfApprovalAllowed(snap, impact.movedOldTotal, 'pemindahan');
+  const fromId = impact.fromCustomer.id, toId = impact.toCustomer.id, priceMode = impact.priceMode;
+  await prisma.$transaction(async (db) => {
+    for (const r of impact.rows) {
+      const data = { customerId: toId };
+      if (r.sale && priceMode === 'recalc' && r.recalcAmount !== r.oldAmount) { data.unitPriceLocked = r.destPrice; data.amount = r.recalcAmount; }
+      await db.distTransaction.update({ where: { id: r.id }, data });
+      await db.gallonMovement.updateMany({ where: { transactionId: r.id, type: { in: ['delivery_out', 'return_in'] } }, data: { customerId: toId } });   // gallon ledger carries customerId
+      await db.correction.create({ data: { transactionId: r.id, reason: req.reason, kind: 'reassign', byStaff: false,
+        oldValue: JSON.stringify({ customerId: fromId, customerName: impact.fromCustomer.name, customerCode: impact.fromCustomer.code, amount: r.oldAmount }),
+        newValue: JSON.stringify({ customerId: toId, customerName: impact.toCustomer.name, customerCode: impact.toCustomer.code, amount: r.recalcAmount }),
+        actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
+      if (config.accountingV2 && r.recalcAmount !== r.oldAmount) {
+        const updated = await db.distTransaction.findUnique({ where: { id: r.id } });
+        await acc.reconcileDistTxn(updated, `reassign:${req.id}`, actor, db);   // recalc amount → adjusting journal (never edits the original)
+      }
+    }
+    await db.distChangeRequest.update({ where: { id: req.id }, data: { status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelf } });
+    if (config.accountingV2) { await acc.postReceivablesReclass(fromId, actor, db); await acc.postReceivablesReclass(toId, actor, db); }   // Piutang == Σ Sisa Bon on BOTH sides
+  });
+  await logAudit('koreksi', `Setujui pindah pelanggan${isSelf ? ' [MANDIRI]' : ''}: ${impact.fromCustomer.name} → ${impact.toCustomer.name}`,
+    `${impact.rows.length} transaksi · Sisa Bon ${impact.fromCustomer.name} ${impact.fromCustomer.sisaBonBefore}→${impact.fromCustomer.sisaBonAfter}; ${impact.toCustomer.name} ${impact.toCustomer.sisaBonBefore}→${impact.toCustomer.sisaBonAfter} · harga: ${priceMode}${isSelf ? ' · PERSETUJUAN MANDIRI' : ''}`, snap, req.fleetId, isSelf);
+  const fresh = await prisma.distChangeRequest.findUnique({ where: { id: req.id } });
+  const out = await changeRequestClient(fresh);
+  return { ...out, fromSisaBon: await customerBonBalance(fromId), toSisaBon: await customerBonBalance(toId) };
 }
 
 // ── PELUNASAN TIDAK DITERIMA (payment not received) ──────────────────────────────
@@ -4350,7 +4523,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
-  requestChange, previewCorrection, listChangeRequests, decideChangeRequest,
+  requestChange, previewCorrection, listChangeRequests, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,

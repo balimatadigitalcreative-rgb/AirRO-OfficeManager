@@ -300,6 +300,13 @@
         approve: (id, body) => req('POST', '/distribusi/change-requests/' + id + '/approve', body || {}),   // body: { confirmNegative? }
         reject: (id, note) => req('POST', '/distribusi/change-requests/' + id + '/reject', { note }),
       },
+      // PINDAHKAN KE PELANGGAN LAIN (reassign) — move txns to another customer. Submit under
+      // distribusiKoreksi; approval reuses changeRequests.approve/reject. Body:
+      // { fromCustomerId, toCustomerId, transactionIds[], priceMode:'keep'|'recalc', reason?, note }.
+      reassign: {
+        preview: (body) => req('POST', '/distribusi/change-requests/reassign/preview', body),   // server dry-run impact + blocks
+        submit: (body) => req('POST', '/distribusi/change-requests/reassign', body),
+      },
       // Customer invoices / notas (documents). create/list are per-customer; get by id.
       invoices: {
         create: (customerId, data) => req('POST', '/distribusi/customers/' + customerId + '/invoices', data || {}),
