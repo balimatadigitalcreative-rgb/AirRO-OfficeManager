@@ -1928,7 +1928,7 @@ function FApp() {
                   </div>
                 )}
                 <div className="txn-splitnote">{tr('txn.splitNote')}</div>
-                {p.seeMoney && <FIN.TxnSummary tab={txnTab} income={tabSum.income} expense={tabSum.expense} combinedIncome={combined.income} combinedExpense={combined.expense} />}
+                {p.seeMoney && <FIN.TxnSummary tab={txnTab} period={periodLbl} income={tabSum.income} expense={tabSum.expense} combinedIncome={combined.income} combinedExpense={combined.expense} />}
                 <div style={{ marginTop: 16 }}>
                   {txnTab === 'setoran'
                     ? <FIN.SetoranMirror rows={setoranRowsPeriod} onOpenDist={openDist} />

@@ -501,10 +501,12 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
 // Per-tab summary: the ACTIVE tab's own income/expense/net ("Sesuai tab aktif"), plus a persistent
 // combined line so splitting the view never hides the real cash position. The combined figures are
 // the period's full total — identical to the old single list.
-function TxnSummary({ tab, income, expense, combinedIncome, combinedExpense }) {
+function TxnSummary({ tab, income, expense, combinedIncome, combinedExpense, period }) {
   // Label the per-tab total with EXACTLY what it covers, so a partial tab is never mistaken for the
   // whole. The combined line (== Ringkasan Pemasukan/Pengeluaran) is shown alongside on a partial tab
   // so the real position is always in view; on "Semua" the per-tab total already IS the combined.
+  // These are PERIOD figures (only entries dated in the selected period — no carry-over), so they wear
+  // the period chip; the cumulative cash position lives in Kas & Bank / the "Saldo Berjalan" column.
   const perLbl = tab === 'operasional' ? trF('txn.perOps') : tab === 'setoran' ? trF('txn.perSetoran') : trF('txn.perAll');
   const row = (lbl, inc, exp, cls) => (
     <div className={`txn-sum-row ${cls}`}>
@@ -516,6 +518,7 @@ function TxnSummary({ tab, income, expense, combinedIncome, combinedExpense }) {
   );
   return (
     <div className="txn-summary card">
+      {period && <div className="txn-sum-period"><span className="period-chip">{period}</span></div>}
       {row(perLbl, income, expense, 'txn-sum-tab')}
       {tab !== 'semua' && row(trF('txn.combined'), combinedIncome, combinedExpense, 'txn-sum-combined')}
     </div>
@@ -549,7 +552,7 @@ function OperasionalTable({ entries, accounts, catMap, canEdit, canDelete, onEdi
         <table className="fin-table fin-cards txn-ops-table">
           <thead><tr>
             <th className="fin-th">{trF('ms.date')}</th><th className="fin-th">{trF('txn.cat')}</th><th className="fin-th">{trF('txn.acct')}</th><th className="fin-th">{trF('ms.desc')}</th>
-            <th className="fin-th fin-r">{trF('ms.in')}</th><th className="fin-th fin-r">{trF('ms.out')}</th><th className="fin-th fin-r">{trF('txn.run')}</th>
+            <th className="fin-th fin-r">{trF('ms.in')}</th><th className="fin-th fin-r">{trF('ms.out')}</th><th className="fin-th fin-r">{trF('txn.run')} <span className="th-cum">{trF('txn.cumTag')}</span></th>
             <th className="fin-th">{trF('txn.proof')}</th>{actionsCol && <th className="fin-th" aria-label={trF('a11y.actions') || ''}></th>}
           </tr></thead>
           <tbody>

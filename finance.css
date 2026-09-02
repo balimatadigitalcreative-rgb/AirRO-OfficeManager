@@ -4515,3 +4515,8 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .acct-neg-banner { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0 0 12px; padding: 10px 14px; border-radius: var(--r-md, 12px); background: #FBEEDB; color: #8A5A12; font-size: 12.5px; line-height: 1.35; border: 1px solid #F0D9B5; }
 .acct-neg-banner svg { flex: 0 0 auto; }
 .acct-neg-banner .btn { margin-left: auto; }
+/* Period vs cumulative labelling: period figures wear the period chip; cumulative columns wear a "KINI"
+   tag so a running balance is never misread as a monthly total. */
+.txn-sum-period { margin-bottom: 8px; }
+.period-chip { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: var(--mint-100); color: var(--green-800); font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.th-cum { font-size: 9px; font-weight: 800; color: var(--text-faint); letter-spacing: .04em; padding: 1px 5px; border: 1px solid var(--border); border-radius: 999px; margin-left: 4px; vertical-align: middle; }

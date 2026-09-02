@@ -57,3 +57,35 @@ describe('Ringkasan totals === Transaksi totals (shared reducer, same scope)', (
     expect(all.expense).toBe(370000);
   });
 });
+
+describe('NO CARRY-OVER — a period total is exactly its own period, never cumulative', () => {
+  // Two months of data. January must never absorb February (the reported suspicion).
+  const jan = [
+    { id: 'j1', type: 'income', amount: 1000000, date: '2026-01-10' },
+    { id: 'j2', type: 'expense', amount: 400000, date: '2026-01-20' },
+  ];
+  const feb = [
+    { id: 'f1', type: 'income', amount: 7000000, date: '2026-02-05' },
+    { id: 'f2', type: 'expense', amount: 2500000, date: '2026-02-15' },
+  ];
+  const monthTotals = (rows, ym) => FTOT.periodTotals(rows, ym + '-01', ym + '-31', false);
+
+  it('a month total equals the manual sum of ONLY that month\'s rows', () => {
+    const j = monthTotals([...jan, ...feb], '2026-01');
+    expect(j.income).toBe(1000000);   // NOT 8,000,000
+    expect(j.expense).toBe(400000);   // NOT 2,900,000
+  });
+
+  it('adding February\'s entries does NOT change January\'s figures', () => {
+    const janAlone = monthTotals(jan, '2026-01');
+    const janWithFeb = monthTotals([...jan, ...feb], '2026-01');
+    expect(janWithFeb).toEqual(janAlone);   // no carry-over, no leakage
+  });
+
+  it('the year total is the sum of its months (a range sums exactly its range)', () => {
+    const all = [...jan, ...feb];
+    const year = FTOT.periodTotals(all, '2026-01-01', '2026-12-31', false);
+    const sumMonths = ['2026-01', '2026-02'].reduce((a, ym) => { const t = monthTotals(all, ym); return { income: a.income + t.income, expense: a.expense + t.expense }; }, { income: 0, expense: 0 });
+    expect(year).toEqual(sumMonths);
+  });
+});

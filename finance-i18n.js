@@ -737,7 +737,7 @@
       // entries list
       'entries.search': 'Search entries…', 'entries.all': 'all', 'entries.income': 'income',
       'entries.expense': 'expense', 'entries.none': 'No entries found.', 'entries.titleMonth': 'Entries · {m}', 'entries.tabRecords': 'Records', 'entries.editSetoran': 'Auto from Setoran — manage there', 'entries.derivedInfo': 'This entry is auto-generated from Setoran — edit it in the Setoran screen.',
-      'txn.tabAll': 'All', 'txn.tabSetoran': 'Deposits', 'txn.tabOps': 'Operational', 'txn.new': 'New Transaction',
+      'txn.tabAll': 'All', 'txn.tabSetoran': 'Deposits', 'txn.tabOps': 'Operational', 'txn.new': 'New Transaction', 'txn.cumTag': 'to date',
       'txn.perOps': 'Operational only · deposits excluded', 'txn.perSetoran': 'Deposits only · operational excluded', 'txn.perAll': 'All sources (deposits + operational)',
       'txn.combined': 'Combined — matches Ringkasan',
       'txn.splitNote': 'Deposits and operational entries are split for display only — reports still combine both.',
@@ -1612,7 +1612,7 @@
       'recent.title': 'Catatan Terbaru', 'common.viewall': 'Lihat semua', 'common.seeall': 'Lihat semua',
       'entries.search': 'Cari catatan…', 'entries.all': 'semua', 'entries.income': 'pemasukan',
       'entries.expense': 'pengeluaran', 'entries.none': 'Catatan tidak ditemukan.', 'entries.titleMonth': 'Catatan · {m}', 'entries.tabRecords': 'Catatan', 'entries.editSetoran': 'Otomatis dari Setoran — kelola di sana', 'entries.derivedInfo': 'Catatan ini otomatis dari Setoran — ubah di layar Setoran.',
-      'txn.tabAll': 'Semua', 'txn.tabSetoran': 'Setoran', 'txn.tabOps': 'Operasional', 'txn.new': 'Transaksi Baru',
+      'txn.tabAll': 'Semua', 'txn.tabSetoran': 'Setoran', 'txn.tabOps': 'Operasional', 'txn.new': 'Transaksi Baru', 'txn.cumTag': 'KINI',
       'txn.perOps': 'Operasional saja · setoran tidak termasuk', 'txn.perSetoran': 'Setoran saja · operasional tidak termasuk', 'txn.perAll': 'Semua sumber (setoran + operasional)',
       'txn.combined': 'Gabungan — sama dengan Ringkasan',
       'txn.splitNote': 'Setoran dan operasional dipisah untuk tampilan saja — laporan tetap menggabungkan keduanya.',
