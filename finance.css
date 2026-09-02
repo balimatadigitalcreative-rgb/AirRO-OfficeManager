@@ -4511,3 +4511,7 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .entry-row-link:hover { background: var(--card-soft); }
 .entry-row-link:focus-visible { outline: 2px solid var(--green-600); outline-offset: -2px; }
 .entry-golink { display: inline-flex; align-items: center; color: var(--text-faint); }
+/* D2 — opening-balance-missing banner on an account's transaction list (negative running balance). */
+.acct-neg-banner { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0 0 12px; padding: 10px 14px; border-radius: var(--r-md, 12px); background: #FBEEDB; color: #8A5A12; font-size: 12.5px; line-height: 1.35; border: 1px solid #F0D9B5; }
+.acct-neg-banner svg { flex: 0 0 auto; }
+.acct-neg-banner .btn { margin-left: auto; }

@@ -1398,6 +1398,27 @@ function FApp() {
   // detail; filter them to the active period. Read-only — corrections live in Distribusi → Setoran.
   const setoranRowsPeriod = uMh(() => (setoran || []).filter((r) => r.date >= range.start && r.date <= range.end), [setoran, range.start, range.end]);
 
+  // "Saldo Berjalan" in the Operasional table = the REAL running balance of each row's OWN account
+  // (opening + that account's movements — every non-reference entry + transfers — chronologically up to
+  // the row). So a funded account reads a true positive balance; an account whose opening was never
+  // entered reads negative (never hidden — the D2 banner + invariant #12 explain it). Keyed by entry id.
+  const opsRunningById = uMh(() => {
+    const ids = new Set(accounts.map((a) => a.id));
+    const primary = accounts.length ? accounts[0].id : null;
+    const acctOf = (e) => (!e.acct ? primary : (ids.has(e.acct) ? e.acct : null));
+    const bal = {}; accounts.forEach((a) => { bal[a.id] = +a.opening || 0; });
+    const moves = [];
+    entries.forEach((e) => { if (e.reference) return; const aid = acctOf(e); if (aid == null) return; moves.push({ k: (e.date || '') + (e.time || ''), aid, delta: (e.type === 'income' ? 1 : -1) * e.amount, id: e.id }); });
+    (transfers || []).forEach((t) => { const k = (t.date || '') + '00:00'; if (bal[t.from] != null) moves.push({ k, aid: t.from, delta: -(+t.amount || 0) }); if (bal[t.to] != null) moves.push({ k, aid: t.to, delta: +(+t.amount || 0) }); });
+    moves.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+    const out = {};
+    for (const m of moves) { bal[m.aid] += m.delta; if (m.id) out[m.id] = bal[m.aid]; }
+    return out;
+  }, [entries, accounts, transfers]);
+  // D2: cash/bank accounts whose balance is NEGATIVE and whose opening was never entered — surfaced as a
+  // banner on the transaction list (do NOT hide/clamp). The invariant "no negative balance" stays failing.
+  const openingNeededAccts = uMh(() => (scopedAccounts || accounts).filter((a) => !(+a.opening) && FS.acctBalance(a, entries, accounts, transfers) < 0).map((a) => ({ id: a.id, name: a.name })), [scopedAccounts, accounts, entries, transfers]);
+
   // ENTRY FORM lives ONLY on Transaksi now (Ringkasan is read-only). It is opened by [Transaksi Baru]
   // or the shareable deep link ?new=income|expense (which survives refresh — keepSearch keeps the query
   // when the hash already resolves to #entries). The global period + active unit are shell state, so
@@ -1912,7 +1933,7 @@ function FApp() {
                   {txnTab === 'setoran'
                     ? <FIN.SetoranMirror rows={setoranRowsPeriod} onOpenDist={openDist} />
                     : txnTab === 'operasional'
-                      ? <FIN.OperasionalTable entries={opsPeriod} accounts={accounts} catMap={catMap} canEdit={p.edit} canDelete={p.delete} onEdit={editEntryRow} onDelete={del} />
+                      ? <FIN.OperasionalTable entries={opsPeriod} accounts={accounts} catMap={catMap} canEdit={p.edit} canDelete={p.delete} onEdit={editEntryRow} onDelete={del} runningById={opsRunningById} negAccts={openingNeededAccts} onFixOpening={() => go('moneyspots')} />
                       : <FIN.EntriesList entries={periodEntries} onDelete={del} onEdit={editEntryRow} filterable showSource title={tr('entries.titleMonth', { m: periodLbl })} catMap={catMap} canDelete={p.delete} canEdit={p.edit} />}
                 </div>
               </div>

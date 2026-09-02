@@ -324,8 +324,8 @@ function MonitorCard({ last7 }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
         <div className="sec-title" style={{ fontSize: 16, fontWeight: 700 }}>{trF('monitor.title')}</div>
         <div style={{ display: 'flex', gap: 14 }}>
-          <span style={{ fontSize: 12, color: 'var(--text-mut)' }}>{trF('monitor.in')} <b className="tnum amt-pos">{fmtC(totIn)}</b></span>
-          <span style={{ fontSize: 12, color: 'var(--text-mut)' }}>{trF('monitor.out')} <b className="tnum amt-neg">{fmtC(totOut)}</b></span>
+          <span style={{ fontSize: 12, color: 'var(--text-mut)' }}>{trF('monitor.in')} <b className="tnum amt-pos">{fmt(totIn)}</b></span>
+          <span style={{ fontSize: 12, color: 'var(--text-mut)' }}>{trF('monitor.out')} <b className="tnum amt-neg">{fmt(totOut)}</b></span>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 14, margin: '10px 0 4px' }}>
@@ -452,8 +452,8 @@ function EntriesList({ entries, onDelete, onEdit, filterable, title, catMap, can
             <div className="day-head">
               <span style={{ fontWeight: 700, fontSize: 12.5 }}>{fmtDate(d)}</span>
               <span style={{ display: 'flex', gap: 12, fontSize: 12, fontWeight: 600 }}>
-                {inc > 0 && <span className="amt-pos tnum">+{fmtC(inc)}</span>}
-                {exp > 0 && <span className="amt-neg tnum">-{fmtC(exp)}</span>}
+                {inc > 0 && <span className="amt-pos tnum">+{fmt(inc)}</span>}
+                {exp > 0 && <span className="amt-neg tnum">-{fmt(exp)}</span>}
               </span>
             </div>
             {items.map((e) => {
@@ -509,8 +509,8 @@ function TxnSummary({ tab, income, expense, combinedIncome, combinedExpense }) {
   const row = (lbl, inc, exp, cls) => (
     <div className={`txn-sum-row ${cls}`}>
       <span className="txn-sum-lbl">{lbl}</span>
-      <span className="txn-sum-cell amt-pos tnum">+{fmtC(inc)}</span>
-      <span className="txn-sum-cell amt-neg tnum">−{fmtC(exp)}</span>
+      <span className="txn-sum-cell amt-pos tnum">+{fmt(inc)}</span>
+      <span className="txn-sum-cell amt-neg tnum">−{fmt(exp)}</span>
       <span className="txn-sum-cell txn-sum-net tnum">{fmtS(inc - exp)}</span>
     </div>
   );
@@ -525,36 +525,43 @@ function TxnSummary({ tab, income, expense, combinedIncome, combinedExpense }) {
 // OPERASIONAL tab — the owner's own bookkeeping: a real columnar table with a running balance, where
 // entry/edit/categorise happen. Columns: Tanggal · Kategori · Akun · Keterangan · Masuk · Keluar ·
 // Saldo berjalan · Bukti · [Edit] [Hapus]. Below 768px it collapses to cards (the .fin-cards engine).
-function OperasionalTable({ entries, accounts, catMap, canEdit, canDelete, onEdit, onDelete }) {
+function OperasionalTable({ entries, accounts, catMap, canEdit, canDelete, onEdit, onDelete, runningById, negAccts, onFixOpening }) {
   const info = (k) => FS.catInfo(catMap, k);
   const acctName = (id) => (accounts.find((a) => a.id === id) || {}).name || '—';
-  // Running balance = cumulative net over the operasional rows oldest→newest (a passbook aid; the
-  // authoritative per-account cash position stays in Kas & Bank). Show newest-first, each row's
-  // balance-as-of-that-row.
-  const asc = entries.slice().sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
-  let run = 0; const withRun = asc.map((e) => { run += e.type === 'income' ? e.amount : -e.amount; return { e, run }; });
-  const rows = withRun.slice().reverse();
+  // "Saldo Berjalan" is the real running balance OF THE ROW'S ACCOUNT (opening + that account's
+  // movements up to the row), computed by the shell (runningById). So a funded account reads a true
+  // positive balance and an account whose opening was never entered reads negative — never hidden; the
+  // banner below explains it. Show newest-first.
+  const rows = entries.slice().sort(FS.byNewest);
   const actionsCol = canEdit || canDelete;
-  if (!rows.length) return <div className="card" style={{ padding: 18 }}><div className="txn-empty">{trF('entries.none')}</div></div>;
+  const neg = negAccts || [];
+  if (!rows.length && !neg.length) return <div className="card" style={{ padding: 18 }}><div className="txn-empty">{trF('entries.none')}</div></div>;
   return (
     <div className="card txn-tablecard">
+      {neg.map((a) => (
+        <div key={a.id} className="acct-neg-banner">
+          {Icn('IconWarn', { s: 16 })}
+          <span>{trF('ms.negBanner', { n: a.name })}</span>
+          {onFixOpening && <button type="button" className="btn btn-ghost btn-xs" onClick={() => onFixOpening(a)}>{trF('ms.setOpening')}</button>}
+        </div>
+      ))}
       <div className="fin-table-wrap">
         <table className="fin-table fin-cards txn-ops-table">
           <thead><tr>
-            <th>{trF('ms.date')}</th><th>{trF('txn.cat')}</th><th>{trF('txn.acct')}</th><th>{trF('ms.desc')}</th>
-            <th className="fin-r">{trF('ms.in')}</th><th className="fin-r">{trF('ms.out')}</th><th className="fin-r">{trF('txn.run')}</th>
-            <th>{trF('txn.proof')}</th>{actionsCol && <th aria-label={trF('a11y.actions') || ''}></th>}
+            <th className="fin-th">{trF('ms.date')}</th><th className="fin-th">{trF('txn.cat')}</th><th className="fin-th">{trF('txn.acct')}</th><th className="fin-th">{trF('ms.desc')}</th>
+            <th className="fin-th fin-r">{trF('ms.in')}</th><th className="fin-th fin-r">{trF('ms.out')}</th><th className="fin-th fin-r">{trF('txn.run')}</th>
+            <th className="fin-th">{trF('txn.proof')}</th>{actionsCol && <th className="fin-th" aria-label={trF('a11y.actions') || ''}></th>}
           </tr></thead>
           <tbody>
-            {rows.map(({ e, run }) => { const isInc = e.type === 'income'; const c = info(e.category); return (
+            {rows.map((e) => { const isInc = e.type === 'income'; const c = info(e.category); const rb = runningById ? runningById[e.id] : undefined; return (
               <tr key={e.id} className="fin-trow">
                 <td className="fin-td" data-label={trF('ms.date')}>{fmtDate(e.date)}<span className="txn-time tnum"> {e.time}</span></td>
                 <td className="fin-td" data-label={trF('txn.cat')}><span className="txn-cat">{Icn(c.icon, { s: 15 })}{c.label}</span></td>
                 <td className="fin-td" data-label={trF('txn.acct')}>{acctName(e.acct)}</td>
                 <td className="fin-td" data-label={trF('ms.desc')}><span className="fin-td-desc">{e.note || '—'}</span></td>
-                <td className="fin-td fin-r tnum amt-pos" data-label={trF('ms.in')}>{isInc ? fmtC(e.amount) : ''}</td>
-                <td className="fin-td fin-r tnum amt-neg" data-label={trF('ms.out')}>{!isInc ? fmtC(e.amount) : ''}</td>
-                <td className="fin-td fin-r tnum txn-run" data-label={trF('txn.run')}>{fmtS(run)}</td>
+                <td className="fin-td fin-r tnum amt-pos" data-label={trF('ms.in')}>{isInc ? fmt(e.amount) : ''}</td>
+                <td className="fin-td fin-r tnum amt-neg" data-label={trF('ms.out')}>{!isInc ? fmt(e.amount) : ''}</td>
+                <td className={`fin-td fin-r tnum txn-run${rb != null && rb < 0 ? ' amt-neg' : ''}`} data-label={trF('txn.run')}>{rb != null ? fmt(rb) : '—'}</td>
                 <td className="fin-td" data-label={trF('txn.proof')}>{e.proof
                   ? <button className="entry-proof" title={trF('att.view')} onClick={() => window.UI._viewProof(e.proof)}>{e.proof.isImg && e.proof.data ? <img src={e.proof.data} alt="" /> : <IconInvoice s={15} />}</button>
                   : <span className="txn-noproof">—</span>}</td>
@@ -589,9 +596,9 @@ function SetoranMirror({ rows, onOpenDist }) {
           </div>
         : <div className="fin-table-wrap"><table className="fin-table fin-cards txn-setoran-table">
             <thead><tr>
-              <th>{trF('ms.date')}</th><th>{trF('st.armada')}</th><th>{trF('txn.petugas')}</th>
-              <th className="fin-r">{trF('st.cash')}</th><th className="fin-r">{trF('st.galon')}</th><th className="fin-r">{trF('st.setoran')}</th>
-              <th>{trF('txn.status')}</th><th aria-label=""></th>
+              <th className="fin-th">{trF('ms.date')}</th><th className="fin-th">{trF('st.armada')}</th><th className="fin-th">{trF('txn.petugas')}</th>
+              <th className="fin-th fin-r">{trF('st.cash')}</th><th className="fin-th fin-r">{trF('st.galon')}</th><th className="fin-th fin-r">{trF('st.setoran')}</th>
+              <th className="fin-th">{trF('txn.status')}</th><th className="fin-th" aria-label=""></th>
             </tr></thead>
             <tbody>
               {sorted.map((r) => (
@@ -599,9 +606,9 @@ function SetoranMirror({ rows, onOpenDist }) {
                   <td className="fin-td" data-label={trF('ms.date')}>{fmtDate(r.date)}</td>
                   <td className="fin-td" data-label={trF('st.armada')}><span className="txn-cat">{Icn('IconTruck', { s: 14 })}{r.armada || '—'}</span></td>
                   <td className="fin-td" data-label={trF('txn.petugas')}>{(r.createdBy && r.createdBy.name) || r.createdByName || '—'}</td>
-                  <td className="fin-td fin-r tnum" data-label={trF('st.cash')}>{fmtC(+r.cash || 0)}</td>
+                  <td className="fin-td fin-r tnum" data-label={trF('st.cash')}>{fmt(+r.cash || 0)}</td>
                   <td className="fin-td fin-r tnum" data-label={trF('st.galon')}>{(+r.galon || 0).toLocaleString('id-ID')}</td>
-                  <td className="fin-td fin-r tnum strong" data-label={trF('st.setoran')}>{fmtC(FS.setoranOf(r))}</td>
+                  <td className="fin-td fin-r tnum strong" data-label={trF('st.setoran')}>{fmt(FS.setoranOf(r))}</td>
                   <td className="fin-td" data-label={trF('txn.status')}><span className="txn-chip txn-chip-ok">{trF('txn.statusRecorded')}</span></td>
                   <td className="fin-td fin-r"><button className="btn btn-ghost btn-xs" onClick={() => onOpenDist(r)}>{trF('txn.openInDist')}</button></td>
                 </tr>
@@ -822,6 +829,13 @@ function AcctDetail({ acct, accounts, entries, transfers, catMap, canEdit, onEdi
           </div>
         </div>
         <div className="modal-body">
+          {!(+acct.opening) && ledger.current < 0 && (
+            <div className="acct-neg-banner">
+              {Icn('IconWarn', { s: 16 })}
+              <span>{trF('ms.negBanner', { n: acct.name })}</span>
+              {canEdit && <button type="button" className="btn btn-ghost btn-xs" onClick={() => onEdit(acct)}>{trF('ms.setOpening')}</button>}
+            </div>
+          )}
           <div className="acct-detail-toolbar">
             <div style={{ minWidth: 150 }}><UI.Dropdown value={period} options={[{ value: 'all', label: trF('ms.allPeriods') || 'Semua' }, ...months.map((m) => ({ value: m, label: monthLabel(m) }))]} onChange={setPeriod} /></div>
             <div className="tx-search" style={{ flex: 1, minWidth: 130 }}><IconSearch s={16} style={{ color: 'var(--text-faint)' }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={trF('ms.searchMut') || 'Cari keterangan…'} /></div>
