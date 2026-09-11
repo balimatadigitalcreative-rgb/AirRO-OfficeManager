@@ -34,6 +34,10 @@ router.get('/customers/:id/adjustments', requireAnyCap(CAN_ADJUST), validate({ p
 router.post('/adjustments/:id/approve', requireAnyCap(CAN_ADJUST), validate({ params: ctrl.schemas.idParams }), ctrl.approveAdjustment);
 router.post('/adjustments/:id/reverse', requireAnyCap(CAN_ADJUST), validate({ params: ctrl.schemas.idParams }), ctrl.reverseAdjustment);
 router.get('/reports/adjustments', requireAnyCap(CAN_ADJUST), validate({ query: ctrl.schemas.adjustReportQuery }), ctrl.adjustmentReport);
+// LITERAL PATH FIRST - declared above /customers/:id, which would otherwise match "location-coverage"
+// as an id and answer 404 for a customer that does not exist.
+router.get('/customers/location-coverage', requireCap('distribusi'), ctrl.locationCoverage);
+
 router.get('/customers', requireCap('distribusi'), validate({ query: ctrl.schemas.custListQuery }), ctrl.listCustomers);
 router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getCustomer);
 // NOTE: the delivery-fleet list is NOT served here — armada has a single app-wide
@@ -45,7 +49,19 @@ router.post('/customers', requireCap('distribusiCustomers'), validate({ body: ct
 router.patch('/customers/:id', requireCap('distribusiCustomers'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.customerUpdateSchema }), ctrl.updateCustomer);
 // GPS location tagging by the delivery crew (needs only the delivery caps, not full
 // customer-management). Sets lat/lng + stamps who/when; fleet scope enforced.
-router.patch('/customers/:id/location', requireAnyCap(['distribusiInput', 'distribusiPengiriman']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationSchema }), ctrl.setLocation);
+// CAPTURING A LOCATION is field work: its own staff-tier capability, so it can be granted to delivery
+// staff without handing them customer editing. Clearing one needs the same right plus a written reason;
+// reverting needs no reason because it only ever restores a point this customer already had.
+router.patch('/customers/:id/location', requireCap('distribusiLokasiSimpan'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationSchema }), ctrl.setLocation);
+router.delete('/customers/:id/location', requireCap('distribusiLokasiSimpan'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.clearLocationSchema }), ctrl.clearLocation);
+router.post('/customers/:id/location/revert', requireCap('distribusiLokasiSimpan'), validate({ params: ctrl.schemas.idParams }), ctrl.revertLocation);
+router.get('/customers/:id/location/history', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.locationHistory);
+
+// BULK CLEAR is for a batch captured wrongly and is never routine, so it sits with customer management
+// rather than with field work. Two steps: a preview that NAMES every customer that would lose its
+// point, then the apply.
+router.post('/customers/location/bulk-clear/preview', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.bulkPreviewSchema }), ctrl.bulkClearPreview);
+router.post('/customers/location/bulk-clear', requireCap('distribusiCustomers'), validate({ body: ctrl.schemas.bulkClearSchema }), ctrl.bulkClearLocations);
 // Location photo (bytes already in the Attachment store; this stores only the id + who/when).
 // Delivery helpers may photograph while delivering; customer managers may replace/remove.
 router.patch('/customers/:id/location-photo', requireAnyCap(['distribusiInput', 'distribusiPengiriman', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationPhotoSchema }), ctrl.setLocationPhoto);

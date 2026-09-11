@@ -248,6 +248,13 @@
         create: (data) => req('POST', '/distribusi/customers', data),
         update: (id, data) => req('PATCH', '/distribusi/customers/' + id, data),
         setLocation: (id, data) => req('PATCH', '/distribusi/customers/' + id + '/location', data),   // { lat, lng, accuracy?, address? }
+        // Clearing needs a written reason; revert restores the point the customer had before.
+        clearLocation: (id, note) => req('DELETE', '/distribusi/customers/' + id + '/location', { note }),
+        revertLocation: (id) => req('POST', '/distribusi/customers/' + id + '/location/revert', {}),
+        locationHistory: (id) => req('GET', '/distribusi/customers/' + id + '/location/history'),
+        locationCoverage: () => req('GET', '/distribusi/customers/location-coverage'),
+        bulkClearPreview: (ids) => req('POST', '/distribusi/customers/location/bulk-clear/preview', { ids }),
+        bulkClearLocations: (ids, note) => req('POST', '/distribusi/customers/location/bulk-clear', { ids, note }),
         setLocationPhoto: (id, photoId) => req('PATCH', '/distribusi/customers/' + id + '/location-photo', { photoId: photoId || null }),
         // Opening / carry-over bon (cap: distribusiKoreksi) — a REAL receivable dated by the admin.
         openingBon: (id, data) => req('POST', '/distribusi/customers/' + id + '/opening-bon', data),   // { amount, txnDate, note }

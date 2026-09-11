@@ -952,6 +952,7 @@ model Customer {
   locationPhotoId  String?                       // Attachment.id of the location photo (bytes fetched lazily, never inline)
   locationPhotoAt  DateTime?                     // when the photo was taken/uploaded
   locationPhotoByName String?                    // who took it
+  locationHistory CustomerLocationHistory[]
   active        Boolean  @default(true)         // false = deactivated (hidden from active list + new txn/delivery, history kept)
   deactivatedAt DateTime?
   deactivatedByName String?
@@ -1429,6 +1430,31 @@ model GallonMovement {
 }
 
 // Immutable, append-only audit trail for every distribusi write.
+// Every change to a customer's coordinates. One row per CHANGE, holding both sides of it, so a bad
+// capture is reverted by reading the previous point - never by replaying a chain.
+model CustomerLocationHistory {
+  id           String   @id @default(cuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  action       String   @default("set")   // set | clear | revert
+  lat          Float?
+  lng          Float?
+  accuracy     Float?
+  prevLat      Float?
+  prevLng      Float?
+  prevAccuracy Float?
+  // Metres between the old point and the new one - STORED, so the audit shows the number the person
+  // was actually shown when they confirmed, not one recomputed later from moved goalposts.
+  movedM       Float?
+  note         String   @default("")
+  actorId      String?
+  actorName    String?
+  createdAt    DateTime @default(now())
+
+  @@index([customerId])
+  @@index([createdAt])
+}
+
 model DistAuditLog {
   id        String   @id @default(cuid())
   kind      String                              // koreksi | harga | input | impor | pelanggan

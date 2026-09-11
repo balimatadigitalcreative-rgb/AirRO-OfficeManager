@@ -4587,3 +4587,31 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .gps-nopos { color: var(--text-faint); font-weight: 600; }
 .gps-retry { align-self: flex-start; margin-top: 2px; padding: 0; border: none; background: none; color: var(--blue-700, #1B5FA8); font-size: 11px; font-weight: 700; cursor: pointer; }
 .gps-retry:disabled { opacity: .5; cursor: default; }
+
+/* LOCATION CAPTURE - mobile-first. Every control here is pressed one-handed, outdoors, often in sun,
+   by someone holding a gallon bottle: 44px minimum, generous spacing, no precision targets. */
+.dist-gps-btn { min-height: 44px; padding: 0 14px; font-size: 13px; }
+.dist-loc-hint { font-size: 11.5px; color: var(--text-faint); line-height: 1.35; max-width: 40ch; }
+.dist-loc-blocked { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: #8A5A12; background: #FBEEDB; border-radius: 999px; padding: 3px 8px; }
+.dist-loc-del { min-height: 44px; display: inline-flex; align-items: center; }
+.dist-loc-modal { max-width: 420px; }
+.dist-loc-modal .modal-foot .btn { min-height: 44px; flex: 1 1 auto; }
+.dist-loc-acc { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--mint-100); color: var(--green-800); font-size: 13px; font-weight: 700; }
+.dist-loc-acc.bad { background: #FBEEDB; color: #8A5A12; }
+.dist-loc-moved { margin-top: 8px; padding: 9px 12px; border-radius: 10px; background: var(--surface-2, rgba(15,30,45,.04)); font-size: 12.5px; font-weight: 600; }
+.dist-loc-moved.bad { background: #FDE7E7; color: #9B1C1C; }
+.dist-loc-coords { margin-top: 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-mut); }
+.dist-loc-hist { margin-top: 12px; }
+.dist-loc-hrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border-soft, rgba(15,30,45,.07)); font-size: 11.5px; }
+.dist-loc-hrow b { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.dist-loc-hrow em { font-style: normal; color: var(--text-faint); }
+.dist-loc-hwho { margin-left: auto; color: var(--text-faint); }
+.dist-loc-hnote { flex: 1 1 100%; color: var(--text-mut); }
+
+/* Coverage strip - the office's view of how far the fieldwork has got. */
+.dist-cov { padding: 8px 18px 4px; }
+.dist-cov-bar { height: 6px; border-radius: 999px; background: var(--surface-2, rgba(15,30,45,.08)); overflow: hidden; }
+.dist-cov-bar span { display: block; height: 100%; background: var(--green-600, #1F9D55); border-radius: 999px; }
+.dist-cov-txt { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; padding-top: 5px; font-size: 12px; }
+.dist-cov-txt em { font-style: normal; color: var(--text-mut); }
+@media (max-width: 640px) { .dist-loc-modal .modal-foot { flex-direction: column-reverse; } }

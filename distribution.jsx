@@ -846,45 +846,195 @@ const mapsUrl = (lat, lng) => 'https://www.google.com/maps?q=' + lat + ',' + lng
 // reported accuracy is worse than 100 m (likely WiFi, not GPS) it asks first: Retry / Save anyway /
 // Cancel. `onCapture` → fill mode (add/edit form); otherwise it saves straight to the server.
 const IS_TOUCH = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-const ACC_LIMIT = 100;
-function GpsButton({ custId, hasLoc, onSaved, onCapture, onFlash, label }) {
+// Above this, the fix is too vague to route by and we say so before saving. 50 m is roughly "the right
+// building"; 500 m is "the right neighbourhood", which is worse than no point at all because it looks
+// like data. The old 100 m limit only warned - it never showed the number on a good fix.
+const ACC_WARN = 50;
+
+// WHY GEOLOCATION FAILED, in words the person can act on.
+//
+// This is the bug that made the feature look dead. The old handler ignored err.code, so a permission
+// denial, a position-unavailable and a 15-second timeout indoors ALL said "izin ditolak". And once a
+// browser has been told no, it never asks again - so the button silently did nothing forever, and
+// nothing on the screen suggested the fix was two taps away in the address bar.
+function geoHelp(code) {
+  const ua = String(navigator.userAgent || '');
+  const isIOS = /iPad|iPhone|iPod/.test(ua);
+  const isChrome = /Chrome|CriOS/.test(ua);
+  if (code === 1) {
+    return isIOS ? trD('dist.locHelpIos')
+      : isChrome ? trD('dist.locHelpChrome')
+        : trD('dist.locHelpGeneric');
+  }
+  if (code === 3) return trD('dist.locHelpTimeout');
+  return trD('dist.locHelpUnavailable');
+}
+
+/*
+ * CAPTURE A CUSTOMER'S LOCATION AT THE DOOR.
+ *
+ * PRIVACY: this reads ONE position, when a person presses the button, and stores it against the
+ * CUSTOMER. There is no watchPosition, no background timer, and nothing that records where the staff
+ * member has been - only where the customer is.
+ *
+ * `onCapture` fills a form instead of saving (used by the add/edit customer screen).
+ */
+function GpsButton({ custId, hasLoc, curLat, curLng, onSaved, onCapture, onFlash, label }) {
   const [busy, setBusy] = uSx(false);
-  const [low, setLow] = uSx(null);   // { lat, lng, accuracy } awaiting the low-accuracy choice
-  if (!IS_TOUCH()) return null;
+  const [ask, setAsk] = uSx(null);      // { lat, lng, accuracy, movedM } awaiting confirmation
+  const [blocked, setBlocked] = uSx('');// a standing permission denial, discovered before any tap
+  const touch = IS_TOUCH();
+
+  // Ask the browser whether geolocation is ALREADY denied, so the panel can explain itself before the
+  // person taps a button that cannot work. Permissions API is absent on older Safari - not an error.
+  uEx(() => {
+    let live = true;
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'geolocation' }).then((st) => {
+          if (!live) return;
+          const set = () => setBlocked(st.state === 'denied' ? geoHelp(1) : '');
+          set();
+          st.onchange = set;     // they fixed it in settings - drop the warning without a reload
+        }).catch(() => {});
+      }
+    } catch (e) { /* unsupported: fall through to the error path on use */ }
+    return () => { live = false; };
+  }, []);
+
+  // NOT touch: the button is hidden on purpose (the office desktop must never be saved as a customer's
+  // location) - but SAYING SO is new. Rendering nothing is what made staff think the feature was gone.
+  if (!touch) return <span className="dist-loc-hint">{trD('dist.locDesktopOnly')}</span>;
+
   const fail = (m) => onFlash && onFlash(m);
   const persist = (lat, lng, accuracy) => {
     if (onCapture) { onCapture({ lat, lng, accuracy }); return; }
     setBusy(true);
     window.API.distribusi.customers.setLocation(custId, { lat, lng, accuracy })
       .then((r) => { setBusy(false); onSaved && onSaved(r.data); })
-      .catch(() => { setBusy(false); fail(trD('dist.locSaveErr')); });
+      .catch((e) => { setBusy(false); fail((e && e.body && e.body.error && e.body.error.message) || trD('dist.locSaveErr')); });
   };
   const capture = () => {
-    if (hasLoc && !onCapture && !window.confirm(trD('dist.locOverwriteConfirm'))) return;
     if (!(navigator.geolocation && navigator.geolocation.getCurrentPosition)) { fail(trD('dist.locUnavailable')); return; }
     setBusy(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setBusy(false);
+        setBlocked('');
         const acc = Math.round(pos.coords.accuracy);
-        if (acc > ACC_LIMIT) { setLow({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc }); return; }
-        persist(pos.coords.latitude, pos.coords.longitude, acc);
+        // HOW FAR FROM THE POINT WE ALREADY HAVE. A big jump nearly always means the person is
+        // standing somewhere else - at the depot, or outside the wrong shop - not that the stored
+        // point was wrong, so it is shown before anything is overwritten.
+        const movedM = (curLat != null && curLng != null)
+          ? Math.round(haversineM(+curLat, +curLng, pos.coords.latitude, pos.coords.longitude)) : null;
+        setAsk({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc, movedM });
       },
-      () => { setBusy(false); fail(trD('dist.locDenied')); },
+      (err) => {
+        setBusy(false);
+        const help = geoHelp(err && err.code);
+        if (err && err.code === 1) setBlocked(help);
+        fail(help);
+      },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   };
+  const poor = ask && ask.accuracy > ACC_WARN;
   return (<>
-    <button type="button" className="btn btn-ghost btn-sm dist-gps-btn" disabled={busy} onClick={capture}><IconPin s={14} />{busy ? '…' : (label || (hasLoc ? trD('dist.locUpdate') : trD('dist.locTag')))}</button>
-    {low && (
-      <div className="modal-scrim" onClick={() => setLow(null)} style={{ zIndex: 260 }}>
-        <div className="modal-card" style={{ maxWidth: 390 }} onClick={(e) => e.stopPropagation()}>
-          <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 800 }}>{trD('dist.locLowT')}</div></div>
-          <div className="modal-body"><div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('dist.locLowMsg', { x: low.accuracy })}</span></div></div>
+    <button type="button" className="btn btn-ghost btn-sm dist-gps-btn" disabled={busy} onClick={capture}>
+      <IconPin s={14} />{busy ? trD('dist.locSearching') : (label || (hasLoc ? trD('dist.locUpdate') : trD('dist.locTag')))}
+    </button>
+    {blocked && <span className="dist-loc-blocked" title={blocked}><IconWarn s={12} />{trD('dist.locBlocked')}</span>}
+    {ask && (
+      <div className="modal-scrim" onClick={() => setAsk(null)} style={{ zIndex: 260 }}>
+        <div className="modal-card dist-loc-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 800 }}>{trD('dist.locConfirmT')}</div></div>
+          <div className="modal-body">
+            {/* ALWAYS shown, good fix or bad: the number is the whole point of confirming. */}
+            <div className={'dist-loc-acc' + (poor ? ' bad' : '')}>
+              <IconPin s={16} />
+              <span>{trD(poor ? 'dist.locAccBad' : 'dist.locAccOk', { x: ask.accuracy })}</span>
+            </div>
+            {poor && <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('dist.locLowMsg', { x: ask.accuracy })}</span></div>}
+            {ask.movedM != null && (
+              <div className={'dist-loc-moved' + (ask.movedM > 300 ? ' bad' : '')}>
+                {trD('dist.locMoved', { d: ask.movedM >= 1000 ? (ask.movedM / 1000).toFixed(1) + ' km' : ask.movedM + ' m' })}
+              </div>
+            )}
+            <div className="dist-loc-coords">{ask.lat.toFixed(6)}, {ask.lng.toFixed(6)}</div>
+          </div>
           <div className="modal-foot" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <button className="btn btn-ghost" onClick={() => setLow(null)}>{trD('dist.locCancel')}</button>
-            <button className="btn btn-ghost" onClick={() => { setLow(null); capture(); }}>{trD('dist.locRetry')}</button>
-            <button className="btn btn-primary" onClick={() => { const l = low; setLow(null); persist(l.lat, l.lng, l.accuracy); }}>{trD('dist.locSaveAnyway')}</button>
+            <button className="btn btn-ghost" onClick={() => setAsk(null)}>{trD('dist.locCancel')}</button>
+            <button className="btn btn-ghost" onClick={() => { setAsk(null); capture(); }}>{trD('dist.locRetry')}</button>
+            <button className={'btn ' + (poor ? 'btn-ghost' : 'btn-primary')} onClick={() => { const a = ask; setAsk(null); persist(a.lat, a.lng, a.accuracy); }}>
+              {trD(poor ? 'dist.locSaveAnyway' : 'dist.locSave')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>);
+}
+
+// Metres between two points - the same haversine the server routes with, so the distance the person
+// confirms is the distance the audit records.
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, toR = (d) => (d * Math.PI) / 180;
+  const dLat = toR(lat2 - lat1), dLng = toR(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// REMOVE or RESTORE a customer's point. Clearing demands a reason in writing, because it throws away
+// work somebody did at a door and the next person needs to know why.
+function LocClear({ custId, hasLoc, onDone, onFlash }) {
+  const [open, setOpen] = uSx(false);
+  const [note, setNote] = uSx('');
+  const [hist, setHist] = uSx([]);
+  const [busy, setBusy] = uSx(false);
+  const load = () => window.API.distribusi.customers.locationHistory(custId).then((r) => setHist(r.data || [])).catch(() => setHist([]));
+  const go = () => {
+    setBusy(true);
+    window.API.distribusi.customers.clearLocation(custId, note.trim())
+      .then(() => { setBusy(false); setOpen(false); setNote(''); onDone && onDone(); })
+      .catch((e) => { setBusy(false); onFlash && onFlash((e && e.body && e.body.error && e.body.error.message) || trD('dist.locClearErr')); });
+  };
+  const revert = () => {
+    setBusy(true);
+    window.API.distribusi.customers.revertLocation(custId)
+      .then(() => { setBusy(false); setOpen(false); onDone && onDone(); })
+      .catch((e) => { setBusy(false); onFlash && onFlash((e && e.body && e.body.error && e.body.error.message) || trD('dist.locRevertErr')); });
+  };
+  const revertable = hist.some((h) => h.prevLat != null);
+  return (<>
+    <button type="button" className="dist-link dist-loc-del" onClick={() => { setOpen(true); load(); }}>{trD('dist.locManage')}</button>
+    {open && (
+      <div className="modal-scrim" onClick={() => setOpen(false)} style={{ zIndex: 260 }}>
+        <div className="modal-card dist-loc-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 800 }}>{trD('dist.locManageT')}</div></div>
+          <div className="modal-body">
+            {hasLoc ? (<>
+              <label className="fld-l">{trD('dist.locClearWhy')}</label>
+              <textarea className="fld" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={trD('dist.locClearWhyPh')} />
+            </>) : <div className="dist-loc-hint">{trD('dist.locNotSet')}</div>}
+            {hist.length > 0 && (
+              <div className="dist-loc-hist">
+                <div className="fld-l">{trD('dist.locHistory')}</div>
+                {hist.slice(0, 8).map((h) => (
+                  <div key={h.id} className="dist-loc-hrow">
+                    <b>{trD('dist.locAct_' + h.action)}</b>
+                    <span>{h.lat != null ? h.lat.toFixed(5) + ', ' + h.lng.toFixed(5) : '\u2014'}</span>
+                    {h.movedM != null && <em>{trD('dist.locMovedShort', { d: h.movedM >= 1000 ? (h.movedM / 1000).toFixed(1) + ' km' : h.movedM + ' m' })}</em>}
+                    <span className="dist-loc-hwho">{h.actorName || ''}</span>
+                    {h.note ? <span className="dist-loc-hnote">{h.note}</span> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="modal-foot" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={() => setOpen(false)}>{trD('dist.locCancel')}</button>
+            {revertable && <button className="btn btn-ghost" disabled={busy} onClick={revert}>{trD('dist.locRevert')}</button>}
+            {hasLoc && <button className="btn btn-danger" disabled={busy || note.trim().length < 3} onClick={go}>{trD('dist.locClear')}</button>}
           </div>
         </div>
       </div>
@@ -6260,6 +6410,30 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
 //     obvious, not silent;
 //   • the fix time is a UTC epoch from the server and is rendered in the app's timezone (appTz), so
 //     "posisi terakhir X menit lalu" can never inherit the provider's Bangkok clock.
+// HOW FAR ALONG THE FIELDWORK IS, where the office can see it. Counts COORDINATES, not Maps links -
+// a pasted link navigates fine by hand and is invisible to routing, so counting it would make the gap
+// look smaller than it is, which is how a gap stays open.
+function LocCoverage() {
+  const [c, setC] = uSx(null);
+  uEx(() => {
+    let live = true;
+    if (window.API && window.API.distribusi && window.API.distribusi.customers.locationCoverage) {
+      window.API.distribusi.customers.locationCoverage().then((r) => { if (live) setC(r.data); }).catch(() => {});
+    }
+    return () => { live = false; };
+  }, []);
+  if (!c || !c.total) return null;
+  return (
+    <div className="dist-cov">
+      <div className="dist-cov-bar"><span style={{ width: c.pct + '%' }} /></div>
+      <div className="dist-cov-txt">
+        <b>{trD('dist.locCoverage', { a: c.withCoords, b: c.total, p: c.pct })}</b>
+        {c.without > 0 && <em>{trD('dist.locCoverageGap', { n: c.without })}</em>}
+      </div>
+    </div>
+  );
+}
+
 function GpsPanel({ canGps, canGpsMap, onFlash }) {
   const [info, setInfo] = uSx(null);
   const [busy, setBusy] = uSx(false);
@@ -6381,7 +6555,7 @@ function GpsPanel({ canGps, canGpsMap, onFlash }) {
   );
 }
 
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canBelumTerkirim, canGps, canGpsMap, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canBelumTerkirim, canGps, canGpsMap, canLoc, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [closeouts, setCloseouts] = uSx([]);
@@ -6495,6 +6669,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
+      <LocCoverage />
       <GpsPanel canGps={canGps} canGpsMap={canGpsMap} onFlash={flash} />
       {/* Carry-over — a BACK-OFFICE surface (distribusiBelumTerkirim); hidden entirely for field staff who
           hold only distribusiPengiriman. Renders nothing when empty, so the screen stays clean either way. */}
@@ -6554,7 +6729,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
                   ? <a href={s.mapsLink} target="_blank" rel="noopener noreferrer" className="dist-link"><IconPin s={12} />{trD('dist.directions')}</a>
                   : <span className="dist-noloc"><IconPin s={12} />{trD('dist.locNotSet')}</span>}
                 {canRoute && <button type="button" className={'dist-link dist-pin' + (s.pinned ? ' on' : '')} title={trD('dist.pinHint')} onClick={() => togglePin(s)}><IconLock s={12} />{trD(s.pinned ? 'dist.pinned' : 'dist.pin')}</button>}
-                <GpsButton custId={s.customerId} hasLoc={s.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); reload(); if (onChanged) onChanged(); }} onFlash={flash} />
+                {canLoc && <GpsButton custId={s.customerId} hasLoc={s.hasLocation} curLat={s.lat} curLng={s.lng} onSaved={() => { flash(trD('dist.locSaved')); reload(); if (onChanged) onChanged(); }} onFlash={flash} />}
+                {canLoc && s.hasLocation && <LocClear custId={s.customerId} hasLoc={s.hasLocation} onDone={() => { flash(trD('dist.locClearOk')); reload(); if (onChanged) onChanged(); }} onFlash={flash} />}
                 <LocPhoto custId={s.customerId} photoId={s.locationPhotoId} canEdit onChanged={() => { flash(trD('dist.locPhotoSaved')); reload(); if (onChanged) onChanged(); }} compact />
               </div>
             </div>

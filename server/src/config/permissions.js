@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true, distribusiLokasiSimpan: true,
     // View-window (time-restriction): Pemilik sees all history + Sisa Bon.
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     'distribusi.galon.reset_total': true,   // OWNER ONLY — clean-slate reset of the whole gallon ledger
@@ -32,7 +32,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true, distribusiLokasiSimpan: true,
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     gudangView: true, gudangDamage: true, gudangReport: true,
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -197,6 +197,10 @@ function deriveDistribusiCaps(perms, role) {
   // derived from the legacy combined flag, and it grants no wider view: tracking is employee
   // monitoring, so the capability answers "may you see tracking", and fleetScope answers "whose".
   if (p.distribusiLacakArmada === undefined) p.distribusiLacakArmada = !!p.distribusiPengiriman;
+  // SAVING A CUSTOMER'S LOCATION is its own capability so it can be granted to delivery staff without
+  // handing them customer editing. It derives from the two caps that already opened the endpoint
+  // (input OR pengiriman), so nobody who could tag a location yesterday loses it today.
+  if (p.distribusiLokasiSimpan === undefined) p.distribusiLokasiSimpan = !!(p.distribusiInput || p.distribusiPengiriman);
   if (p.distribusiOrder === undefined) p.distribusiOrder = legacy;
   // Route-ordering + customer-delete derive ONLY from the old combined `distribusi` (so a
   // user who had full distribusi access keeps them) — NOT from distribusiPengiriman/

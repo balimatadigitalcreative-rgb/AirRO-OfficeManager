@@ -1799,7 +1799,7 @@ function FApp() {
               canBelumTerkirim={!!p.distribusiBelumTerkirim}
               /* TWO separate rights: seeing the tracking panel at all, and being allowed to re-map a
                  vehicle to another armada. A driver holds the first and must never hold the second. */
-              canGps={!!p.distribusiLacakArmada} canGpsMap={!!p.settings}
+              canGps={!!p.distribusiLacakArmada} canGpsMap={!!p.settings} canLoc={!!p.distribusiLokasiSimpan}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}

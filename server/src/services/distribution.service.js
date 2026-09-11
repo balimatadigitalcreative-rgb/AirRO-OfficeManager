@@ -624,9 +624,152 @@ async function setCustomerLocation(id, body, actor) {
   // Also build a ready-to-use Maps link from the point so "Petunjuk Arah" works right away.
   const data = { lat: loc.lat, lng: loc.lng, mapsUrl: 'https://www.google.com/maps?q=' + loc.lat + ',' + loc.lng, locationAccuracy: acc, locationSetAt: new Date(), locationSetByName: snap.actorName };
   if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
+  // HOW FAR THE POINT MOVED. A large jump usually means the person is standing somewhere else - at the
+  // depot, or outside the wrong shop - not that the old point was wrong. The number is stored, not
+  // recomputed later, so the audit trail shows exactly what they were shown when they confirmed.
+  const prev = hasCoords(cur) ? { lat: cur.lat, lng: cur.lng } : null;
+  const movedM = prev ? Math.round(haversineKm(prev, loc) * 1000) : null;
   const c = await prisma.customer.update({ where: { id }, data });
-  await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}${acc != null ? ' · ±' + acc + ' m' : ''}`, snap, c.armada);
+  await prisma.customerLocationHistory.create({ data: {
+    customerId: id, action: 'set', lat: loc.lat, lng: loc.lng, accuracy: acc,
+    prevLat: prev ? prev.lat : null, prevLng: prev ? prev.lng : null, prevAccuracy: prev ? cur.locationAccuracy : null,
+    movedM, note: String(body.note || '').slice(0, 300), actorId: snap.actorId, actorName: snap.actorName,
+  } });
+  await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}${acc != null ? ' · ±' + acc + ' m' : ''}${movedM != null ? ' · geser ' + movedM + ' m dari titik lama' : ''}`, snap, c.armada);
   return custClient(c);
+}
+
+// REMOVE a customer's location, returning them to the "belum ada lokasi" group.
+//
+// A NOTE IS REQUIRED. Clearing a coordinate throws away fieldwork somebody did at a door, and the next
+// person to look needs to know whether it was wrong, a duplicate, or a shop that moved. The previous
+// point is kept in history, so this is reversible - unless the customer only ever had a PASTED Maps
+// link and no coordinates, in which case there is no point to restore and revert will say so.
+async function clearCustomerLocation(id, body, actor) {
+  const cur = await prisma.customer.findUnique({ where: { id } });
+  if (!cur) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, cur.armada)) throw ApiError.forbidden('Pelanggan di luar akses Anda.');
+  const note = String((body && body.note) || '').trim();
+  if (note.length < 3) throw ApiError.badRequest('Alasan wajib diisi saat menghapus lokasi.');
+  if (!hasCoords(cur) && !cur.mapsUrl) throw ApiError.badRequest('Pelanggan ini belum punya lokasi.');
+  const snap = await actorSnap(actor);
+  const c = await prisma.customer.update({ where: { id }, data: {
+    lat: null, lng: null, mapsUrl: '', locationAccuracy: null, locationSetAt: null, locationSetByName: null,
+  } });
+  await prisma.customerLocationHistory.create({ data: {
+    customerId: id, action: 'clear',
+    prevLat: cur.lat, prevLng: cur.lng, prevAccuracy: cur.locationAccuracy,
+    note: note.slice(0, 300), actorId: snap.actorId, actorName: snap.actorName,
+  } });
+  await logAudit('pelanggan', `Hapus lokasi: ${c.name}`, `${hasCoords(cur) ? cur.lat.toFixed(6) + ', ' + cur.lng.toFixed(6) : '(link maps)'} · alasan: ${note}`, snap, c.armada);
+  return custClient(c);
+}
+
+// Put back the point this customer had BEFORE the last change - the way out of a bad capture without
+// sending anyone back to the door.
+async function revertCustomerLocation(id, actor) {
+  const cur = await prisma.customer.findUnique({ where: { id } });
+  if (!cur) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, cur.armada)) throw ApiError.forbidden('Pelanggan di luar akses Anda.');
+  const h = await prisma.customerLocationHistory.findFirst({
+    where: { customerId: id, prevLat: { not: null }, prevLng: { not: null } }, orderBy: { createdAt: 'desc' },
+  });
+  if (!h) throw ApiError.badRequest('Tidak ada lokasi sebelumnya untuk dikembalikan.');
+  const snap = await actorSnap(actor);
+  const prev = { lat: h.prevLat, lng: h.prevLng };
+  const movedM = hasCoords(cur) ? Math.round(haversineKm({ lat: cur.lat, lng: cur.lng }, prev) * 1000) : null;
+  const c = await prisma.customer.update({ where: { id }, data: {
+    lat: prev.lat, lng: prev.lng, mapsUrl: 'https://www.google.com/maps?q=' + prev.lat + ',' + prev.lng,
+    locationAccuracy: h.prevAccuracy, locationSetAt: new Date(), locationSetByName: snap.actorName,
+  } });
+  await prisma.customerLocationHistory.create({ data: {
+    customerId: id, action: 'revert', lat: prev.lat, lng: prev.lng, accuracy: h.prevAccuracy,
+    prevLat: cur.lat, prevLng: cur.lng, prevAccuracy: cur.locationAccuracy, movedM,
+    note: 'Kembalikan titik sebelumnya', actorId: snap.actorId, actorName: snap.actorName,
+  } });
+  await logAudit('pelanggan', `Kembalikan lokasi: ${c.name}`, `${prev.lat.toFixed(6)}, ${prev.lng.toFixed(6)}`, snap, c.armada);
+  return custClient(c);
+}
+
+async function listLocationHistory(id, actor) {
+  const cur = await prisma.customer.findUnique({ where: { id } });
+  if (!cur) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, cur.armada)) throw ApiError.forbidden('Pelanggan di luar akses Anda.');
+  const rows = await prisma.customerLocationHistory.findMany({ where: { customerId: id }, orderBy: { createdAt: 'desc' }, take: 50 });
+  return rows.map((r) => ({
+    id: r.id, action: r.action, lat: r.lat, lng: r.lng, accuracy: r.accuracy,
+    prevLat: r.prevLat, prevLng: r.prevLng, movedM: r.movedM, note: r.note || '',
+    actorName: r.actorName || '', at: r.createdAt ? new Date(r.createdAt).getTime() : null,
+  }));
+}
+
+// HOW FAR ALONG THE FIELDWORK IS. Counts COORDINATES, not Maps links: a pasted link is enough to
+// navigate by hand but useless for ordering a route, and conflating the two makes the gap look
+// smaller than it is - which is how it stays open.
+async function locationCoverage(actor) {
+  const base = { active: true, ...fleetWhere(actor, 'armada') };
+  const rows = await prisma.customer.findMany({ where: base, select: { armada: true, lat: true, lng: true, mapsUrl: true } });
+  const byFleet = {};
+  let withCoords = 0, linkOnly = 0;
+  for (const r of rows) {
+    const f = r.armada || '(tanpa armada)';
+    byFleet[f] = byFleet[f] || { fleetId: f, total: 0, withCoords: 0 };
+    byFleet[f].total++;
+    if (hasCoords(r)) { withCoords++; byFleet[f].withCoords++; }
+    else if (r.mapsUrl) linkOnly++;
+  }
+  const total = rows.length;
+  return {
+    total, withCoords, without: total - withCoords,
+    // Customers whose only "location" is a pasted Maps link - they LOOK located on the customer list
+    // and are invisible to routing. Worth naming separately so the number is not quietly wrong.
+    linkOnly,
+    pct: total ? Math.round((withCoords / total) * 100) : 100,
+    byFleet: Object.values(byFleet).sort((a, b) => a.fleetId.localeCompare(b.fleetId)),
+  };
+}
+
+// BULK CLEAR (admin) - for a batch captured wrongly, never routine. Two steps on purpose: the preview
+// names every customer that would lose its point, because "42 customers" is not something anyone can
+// check, and a list of names is.
+async function bulkClearPreview(ids, actor) {
+  const want = [...new Set((Array.isArray(ids) ? ids : []).map(String))].slice(0, 500);
+  const rows = await prisma.customer.findMany({
+    where: { id: { in: want }, ...fleetWhere(actor, 'armada') },
+    select: { id: true, code: true, name: true, armada: true, lat: true, lng: true, mapsUrl: true, locationSetByName: true, locationSetAt: true },
+  });
+  const affected = rows.filter((r) => hasCoords(r) || r.mapsUrl);
+  return {
+    requested: want.length,
+    // Asked for but not touchable: outside the caller's fleet scope, already without a location, or
+    // simply not a customer. Reported rather than silently dropped from the count.
+    skipped: want.length - affected.length,
+    affected: affected.map((r) => ({
+      id: r.id, code: r.code || '', name: r.name, armada: r.armada || '',
+      lat: r.lat, lng: r.lng, hasCoords: hasCoords(r),
+      setBy: r.locationSetByName || '', setAt: r.locationSetAt ? new Date(r.locationSetAt).getTime() : null,
+    })),
+  };
+}
+
+async function bulkClearLocations(body, actor) {
+  const note = String((body && body.note) || '').trim();
+  if (note.length < 3) throw ApiError.badRequest('Alasan wajib diisi saat menghapus lokasi massal.');
+  const prev = await bulkClearPreview(body && body.ids, actor);
+  if (!prev.affected.length) throw ApiError.badRequest('Tidak ada pelanggan berlokasi dalam pilihan itu.');
+  const snap = await actorSnap(actor);
+  for (const a of prev.affected) {
+    const cur = await prisma.customer.findUnique({ where: { id: a.id } });
+    await prisma.customer.update({ where: { id: a.id }, data: {
+      lat: null, lng: null, mapsUrl: '', locationAccuracy: null, locationSetAt: null, locationSetByName: null,
+    } });
+    await prisma.customerLocationHistory.create({ data: {
+      customerId: a.id, action: 'clear', prevLat: cur.lat, prevLng: cur.lng, prevAccuracy: cur.locationAccuracy,
+      note: ('Hapus massal: ' + note).slice(0, 300), actorId: snap.actorId, actorName: snap.actorName,
+    } });
+  }
+  await logAudit('pelanggan', `Hapus lokasi massal: ${prev.affected.length} pelanggan`, `alasan: ${note} · ${prev.affected.map((a) => a.name).slice(0, 20).join(', ')}${prev.affected.length > 20 ? ' …' : ''}`, snap, '');
+  return { cleared: prev.affected.length, skipped: prev.skipped };
 }
 // Attach / replace / remove a customer's LOCATION PHOTO. The photo bytes already live in the
 // Attachment store (uploaded via the existing /attachments flow); here we only store its id + who/
@@ -4664,7 +4807,7 @@ module.exports = {
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
   gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance, openingRowsPanel, openingRowsBulk, restoreOpeningRowsBatch,
-  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
+  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, clearCustomerLocation, revertCustomerLocation, listLocationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
