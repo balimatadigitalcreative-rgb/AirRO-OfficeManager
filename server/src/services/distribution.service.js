@@ -3758,7 +3758,7 @@ function deliveryClient(r, sisaBon) {
   const c = r.customer || {};
   let days = []; try { days = c.deliveryDays ? JSON.parse(c.deliveryDays) : []; } catch (e) {}
   return {
-    id: r.id, date: r.date, fleetId: r.fleetId, customerId: r.customerId, source: r.source, seq: r.seq,
+    id: r.id, date: r.date, fleetId: r.fleetId, customerId: r.customerId, source: r.source, seq: r.seq, pinned: !!r.pinned,
     status: r.status, qty: r.qty, note: r.note || '', pendingReason: r.pendingReason || '', transactionId: r.transactionId || null,
     createdByName: r.createdByName || null, createdAt: r.createdAt ? new Date(r.createdAt).getTime() : null,
     customerName: c.name || '', customerCode: c.code || '', phone: c.phone || '', armada: c.armada || '', masterPrice: c.masterPrice || 0,
@@ -4052,7 +4052,125 @@ async function reorderDeliveries(user, body) {
   for (const r of rows) { if (!fleetAllows(user, r.fleetId)) throw ApiError.forbidden('Pengiriman di luar akses Anda.'); }
   let seq = 0;
   for (const id of ids) { if (byId[id]) { await prisma.delivery.update({ where: { id }, data: { seq } }); seq++; } }
+  // AUDITED — saving a route order is a real change the office sees; record who reordered what.
+  if (seq) {
+    const snap = await actorSnap(user);
+    const first = byId[ids.find((i) => byId[i])];
+    await logAudit('pengiriman', 'Simpan urutan rute: ' + (first ? first.fleetId : ''), 'Tanggal ' + (first ? first.date : '') + ' - ' + seq + ' perhentian' + (body.source === 'proximity' ? ' - dari urutan jarak' : ''), snap, first ? first.fleetId : '');
+  }
   return { ok: true, count: seq };
+}
+
+// == ROUTE ORDERING BY PROXIMITY ==================================================================
+// Order today's undelivered stops so the driver travels a sensible path instead of criss-crossing.
+// PHASE 1 is STRAIGHT-LINE (haversine) distance computed right here - no external routing API, no
+// per-call cost. What it produces is a SUGGESTION: the board still delivers in any order, and a stop
+// completed out of sequence is never blocked nor flagged.
+const EARTH_KM = 6371;
+const toRad = (d) => (d * Math.PI) / 180;
+function haversineKm(a, b) {
+  if (!a || !b || a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
+  const dLat = toRad(+b.lat - +a.lat), dLng = toRad(+b.lng - +a.lng);
+  const h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(+a.lat)) * Math.cos(toRad(+b.lat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+const hasCoords = (r) => !!(r && r.lat != null && r.lng != null && Number.isFinite(+r.lat) && Number.isFinite(+r.lng));
+const km1 = (v) => (v == null ? null : Math.round(v * 10) / 10);   // 1 decimal - "1,2 km"
+// Greedy nearest-neighbour walk from `origin` over `pool` (pure; returns a new ordering).
+function nearestWalk(origin, pool) {
+  const left = pool.slice(); const out = [];
+  let cur = origin;
+  while (left.length) {
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < left.length; i++) { const d = haversineKm(cur, left[i]); if (d != null && d < bd) { bd = d; bi = i; } }
+    const nx = left.splice(bi, 1)[0];
+    out.push(nx); cur = nx;
+  }
+  return out;
+}
+// The depot origin is an OPTIONAL owner setting ({lat,lng}); absent is normal, not an error.
+async function depotOrigin() {
+  try {
+    const v = await require('./settings.service').get('depotOrigin');
+    if (!v || typeof v !== 'object') return null;
+    const lat = Number(v.lat), lng = Number(v.lng);
+    // (0,0) is Null Island, never a depot - it is what an unset/blank coordinate coerces to, and using
+    // it as an origin would silently order the whole route from the Gulf of Guinea.
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
+    return { lat, lng };
+  } catch (e) { return null; }
+}
+
+// GET /deliveries/route - today's undelivered stops ordered by proximity, with per-leg + cumulative
+// distance. Customers WITHOUT coordinates are never dropped: they come back in their own trailing
+// `unlocated` group so staff can fill the gap in place instead of losing the stop.
+async function routeDeliveries(user, query) {
+  const q = query || {};
+  const date = q.date || todayISO();
+  const strategy = q.strategy === 'farthest' ? 'farthest' : 'nearest';
+  const rows = await prisma.delivery.findMany({
+    where: { date, status: 'pending', ...fleetWhere(user, 'fleetId', q.fleet) },
+    include: { customer: true }, orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
+  });
+  const bon = await bonMapFor([...new Set(rows.map((r) => r.customerId))]);
+  const stops = rows.map((r) => deliveryClient(r, bon[r.customerId]));
+  const located = stops.filter(hasCoords);
+  const unlocated = stops.filter((s) => !hasCoords(s));
+  // ORIGIN - the driver's live position when supplied; else the configured depot; else the centroid of
+  // today's located stops. `source` is returned so a denied/unavailable geolocation degrades to a
+  // LABELLED fallback the UI can say out loud, instead of failing.
+  let origin = null, originSource = 'none';
+  if (Number.isFinite(+q.lat) && Number.isFinite(+q.lng)) { origin = { lat: +q.lat, lng: +q.lng }; originSource = 'driver'; }
+  if (!origin) { const d = await depotOrigin(); if (d) { origin = d; originSource = 'depot'; } }
+  if (!origin && located.length) {
+    origin = { lat: located.reduce((a, s) => a + +s.lat, 0) / located.length, lng: located.reduce((a, s) => a + +s.lng, 0) / located.length };
+    originSource = 'centroid';
+  }
+  // PINNED ("urutan tetap") stops hold their position - a fixed time window must never be overridden
+  // by proximity. Only the unpinned stops are re-walked; the walk drops into the free slots around them.
+  const free = located.filter((s) => !s.pinned);
+  let walked;
+  if (!origin) walked = free;                      // nothing to measure from - keep the board order
+  else if (strategy === 'farthest' && free.length) {
+    // Start at the stop FARTHEST from the origin and work back - usually a better LOOP than greedy
+    // nearest-first, which tends to strand one long hop home.
+    let fi = 0, fd = -1;
+    free.forEach((s, i) => { const d = haversineKm(origin, s); if (d != null && d > fd) { fd = d; fi = i; } });
+    const start = free[fi];
+    walked = [start].concat(nearestWalk(start, free.filter((_, i) => i !== fi)));
+  } else walked = nearestWalk(origin, free);
+  const ordered = []; let w = 0;
+  for (let i = 0; i < located.length; i++) ordered.push(located[i].pinned ? located[i] : walked[w++]);
+  // Per-leg + cumulative distance along the FINAL sequence (pinned stops included), so
+  // "1,2 km - total 8,4 km" describes the path actually travelled.
+  let prev = origin, cum = 0;
+  const data = ordered.map((s, i) => {
+    const leg = haversineKm(prev, s);
+    if (leg != null) cum += leg;
+    prev = s;
+    return Object.assign({}, s, { order: i + 1, legKm: km1(leg), cumKm: km1(cum) });
+  });
+  // COVERAGE - the real blocker. A proximity route is only as good as the share of stops that actually
+  // have coordinates, so the number travels with the response and the UI can show it.
+  const total = stops.length;
+  return {
+    date, fleet: q.fleet || null, strategy,
+    origin: origin ? { lat: origin.lat, lng: origin.lng, source: originSource } : null,
+    data, unlocated, totalKm: km1(cum) || 0,
+    coverage: { total, withCoords: located.length, withoutCoords: unlocated.length, pct: total ? Math.round((located.length / total) * 100) : 100 },
+  };
+}
+
+// Toggle "urutan tetap" on one stop (a route concern -> distribusiRute). Never affects delivery status.
+async function pinDelivery(user, id, body) {
+  const row = await prisma.delivery.findUnique({ where: { id } });
+  if (!row) throw ApiError.notFound('Pengiriman tidak ditemukan.');
+  if (!fleetAllows(user, row.fleetId)) throw ApiError.notFound('Pengiriman tidak ditemukan.');
+  const pinned = !!body.pinned;
+  const up = await prisma.delivery.update({ where: { id }, data: { pinned } });
+  const snap = await actorSnap(user);
+  await logAudit('pengiriman', (pinned ? 'Kunci' : 'Lepas') + ' urutan tetap', row.date + ' - ' + row.fleetId, snap, row.fleetId);
+  return { id: up.id, pinned: up.pinned };
 }
 
 // ══ CARRY-OVER of undelivered stops ══════════════════════════════════════════════════════════════
@@ -4526,7 +4644,7 @@ module.exports = {
   requestChange, previewCorrection, listChangeRequests, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
-  deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts,
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, pinDelivery, closeDay, listCloseouts,
   outstandingDeliveries, outstandingSummary, resolveOutstanding, bulkCarry, bulkCarryPreview, bulkResolveOutstanding, undoBulkCarry,
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,

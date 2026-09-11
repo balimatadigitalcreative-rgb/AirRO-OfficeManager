@@ -1250,6 +1250,10 @@ model Delivery {
   customerId    String
   source        String   @default("jadwal")     // jadwal | tambahan
   seq           Int      @default(0)            // route order
+  // URUTAN TETAP — this stop has a fixed time window (hotel/restaurant delivery hours), so the
+  // proximity route MUST NOT move it: the nearest-neighbour walk reorders everything around it while
+  // this stop keeps its position. Purely a routing hint; it never blocks or flags a delivery.
+  pinned        Boolean  @default(false)
   status        String   @default("pending")    // pending | terkirim | batal | ditunda
   qty           Int?                             // optional planned qty
   note          String   @default("")

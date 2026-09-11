@@ -6262,6 +6262,12 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   const [orderOpen, setOrderOpen] = uSx(false);
   const [txnStop, setTxnStop] = uSx(null);
   const [closeOpen, setCloseOpen] = uSx(false);
+  // ROUTE ORDERING BY PROXIMITY - display state only until [Simpan urutan] writes it into seq.
+  const [routeOn, setRouteOn] = uSx(false);
+  const [routeBusy, setRouteBusy] = uSx(false);
+  const [routeMeta, setRouteMeta] = uSx(null);   // { origin:{source}, totalKm, coverage, strategy }
+  const [legs, setLegs] = uSx({});               // deliveryId -> { legKm, cumKm, order }
+  const [noLocIds, setNoLocIds] = uSx([]);       // trailing "belum ada lokasi" group
   const ef = effFleet(fleetScope, distFleet);
   const reload = () => {
     if (!(window.API && window.API.distribusi)) return;
@@ -6282,8 +6288,45 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   // ── route reorder: ↑/↓ buttons (work everywhere, incl. mobile) + HTML5 drag (bonus). ──
   // Optimistic: reorder locally, then PUT the new id order; the saved seq drives the list.
   const dragIdx = React.useRef(null);
-  const persistOrder = (list) => window.API.distribusi.deliveries.reorder({ date, fleet: ef, order: list.map((r) => r.id) })
+  const persistOrder = (list, source) => window.API.distribusi.deliveries.reorder({ date, fleet: ef, order: list.map((r) => r.id), source: source || 'manual' })
     .then(() => { if (onChanged) onChanged(); }).catch(() => flash(trD('dist.loadErr')));
+  // ── Proximity route ────────────────────────────────────────────────────────────────────────────
+  // ONE geolocation read per tap - never a continuous GPS poll: that drains the battery and tracks the
+  // driver all day for no gain. Denied/unavailable is NOT a failure: the server orders from the depot
+  // (then the centroid) and returns which origin it used, which the banner says out loud.
+  const kmTxt = (v) => (v == null ? '—' : String(v).replace('.', ','));
+  const applyRoute = (r) => {
+    const map = {}; (r.data || []).forEach((x) => { map[x.id] = { legKm: x.legKm, cumKm: x.cumKm, order: x.order }; });
+    setLegs(map);
+    setNoLocIds((r.unlocated || []).map((x) => x.id));
+    setRouteMeta({ origin: r.origin || null, totalKm: r.totalKm, coverage: r.coverage, strategy: r.strategy });
+    setRouteOn(true);
+    // Reorder the DISPLAY to the suggestion (located stops first, then the no-location group). Keeping
+    // the full permutation matters: persistOrder writes every id, so the tail must travel with it.
+    const byId = {}; (board || []).forEach((x) => { byId[x.id] = x; });
+    const next = (r.data || []).map((x) => byId[x.id]).filter(Boolean).concat((r.unlocated || []).map((x) => byId[x.id]).filter(Boolean));
+    if (next.length) setBoard(next);
+  };
+  const fetchRoute = (strategy, coords) => {
+    setRouteBusy(true);
+    return window.API.distribusi.deliveries.route({ date, fleet: ef, strategy, lat: coords ? coords.lat : null, lng: coords ? coords.lng : null })
+      .then(applyRoute).catch(() => flash(trD('dist.loadErr'))).then(() => setRouteBusy(false));
+  };
+  const routeFromMe = (strategy) => {
+    if (!navigator.geolocation) { flash(trD('dist.locUnavailable')); return fetchRoute(strategy, null); }
+    setRouteBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setRouteBusy(false); fetchRoute(strategy, { lat: pos.coords.latitude, lng: pos.coords.longitude }); },
+      () => { setRouteBusy(false); flash(trD('dist.routeDenied')); fetchRoute(strategy, null); },   // fall back, never fail
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  };
+  const clearRoute = () => { setRouteOn(false); setLegs({}); setNoLocIds([]); setRouteMeta(null); reload(); };
+  const saveRoute = () => persistOrder(board || [], 'proximity').then(() => flash(trD('dist.routeSaved')));
+  // "Urutan tetap" - a fixed time window this stop must keep; proximity reorders around it.
+  const togglePin = (s) => window.API.distribusi.deliveries.pin(s.id, !s.pinned)
+    .then(() => { setBoard((prev) => (prev || []).map((x) => (x.id === s.id ? Object.assign({}, x, { pinned: !s.pinned }) : x))); flash(trD(s.pinned ? 'dist.pinCleared' : 'dist.pinSaved')); })
+    .catch(() => flash(trD('dist.loadErr')));
   const reorder = (from, to) => {
     if (from == null || to == null || from === to || to < 0) return;
     const next = (board || []).slice();
@@ -6317,6 +6360,9 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       <div className="dist-tx-toolbar">
         <div style={{ minWidth: 190 }}><DP.DateField value={date} onChange={setDate} allowFuture /></div>
         <div style={{ flex: 1 }} />
+        {board !== null && rows.length > 0 && <button type="button" className="btn btn-ghost" disabled={routeBusy} onClick={() => routeFromMe('nearest')}><IconPin s={16} />{routeBusy ? '…' : trD('dist.routeFromMe')}</button>}
+        {routeOn && <button type="button" className="btn btn-ghost" disabled={routeBusy} onClick={() => routeFromMe(routeMeta && routeMeta.strategy === 'farthest' ? 'nearest' : 'farthest')}><IconRefresh s={16} />{trD(routeMeta && routeMeta.strategy === 'farthest' ? 'dist.routeNearest' : 'dist.routeFarthest')}</button>}
+        {routeOn && canRoute && <button type="button" className="btn btn-primary" onClick={saveRoute}><IconCheck s={16} />{trD('dist.routeSave')}</button>}
         {canOrder && <button type="button" className="btn btn-ghost" onClick={() => setOrderOpen(true)}><IconPlus s={16} />{trD('dist.addOrder')}</button>}
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
@@ -6334,11 +6380,29 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
           </div>
         </div>
       ))}
+      {routeOn && routeMeta && (
+        <div className="card dist-route-bar">
+          <span className="dist-route-total"><IconPin s={14} />{trD('dist.routeTotal', { km: kmTxt(routeMeta.totalKm) })}</span>
+          <span className="dist-route-origin">{trD('dist.routeOrigin_' + ((routeMeta.origin && routeMeta.origin.source) || 'none'))}</span>
+          {routeMeta.coverage && routeMeta.coverage.withoutCoords > 0 && (
+            <span className="dist-route-cov"><IconWarn s={12} />{trD('dist.routeCoverage', { n: routeMeta.coverage.withoutCoords, total: routeMeta.coverage.total })}</span>
+          )}
+          <span style={{ flex: 1 }} />
+          <button type="button" className="dist-link" onClick={clearRoute}>{trD('dist.routeClear')}</button>
+          <span className="dist-route-hint">{trD('dist.routeHint')}</span>
+        </div>
+      )}
       <div className="card dist-card" style={{ padding: '6px 18px' }}>
         {board === null && <div className="dist-empty dist-loading"><span className="dist-spin" />{trD('common.loading')}</div>}
         {board !== null && rows.length === 0 && <div className="dist-empty">{trD('dist.delivEmpty')}</div>}
         {rows.map((s, i) => (
-          <div key={s.id} className={`dist-cust-row dist-deliv-row st-${s.status}`}
+          <React.Fragment key={s.id}>
+          {/* Trailing group: stops whose customer has no coordinates. They are never dropped from the
+              board - they simply cannot be ordered by distance until someone captures the location. */}
+          {routeOn && noLocIds.length > 0 && noLocIds[0] === s.id && (
+            <div className="dist-route-group"><IconPin s={12} />{trD('dist.routeNoLocGroup', { n: noLocIds.length })}</div>
+          )}
+          <div className={`dist-cust-row dist-deliv-row st-${s.status}`}
             draggable={canRoute} onDragStart={canRoute ? (e) => { dragIdx.current = i; e.dataTransfer.effectAllowed = 'move'; } : undefined}
             onDragOver={canRoute ? (e) => e.preventDefault() : undefined} onDrop={canRoute ? (e) => { e.preventDefault(); const from = dragIdx.current; dragIdx.current = null; reorder(from, i); } : undefined}>
             {canRoute && (
@@ -6353,22 +6417,28 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
               <div className="dist-txn-line1"><span className="dist-deliv-seq">{i + 1}.</span>{s.customerCode && <span className="dist-code">{s.customerCode}</span>}<span className="dist-txn-name">{s.customerName}</span>{srcBadge(s.source)}{statBadge(s.status)}</div>
               <div className="dist-txn-sub">{s.phone || '—'}{s.deliveryDays && s.deliveryDays.length ? ' · ' + fmtDays(s.deliveryDays) : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}{s.note ? ' · ' + s.note : ''}</div>
               {s.pendingReason ? <div className="dist-deliv-reason"><IconInvoice s={11} />{trD('dist.pendingReason')}: {s.pendingReason}</div> : null}
+              {routeOn && legs[s.id] ? (
+                <div className="dist-route-km"><IconPin s={11} />{kmTxt(legs[s.id].legKm)} km · {trD('dist.routeCum')} {kmTxt(legs[s.id].cumKm)} km</div>
+              ) : null}
               <div className="dist-deliv-loc no-print">
                 {s.mapsLink
                   ? <a href={s.mapsLink} target="_blank" rel="noopener noreferrer" className="dist-link"><IconPin s={12} />{trD('dist.directions')}</a>
                   : <span className="dist-noloc"><IconPin s={12} />{trD('dist.locNotSet')}</span>}
+                {canRoute && <button type="button" className={'dist-link dist-pin' + (s.pinned ? ' on' : '')} title={trD('dist.pinHint')} onClick={() => togglePin(s)}><IconLock s={12} />{trD(s.pinned ? 'dist.pinned' : 'dist.pin')}</button>}
                 <GpsButton custId={s.customerId} hasLoc={s.hasLocation} onSaved={() => { flash(trD('dist.locSaved')); reload(); if (onChanged) onChanged(); }} onFlash={flash} />
                 <LocPhoto custId={s.customerId} photoId={s.locationPhotoId} canEdit onChanged={() => { flash(trD('dist.locPhotoSaved')); reload(); if (onChanged) onChanged(); }} compact />
               </div>
             </div>
             {s.status === 'pending' && (
               <div className="dist-deliv-actions">
+                {s.mapsLink && <a className="btn btn-ghost btn-sm" href={s.mapsLink} target="_blank" rel="noopener noreferrer"><IconPin s={13} />{trD('dist.navigate')}</a>}
                 <button type="button" className="btn btn-primary btn-sm" onClick={() => setTxnStop(s)}><IconPlus s={13} />{trD('dist.delivMakeTxn')}</button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => mark(s.id, 'terkirim')}><IconCheck s={13} />{trD('dist.delivMarkSent')}</button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => mark(s.id, 'batal')}><IconClose s={13} />{trD('dist.delivCancel')}</button>
               </div>
             )}
           </div>
+          </React.Fragment>
         ))}
       </div>
       {orderOpen && <DeliveryOrderModal date={date} customers={custs} onClose={() => setOrderOpen(false)} onSaved={() => { setOrderOpen(false); flash(trD('dist.orderSaved')); reload(); if (onChanged) onChanged(); }} />}

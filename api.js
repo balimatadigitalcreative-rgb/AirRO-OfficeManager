@@ -326,7 +326,11 @@
         board: (date, fleet) => { const p = ['date=' + encodeURIComponent(date)]; if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/deliveries?' + p.join('&')); },
         addOrder: (data) => req('POST', '/distribusi/deliveries/order', data),
         mark: (id, data) => req('PATCH', '/distribusi/deliveries/' + id, data),
-        reorder: (data) => req('PUT', '/distribusi/deliveries/reorder', data),   // { date, fleet, order:[ids] }
+        reorder: (data) => req('PUT', '/distribusi/deliveries/reorder', data),   // { date, fleet, order:[ids], source? }
+        // ROUTE ORDERING BY PROXIMITY (phase 1: straight-line). lat/lng optional - without them the
+        // server falls back to the depot setting, then the centroid, and says which origin it used.
+        route: (o) => { const q = o || {}; const p2 = ['date=' + encodeURIComponent(q.date)]; if (q.fleet && q.fleet !== 'all') p2.push('fleet=' + encodeURIComponent(q.fleet)); if (q.lat != null && q.lng != null) { p2.push('lat=' + q.lat); p2.push('lng=' + q.lng); } if (q.strategy) p2.push('strategy=' + q.strategy); return req('GET', '/distribusi/deliveries/route?' + p2.join('&')); },
+        pin: (id, pinned) => req('PATCH', '/distribusi/deliveries/' + id + '/pin', { pinned: !!pinned }),
         close: (data) => req('POST', '/distribusi/deliveries/close', data),      // { date, fleet, generalNote, reasons:{id:reason} }
         closeouts: (qs) => req('GET', '/distribusi/closeouts' + (qs ? '?' + qs : '')),
         // Carry-over of undelivered stops from previous days.

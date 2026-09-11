@@ -192,7 +192,15 @@ const cashIntegQuery = z.object({ dateFrom: DATE.optional(), dateTo: DATE.option
 const boardQuery = z.object({ date: DATE, fleet: z.string().max(60).optional() });
 const orderSchema = z.object({ customerId: z.string().min(1), date: DATE, qty: z.number().int().nonnegative().optional(), note: z.string().max(300).optional() });
 const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), transactionId: z.string().min(1).optional() });
-const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), order: z.array(z.string().min(1)).max(2000) });
+const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), order: z.array(z.string().min(1)).max(2000), source: z.enum(['manual', 'proximity']).optional() });
+// Route ordering by proximity. lat/lng are the DRIVER's live position (optional - the server falls back
+// to the depot setting, then the centroid of today's stops, and reports which origin it used).
+const routeQuery = z.object({
+  date: DATE, fleet: z.string().max(60).optional(),
+  lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional(),
+  strategy: z.enum(['nearest', 'farthest']).optional(),
+});
+const pinSchema = z.object({ pinned: z.boolean() });
 const closeSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), generalNote: z.string().max(500).optional(), reasons: z.record(z.string().max(300)).optional() });
 // Carry-over of undelivered stops. `includeDitunda` accepts a string ('false'/'0') from the query.
 const outstandingQuery = z.object({ fleet: z.string().max(60).optional(), asOf: DATE.optional(), maxAgeDays: z.coerce.number().int().positive().max(3650).optional(), includeDitunda: z.union([z.boolean(), z.enum(['true', 'false', '0', '1'])]).optional() });
@@ -363,6 +371,9 @@ const addOrder = asyncHandler(async (req, res) => {
 });
 const markDelivery = asyncHandler(async (req, res) => { const r = await service.markDelivery(req.params.id, req.body, req.user); bcast('delivery', req.params.id); res.json(r); });
 const reorderDeliveries = asyncHandler(async (req, res) => { const r = await service.reorderDeliveries(req.user, req.body); bcast('delivery', 'reorder'); res.json({ data: r }); });
+// Proximity route - read-only suggestion (no write, no broadcast). Persisting it is the reorder call.
+const deliveryRoute = asyncHandler(async (req, res) => res.json(await service.routeDeliveries(req.user, req.query)));
+const pinDelivery = asyncHandler(async (req, res) => { const r = await service.pinDelivery(req.user, req.params.id, req.body); bcast('delivery', req.params.id); res.json({ data: r }); });
 const closeDay = asyncHandler(async (req, res) => {
   const r = await service.closeDay(req.user, req.body);
   // Notify the fleet's admins/atasan (AlertBell) when the day is closed with undelivered
@@ -458,7 +469,7 @@ module.exports = {
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, previewReassign, requestReassign, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, resetTotalPreview, resetTotalCommit, resetTotalRestore, openingRowsList, openingRowsBulkPreview, openingRowsBulk, openingRowsRestore, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
-  deliveryBoard, addOrder, markDelivery, reorderDeliveries, closeDay, listCloseouts, outstandingDeliveries, resolveOutstanding,
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries, deliveryRoute, pinDelivery, closeDay, listCloseouts, outstandingDeliveries, resolveOutstanding,
   bulkCarryPreview, bulkCarry, bulkResolveOutstanding, undoBulkCarry,
   openRun, closeRun, correctRun, listRuns,
   listExpenses, createExpense, voidExpense, expenseCats, deliveryReport,
@@ -466,5 +477,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, routeQuery, pinSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };

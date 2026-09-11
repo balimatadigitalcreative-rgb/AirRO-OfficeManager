@@ -160,6 +160,10 @@ router.get('/cash-integration', requireCap('distribusiCashIntegrasi'), validate(
 // ── Delivery board — view = distribusiPengiriman; add extra order = distribusiOrder;
 // marking a stop (terkirim/batal, link a txn) = distribusiPengiriman. ──
 router.get('/deliveries', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.boardQuery }), ctrl.deliveryBoard);
+// ROUTE ORDERING BY PROXIMITY - the driver's own tool, so it rides the delivery cap (not distribusiRute,
+// which gates SAVING an order). Read-only: it suggests an order, it never writes one. Declared before
+// '/deliveries/:id' style paths so 'route' is never read as an id.
+router.get('/deliveries/route', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.routeQuery }), ctrl.deliveryRoute);
 // CARRY-OVER of undelivered stops — its OWN back-office cap (distribusiBelumTerkirim), separate from the
 // field team's daily-route cap (distribusiPengiriman). Every surface below is gated on it; the outstanding
 // COUNT on the dashboard summary is gated in the service (see outstandingSummary). GET the actionable list
@@ -172,6 +176,8 @@ router.post('/deliveries/outstanding/undo-carry', requireCap('distribusiBelumTer
 router.post('/deliveries/outstanding/:id/resolve', requireCap('distribusiBelumTerkirim'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.outstandingResolveSchema }), ctrl.resolveOutstanding);
 router.post('/deliveries/order', requireCap('distribusiOrder'), validate({ body: ctrl.schemas.orderSchema }), ctrl.addOrder);
 router.put('/deliveries/reorder', requireCap('distribusiRute'), validate({ body: ctrl.schemas.reorderSchema }), ctrl.reorderDeliveries);
+// 'Urutan tetap' (pin) - a route-order concern, so it shares the route capability.
+router.patch('/deliveries/:id/pin', requireCap('distribusiRute'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.pinSchema }), ctrl.pinDelivery);
 // Close the day (helper who ran the deliveries). Undelivered stops need a reason.
 router.post('/deliveries/close', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.closeSchema }), ctrl.closeDay);
 // Admin report of closeouts across the (scoped) fleets.
