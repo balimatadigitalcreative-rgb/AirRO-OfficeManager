@@ -8,9 +8,11 @@ const asyncHandler = require('../utils/asyncHandler');
 const fleetSchema = z.object({ fleetId: z.string().max(60) });
 const idParams = z.object({ id: z.string().min(1) });
 
-const listDevices = asyncHandler(async (req, res) => res.json(await service.listDevices()));
+// EVERY handler passes req.user and nothing from the query or body decides scope. There is deliberately
+// no `fleetId` parameter to honour: scope comes from the session, so a crafted request cannot widen it.
+const listDevices = asyncHandler(async (req, res) => res.json(await service.viewDevices(req.user)));
 const syncDevices = asyncHandler(async (req, res) => res.json({ data: await service.syncDevices(req.user) }));
-const refreshPositions = asyncHandler(async (req, res) => res.json({ data: await service.refreshPositions({}) }));
-const setDeviceFleet = asyncHandler(async (req, res) => res.json({ data: await service.setDeviceFleet(req.params.id, req.body) }));
+const refreshPositions = asyncHandler(async (req, res) => res.json({ data: await service.refreshPositions(req.user, {}) }));
+const setDeviceFleet = asyncHandler(async (req, res) => res.json({ data: await service.setDeviceFleet(req.user, req.params.id, req.body) }));
 
 module.exports = { listDevices, syncDevices, refreshPositions, setDeviceFleet, schemas: { fleetSchema, idParams } };

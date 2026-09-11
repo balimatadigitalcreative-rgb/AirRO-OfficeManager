@@ -96,13 +96,9 @@ const cleanDays = (v) => { const a = Array.isArray(v) ? v : []; return DAY_CODES
 // A user's fleetScope (from the token) is 'all'/null (full access) or an array of fleet
 // names. Customers carry their fleet in `armada`; transactions & audit rows in `fleetId`.
 // EVERY read filters by scope; EVERY write is forced within scope — server-enforced.
-function fleetScopeOf(user) {
-  const raw = user && user.fleetScope;
-  if (raw == null || raw === 'all' || raw === '') return null;   // full access
-  if (Array.isArray(raw)) return raw.filter(Boolean);
-  try { const a = JSON.parse(raw); if (Array.isArray(a)) return a.filter(Boolean); if (a === 'all') return null; } catch (e) {}
-  return null;   // unparseable → full access (only an explicit array restricts)
-}
+// Defined in lib/fleet-scope so distribution and VEHICLE TRACKING cannot drift apart - a driver must
+// see the same armadas on the map as on the board. null = every fleet; an array restricts; [] = none.
+const { fleetScopeOf } = require('../lib/fleet-scope');
 // Prisma `where` fragment for a fleet column, honouring the scope + an optional explicit
 // filter (`qFleet`, only meaningful for full-access users toggling a fleet).
 function fleetWhere(user, col, qFleet) {
@@ -4104,6 +4100,26 @@ async function depotOrigin() {
 // GET /deliveries/route - today's undelivered stops ordered by proximity, with per-leg + cumulative
 // distance. Customers WITHOUT coordinates are never dropped: they come back in their own trailing
 // `unlocated` group so staff can fill the gap in place instead of losing the stop.
+// The last known position of a vehicle in the user's fleet scope, or null.
+//
+// SCOPE COMES FROM THE SESSION. gps.service.trackingScope resolves it from the token's fleetScope, so
+// this can only ever return a vehicle the user is already allowed to see; `wantId` narrows that list
+// and never widens it. A stale fix is refused outright - ordering a whole day's route from where the
+// truck was three hours ago is worse than falling through to the depot, because it looks right.
+async function vehicleOrigin(user, wantId) {
+  try {
+    const gps = require('./gps.service');
+    const { data } = await gps.listDevices(user);
+    const usable = (data || []).filter((d) => d.posState === 'ok' && !d.stale);
+    if (!usable.length) return null;
+    const pick = wantId ? usable.find((d) => d.id === wantId || d.vehicleId === String(wantId)) : usable[0];
+    if (!pick) return null;
+    return { lat: pick.lat, lng: pick.lng, vehicle: { id: pick.id, registration: pick.registration, fleetId: pick.fleetId, fixAt: pick.fixAt } };
+  } catch (e) {
+    return null;   // tracking unavailable is not a reason to refuse a route
+  }
+}
+
 async function routeDeliveries(user, query) {
   const q = query || {};
   const date = q.date || todayISO();
@@ -4119,8 +4135,17 @@ async function routeDeliveries(user, query) {
   // ORIGIN - the driver's live position when supplied; else the configured depot; else the centroid of
   // today's located stops. `source` is returned so a denied/unavailable geolocation degrades to a
   // LABELLED fallback the UI can say out loud, instead of failing.
-  let origin = null, originSource = 'none';
+  let origin = null, originSource = 'none', originVehicle = null;
   if (Number.isFinite(+q.lat) && Number.isFinite(+q.lng)) { origin = { lat: +q.lat, lng: +q.lng }; originSource = 'driver'; }
+  // THE TRUCK'S OWN POSITION, when the phone has not given us one. It is picked from the vehicles in
+  // THIS user's fleet scope - no selection step for a driver who has exactly one - so ordering starts
+  // from where the vehicle actually is rather than from a depot it left hours ago. `vehicleId` only
+  // ever NARROWS an already-scoped list (for someone who drives more than one), and is validated
+  // against that scope: it cannot reach a vehicle the session may not see.
+  if (!origin) {
+    const v = await vehicleOrigin(user, q.vehicleId);
+    if (v) { origin = { lat: v.lat, lng: v.lng }; originSource = 'vehicle'; originVehicle = v.vehicle; }
+  }
   if (!origin) { const d = await depotOrigin(); if (d) { origin = d; originSource = 'depot'; } }
   if (!origin && located.length) {
     origin = { lat: located.reduce((a, s) => a + +s.lat, 0) / located.length, lng: located.reduce((a, s) => a + +s.lng, 0) / located.length };
@@ -4156,6 +4181,8 @@ async function routeDeliveries(user, query) {
   return {
     date, fleet: q.fleet || null, strategy,
     origin: origin ? { lat: origin.lat, lng: origin.lng, source: originSource } : null,
+    // Which truck the order was measured from, when it was the truck - so the UI can name it.
+    originVehicle,
     data, unlocated, totalKm: km1(cum) || 0,
     coverage: { total, withCoords: located.length, withoutCoords: unlocated.length, pct: total ? Math.round((located.length / total) * 100) : 100 },
   };

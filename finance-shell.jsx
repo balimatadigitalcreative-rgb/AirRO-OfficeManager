@@ -1796,7 +1796,10 @@ function FApp() {
           )}
           {screen === 'dist-deliveries' && p.distribusiPengiriman && (
             <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}
-              canBelumTerkirim={!!p.distribusiBelumTerkirim} canGps={!!p.settings}
+              canBelumTerkirim={!!p.distribusiBelumTerkirim}
+              /* TWO separate rights: seeing the tracking panel at all, and being allowed to re-map a
+                 vehicle to another armada. A driver holds the first and must never hold the second. */
+              canGps={!!p.distribusiLacakArmada} canGpsMap={!!p.settings}
               fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
               onChanged={() => setDistTick((t) => t + 1)} />
           )}

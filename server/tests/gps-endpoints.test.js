@@ -101,7 +101,7 @@ describe('the adapter requests ONLY the two verified paths', () => {
   });
 
   it('ONE call covers the whole fleet — never one request per vehicle', async () => {
-    await require('../src/services/gps.service').refreshPositions({ force: true });   // past the cache
+    await require('../src/services/gps.service').refreshPositions(null, { force: true });   // past the cache
     const statusCalls = calls.filter((u) => u.endsWith('/vehicles/status'));
     expect(statusCalls).toHaveLength(1);
     // …and it did return both vehicles, so per-vehicle polling would buy nothing.
@@ -143,11 +143,11 @@ describe('refreshing the position is delivery work, not configuration', () => {
 
   it('the provider call is cached briefly, so a whole team pressing [Coba lagi] is ONE request', async () => {
     const gps = require('../src/services/gps.service');
-    await gps.refreshPositions({ force: true });     // prime the cache
+    await gps.refreshPositions(null, { force: true });     // prime the cache
     installFetch();                                  // forget those calls
-    await gps.refreshPositions({});
-    await gps.refreshPositions({});
-    await gps.refreshPositions({});
+    await gps.refreshPositions(null, {});
+    await gps.refreshPositions(null, {});
+    await gps.refreshPositions(null, {});
     expect(calls).toHaveLength(0);                   // three presses, zero provider calls
   });
 });
@@ -163,7 +163,7 @@ describe('an empty position says WHY, and when we last asked', () => {
   it('a provider failure is recorded with its reason — not left as a blank position', async () => {
     const gps = require('../src/services/gps.service');
     global.fetch = async () => ({ ok: false, status: 503, json: async () => ({}), text: async () => 'upstream down' });
-    await gps.refreshPositions({ force: true });
+    await gps.refreshPositions(null, { force: true });
     const body = (await request(app).get('/api/v1/gps/devices').set(auth(gm))).body;
     expect(body.lastAttempt.ok).toBe(false);
     expect(body.lastAttempt.error).toMatch(/503/);
@@ -181,13 +181,13 @@ describe('an empty position says WHY, and when we last asked', () => {
     let T = 1758000000000;
     nowSpy.mockImplementation(() => T);
     try {
-      await gps.refreshPositions({ force: true });                   // a success at T
+      await gps.refreshPositions(null, { force: true });                   // a success at T
       T += 25000;                                                    // ...cooldown expires
       global.fetch = async () => ({ ok: false, status: 503, json: async () => ({}), text: async () => 'down' });
-      await gps.refreshPositions({});                                // a real attempt, which FAILS
+      await gps.refreshPositions(null, {});                                // a real attempt, which FAILS
       T += 5000;                                                     // only 5s later
       installFetch();                                                // provider healthy again
-      await gps.refreshPositions({});                                // no force
+      await gps.refreshPositions(null, {});                                // no force
       expect(calls).toEqual([BASE + '/vehicles/status']);            // it reached the provider
     } finally { nowSpy.mockRestore(); }
   });

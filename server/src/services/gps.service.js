@@ -18,7 +18,8 @@
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
 const config = require('../config/env');
-const { parseProviderTs } = require('../lib/time');
+const { parseProviderTs, todayISO, zonedNaiveToUtcMs } = require('../lib/time');
+const { fleetScopeOf } = require('../lib/fleet-scope');
 const cartrack = require('./cartrack.service');
 const settings = require('./settings.service');
 
@@ -55,6 +56,67 @@ function deriveFleet(vehicleName, fleets) {
   return hit ? String(hit).trim() : '';
 }
 
+// ── TRACKING SCOPE ─ the one resolver every tracking path goes through ──────────────────────
+/*
+ * WHO MAY SEE WHICH VEHICLE. Derived from the SESSION and nothing else: `fleetScope` off the JWT, via
+ * the same lib/fleet-scope used by the delivery board. A request parameter never widens it - that is
+ * the IDOR pattern already fixed once in the accounting reports, and it must not come back through a
+ * `?fleetId=` on a map.
+ *
+ * The convention (lib/fleet-scope): null = EVERY fleet (owner, GM, back office); an array restricts;
+ * an explicit [] restricts to NOTHING and is a real state, not a synonym for "all".
+ *
+ * Scope names are matched to the app's armada list case-insensitively and canonicalised to the app's
+ * spelling, because GpsDevice.fleetId is compared verbatim everywhere else. A scope entry matching no
+ * known armada is DRIFT: it would silently show the user nothing at all, so it is reported rather than
+ * swallowed - an empty panel that means "your access is misspelt" must never look like "no vehicles".
+ */
+async function trackingScope(user) {
+  const raw = fleetScopeOf(user);
+  const known = await knownFleets();
+  if (raw === null) return { all: true, fleets: known, drift: [] };
+  const canon = (f) => known.find((k) => String(k).trim().toLowerCase() === String(f).trim().toLowerCase());
+  const drift = raw.filter((f) => !canon(f)).map((f) => String(f).trim());
+  if (drift.length) {
+    // Visible to whoever reads the logs, and returned to the caller so an admin sees it in the UI.
+    console.warn('[gps] fleetScope names match no known armada: ' + drift.join(', ') + ' (known: ' + known.join(', ') + ')');
+  }
+  return { all: false, fleets: raw.map((f) => canon(f) || String(f).trim()), drift };
+}
+
+// The prisma filter for a resolved scope. An unrestricted scope filters nothing; a restricted one is
+// an explicit `in` list, and an EMPTY scope matches nothing rather than everything - the difference
+// between "sees all vehicles" and "sees none" is one careless fallback.
+function scopeWhereFleet(scope) {
+  if (scope.all) return {};
+  return { fleetId: { in: scope.fleets.length ? scope.fleets : ['__no_fleet__'] } };
+}
+
+// WHO LOOKED. Tracking is employee monitoring, so a view is recorded - once per actor per fleet per
+// business day, because the panel reloads on every visit to the delivery screen and an audit log
+// nobody can read answers nothing. Written directly (not via distribution.service) so that route
+// ordering can depend on THIS module without a require cycle.
+async function noteTrackingView(user, scope) {
+  if (!user || !user.id) return;
+  const ymd = todayISO();
+  const since = new Date(zonedNaiveToUtcMs(Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)), config.appTz));
+  const fleetId = scope.all ? '' : scope.fleets.join(', ');       // '' = every fleet, the log's own convention
+  const seen = await prisma.distAuditLog.findFirst({ where: { kind: 'lacak_armada', actorId: user.id, fleetId, createdAt: { gte: since } }, select: { id: true } });
+  if (seen) return;
+  let name = null;
+  let role = (user && user.role) || null;
+  try {
+    const u = await prisma.user.findUnique({ where: { id: user.id }, select: { name: true, role: true } });
+    if (u) { name = u.name; role = u.role; }
+  } catch (e) { /* the log must never break the read it is recording */ }
+  await prisma.distAuditLog.create({ data: {
+    kind: 'lacak_armada',
+    title: 'Lihat posisi kendaraan: ' + (scope.all ? 'semua armada' : (fleetId || 'tanpa armada')),
+    detail: 'Akses pelacakan dibuka' + (scope.all ? '' : ' untuk armada ' + fleetId),
+    fleetId, actorId: user.id, actorRole: role, actorName: name,
+  } });
+}
+
 // ── what happened last time we asked the provider ────────────────────────────────
 // A BLANK EMPTY STATE HIDES BUGS. "belum ada posisi" sat on the screen while the adapter was calling an
 // endpoint that carries no position at all, and nothing on the page could have said so. So the outcome
@@ -86,6 +148,9 @@ function positionPatch(existing, fix, ts) {
   return pos;
 }
 
+// A fix older than this is flagged stale (it still shows - with its age).
+const STALE_FIX_MS = 30 * 60 * 1000;
+
 // ── client shape ─────────────────────────────────────────────────────────────────────────────────
 function deviceClient(d) {
   return {
@@ -102,6 +167,9 @@ function deviceClient(d) {
     //   ok    - we have one          never - this device has never been synced
     //   noFix - synced, but the provider has never reported a position for it
     posState: (d.lastLat != null && d.lastLng != null) ? 'ok' : (d.lastSyncAt ? 'noFix' : 'never'),
+    // A fix old enough that "where the truck is" is a guess. Shown, never hidden: a stale position
+    // presented as current is worse than an honest "posisi terakhir 3 jam lalu".
+    stale: !!(d.lastFixAt && Date.now() - new Date(d.lastFixAt).getTime() > STALE_FIX_MS),
     // A UTC epoch. The client renders it in the app timezone; it is never a pre-formatted local string.
     fixAt: d.lastFixAt ? new Date(d.lastFixAt).getTime() : null,
     fixRaw: d.lastFixRaw || '', fixAssumedTz: d.lastFixAssumedTz || '',
@@ -110,8 +178,9 @@ function deviceClient(d) {
 }
 
 // ── read ─────────────────────────────────────────────────────────────────────────────────────────
-async function listDevices() {
-  const rows = await prisma.gpsDevice.findMany({ orderBy: [{ fleetId: 'asc' }, { vehicleName: 'asc' }] });
+async function listDevices(user, scopeIn) {
+  const scope = scopeIn || await trackingScope(user);
+  const rows = await prisma.gpsDevice.findMany({ where: scopeWhereFleet(scope), orderBy: [{ fleetId: 'asc' }, { vehicleName: 'asc' }] });
   const data = rows.map(deviceClient);
   return {
     data,
@@ -119,9 +188,33 @@ async function listDevices() {
     appTz: config.appTz,
     // When we last asked the provider and how it went - shown beside an empty position.
     lastAttempt: await lastAttempt(),
-    // The UI warning: tracked vehicles the app cannot attribute to any armada.
-    unmapped: data.filter((d) => d.unmapped).map((d) => ({ id: d.id, vehicleName: d.vehicleName, registration: d.registration })),
+    // What this session may see, so the UI can explain itself instead of rendering an empty box.
+    scope: { all: scope.all, fleets: scope.fleets, drift: scope.drift },
+    //   emptyScope - holds the capability but is assigned no armada
+    //   driftScope - the assigned armada matches no known fleet (a spelling problem, not an empty fleet)
+    //   noDevice   - their armada has no GPS device mapped to it yet
+    state: scope.all || scope.fleets.length ? (data.length ? 'ok' : (scope.drift.length ? 'driftScope' : 'noDevice')) : 'emptyScope',
+    // Vehicles the app cannot attribute to any armada. They belong to no fleet, so they are only ever
+    // visible to an unrestricted session - a driver is not shown another fleet's unmapped truck.
+    unmapped: scope.all ? data.filter((d) => d.unmapped).map((d) => ({ id: d.id, vehicleName: d.vehicleName, registration: d.registration })) : [],
   };
+}
+
+// The read the API serves: identical to listDevices, plus the "who looked" record.
+async function viewDevices(user) {
+  const scope = await trackingScope(user);
+  await noteTrackingView(user, scope);
+  return listDevices(user, scope);
+}
+
+// One device, or 403. A crafted id naming another fleet's vehicle is REFUSED rather than served, and
+// the message names no vehicle: an error must not become a way to learn that a truck exists.
+async function deviceInScope(user, id) {
+  const d = await prisma.gpsDevice.findUnique({ where: { id } });
+  if (!d) throw ApiError.notFound('Perangkat GPS tidak ditemukan.');
+  const scope = await trackingScope(user);
+  if (!scope.all && !scope.fleets.includes(d.fleetId)) throw ApiError.forbidden('Armada di luar akses Anda.');
+  return d;
 }
 
 // ── sync ─────────────────────────────────────────────────────────────────────────────────────────
@@ -171,7 +264,7 @@ async function syncDevices(actor) {
     if (existing) { await prisma.gpsDevice.update({ where: { id: existing.id }, data }); out.updated++; }
     else { await prisma.gpsDevice.create({ data: { provider: 'cartrack', vehicleId: v.vehicleId, ...data } }); out.created++; }
   }
-  const res = Object.assign(out, await listDevices());
+  const res = Object.assign(out, await listDevices(actor));
   // How many devices actually have a known position once the dust settles — the number the UI cares
   // about, and not the same as how many rows the sync happened to write.
   res.positioned = res.data.filter((d) => d.lat != null && d.lng != null).length;
@@ -191,11 +284,11 @@ async function syncDevices(actor) {
 const REFRESH_MIN_MS = 20000;
 let lastRefreshMs = 0;
 
-async function refreshPositions(opts) {
+async function refreshPositions(user, opts) {
   const force = !!(opts && opts.force);
-  if (!cartrack.configured()) return Object.assign({ refreshed: false, cached: false }, await listDevices());
+  if (!cartrack.configured()) return Object.assign({ refreshed: false, cached: false }, await listDevices(user));
   if (!force && Date.now() - lastRefreshMs < REFRESH_MIN_MS) {
-    return Object.assign({ refreshed: false, cached: true }, await listDevices());
+    return Object.assign({ refreshed: false, cached: true }, await listDevices(user));
   }
   let statuses = null;
   let error = '';
@@ -205,7 +298,7 @@ async function refreshPositions(opts) {
   // button is broken, and they would press it harder.
   if (!error) lastRefreshMs = Date.now();
   await recordAttempt('refresh', !error, error);
-  if (error) return Object.assign({ refreshed: false, cached: false, error }, await listDevices());
+  if (error) return Object.assign({ refreshed: false, cached: false, error }, await listDevices(user));
   const now = new Date();
   for (const st of statuses) {
     const existing = await prisma.gpsDevice.findUnique({ where: { provider_vehicleId: { provider: 'cartrack', vehicleId: st.vehicleId } } });
@@ -213,24 +306,29 @@ async function refreshPositions(opts) {
     const ts = parseProviderTs(st.rawTs, config.cartrack.tz);
     await prisma.gpsDevice.update({ where: { id: existing.id }, data: Object.assign({ lastSyncAt: now }, positionPatch(existing, st, ts)) });
   }
-  return Object.assign({ refreshed: true, cached: false }, await listDevices());
+  return Object.assign({ refreshed: true, cached: false }, await listDevices(user));
 }
 
 // ── editable mapping ─────────────────────────────────────────────────────────────────────────────
 // Setting the fleet by hand marks the row 'manual' so a later sync leaves it alone. Passing '' clears
 // the mapping AND returns the row to 'derived', so the next sync may seed it again.
-async function setDeviceFleet(id, body) {
-  const d = await prisma.gpsDevice.findUnique({ where: { id } });
-  if (!d) throw ApiError.notFound('Perangkat GPS tidak ditemukan.');
+async function setDeviceFleet(user, id, body) {
+  // BOTH ends are scoped: you may not re-map a vehicle you cannot see, and you may not hand one to a
+  // fleet outside your own access - otherwise a scoped admin could move a truck out of sight.
+  const d = await deviceInScope(user, id);
   const fleetId = String(body.fleetId == null ? '' : body.fleetId).trim();
   if (fleetId) {
     const fleets = await knownFleets();
     if (fleets.length && !fleets.some((f) => String(f).trim().toLowerCase() === fleetId.toLowerCase())) {
       throw ApiError.badRequest('Armada "' + fleetId + '" tidak dikenal.', { fleets });
     }
+    const scope = await trackingScope(user);
+    if (!scope.all && !scope.fleets.some((f) => f.toLowerCase() === fleetId.toLowerCase())) {
+      throw ApiError.forbidden('Armada di luar akses Anda.');
+    }
   }
   const up = await prisma.gpsDevice.update({ where: { id }, data: { fleetId, fleetSource: fleetId ? 'manual' : 'derived' } });
   return deviceClient(up);
 }
 
-module.exports = { listDevices, syncDevices, refreshPositions, setDeviceFleet, deriveFleet, fleetTokenOf, knownFleets, deviceClient };
+module.exports = { listDevices, viewDevices, trackingScope, deviceInScope, syncDevices, refreshPositions, setDeviceFleet, deriveFleet, fleetTokenOf, knownFleets, deviceClient };

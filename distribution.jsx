@@ -6260,15 +6260,18 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
 //     obvious, not silent;
 //   • the fix time is a UTC epoch from the server and is rendered in the app's timezone (appTz), so
 //     "posisi terakhir X menit lalu" can never inherit the provider's Bangkok clock.
-function GpsPanel({ canGps, onFlash }) {
+function GpsPanel({ canGps, canGpsMap, onFlash }) {
   const [info, setInfo] = uSx(null);
   const [busy, setBusy] = uSx(false);
   const load = () => {
     if (!(window.API && window.API.gps)) return;
+    // A 403 here is the server saying "not your feature" - render nothing rather than an error box.
     window.API.gps.devices().then(setInfo).catch(() => setInfo(null));
   };
-  uEx(() => { load(); }, []);
-  if (!info) return null;
+  uEx(() => { if (canGps) load(); }, [canGps]);
+  // WITHOUT THE CAPABILITY THERE IS NO PANEL. The server refuses every tracking endpoint too; this is
+  // the courtesy half of that rule, never the enforcement.
+  if (!canGps || !info) return null;
   const tz = info.appTz || 'Asia/Makassar';
   // Absolute wall-clock in the BUSINESS timezone — never the browser's, never the provider's.
   const atTxt = (ms) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(ms)); } catch (e) { return ''; } };
@@ -6310,15 +6313,26 @@ function GpsPanel({ canGps, onFlash }) {
     .then(() => { load(); if (onFlash) onFlash(trD('gps.mapSaved')); })
     .catch((e) => { if (onFlash) onFlash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   // Not connected: only the person who could fix it needs to see it.
-  if (!info.configured) return canGps ? <div className="card dist-card gps-panel"><div className="gps-off"><IconWarn s={14} />{trD('gps.notConfigured')}</div></div> : null;
-  if (!(info.data || []).length && !canGps) return null;
+  if (!info.configured) return canGpsMap ? <div className="card dist-card gps-panel"><div className="gps-off"><IconWarn s={14} />{trD('gps.notConfigured')}</div></div> : null;
+  // EVERY EMPTY CASE SAYS WHY. An empty panel is indistinguishable from a broken one, and these three
+  // have different fixes: ask an admin for an armada, correct a misspelt one, or map a device to it.
+  const emptyMsg = info.state === 'emptyScope' ? trD('gps.scopeEmpty')
+    : info.state === 'driftScope' ? trD('gps.scopeDrift', { names: ((info.scope && info.scope.drift) || []).join(', ') })
+      : info.state === 'noDevice' ? trD('gps.scopeNoDevice', { fleets: ((info.scope && info.scope.fleets) || []).join(', ') })
+        : '';
+  if (emptyMsg) return <div className="card dist-card gps-panel"><div className="gps-off"><IconWarn s={14} />{emptyMsg}</div></div>;
   const fleets = [...new Set((info.data || []).map((d) => d.fleetId).filter(Boolean))];
+  // A DRIVER SHOULD NOT HAVE TO PICK. With exactly one vehicle in scope the panel names it outright -
+  // there is nothing to choose between, so no selector is rendered at all.
+  const only = (info.data || []).length === 1 ? info.data[0] : null;
   return (
     <div className="card dist-card gps-panel">
       <div className="dist-card-head">
-        <div className="sec-title"><IconTruck s={15} />{trD('gps.title')}</div>
+        <div className="sec-title"><IconTruck s={15} />
+          {only ? trD('gps.yourVehicle', { reg: only.registration || only.vehicleName, fleet: only.fleetId || trD('gps.noFleet') }) : trD('gps.title')}
+        </div>
         <span style={{ flex: 1 }} />
-        {canGps && <button type="button" className="dist-link" disabled={busy} onClick={sync}>{busy ? '…' : trD('gps.sync')}</button>}
+        {canGpsMap && <button type="button" className="dist-link" disabled={busy} onClick={sync}>{busy ? '…' : trD('gps.sync')}</button>}
       </div>
       {/* WHEN WE LAST ASKED, AND HOW IT WENT. The blank "belum ada posisi" hid a wrong-endpoint bug for a
           full round trip: the screen could not distinguish "no fix yet" from "we never actually asked". */}
@@ -6336,7 +6350,7 @@ function GpsPanel({ canGps, onFlash }) {
         <div key={d.id} className={'gps-row' + (d.unmapped ? ' unmapped' : '')}>
           <span className="gps-veh">{d.registration || d.vehicleName}<em>{d.vehicleName}</em></span>
           <span className="gps-fleet">
-            {canGps ? (
+            {canGpsMap ? (
               <select className="fld gps-sel" value={d.fleetId || ''} onChange={(e) => setFleet(d, e.target.value)}>
                 <option value="">{trD('gps.noFleet')}</option>
                 {fleets.concat(d.fleetId && fleets.indexOf(d.fleetId) < 0 ? [d.fleetId] : []).map((f) => <option key={f} value={f}>{f}</option>)}
@@ -6367,7 +6381,7 @@ function GpsPanel({ canGps, onFlash }) {
   );
 }
 
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canBelumTerkirim, canGps, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canBelumTerkirim, canGps, canGpsMap, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [closeouts, setCloseouts] = uSx([]);
@@ -6481,7 +6495,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
-      <GpsPanel canGps={canGps} onFlash={flash} />
+      <GpsPanel canGps={canGps} canGpsMap={canGpsMap} onFlash={flash} />
       {/* Carry-over — a BACK-OFFICE surface (distribusiBelumTerkirim); hidden entirely for field staff who
           hold only distribusiPengiriman. Renders nothing when empty, so the screen stays clean either way. */}
       {canBelumTerkirim && <OutstandingSection ef={ef} today={today} refreshKey={refreshKey} onResolved={() => { reload(); if (onChanged) onChanged(); }} />}

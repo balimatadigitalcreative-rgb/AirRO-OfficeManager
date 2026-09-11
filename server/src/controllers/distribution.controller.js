@@ -199,6 +199,9 @@ const routeQuery = z.object({
   date: DATE, fleet: z.string().max(60).optional(),
   lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional(),
   strategy: z.enum(['nearest', 'farthest']).optional(),
+  // Which truck the driver is in today, when their scope holds more than one. It only ever NARROWS the
+  // already-scoped vehicle list server-side - it can never reach a vehicle the session may not see.
+  vehicleId: z.string().max(60).optional(),
 });
 const pinSchema = z.object({ pinned: z.boolean() });
 const closeSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), generalNote: z.string().max(500).optional(), reasons: z.record(z.string().max(300)).optional() });

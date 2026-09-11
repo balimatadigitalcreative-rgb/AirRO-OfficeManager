@@ -49,6 +49,9 @@ async function resetDb() {
   await prisma.distTransaction.deleteMany();
   await prisma.priceHistory.deleteMany();
   await prisma.gallonMovement.deleteMany();   // gallon ledger (also feeds the Gudang galon card)
+  await prisma.gpsDevice.deleteMany();         // tracked vehicles - otherwise a device seeded by one
+                                              // suite survives into the next, where route ordering
+                                              // would silently start from a leftover truck.
   await prisma.deliveryCloseout.deleteMany();
   await prisma.delivery.deleteMany();          // delivery-board stops (FK → customer)
   await prisma.distInvoice.deleteMany();       // invoices (FK → customer)
