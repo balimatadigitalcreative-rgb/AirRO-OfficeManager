@@ -18,6 +18,15 @@ const ApiError = require('../utils/ApiError');
 
 const configured = () => !!(config.cartrack.username && config.cartrack.password);
 
+/*
+ * THE ONLY TWO PATHS THIS ADAPTER MAY REQUEST, both verified 200 against the live Indonesia API:
+ *   /vehicles        — identity (registration, model, licence). Carries NO position on this tenant.
+ *   /vehicles/status — the live feed for EVERY vehicle in ONE call.
+ * Per-vehicle variants (/vehicles/{id}/status, /vehicles/{id}/position) and /positions all 404.
+ * A test asserts no other path is ever requested, so a wrong endpoint cannot come back quietly.
+ */
+const PATHS = { VEHICLES: '/vehicles', STATUS: '/vehicles/status' };
+
 // Basic auth header, built per call and never retained.
 function authHeader() {
   const raw = config.cartrack.username + ':' + config.cartrack.password;
@@ -72,7 +81,19 @@ const F = {
   lng: ['longitude', 'lng', 'lon', 'position_longitude', 'gps_longitude', 'last_longitude'],
   ts: ['event_ts', 'gps_ts', 'position_ts', 'last_position_ts', 'last_update', 'event_date', 'timestamp', 'updated_at'],
   speed: ['speed', 'speed_kph', 'speed_km_h', 'velocity'],
+  heading: ['bearing', 'heading', 'direction', 'course'],
+  ignition: ['ignition', 'ignition_on', 'ignitionOn', 'engine_on'],
 };
+
+// Providers spell a boolean every which way ('true', 1, 'ON'). Anything unrecognised stays null —
+// "unknown" is a real answer here and must not collapse into false.
+function bool(x) {
+  if (x === true || x === false) return x;
+  const s = String(x == null ? '' : x).trim().toLowerCase();
+  if (['true', '1', 'on', 'yes', 'y'].includes(s)) return true;
+  if (['false', '0', 'off', 'no', 'n'].includes(s)) return false;
+  return null;
+}
 
 // Normalise ONE provider vehicle row into the shape the GPS service stores. Position fields are
 // optional: /vehicles may or may not carry a last-known fix depending on the tenant, and "no fix yet"
@@ -91,7 +112,7 @@ function normalizeVehicle(v) {
 }
 
 async function listVehicles() {
-  const body = await get('/vehicles');
+  const body = await get(PATHS.VEHICLES);
   return unwrapList(body).map(normalizeVehicle).filter((v) => v.vehicleId);
 }
 
@@ -131,13 +152,15 @@ function normalizeStatus(s) {
     lat: real ? c.lat : null,
     lng: real ? c.lng : null,
     speedKph: num(pick(s, F.speed)),
+    headingDeg: num(pick(s, F.heading)),
+    ignitionOn: bool(pick(s, F.ignition)),
     rawTs: pick(s, F.ts),
   };
 }
 
 async function listStatuses() {
-  const body = await get('/vehicles/status');
+  const body = await get(PATHS.STATUS);
   return unwrapList(body).map(normalizeStatus).filter((v) => v.vehicleId);
 }
 
-module.exports = { configured, listVehicles, listStatuses, normalizeVehicle, normalizeStatus, coordsOf, unwrapList, pick, FIELDS: F };
+module.exports = { configured, PATHS, listVehicles, listStatuses, normalizeVehicle, normalizeStatus, coordsOf, unwrapList, pick, FIELDS: F };

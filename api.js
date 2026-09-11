@@ -114,6 +114,7 @@
     gps: {
       devices: () => req('GET', '/gps/devices'),                                  // { data[], unmapped[], configured, appTz }
       sync: () => req('POST', '/gps/sync', {}),                                   // pull from the provider + upsert
+      refresh: () => req('POST', '/gps/refresh', {}),                             // positions only; server-cached, delivery cap
       setFleet: (id, fleetId) => req('PATCH', '/gps/devices/' + id + '/fleet', { fleetId }),   // '' clears (back to derived)
     },
     // ACCOUNTING v2 (double-entry) reports — flag-gated server-side (404 when ACCOUNTING_V2 is off).

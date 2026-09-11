@@ -4580,3 +4580,10 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .gps-row { grid-template-columns: 1fr auto; row-gap: 4px; }
   .gps-pos { grid-column: 1 / -1; flex-direction: row; gap: 8px; align-items: baseline; }
 }
+
+/* GPS: the position cell must never be a bare blank - it carries the REASON and a retry. */
+.gps-attempt { font-size: 11.5px; color: var(--text-mut); padding: 2px 0 6px; }
+.gps-attempt.bad { color: #8A5A12; font-weight: 600; }
+.gps-nopos { color: var(--text-faint); font-weight: 600; }
+.gps-retry { align-self: flex-start; margin-top: 2px; padding: 0; border: none; background: none; color: var(--blue-700, #1B5FA8); font-size: 11px; font-weight: 700; cursor: pointer; }
+.gps-retry:disabled { opacity: .5; cursor: default; }

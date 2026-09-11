@@ -1294,6 +1294,10 @@ model GpsDevice {
   lastLat          Float?
   lastLng          Float?
   lastSpeedKph     Float?
+  // NULL is "the provider said nothing", which is NOT the same as 0 kph or engine-off. Keeping them
+  // distinguishable is what lets the UI say WHY there is no position instead of showing a blank.
+  lastHeadingDeg   Float?                             // bearing, degrees
+  lastIgnitionOn   Boolean?
   lastFixAt        DateTime?                          // UTC instant of the GPS fix
   lastFixRaw       String    @default("")             // the provider's raw timestamp string (audit)
   lastFixAssumedTz String    @default("")             // zone WE assumed ('' = the stamp had its own offset)

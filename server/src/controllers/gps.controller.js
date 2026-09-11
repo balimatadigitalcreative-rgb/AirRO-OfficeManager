@@ -10,6 +10,7 @@ const idParams = z.object({ id: z.string().min(1) });
 
 const listDevices = asyncHandler(async (req, res) => res.json(await service.listDevices()));
 const syncDevices = asyncHandler(async (req, res) => res.json({ data: await service.syncDevices(req.user) }));
+const refreshPositions = asyncHandler(async (req, res) => res.json({ data: await service.refreshPositions({}) }));
 const setDeviceFleet = asyncHandler(async (req, res) => res.json({ data: await service.setDeviceFleet(req.params.id, req.body) }));
 
-module.exports = { listDevices, syncDevices, setDeviceFleet, schemas: { fleetSchema, idParams } };
+module.exports = { listDevices, syncDevices, refreshPositions, setDeviceFleet, schemas: { fleetSchema, idParams } };

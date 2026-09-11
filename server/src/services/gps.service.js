@@ -55,6 +55,37 @@ function deriveFleet(vehicleName, fleets) {
   return hit ? String(hit).trim() : '';
 }
 
+// ── what happened last time we asked the provider ────────────────────────────────
+// A BLANK EMPTY STATE HIDES BUGS. "belum ada posisi" sat on the screen while the adapter was calling an
+// endpoint that carries no position at all, and nothing on the page could have said so. So the outcome
+// of every attempt is recorded and shown: when we last asked, and what came back.
+// Provider error TEXT is safe to store - ApiError messages carry a status code and a path, never the
+// Authorization header or the credentials themselves.
+const ATTEMPT_KEY = 'gps_last_attempt';
+async function recordAttempt(kind, ok, error) {
+  const rec = { at: Date.now(), kind, ok: !!ok, error: error ? String(error).slice(0, 300) : '' };
+  try { await settings.set(ATTEMPT_KEY, rec); } catch (e) { /* never fail a sync over its own bookkeeping */ }
+  return rec;
+}
+async function lastAttempt() {
+  try { const v = await settings.get(ATTEMPT_KEY); return v && typeof v === 'object' ? v : null; } catch (e) { return null; }
+}
+
+// The columns a fix writes - or {} when the reading is older than the one already stored.
+// A LAST-KNOWN POSITION ONLY MOVES FORWARD: an out-of-order reading, or an identity row standing in for
+// a status feed that is down, would otherwise draw the vehicle jumping back across town. That reads as
+// real movement, which is worse than showing nothing.
+function positionPatch(existing, fix, ts) {
+  if (existing && existing.lastFixAt && ts.at && ts.at.getTime() < new Date(existing.lastFixAt).getTime()) return {};
+  const pos = {};
+  if (fix.lat != null && fix.lng != null) { pos.lastLat = fix.lat; pos.lastLng = fix.lng; }
+  if (fix.speedKph != null) pos.lastSpeedKph = fix.speedKph;
+  if (fix.headingDeg != null) pos.lastHeadingDeg = fix.headingDeg;
+  if (fix.ignitionOn != null) pos.lastIgnitionOn = fix.ignitionOn;
+  if (ts.at) { pos.lastFixAt = ts.at; pos.lastFixRaw = ts.raw; pos.lastFixAssumedTz = ts.assumedTz; }
+  return pos;
+}
+
 // ── client shape ─────────────────────────────────────────────────────────────────────────────────
 function deviceClient(d) {
   return {
@@ -64,6 +95,13 @@ function deviceClient(d) {
     providerTz: d.providerTz || '', active: d.active !== false,
     lat: d.lastLat != null ? d.lastLat : null, lng: d.lastLng != null ? d.lastLng : null,
     speedKph: d.lastSpeedKph != null ? d.lastSpeedKph : null,
+    headingDeg: d.lastHeadingDeg != null ? d.lastHeadingDeg : null,
+    // null is "the provider said nothing" - deliberately NOT folded into false.
+    ignitionOn: d.lastIgnitionOn == null ? null : !!d.lastIgnitionOn,
+    // WHY there is no position, so the UI never has to render an unexplained blank:
+    //   ok    - we have one          never - this device has never been synced
+    //   noFix - synced, but the provider has never reported a position for it
+    posState: (d.lastLat != null && d.lastLng != null) ? 'ok' : (d.lastSyncAt ? 'noFix' : 'never'),
     // A UTC epoch. The client renders it in the app timezone; it is never a pre-formatted local string.
     fixAt: d.lastFixAt ? new Date(d.lastFixAt).getTime() : null,
     fixRaw: d.lastFixRaw || '', fixAssumedTz: d.lastFixAssumedTz || '',
@@ -79,6 +117,8 @@ async function listDevices() {
     data,
     configured: cartrack.configured(),
     appTz: config.appTz,
+    // When we last asked the provider and how it went - shown beside an empty position.
+    lastAttempt: await lastAttempt(),
     // The UI warning: tracked vehicles the app cannot attribute to any armada.
     unmapped: data.filter((d) => d.unmapped).map((d) => ({ id: d.id, vehicleName: d.vehicleName, registration: d.registration })),
   };
@@ -93,9 +133,11 @@ async function syncDevices(actor) {
   // failure — so a broken position feed is recorded and stepped over, never allowed to fail the sync.
   const statusById = new Map();
   let positionFeed = true;
+  let feedError = '';
   try {
     (await cartrack.listStatuses()).forEach((st) => statusById.set(st.vehicleId, st));
-  } catch (e) { positionFeed = false; }
+  } catch (e) { positionFeed = false; feedError = (e && e.message) || 'gagal'; }
+  await recordAttempt('sync', positionFeed, feedError);
   const fleets = await knownFleets();
   const now = new Date();
   const out = { created: 0, updated: 0, keptManual: 0, unmapped: 0, positioned: 0, positionFeed, total: vehicles.length };
@@ -115,21 +157,13 @@ async function syncDevices(actor) {
       lat: st.lat != null ? st.lat : v.lat,
       lng: st.lng != null ? st.lng : v.lng,
       speedKph: st.speedKph != null ? st.speedKph : v.speedKph,
+      headingDeg: st.headingDeg != null ? st.headingDeg : null,
+      ignitionOn: st.ignitionOn != null ? st.ignitionOn : null,
       rawTs: st.rawTs != null ? st.rawTs : v.rawTs,
     };
     // Normalise the fix timestamp to a UTC instant; keep the raw string + the zone we assumed.
     const ts = parseProviderTs(fix.rawTs, config.cartrack.tz);
-    // A LAST-KNOWN POSITION ONLY MOVES FORWARD. A reading older than the one already stored is ignored
-    // outright — whether it arrived out of order, or came from the identity row standing in for a
-    // status feed that is down. Overwriting a fresh fix with a stale one would make the vehicle appear
-    // to jump backwards across town, which reads as real movement and is worse than showing nothing.
-    const stale = !!(existing && existing.lastFixAt && ts.at && ts.at.getTime() < new Date(existing.lastFixAt).getTime());
-    const pos = {};
-    if (!stale) {
-      if (fix.lat != null && fix.lng != null) { pos.lastLat = fix.lat; pos.lastLng = fix.lng; }
-      if (fix.speedKph != null) pos.lastSpeedKph = fix.speedKph;
-      if (ts.at) { pos.lastFixAt = ts.at; pos.lastFixRaw = ts.raw; pos.lastFixAssumedTz = ts.assumedTz; }
-    }
+    const pos = positionPatch(existing, fix, ts);
     const data = {
       registration: v.registration, vehicleName: v.vehicleName, providerTz: v.providerTz,
       fleetId, fleetSource: manual ? 'manual' : 'derived', lastSyncAt: now, active: true, ...pos,
@@ -142,6 +176,44 @@ async function syncDevices(actor) {
   // about, and not the same as how many rows the sync happened to write.
   res.positioned = res.data.filter((d) => d.lat != null && d.lng != null).length;
   return res;
+}
+
+// ── position refresh (on demand) ─────────────────────────────────────────────
+/*
+ * A READ of the live feed: it updates positions only, never creates a device and never touches the
+ * fleet mapping. That is why it rides distribusiPengiriman rather than `settings` - a driver must be
+ * able to ask "where is the truck now?" without holding the keys to the integration.
+ *
+ * THE SHORT CACHE IS THE RATE LIMIT. One call to /vehicles/status returns EVERY vehicle, so a whole
+ * delivery team pressing [Coba lagi] at once costs the provider one request per REFRESH_MIN_MS - not
+ * one per person, and not one per vehicle.
+ */
+const REFRESH_MIN_MS = 20000;
+let lastRefreshMs = 0;
+
+async function refreshPositions(opts) {
+  const force = !!(opts && opts.force);
+  if (!cartrack.configured()) return Object.assign({ refreshed: false, cached: false }, await listDevices());
+  if (!force && Date.now() - lastRefreshMs < REFRESH_MIN_MS) {
+    return Object.assign({ refreshed: false, cached: true }, await listDevices());
+  }
+  let statuses = null;
+  let error = '';
+  try { statuses = await cartrack.listStatuses(); } catch (e) { error = (e && e.message) || 'gagal'; }
+  // SUCCESS IS CACHED; A FAILURE IS NOT. Someone staring at "penyedia error" and pressing [Coba lagi]
+  // must actually reach the provider — serving them a twenty-second-old refusal would look like the
+  // button is broken, and they would press it harder.
+  if (!error) lastRefreshMs = Date.now();
+  await recordAttempt('refresh', !error, error);
+  if (error) return Object.assign({ refreshed: false, cached: false, error }, await listDevices());
+  const now = new Date();
+  for (const st of statuses) {
+    const existing = await prisma.gpsDevice.findUnique({ where: { provider_vehicleId: { provider: 'cartrack', vehicleId: st.vehicleId } } });
+    if (!existing) continue;      // a vehicle we have never synced is not ours to invent here
+    const ts = parseProviderTs(st.rawTs, config.cartrack.tz);
+    await prisma.gpsDevice.update({ where: { id: existing.id }, data: Object.assign({ lastSyncAt: now }, positionPatch(existing, st, ts)) });
+  }
+  return Object.assign({ refreshed: true, cached: false }, await listDevices());
 }
 
 // ── editable mapping ─────────────────────────────────────────────────────────────────────────────
@@ -161,4 +233,4 @@ async function setDeviceFleet(id, body) {
   return deviceClient(up);
 }
 
-module.exports = { listDevices, syncDevices, setDeviceFleet, deriveFleet, fleetTokenOf, knownFleets, deviceClient };
+module.exports = { listDevices, syncDevices, refreshPositions, setDeviceFleet, deriveFleet, fleetTokenOf, knownFleets, deviceClient };

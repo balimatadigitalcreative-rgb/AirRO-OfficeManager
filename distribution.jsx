@@ -6281,6 +6281,24 @@ function GpsPanel({ canGps, onFlash }) {
     if (h < 24) return trD('gps.hourAgo', { n: h });
     return trD('gps.dayAgo', { n: Math.floor(h / 24) });
   };
+  // WHY a device has no position, in the order that actually explains it: a provider error is the cause
+  // of everything else, and a device nobody has synced was never going to have one.
+  const reasonOf = (d) => {
+    const a = info.lastAttempt;
+    if (a && !a.ok) return trD('gps.whyProvider', { err: a.error || '' });
+    if (d.posState === 'never') return trD('gps.whyNeverSynced');
+    if (d.ignitionOn === false) return trD('gps.whyIgnitionOff');
+    return trD('gps.whyNoFix');
+  };
+  // Positions only - no mapping changes - so this is open to anyone who can see the delivery board.
+  // The server caches the provider call, so pressing it repeatedly costs the provider nothing.
+  const refresh = () => {
+    setBusy(true);
+    window.API.gps.refresh()
+      .then((r) => { setInfo(r.data); })
+      .catch((e) => { if (onFlash) onFlash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); })
+      .then(() => setBusy(false));
+  };
   const sync = () => {
     setBusy(true);
     window.API.gps.sync()
@@ -6302,6 +6320,15 @@ function GpsPanel({ canGps, onFlash }) {
         <span style={{ flex: 1 }} />
         {canGps && <button type="button" className="dist-link" disabled={busy} onClick={sync}>{busy ? '…' : trD('gps.sync')}</button>}
       </div>
+      {/* WHEN WE LAST ASKED, AND HOW IT WENT. The blank "belum ada posisi" hid a wrong-endpoint bug for a
+          full round trip: the screen could not distinguish "no fix yet" from "we never actually asked". */}
+      {info.lastAttempt && (
+        <div className={'gps-attempt' + (info.lastAttempt.ok ? '' : ' bad')}>
+          {info.lastAttempt.ok
+            ? trD('gps.lastTryOk', { t: agoTxt(info.lastAttempt.at) })
+            : trD('gps.lastTryErr', { t: agoTxt(info.lastAttempt.at), err: info.lastAttempt.error || '' })}
+        </div>
+      )}
       {(info.unmapped || []).length > 0 && (
         <div className="gps-warn"><IconWarn s={14} />{trD('gps.unmappedWarn', { n: info.unmapped.length, names: info.unmapped.map((u) => u.vehicleName || u.registration).join(', ') })}</div>
       )}
@@ -6318,12 +6345,18 @@ function GpsPanel({ canGps, onFlash }) {
             {d.fleetSource === 'manual' && <span className="gps-manual" title={trD('gps.manualHint')}>{trD('gps.manual')}</span>}
           </span>
           <span className="gps-pos">
-            {d.fixAt ? (
+            {d.posState === 'ok' && d.fixAt ? (
               <>
-                <b>{agoTxt(d.fixAt)}</b>
+                <b>{agoTxt(d.fixAt)}{d.speedKph > 0 ? ' \u00b7 ' + Math.round(d.speedKph) + ' km/j' : ''}</b>
                 <em title={d.fixRaw ? trD('gps.rawHint', { raw: d.fixRaw, tz: d.fixAssumedTz || trD('gps.tzExplicit') }) : ''}>{atTxt(d.fixAt)} {tz.split('/').pop()}</em>
               </>
-            ) : <span className="dist-noloc">{trD('gps.noFix')}</span>}
+            ) : (
+              <>
+                <b className="gps-nopos">{trD('gps.noFix')}</b>
+                <em>{reasonOf(d)}</em>
+                <button type="button" className="gps-retry" disabled={busy} onClick={refresh}>{busy ? '\u2026' : trD('gps.retry')}</button>
+              </>
+            )}
           </span>
           {d.lat != null && d.lng != null
             ? <a className="dist-link" href={mapsUrl(d.lat, d.lng)} target="_blank" rel="noopener noreferrer"><IconPin s={12} />{trD('dist.directions')}</a>
