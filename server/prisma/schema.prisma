@@ -1269,6 +1269,42 @@ model Delivery {
   @@index([date, fleetId])
 }
 
+// ── Fleet GPS (Cartrack) ─────────────────────────────────────────────────
+// One tracked vehicle from the provider, mapped to an AirRO armada (fleet).
+//
+// THE MAPPING IS DATA, NOT A DERIVATION. It is seeded by reading the "(MERAH)"/"(BIRU)" suffix out of
+// the provider's vehicle_name, but it is then EDITABLE and remembered: `fleetSource='manual'` means a
+// human chose it and a later sync must never overwrite it. Renaming a vehicle at the provider therefore
+// cannot silently break the link. An unmapped vehicle (fleetId '') is surfaced in the UI, never hidden.
+//
+// TIMESTAMPS ARE STORED AS UTC INSTANTS. The provider's own timezone field is NOT trusted (the two
+// AirRO vehicles report different values — null and "Asia/Bangkok" — while both drive in Bali/WITA),
+// so `lastFixRaw` keeps the string exactly as received and `lastFixAssumedTz` records the zone WE
+// assumed when that string carried no offset. That makes a one-hour drift auditable instead of silent.
+model GpsDevice {
+  id               String    @id @default(cuid())
+  provider         String    @default("cartrack")
+  vehicleId        String                            // provider's vehicle_id (e.g. 452461087)
+  registration     String    @default("")            // DK8919AQ
+  vehicleName      String    @default("")            // "DK8919AQ (MERAH)" — verbatim from the provider
+  fleetId          String    @default("")            // armada; '' = UNMAPPED (the UI warns)
+  fleetSource      String    @default("derived")     // derived | manual — manual survives a re-sync
+  providerTz       String    @default("")            // what the provider claims; recorded, never trusted
+  active           Boolean   @default(true)
+  lastLat          Float?
+  lastLng          Float?
+  lastSpeedKph     Float?
+  lastFixAt        DateTime?                          // UTC instant of the GPS fix
+  lastFixRaw       String    @default("")             // the provider's raw timestamp string (audit)
+  lastFixAssumedTz String    @default("")             // zone WE assumed ('' = the stamp had its own offset)
+  lastSyncAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt @default(now())
+
+  @@unique([provider, vehicleId])
+  @@index([fleetId])
+}
+
 // Daily delivery closeout — a helper closes the day for (date, armada) with a report.
 // One per (date, fleetId). Undelivered stops carry their reason on Delivery.pendingReason
 // and are moved to status 'ditunda' at closeout (kept, not lost).

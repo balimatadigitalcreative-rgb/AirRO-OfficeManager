@@ -94,6 +94,7 @@ router.use('/calendar', require('./calendar.routes'));
 router.use('/payroll', require('./payroll.routes'));
 router.use('/payroll-accrual', require('./payrollAccrual.routes'));   // accrual payroll (double-entry) — sdmPayroll* caps
 router.use('/attachments', require('./attachment.routes'));   // proof photos, out of the record payload
+router.use('/gps', require('./gps.routes'));                   // Fleet GPS (Cartrack) - device<->armada mapping + last position
 router.use('/settings', require('./settings.routes'));
 router.use('/business-units', require('./businessUnit.routes'));   // unit bisnis dictionary (labels only, Stage 1)
 router.use('/inter-unit-transfers', require('./interUnitTransfer.routes'));   // Stage 4: internal money movement between units

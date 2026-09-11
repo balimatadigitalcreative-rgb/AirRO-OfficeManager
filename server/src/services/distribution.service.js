@@ -53,7 +53,7 @@ const noMoneyIn = (r) => !!(r && r.paymentNotReceived);
 const NOT_PNR = { paymentNotReceived: { not: true } };   // query-side twin of noMoneyIn (NULL-safe)
 // Retroactive-price-change scopes (option b). Payments (pelunasan) are never re-priced.
 const PRICE_SCOPES = ['all', 'cycle', 'bon'];
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 function scopeWhere(scope, today) {
   if (scope === 'bon') return { method: 'bon' };
   const sales = { method: { in: ['lunas', 'bon'] } };

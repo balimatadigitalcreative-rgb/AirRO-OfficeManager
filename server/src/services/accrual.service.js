@@ -8,6 +8,7 @@
 //     next period's start (Dr 2-4000 · Cr expense), so when the real bill lands next period it counts
 //     once, not twice. (The request cut off at "reverse"; this is the standard reversing-entry method.)
 const prisma = require('../lib/prisma');
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 const ApiError = require('../utils/ApiError');
 const config = require('../config/env');
 const acc = require('./accounting.service');
@@ -108,7 +109,7 @@ function monthsBetween(a, b) { const [ay, am] = a.split('-').map(Number); const 
 // Post every amortisation month due through `asOf` (inclusive), idempotently. sourceId `${id}:${YYYY-MM}`
 // + postedThrough both guard against double-posting, so this is safe to run daily / on close.
 async function postAmortization({ asOf } = {}, actor) {
-  const cutoff = ym(asOf || new Date().toISOString().slice(0, 10));
+  const cutoff = ym(asOf || todayISO());
   const schedules = await prisma.amortizationSchedule.findMany();
   let posted = 0;
   for (const s of schedules) {
@@ -135,7 +136,7 @@ async function postAmortization({ asOf } = {}, actor) {
 // How many amortisation MONTHS are due through `asOf`'s month but not yet posted — the Tutup Buku
 // blocker ("n amortisasi belum diposting"). Zero once postAmortization has run through the period end.
 async function pendingAmortizationCount({ asOf } = {}) {
-  const cutoff = ym(asOf || new Date().toISOString().slice(0, 10));
+  const cutoff = ym(asOf || todayISO());
   const schedules = await prisma.amortizationSchedule.findMany();
   let pending = 0;
   for (const s of schedules) {

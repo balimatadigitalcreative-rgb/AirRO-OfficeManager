@@ -1,5 +1,6 @@
 'use strict';
 const prisma = require('../lib/prisma');
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 const ApiError = require('../utils/ApiError');
 const rules = require('./cashbon.rules');
 
@@ -91,7 +92,7 @@ async function decide(id, status, user, reason, disbursedDate) {
   trail.decidedAt = Date.now();
   if (status === 'rejected') trail.rejectReason = reason || '';
   const data = { status, data: JSON.stringify(trail) };
-  if (status === 'approved') data.disbursedDate = disbursedDate || existing.disbursedDate || new Date().toISOString().slice(0, 10);
+  if (status === 'approved') data.disbursedDate = disbursedDate || existing.disbursedDate || todayISO();
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.cashbon.update({ where: { id }, data });
     // DISBURSEMENT posts an employee receivable so the payroll repayment (Cr Piutang Karyawan) balances:

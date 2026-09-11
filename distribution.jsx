@@ -6253,7 +6253,88 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   );
 }
 
-function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canBelumTerkirim, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
+// ── FLEET GPS (Cartrack) ──────────────────────────────────────────────────────────────────────────
+// Shows each tracked vehicle, which armada it maps to, and its last known position. Two rules it exists
+// to enforce visually:
+//   • a vehicle that maps to NO armada is WARNED about, never hidden — a provider rename must be
+//     obvious, not silent;
+//   • the fix time is a UTC epoch from the server and is rendered in the app's timezone (appTz), so
+//     "posisi terakhir X menit lalu" can never inherit the provider's Bangkok clock.
+function GpsPanel({ canGps, onFlash }) {
+  const [info, setInfo] = uSx(null);
+  const [busy, setBusy] = uSx(false);
+  const load = () => {
+    if (!(window.API && window.API.gps)) return;
+    window.API.gps.devices().then(setInfo).catch(() => setInfo(null));
+  };
+  uEx(() => { load(); }, []);
+  if (!info) return null;
+  const tz = info.appTz || 'Asia/Makassar';
+  // Absolute wall-clock in the BUSINESS timezone — never the browser's, never the provider's.
+  const atTxt = (ms) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(ms)); } catch (e) { return ''; } };
+  // Elapsed time is computed from the UTC instant, so it is immune to any zone confusion.
+  const agoTxt = (ms) => {
+    const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (m < 1) return trD('gps.justNow');
+    if (m < 60) return trD('gps.minAgo', { n: m });
+    const h = Math.floor(m / 60);
+    if (h < 24) return trD('gps.hourAgo', { n: h });
+    return trD('gps.dayAgo', { n: Math.floor(h / 24) });
+  };
+  const sync = () => {
+    setBusy(true);
+    window.API.gps.sync()
+      .then((r) => { setInfo(r.data); if (onFlash) onFlash(trD('gps.synced', { n: (r.data && r.data.total) || 0 })); })
+      .catch((e) => { if (onFlash) onFlash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); })
+      .then(() => setBusy(false));
+  };
+  const setFleet = (d, fleetId) => window.API.gps.setFleet(d.id, fleetId)
+    .then(() => { load(); if (onFlash) onFlash(trD('gps.mapSaved')); })
+    .catch((e) => { if (onFlash) onFlash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
+  // Not connected: only the person who could fix it needs to see it.
+  if (!info.configured) return canGps ? <div className="card dist-card gps-panel"><div className="gps-off"><IconWarn s={14} />{trD('gps.notConfigured')}</div></div> : null;
+  if (!(info.data || []).length && !canGps) return null;
+  const fleets = [...new Set((info.data || []).map((d) => d.fleetId).filter(Boolean))];
+  return (
+    <div className="card dist-card gps-panel">
+      <div className="dist-card-head">
+        <div className="sec-title"><IconTruck s={15} />{trD('gps.title')}</div>
+        <span style={{ flex: 1 }} />
+        {canGps && <button type="button" className="dist-link" disabled={busy} onClick={sync}>{busy ? '…' : trD('gps.sync')}</button>}
+      </div>
+      {(info.unmapped || []).length > 0 && (
+        <div className="gps-warn"><IconWarn s={14} />{trD('gps.unmappedWarn', { n: info.unmapped.length, names: info.unmapped.map((u) => u.vehicleName || u.registration).join(', ') })}</div>
+      )}
+      {(info.data || []).map((d) => (
+        <div key={d.id} className={'gps-row' + (d.unmapped ? ' unmapped' : '')}>
+          <span className="gps-veh">{d.registration || d.vehicleName}<em>{d.vehicleName}</em></span>
+          <span className="gps-fleet">
+            {canGps ? (
+              <select className="fld gps-sel" value={d.fleetId || ''} onChange={(e) => setFleet(d, e.target.value)}>
+                <option value="">{trD('gps.noFleet')}</option>
+                {fleets.concat(d.fleetId && fleets.indexOf(d.fleetId) < 0 ? [d.fleetId] : []).map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            ) : (d.fleetId ? <span className="dist-badge">{d.fleetId}</span> : <span className="dist-noloc">{trD('gps.noFleet')}</span>)}
+            {d.fleetSource === 'manual' && <span className="gps-manual" title={trD('gps.manualHint')}>{trD('gps.manual')}</span>}
+          </span>
+          <span className="gps-pos">
+            {d.fixAt ? (
+              <>
+                <b>{agoTxt(d.fixAt)}</b>
+                <em title={d.fixRaw ? trD('gps.rawHint', { raw: d.fixRaw, tz: d.fixAssumedTz || trD('gps.tzExplicit') }) : ''}>{atTxt(d.fixAt)} {tz.split('/').pop()}</em>
+              </>
+            ) : <span className="dist-noloc">{trD('gps.noFix')}</span>}
+          </span>
+          {d.lat != null && d.lng != null
+            ? <a className="dist-link" href={mapsUrl(d.lat, d.lng)} target="_blank" rel="noopener noreferrer"><IconPin s={12} />{trD('dist.directions')}</a>
+            : <span />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKoreksi, canBelumTerkirim, canGps, fleetScope, fleet, distFleet, setDistFleet, onChanged }) {
   const [date, setDate] = uSx(today);
   const [board, setBoard] = uSx(null);
   const [closeouts, setCloseouts] = uSx([]);
@@ -6367,6 +6448,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
+      <GpsPanel canGps={canGps} onFlash={flash} />
       {/* Carry-over — a BACK-OFFICE surface (distribusiBelumTerkirim); hidden entirely for field staff who
           hold only distribusiPengiriman. Renders nothing when empty, so the screen stays clean either way. */}
       {canBelumTerkirim && <OutstandingSection ef={ef} today={today} refreshKey={refreshKey} onResolved={() => { reload(); if (onChanged) onChanged(); }} />}

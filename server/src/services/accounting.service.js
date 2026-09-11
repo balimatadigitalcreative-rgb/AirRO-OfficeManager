@@ -6,6 +6,7 @@
 //
 // HARD INVARIANT (asserted on every post): sum(debit) === sum(credit) per journal entry.
 const prisma = require('../lib/prisma');
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 const ApiError = require('../utils/ApiError');
 const { unitWhere } = require('../lib/scope');   // per-user business-unit access (mirrors report.service)
 
@@ -703,7 +704,7 @@ async function accountingStatus({ asOf } = {}) {
   // Computed inline (not via subscription.service) to avoid a require cycle. Best-effort.
   let subsRemind = 0, subsRemindTotal = 0;
   try {
-    const t = base || new Date().toISOString().slice(0, 10);
+    const t = base || todayISO();
     const addD = (d, k) => { const dt = new Date(d + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + (k | 0)); return dt.toISOString().slice(0, 10); };
     const subs = await prisma.subscription.findMany({ where: { status: 'aktif' }, select: { nextRunDate: true, remindDays: true, amount: true, tax: true } });
     subs.forEach((s) => { if (s.nextRunDate <= addD(t, s.remindDays != null ? s.remindDays : 3)) { subsRemind++; subsRemindTotal += Number(s.amount) + Number(s.tax); } });
@@ -771,7 +772,7 @@ function agingBucket(date, asOf) {
   return days <= 30 ? 'd0_30' : days <= 60 ? 'd31_60' : days <= 90 ? 'd61_90' : 'd90p';
 }
 async function agingReceivables({ asOf, fleetId, businessUnitId, user } = {}) {
-  const today = asOf || new Date().toISOString().slice(0, 10);
+  const today = asOf || todayISO();
   const where = { method: { in: ['bon', 'pelunasan'] }, status: { not: 'void' }, bonCounted: true };
   if (fleetId) where.fleetId = fleetId;
   if (businessUnitId) where.businessUnitId = businessUnitId;

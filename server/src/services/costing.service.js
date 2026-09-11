@@ -30,7 +30,7 @@ const f = (v) => Number(v) || 0;
 const int = (v) => Math.max(0, Math.round(Number(v) || 0));
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const ym = (d) => String(d || '').slice(0, 7);
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 async function idByCode(code) { const a = await prisma.chartAccount.findUnique({ where: { code: String(code || '') }, select: { id: true } }); return a ? a.id : null; }
 async function codeById(id) { const a = await prisma.chartAccount.findUnique({ where: { id }, select: { code: true } }); return a ? a.code : null; }
 

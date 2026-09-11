@@ -109,6 +109,13 @@
       audit: (userId) => req('GET', '/users/audit' + (userId ? '?userId=' + encodeURIComponent(userId) : '')),   // admin audit trail (all or one user)
     }),
     roles: collection('roles'),
+    // FLEET GPS (Cartrack). Reading rides the delivery cap; sync + remapping are integration config
+    // (settings). Timestamps come back as UTC epochs — the client renders them in `appTz`, never raw.
+    gps: {
+      devices: () => req('GET', '/gps/devices'),                                  // { data[], unmapped[], configured, appTz }
+      sync: () => req('POST', '/gps/sync', {}),                                   // pull from the provider + upsert
+      setFleet: (id, fleetId) => req('PATCH', '/gps/devices/' + id + '/fleet', { fleetId }),   // '' clears (back to derived)
+    },
     // ACCOUNTING v2 (double-entry) reports — flag-gated server-side (404 when ACCOUNTING_V2 is off).
     accounting: {
       cashFlow: (p) => req('GET', '/accounting/cash-flow' + acctQs(p)),   // { dateFrom, dateTo, businessUnitId?, fleetId? }

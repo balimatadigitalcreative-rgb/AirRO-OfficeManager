@@ -23,7 +23,7 @@ function addMonthsDate(date, k) {
 function addDays(date, k) { const dt = new Date(date + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + (k | 0)); return dt.toISOString().slice(0, 10); }
 function advance(date, cadence, interval) { return addMonthsDate(date, (CADENCE[cadence] || 1) * Math.max(1, int(interval))); }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 function subClient(s, today) {
   const t = today || todayISO();
   return { id: s.id, supplierId: s.supplierId, supplierName: s.supplier ? s.supplier.name : null, name: s.name, description: s.description || '',
@@ -105,7 +105,7 @@ async function skipCycle(id) {
 // Generate every due cycle up to `asOf` (inclusive) for all ACTIVE subscriptions — catching up any
 // missed cycles. Idempotent: a SubscriptionRun per cycle (unique) means a re-run generates nothing new.
 async function runSubscriptions({ asOf } = {}, actor) {
-  const today = isDate(asOf) ? asOf : new Date().toISOString().slice(0, 10);
+  const today = isDate(asOf) ? asOf : todayISO();
   const subs = await prisma.subscription.findMany({ where: { status: 'aktif', nextRunDate: { lte: today } } });
   let generated = 0, skipped = 0; const bills = [];
   for (const s of subs) {

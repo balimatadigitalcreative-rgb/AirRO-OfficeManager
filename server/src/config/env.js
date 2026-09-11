@@ -45,6 +45,23 @@ const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   corsOrigin: process.env.CORS_ORIGIN || '*',
+  // BUSINESS TIMEZONE — what "today" means. The host clock is irrelevant: every business date is
+  // derived in THIS zone (see lib/time.js). Bali is WITA (UTC+8); on a UTC server the old
+  // toISOString().slice(0,10) resolved to YESTERDAY for the whole 00:00-08:00 WITA window.
+  appTz: process.env.APP_TZ || 'Asia/Makassar',
+  // CARTRACK fleet GPS (optional integration). Credentials live ONLY in env - never in the DB, never
+  // in a response. Absent credentials simply mean "not configured": every endpoint degrades to a
+  // clear, non-fatal message instead of throwing.
+  cartrack: {
+    baseUrl: (process.env.CARTRACK_BASE_URL || 'https://fleetapi-id.cartrack.com/rest').replace(/\/+$/, ''),
+    username: process.env.CARTRACK_USERNAME || '',
+    password: process.env.CARTRACK_PASSWORD || '',
+    // Zone assumed for a NAIVE provider timestamp (one with no offset). Deliberately NOT read from the
+    // provider's own default_timezone: the two vehicles report different values (null / Asia/Bangkok)
+    // while both drive in Bali, so that field describes the account, not the clock on the fix.
+    tz: process.env.CARTRACK_TZ || 'UTC',
+    timeoutMs: parseInt(process.env.CARTRACK_TIMEOUT_MS || '12000', 10),
+  },
   // ACCOUNTING v2 (double-entry) feature flag. OFF by default — the cash book stays the sole source of
   // truth for every existing report until the new engine is proven byte-identical and cut over.
   accountingV2: process.env.ACCOUNTING_V2 === 'true',

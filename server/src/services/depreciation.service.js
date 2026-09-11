@@ -29,7 +29,7 @@ const firstOf = (yearMonth) => yearMonth + '-01';
 const addMonths = (yearMonth, k) => { let [y, m] = yearMonth.split('-').map(Number); m += (k | 0); y += Math.floor((m - 1) / 12); m = (((m - 1) % 12) + 12) % 12 + 1; return `${y}-${String(m).padStart(2, '0')}`; };
 const monthsBetween = (a, b) => { const [ay, am] = a.split('-').map(Number); const [by, bm] = b.split('-').map(Number); return (by - ay) * 12 + (bm - am); };
 const daysInMonth = (date) => { const [y, m] = String(date).split('-').map(Number); return new Date(y, m, 0).getDate(); };
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 
 // First-month policy: 'full' (a full month's charge in the acquisition month) or 'prorata' (by days).
 // Configurable — NOT left implicit. Default 'full' (simplest; common for monthly books).

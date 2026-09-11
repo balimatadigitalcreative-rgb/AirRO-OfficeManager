@@ -4,6 +4,7 @@
 // Usaha · Cr Kas/Bank) may be partial and the status derives from Σ paid. Posts through the SAME
 // double-entry engine as everything else (accounting.postJournal), gated on ACCOUNTING_V2.
 const prisma = require('../lib/prisma');
+const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
 const ApiError = require('../utils/ApiError');
 const config = require('../config/env');
 const acc = require('./accounting.service');
@@ -196,7 +197,7 @@ async function listBills(query, user) {
   if (q.businessUnitId) where.businessUnitId = String(q.businessUnitId);
   const bills = await prisma.bill.findMany({ where: withUnitScope(where, user), orderBy: [{ billDate: 'desc' }, { createdAt: 'desc' }], take: 500, include: { lines: true, payments: { select: { amount: true } }, supplier: { select: { name: true } } } });
   // Outstanding summary for the header KPIs (open + overdue).
-  const today = q.asOf || new Date().toISOString().slice(0, 10);
+  const today = q.asOf || todayISO();
   let openTotal = 0, overdueTotal = 0;
   const data = bills.map((b) => {
     const c = billClient(b);
@@ -223,7 +224,7 @@ function bucket(date, asOf) {
   return days <= 30 ? 'd0_30' : days <= 60 ? 'd31_60' : days <= 90 ? 'd61_90' : 'd90p';
 }
 async function agingPayables({ asOf, businessUnitId, user } = {}) {
-  const today = asOf || new Date().toISOString().slice(0, 10);
+  const today = asOf || todayISO();
   const where = { status: { in: ['terbuka', 'sebagian'] } };
   if (businessUnitId) where.businessUnitId = String(businessUnitId);
   const bills = await prisma.bill.findMany({ where: withUnitScope(where, user), include: { payments: { select: { amount: true } }, supplier: { select: { id: true, name: true } } } });
@@ -245,7 +246,7 @@ async function payablesBalance() { const rows = await acc.accountBalances(); con
 // "JATUH TEMPO MINGGU INI" — unpaid bills due within the next 7 days (incl. already overdue), so nothing
 // is missed. Sorted soonest-first; flags overdue.
 async function payablesDue({ asOf, days = 7, user } = {}) {
-  const today = asOf || new Date().toISOString().slice(0, 10);
+  const today = asOf || todayISO();
   const until = new Date(today + 'T00:00'); until.setDate(until.getDate() + days);
   const untilStr = until.toISOString().slice(0, 10);
   const bills = await prisma.bill.findMany({ where: withUnitScope({ status: { in: ['terbuka', 'sebagian'] }, dueDate: { not: null, lte: untilStr } }, user), include: { payments: { select: { amount: true } }, supplier: { select: { name: true } } }, orderBy: { dueDate: 'asc' } });

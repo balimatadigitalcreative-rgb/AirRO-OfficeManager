@@ -4561,3 +4561,22 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .dist-route-bar { gap: 7px; padding: 9px 12px; }
   .dist-route-origin, .dist-route-cov { font-size: 11.5px; }
 }
+
+/* Fleet GPS panel (Pengiriman) — one row per tracked vehicle; unmapped rows are visibly flagged. */
+.gps-panel { padding: 6px 18px 12px; }
+.gps-off { display: flex; align-items: center; gap: 7px; padding: 10px 0; color: var(--text-mut); font-size: 12.5px; }
+.gps-warn { display: flex; align-items: flex-start; gap: 7px; margin: 6px 0 8px; padding: 9px 12px; border-radius: 9px; background: #FBEEDB; color: #8A5A12; font-size: 12px; line-height: 1.35; }
+.gps-row { display: grid; grid-template-columns: minmax(120px, 1.3fr) minmax(120px, 1fr) minmax(130px, 1fr) auto; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft, rgba(15,30,45,.07)); font-size: 12.5px; }
+.gps-row:last-child { border-bottom: none; }
+.gps-row.unmapped { background: rgba(251, 238, 219, .35); border-radius: 8px; padding-left: 8px; padding-right: 8px; }
+.gps-veh { display: flex; flex-direction: column; font-weight: 700; min-width: 0; }
+.gps-veh em { font-style: normal; font-weight: 500; font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gps-fleet { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gps-sel { height: 30px; padding: 2px 8px; font-size: 12px; max-width: 140px; }
+.gps-manual { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--green-800); background: var(--mint-100); border-radius: 999px; padding: 1px 6px; }
+.gps-pos { display: flex; flex-direction: column; font-variant-numeric: tabular-nums; }
+.gps-pos em { font-style: normal; font-size: 11px; color: var(--text-faint); }
+@media (max-width: 640px) {
+  .gps-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .gps-pos { grid-column: 1 / -1; flex-direction: row; gap: 8px; align-items: baseline; }
+}
