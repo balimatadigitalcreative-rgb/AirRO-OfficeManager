@@ -227,10 +227,14 @@ describe('the client explains a failure instead of swallowing it', () => {
     expect(jsx).toContain('dist.locAccBad');
   });
 
-  it('only ONE position is ever read — no background trace of the staff member', () => {
-    // A CALL, not the word: the module comment says "there is no watchPosition", and a bare substring
-    // check would fail on the very sentence promising the thing it is testing for.
-    expect(jsx).not.toMatch(/\.watchPosition\s*\(/);
-    expect(jsx).toMatch(/\.getCurrentPosition\s*\(/);
+  it('CAPTURE reads exactly one position — no trail of the staff member', () => {
+    // Scoped to GpsButton, not the whole file: DriverWatch legitimately uses watchPosition to order
+    // stops while the delivery screen is open, and that boundary is pinned in driver-position.test.js.
+    // What must never happen is the CUSTOMER-tagging button quietly becoming a tracker.
+    const i = jsx.indexOf('function GpsButton(');
+    const body = jsx.slice(i, jsx.indexOf('function haversineM(', i));
+    expect(i).toBeGreaterThan(0);
+    expect(body).not.toMatch(/\.watchPosition\s*\(/);
+    expect(body).toMatch(/\.getCurrentPosition\s*\(/);
   });
 });

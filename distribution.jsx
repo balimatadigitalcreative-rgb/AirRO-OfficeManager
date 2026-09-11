@@ -6413,6 +6413,131 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
 // HOW FAR ALONG THE FIELDWORK IS, where the office can see it. Counts COORDINATES, not Maps links -
 // a pasted link navigates fine by hand and is invisible to routing, so counting it would make the gap
 // look smaller than it is, which is how a gap stays open.
+/*
+ * DRIVER POSITION FROM THE PHONE - the primary source for ordering stops.
+ *
+ * WHAT THIS HONESTLY IS, and what the card says out loud rather than burying:
+ *   - A web app CANNOT switch location on. The permission belongs to the driver, and once they deny
+ *     it the browser will never ask again - only they can undo that, in browser settings.
+ *   - Positions arrive ONLY while this screen is open and awake. A phone in a pocket reports nothing.
+ *     That is enough to order stops when a driver opens the app. It is not vehicle tracking and must
+ *     never be described as if it were.
+ *
+ * BATTERY AND DATA: one watchPosition, not a polling loop, and a fix is uploaded only when the driver
+ * has moved more than 100 m or a minute has passed - whichever comes first. The watch is cleared the
+ * moment the tab is hidden and restarted on return.
+ */
+const POS_MOVE_M = 100;
+const POS_EVERY_MS = 60000;
+const POS_MAX_ACC_M = 200;
+
+// "8 detik lalu" / "3 menit lalu" / "2 jam lalu" - used wherever a position's age is shown.
+function agoShort(ms) {
+  const sec = Math.max(0, Math.round(ms / 1000));
+  if (sec < 60) return trD('dist.agoSec', { n: sec });
+  const min = Math.round(sec / 60);
+  if (min < 60) return trD('dist.agoMin', { n: min });
+  return trD('dist.agoHour', { n: Math.round(min / 60) });
+}
+
+function DriverWatch({ onChange }) {
+  const [perm, setPerm] = uSx('unknown');     // unknown | prompt | granted | denied | unsupported
+  const [lastAt, setLastAt] = uSx(0);
+  const [err, setErr] = uSx('');
+  const st = React.useRef({ id: null, lat: null, lng: null, sentAt: 0 });
+
+  const report = (at) => { if (onChange) onChange({ granted: true, at }); };
+
+  const send = (pos) => {
+    const c = pos.coords;
+    const acc = Math.round(c.accuracy);
+    // The server rejects anything vaguer than this; sending it would only burn data to be told so.
+    if (acc > POS_MAX_ACC_M) return;
+    const cur = st.current;
+    const moved = cur.lat == null ? Infinity : haversineM(cur.lat, cur.lng, c.latitude, c.longitude);
+    const due = Date.now() - cur.sentAt >= POS_EVERY_MS;
+    // BATCHING: neither threshold met means this fix tells us nothing new.
+    if (!(moved > POS_MOVE_M || due)) return;
+    cur.lat = c.latitude; cur.lng = c.longitude; cur.sentAt = Date.now();
+    window.API.distribusi.position({ lat: c.latitude, lng: c.longitude, accuracy: acc, recordedAt: pos.timestamp || Date.now() })
+      .then(() => { setLastAt(Date.now()); setErr(''); report(Date.now()); })
+      .catch(() => { /* a dropped upload is not worth interrupting a delivery round for */ });
+  };
+
+  const stop = () => {
+    if (st.current.id != null && navigator.geolocation) { navigator.geolocation.clearWatch(st.current.id); }
+    st.current.id = null;
+  };
+  const start = () => {
+    if (st.current.id != null || !navigator.geolocation) return;
+    st.current.id = navigator.geolocation.watchPosition(
+      (pos) => { setPerm('granted'); send(pos); },
+      (e) => { if (e && e.code === 1) { setPerm('denied'); stop(); } setErr(geoHelp(e && e.code)); },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 },
+    );
+  };
+
+  const check = () => {
+    if (!(navigator.geolocation && navigator.geolocation.watchPosition)) { setPerm('unsupported'); return; }
+    if (!(navigator.permissions && navigator.permissions.query)) { setPerm('prompt'); return; }   // older Safari
+    navigator.permissions.query({ name: 'geolocation' })
+      .then((p) => { setPerm(p.state); p.onchange = () => setPerm(p.state); })
+      .catch(() => setPerm('prompt'));
+  };
+  uEx(() => { check(); }, []);
+
+  // START only when granted, and STOP the moment the screen is hidden. This is the whole privacy
+  // boundary: no watch survives leaving the screen, so nothing is collected in the background.
+  uEx(() => {
+    if (perm === 'granted') start(); else stop();
+    const vis = () => { if (document.hidden) stop(); else if (perm === 'granted') start(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { document.removeEventListener('visibilitychange', vis); stop(); };
+  }, [perm]);
+
+  // Asking is the ONLY thing an app may do: this triggers the browser's own prompt, and if the driver
+  // has already said no it will not appear - which is why the denied branch below explains settings
+  // instead of pretending another button will help.
+  const ask = () => {
+    if (!navigator.geolocation) { setPerm('unsupported'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setPerm('granted'); send(pos); },
+      (e) => { if (e && e.code === 1) setPerm('denied'); setErr(geoHelp(e && e.code)); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  };
+
+  if (perm === 'granted') {
+    return (
+      <div className="dist-pos-ok">
+        <IconPin s={12} />
+        <span>{lastAt ? trD('dist.posLive', { s: Math.max(1, Math.round((Date.now() - lastAt) / 1000)) }) : trD('dist.posWaiting')}</span>
+        <em>{trD('dist.posOnlyOpen')}</em>
+      </div>
+    );
+  }
+  if (perm === 'unsupported') return <div className="dist-pos-card"><IconWarn s={16} /><div>{trD('dist.posUnsupported')}</div></div>;
+  if (perm === 'unknown') return null;
+
+  const denied = perm === 'denied';
+  return (
+    <div className="card dist-pos-card blocking">
+      <div className="dist-pos-h"><IconPin s={16} />{trD('dist.posNeedT')}</div>
+      <div className="dist-pos-b">{trD('dist.posNeedWhy')}</div>
+      {denied ? (
+        <>
+          {/* The prompt will NOT come back. Saying "allow it" again would be a lie; this is the path. */}
+          <div className="dist-pos-help">{err || geoHelp(1)}</div>
+          <button type="button" className="btn btn-primary dist-pos-btn" onClick={check}>{trD('gps.retry')}</button>
+        </>
+      ) : (
+        <button type="button" className="btn btn-primary dist-pos-btn" onClick={ask}>{trD('dist.posEnable')}</button>
+      )}
+      <div className="dist-pos-privacy">{trD('dist.posPrivacy')}</div>
+    </div>
+  );
+}
+
 function LocCoverage() {
   const [c, setC] = uSx(null);
   uEx(() => {
@@ -6585,8 +6710,25 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   };
   uEx(() => { setBoard(null); reload(); }, [refreshKey, ef, date]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
-  const mark = (id, status, transactionId) => window.API.distribusi.deliveries.mark(id, transactionId ? { status, transactionId } : { status })
-    .then(() => { reload(); if (onChanged) onChanged(); }).catch(() => flash(trD('dist.loadErr')));
+  // Whether THIS session currently has a usable fix, reported up by DriverWatch.
+  const [posState, setPosState] = uSx({ granted: false, at: 0 });
+  const [needReason, setNeedReason] = uSx(null);   // a stop awaiting the no-position override
+  const posFresh = () => !!(posState.at && Date.now() - posState.at < 15 * 60 * 1000);
+  const mark = (id, status, transactionId, noLocationReason) => {
+    const body = { status };
+    if (transactionId) body.transactionId = transactionId;
+    if (noLocationReason) body.noLocationReason = noLocationReason;
+    return window.API.distribusi.deliveries.mark(id, body)
+      .then(() => { reload(); if (onChanged) onChanged(); })
+      .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')));
+  };
+  // COMPLETING A STOP wants a position, but never at the cost of stranding a driver whose GPS has
+  // failed: no fix means "give a reason", not "you cannot finish your day".
+  const markDone = (s, transactionId) => {
+    if (posFresh()) return mark(s.id, 'terkirim', transactionId);
+    setNeedReason({ stop: s, transactionId: transactionId || null });
+    return Promise.resolve();
+  };
   // ── route reorder: ↑/↓ buttons (work everywhere, incl. mobile) + HTML5 drag (bonus). ──
   // Optimistic: reorder locally, then PUT the new id order; the saved seq drives the list.
   const dragIdx = React.useRef(null);
@@ -6669,6 +6811,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
       </div>
 
+      <DriverWatch onChange={setPosState} />
       <LocCoverage />
       <GpsPanel canGps={canGps} canGpsMap={canGpsMap} onFlash={flash} />
       {/* Carry-over — a BACK-OFFICE surface (distribusiBelumTerkirim); hidden entirely for field staff who
@@ -6687,7 +6830,12 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       {routeOn && routeMeta && (
         <div className="card dist-route-bar">
           <span className="dist-route-total"><IconPin s={14} />{trD('dist.routeTotal', { km: kmTxt(routeMeta.totalKm) })}</span>
-          <span className="dist-route-origin">{trD('dist.routeOrigin_' + ((routeMeta.origin && routeMeta.origin.source) || 'none'))}</span>
+          {/* WHICH SOURCE, AND HOW OLD. "dari depot" and "posisi ponsel - 8 detik lalu" are very
+              different claims; a banner that does not distinguish them invites the wrong one. */}
+          <span className="dist-route-origin">
+            {trD('dist.routeOrigin_' + ((routeMeta.origin && routeMeta.origin.source) || 'none'))}
+            {routeMeta.origin && routeMeta.origin.ageMs != null ? ' \u00b7 ' + agoShort(routeMeta.origin.ageMs) : ''}
+          </span>
           {routeMeta.coverage && routeMeta.coverage.withoutCoords > 0 && (
             <span className="dist-route-cov"><IconWarn s={12} />{trD('dist.routeCoverage', { n: routeMeta.coverage.withoutCoords, total: routeMeta.coverage.total })}</span>
           )}
@@ -6738,7 +6886,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
               <div className="dist-deliv-actions">
                 {s.mapsLink && <a className="btn btn-ghost btn-sm" href={s.mapsLink} target="_blank" rel="noopener noreferrer"><IconPin s={13} />{trD('dist.navigate')}</a>}
                 <button type="button" className="btn btn-primary btn-sm" onClick={() => setTxnStop(s)}><IconPlus s={13} />{trD('dist.delivMakeTxn')}</button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => mark(s.id, 'terkirim')}><IconCheck s={13} />{trD('dist.delivMarkSent')}</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => markDone(s)}><IconCheck s={13} />{trD('dist.delivMarkSent')}</button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => mark(s.id, 'batal')}><IconClose s={13} />{trD('dist.delivCancel')}</button>
               </div>
             )}
@@ -6747,7 +6895,27 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         ))}
       </div>
       {orderOpen && <DeliveryOrderModal date={date} customers={custs} onClose={() => setOrderOpen(false)} onSaved={() => { setOrderOpen(false); flash(trD('dist.orderSaved')); reload(); if (onChanged) onChanged(); }} />}
-      {txnStop && <DeliveryTxnModal stop={txnStop} today={date} onClose={() => setTxnStop(null)} onCreated={(txn) => { const st = txnStop; setTxnStop(null); mark(st.id, 'terkirim', txn.id); flash(trD('dist.delivSentTxn')); }} />}
+      {needReason && (
+        <div className="modal-scrim" onClick={() => setNeedReason(null)} style={{ zIndex: 260 }}>
+          <div className="modal-card dist-loc-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div style={{ fontSize: 16, fontWeight: 800 }}>{trD('dist.posNoFixT')}</div></div>
+            <div className="modal-body">
+              <div className="dist-gr-warn"><IconWarn s={16} /><span>{trD('dist.posNoFixMsg')}</span></div>
+              <label className="fld-l" style={{ marginTop: 10 }}>{trD('dist.posNoFixWhy')}</label>
+              <textarea className="fld" rows={2} value={needReason.note || ''} placeholder={trD('dist.posNoFixWhyPh')}
+                onChange={(e) => setNeedReason((n) => ({ ...n, note: e.target.value }))} />
+            </div>
+            <div className="modal-foot" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <button className="btn btn-ghost" onClick={() => setNeedReason(null)}>{trD('dist.locCancel')}</button>
+              <button className="btn btn-primary" disabled={!needReason.note || needReason.note.trim().length < 5}
+                onClick={() => { const n = needReason; setNeedReason(null); mark(n.stop.id, 'terkirim', n.transactionId, n.note.trim()); }}>
+                {trD('dist.posNoFixGo')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {txnStop && <DeliveryTxnModal stop={txnStop} today={date} onClose={() => setTxnStop(null)} onCreated={(txn) => { const st = txnStop; setTxnStop(null); markDone(st, txn.id); flash(trD('dist.delivSentTxn')); }} />}
       {closeOpen && closeFleet && <CloseoutModal date={date} fleet={closeFleet} pendingStops={pendingStops} canBelumTerkirim={canBelumTerkirim} onClose={() => setCloseOpen(false)} onClosed={() => { setCloseOpen(false); flash(trD('dist.closeDone')); reload(); if (onChanged) onChanged(); }} />}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>

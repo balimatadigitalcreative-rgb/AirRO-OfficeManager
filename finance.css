@@ -4615,3 +4615,15 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .dist-cov-txt { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; padding-top: 5px; font-size: 12px; }
 .dist-cov-txt em { font-style: normal; color: var(--text-mut); }
 @media (max-width: 640px) { .dist-loc-modal .modal-foot { flex-direction: column-reverse; } }
+
+/* DRIVER POSITION — the permission card is deliberately loud: a driver who cannot see why ordering is
+   not working will decide the feature is broken and stop using it. 44px targets, one-handed. */
+.dist-pos-card { margin: 8px 18px; padding: 14px 16px; border-radius: 12px; background: #FBEEDB; color: #6B4310; }
+.dist-pos-card.blocking { border: 1px solid rgba(138,90,18,.25); }
+.dist-pos-h { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; }
+.dist-pos-b { margin-top: 6px; font-size: 12.5px; line-height: 1.45; }
+.dist-pos-help { margin-top: 8px; padding: 10px 12px; border-radius: 9px; background: rgba(255,255,255,.6); font-size: 12.5px; line-height: 1.45; font-weight: 600; }
+.dist-pos-btn { min-height: 44px; margin-top: 10px; width: 100%; max-width: 280px; }
+.dist-pos-privacy { margin-top: 10px; font-size: 11px; line-height: 1.45; opacity: .85; }
+.dist-pos-ok { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 18px 0; font-size: 11.5px; color: var(--text-mut); }
+.dist-pos-ok em { font-style: normal; color: var(--text-faint); }

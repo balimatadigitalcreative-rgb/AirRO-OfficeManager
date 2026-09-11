@@ -4176,9 +4176,32 @@ async function markDelivery(id, body, actor) {
   if (!d) throw ApiError.notFound('Delivery not found');
   if (!fleetAllows(actor, d.fleetId)) throw ApiError.forbidden('Pengiriman di luar akses Anda.');
   const status = ['pending', 'terkirim', 'batal'].includes(body.status) ? body.status : d.status;
+  // POSITION REQUIRED TO COMPLETE - opt-in (setting `wajibPosisiSelesai`), because turning it on
+  // changes how every stop is closed and that is a business decision, not a deploy side-effect.
+  //
+  // THE OVERRIDE IS NOT OPTIONAL. A phone whose GPS genuinely fails, a denied permission, a dead
+  // battery swapped mid-round - a driver must always be able to finish their day. So the reason is
+  // written down and audited rather than the action being refused.
+  const noLocReason = String(body.noLocationReason || '').trim();
+  if (status === 'terkirim') {
+    let required = false;
+    try { required = !!(await require('./settings.service').get('wajibPosisiSelesai')); } catch (e) { /* setting absent = off */ }
+    if (required && !noLocReason) {
+      const pos = await myPosition(actor);
+      if (!pos || !pos.fresh) {
+        throw ApiError.badRequest('Aktifkan lokasi untuk menandai selesai, atau isi alasan.', { code: 'POSITION_REQUIRED' });
+      }
+    }
+  }
   const data = { status };
   if (body.transactionId) data.transactionId = String(body.transactionId);
   const row = await prisma.delivery.update({ where: { id }, data, include: { customer: true } });
+  if (status === 'terkirim' && noLocReason) {
+    // Logged whenever it is given, whether or not the setting made it mandatory: a stop closed without
+    // a position is exactly the thing somebody will want to look up later.
+    const snap = await actorSnap(actor);
+    await logAudit('pengiriman', 'Selesai tanpa posisi: ' + (row.customer ? row.customer.name : ''), 'alasan: ' + noLocReason.slice(0, 300), snap, row.fleetId);
+  }
   const sisa = (await bonMapFor([row.customerId]))[row.customerId];
   return { data: deliveryClient(row, sisa) };
 }
@@ -4249,6 +4272,88 @@ async function depotOrigin() {
 // this can only ever return a vehicle the user is already allowed to see; `wantId` narrows that list
 // and never widens it. A stale fix is refused outright - ordering a whole day's route from where the
 // truck was three hours ago is worse than falling through to the depot, because it looks right.
+/*
+ * PHONE POSITION - the primary source for route ordering, and the honest one.
+ *
+ * WHAT IT CANNOT DO, stated here because the UI says the same thing to drivers: a web app cannot
+ * force location on, and a browser that has been denied never prompts again. Positions arrive only
+ * while the delivery screen is OPEN and awake - a phone in a pocket reports nothing. That is enough
+ * to order stops when a driver opens the app; it is NOT continuous vehicle tracking, and nothing here
+ * should be described as if it were.
+ *
+ * RETENTION: eight hours, which is one working day's routing and no more. Expired rows are deleted on
+ * every read and every write, so the table cannot quietly become a movement history.
+ */
+const POSITION_TTL_MS = 8 * 60 * 60 * 1000;
+// A fix older than this is not "where the driver is" any more, only where they were.
+const POSITION_FRESH_MS = 15 * 60 * 1000;
+// Worse than this is noise: it would order a route from the wrong end of a village.
+const POSITION_MAX_ACC_M = 200;
+
+async function purgeStalePositions() {
+  try {
+    await prisma.driverPosition.deleteMany({ where: { recordedAt: { lt: new Date(Date.now() - POSITION_TTL_MS) } } });
+  } catch (e) { /* housekeeping must never fail the request it rode in on */ }
+}
+
+// Store THIS session's position. The fleet comes from the session's scope - a fleetId in the body is
+// ignored outright, which is the same rule the tracking endpoints follow.
+async function recordPosition(user, body) {
+  const loc = normLatLng(body.lat, body.lng);
+  if (!loc) throw ApiError.badRequest('Koordinat tidak valid.');
+  const acc = (body.accuracy != null && Number.isFinite(+body.accuracy)) ? Math.round(+body.accuracy) : null;
+  if (acc != null && acc > POSITION_MAX_ACC_M) {
+    throw ApiError.badRequest('Akurasi terlalu rendah (±' + acc + ' m) — posisi tidak disimpan.', { code: 'ACCURACY_TOO_LOW', limit: POSITION_MAX_ACC_M });
+  }
+  const recordedAt = body.recordedAt ? new Date(body.recordedAt) : new Date();
+  const at = isNaN(recordedAt.getTime()) ? new Date() : recordedAt;
+  const scope = fleetScopeOf(user);
+  // A single-fleet driver is attributed to their fleet; an unrestricted user (office) has no single
+  // fleet and is stored with none rather than being guessed into one.
+  const fleetId = scope && scope.length === 1 ? scope[0] : '';
+  const snap = await actorSnap(user);
+  await purgeStalePositions();
+  const data = { userName: snap.actorName || '', fleetId, lat: loc.lat, lng: loc.lng, accuracy: acc, recordedAt: at, receivedAt: new Date() };
+  const row = await prisma.driverPosition.upsert({ where: { userId: user.id }, create: { userId: user.id, ...data }, update: data });
+  return { ok: true, at: row.recordedAt.getTime(), fleetId, retentionHours: POSITION_TTL_MS / 3600000 };
+}
+
+// This session's own last fix. Used as the route origin - never anybody else's.
+async function myPosition(user) {
+  if (!user || !user.id) return null;
+  await purgeStalePositions();
+  const row = await prisma.driverPosition.findUnique({ where: { userId: user.id } });
+  if (!row) return null;
+  const ageMs = Date.now() - new Date(row.recordedAt).getTime();
+  return { lat: row.lat, lng: row.lng, accuracy: row.accuracy, at: new Date(row.recordedAt).getTime(), ageMs, fresh: ageMs <= POSITION_FRESH_MS };
+}
+
+// Every driver position the caller may see, scoped exactly like vehicle tracking. Behind
+// distribusiLacakArmada at the route, and the view is logged there too - phone location is more
+// personal than a truck's, so "who looked" matters more, not less.
+async function listPositions(user) {
+  await purgeStalePositions();
+  // WHO LOOKED. Once per actor per day - the screen polls, and a log nobody can read answers nothing.
+  // Phone location is more personal than a truck's, so this is recorded even though the same person
+  // could have seen the same drivers on the vehicle panel.
+  try {
+    if (user && user.id) {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const seen = await prisma.distAuditLog.findFirst({ where: { kind: 'lacak_posisi', actorId: user.id, createdAt: { gte: since } }, select: { id: true } });
+      if (!seen) {
+        const snap = await actorSnap(user);
+        await logAudit('lacak_posisi', 'Lihat posisi ponsel kurir', 'Akses peta posisi dibuka', snap, '');
+      }
+    }
+  } catch (e) { /* the log must never break the read it records */ }
+  const rows = await prisma.driverPosition.findMany({ where: fleetWhere(user, 'fleetId'), orderBy: { recordedAt: 'desc' } });
+  return rows.map((r) => ({
+    userId: r.userId, userName: r.userName || '', fleetId: r.fleetId || '',
+    lat: r.lat, lng: r.lng, accuracy: r.accuracy,
+    at: new Date(r.recordedAt).getTime(), ageMs: Date.now() - new Date(r.recordedAt).getTime(),
+  }));
+}
+
 async function vehicleOrigin(user, wantId) {
   try {
     const gps = require('./gps.service');
@@ -4278,17 +4383,28 @@ async function routeDeliveries(user, query) {
   // ORIGIN - the driver's live position when supplied; else the configured depot; else the centroid of
   // today's located stops. `source` is returned so a denied/unavailable geolocation degrades to a
   // LABELLED fallback the UI can say out loud, instead of failing.
-  let origin = null, originSource = 'none', originVehicle = null;
-  if (Number.isFinite(+q.lat) && Number.isFinite(+q.lng)) { origin = { lat: +q.lat, lng: +q.lng }; originSource = 'driver'; }
+  let origin = null, originSource = 'none', originVehicle = null, originAgeMs = null;
+  if (Number.isFinite(+q.lat) && Number.isFinite(+q.lng)) { origin = { lat: +q.lat, lng: +q.lng }; originSource = 'driver'; originAgeMs = 0; }
+  // THE PHONE FIRST, then the truck - whichever is FRESHER. A phone reports only while the delivery
+  // screen is open, so it is often the newer of the two by minutes; but a driver who closed the app an
+  // hour ago should not out-rank a truck that reported thirty seconds ago. Whichever wins, the source
+  // and its age are returned so the screen can say which it used instead of implying certainty.
+  if (!origin) {
+    const [phone, veh] = await Promise.all([myPosition(user), vehicleOrigin(user, q.vehicleId)]);
+    const phoneAge = phone && phone.fresh ? phone.ageMs : null;
+    const vehAge = veh && veh.vehicle && veh.vehicle.fixAt ? Date.now() - veh.vehicle.fixAt : (veh ? Infinity : null);
+    if (phoneAge != null && (vehAge == null || phoneAge <= vehAge)) {
+      origin = { lat: phone.lat, lng: phone.lng }; originSource = 'phone'; originAgeMs = phone.ageMs;
+    } else if (veh) {
+      origin = { lat: veh.lat, lng: veh.lng }; originSource = 'vehicle'; originVehicle = veh.vehicle;
+      originAgeMs = Number.isFinite(vehAge) ? vehAge : null;
+    }
+  }
   // THE TRUCK'S OWN POSITION, when the phone has not given us one. It is picked from the vehicles in
   // THIS user's fleet scope - no selection step for a driver who has exactly one - so ordering starts
   // from where the vehicle actually is rather than from a depot it left hours ago. `vehicleId` only
   // ever NARROWS an already-scoped list (for someone who drives more than one), and is validated
   // against that scope: it cannot reach a vehicle the session may not see.
-  if (!origin) {
-    const v = await vehicleOrigin(user, q.vehicleId);
-    if (v) { origin = { lat: v.lat, lng: v.lng }; originSource = 'vehicle'; originVehicle = v.vehicle; }
-  }
   if (!origin) { const d = await depotOrigin(); if (d) { origin = d; originSource = 'depot'; } }
   if (!origin && located.length) {
     origin = { lat: located.reduce((a, s) => a + +s.lat, 0) / located.length, lng: located.reduce((a, s) => a + +s.lng, 0) / located.length };
@@ -4323,7 +4439,9 @@ async function routeDeliveries(user, query) {
   const total = stops.length;
   return {
     date, fleet: q.fleet || null, strategy,
-    origin: origin ? { lat: origin.lat, lng: origin.lng, source: originSource } : null,
+    // `source` and `ageMs` travel together on purpose: "dari depot" and "posisi ponsel - 8 detik lalu"
+    // are very different claims, and a route that does not say which it made invites the wrong one.
+    origin: origin ? { lat: origin.lat, lng: origin.lng, source: originSource, ageMs: originAgeMs } : null,
     // Which truck the order was measured from, when it was the truck - so the UI can name it.
     originVehicle,
     data, unlocated, totalKm: km1(cum) || 0,
@@ -4807,7 +4925,7 @@ module.exports = {
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
   gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance, openingRowsPanel, openingRowsBulk, restoreOpeningRowsBatch,
-  listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, clearCustomerLocation, revertCustomerLocation, listLocationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
+  recordPosition, myPosition, listPositions, listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, clearCustomerLocation, revertCustomerLocation, listLocationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,

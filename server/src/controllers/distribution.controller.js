@@ -196,7 +196,16 @@ const deliveryReportQuery = z.object({ period: z.enum(['today', 'week', 'month',
 const cashIntegQuery = z.object({ dateFrom: DATE.optional(), dateTo: DATE.optional(), fleet: z.string().max(60).optional() });
 const boardQuery = z.object({ date: DATE, fleet: z.string().max(60).optional() });
 const orderSchema = z.object({ customerId: z.string().min(1), date: DATE, qty: z.number().int().nonnegative().optional(), note: z.string().max(300).optional() });
-const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), transactionId: z.string().min(1).optional() });
+// `noLocationReason` is the override for completing a stop with no usable fix. It is never defaulted
+// and never inferred - if it is absent, the driver had a position or the requirement is off.
+const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), transactionId: z.string().min(1).optional(), noLocationReason: z.string().max(300).optional() });
+// A position from the driver's phone. There is deliberately no fleetId field: attribution comes from
+// the session, so a crafted body cannot file a position under somebody else's armada.
+const positionSchema = z.object({
+  lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]),
+  accuracy: z.union([z.number(), z.string(), z.null()]).optional(),
+  recordedAt: z.union([z.number(), z.string()]).optional(),
+});
 const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional(), order: z.array(z.string().min(1)).max(2000), source: z.enum(['manual', 'proximity']).optional() });
 // Route ordering by proximity. lat/lng are the DRIVER's live position (optional - the server falls back
 // to the depot setting, then the centroid of today's stops, and reports which origin it used).
@@ -305,6 +314,8 @@ const locationHistory = asyncHandler(async (req, res) => res.json({ data: await 
 const locationCoverage = asyncHandler(async (req, res) => res.json({ data: await service.locationCoverage(req.user) }));
 const bulkClearPreview = asyncHandler(async (req, res) => res.json({ data: await service.bulkClearPreview(req.body.ids, req.user) }));
 const bulkClearLocations = asyncHandler(async (req, res) => { const r = await service.bulkClearLocations(req.body, req.user); bcast('update', ''); res.json({ data: r }); });
+const recordPosition = asyncHandler(async (req, res) => res.json({ data: await service.recordPosition(req.user, req.body) }));
+const listPositions = asyncHandler(async (req, res) => res.json({ data: await service.listPositions(req.user) }));
 const setLocationPhoto = asyncHandler(async (req, res) => { const c = await service.setLocationPhoto(req.params.id, req.body, req.user); bcast('update', c.id); res.json({ data: c }); });
 const importCustomers = asyncHandler(async (req, res) => { const r = await service.importCustomers(req.body.customers, req.user, req.body.skipped); bcast('import', 'customers'); res.status(201).json(r); });
 const importLegacyTxns = asyncHandler(async (req, res) => { const r = await service.importLegacyTransactions(req.params.id, req.body.rows, req.user, req.body.skipped, req.body.includeBon); bcast('update', req.params.id); res.status(201).json(r); });
@@ -478,7 +489,7 @@ const openingResetSchema = z.object({ mode: z.enum(['delta', 'void_all']).option
 const openingResetImpactSchema = z.object({ mode: z.enum(['delta', 'void_all']).optional(), targetQty: z.coerce.number().int().min(0).optional(), fleetId: z.string().max(60).optional() });
 
 module.exports = {
-  listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, clearLocation, revertLocation, locationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
+  recordPosition, listPositions, listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, clearLocation, revertLocation, locationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
   listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, previewReassign, requestReassign, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
@@ -491,5 +502,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, clearLocationSchema, bulkPreviewSchema, bulkClearSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, reorderSchema, routeQuery, pinSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, clearLocationSchema, bulkPreviewSchema, bulkClearSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, positionSchema, reorderSchema, routeQuery, pinSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };

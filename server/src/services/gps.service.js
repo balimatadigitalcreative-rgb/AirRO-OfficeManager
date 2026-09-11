@@ -56,6 +56,16 @@ function deriveFleet(vehicleName, fleets) {
   return hit ? String(hit).trim() : '';
 }
 
+/*
+ * THE VEHICLE PROVIDER IS OPTIONAL. `cartrackAktif` (default on) switches the Cartrack adapter off
+ * entirely - if the subscription is dropped, the setting goes false, the panel says so, and routing
+ * carries on from the phone position or the depot. The adapter stays in the codebase, unbroken, so
+ * turning it back on is a setting and not a redeploy.
+ */
+async function providerEnabled() {
+  try { const v = await settings.get('cartrackAktif'); return v !== false; } catch (e) { return true; }
+}
+
 // ── TRACKING SCOPE ─ the one resolver every tracking path goes through ──────────────────────
 /*
  * WHO MAY SEE WHICH VEHICLE. Derived from the SESSION and nothing else: `fleetScope` off the JWT, via
@@ -182,9 +192,12 @@ async function listDevices(user, scopeIn) {
   const scope = scopeIn || await trackingScope(user);
   const rows = await prisma.gpsDevice.findMany({ where: scopeWhereFleet(scope), orderBy: [{ fleetId: 'asc' }, { vehicleName: 'asc' }] });
   const data = rows.map(deviceClient);
+  const enabled = await providerEnabled();
   return {
     data,
-    configured: cartrack.configured(),
+    // Switched OFF is a different state from NOT CONFIGURED, and the panel says which.
+    providerEnabled: enabled,
+    configured: enabled && cartrack.configured(),
     appTz: config.appTz,
     // When we last asked the provider and how it went - shown beside an empty position.
     lastAttempt: await lastAttempt(),
@@ -219,6 +232,7 @@ async function deviceInScope(user, id) {
 
 // ── sync ─────────────────────────────────────────────────────────────────────────────────────────
 async function syncDevices(actor) {
+  if (!(await providerEnabled())) throw ApiError.badRequest('Pelacakan kendaraan dimatikan di pengaturan.', { providerEnabled: false });
   const vehicles = await cartrack.listVehicles();
   // TWO FEEDS, ONE ROW. /vehicles is identity (registration, name, licence) and carries no position on
   // this tenant; /vehicles/status is where the fix actually lives. A tenant that lacks the status feed
@@ -286,7 +300,7 @@ let lastRefreshMs = 0;
 
 async function refreshPositions(user, opts) {
   const force = !!(opts && opts.force);
-  if (!cartrack.configured()) return Object.assign({ refreshed: false, cached: false }, await listDevices(user));
+  if (!(await providerEnabled()) || !cartrack.configured()) return Object.assign({ refreshed: false, cached: false }, await listDevices(user));
   if (!force && Date.now() - lastRefreshMs < REFRESH_MIN_MS) {
     return Object.assign({ refreshed: false, cached: true }, await listDevices(user));
   }
@@ -331,4 +345,4 @@ async function setDeviceFleet(user, id, body) {
   return deviceClient(up);
 }
 
-module.exports = { listDevices, viewDevices, trackingScope, deviceInScope, syncDevices, refreshPositions, setDeviceFleet, deriveFleet, fleetTokenOf, knownFleets, deviceClient };
+module.exports = { listDevices, viewDevices, providerEnabled, trackingScope, deviceInScope, syncDevices, refreshPositions, setDeviceFleet, deriveFleet, fleetTokenOf, knownFleets, deviceClient };

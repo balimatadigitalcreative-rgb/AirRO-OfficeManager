@@ -1455,6 +1455,26 @@ model CustomerLocationHistory {
   @@index([createdAt])
 }
 
+// The phone's last known position - ONE ROW PER USER, replaced on every fix.
+//
+// NOT A TRAIL. There is no history here and no way to reconstruct where somebody has been: this
+// exists to order today's stops, not to watch staff. Rows past the retention window are deleted on
+// read and on write. fleetId is resolved from the SESSION when written, never from the request body.
+model DriverPosition {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  userName   String   @default("")
+  fleetId    String   @default("")
+  lat        Float
+  lng        Float
+  accuracy   Float?
+  recordedAt DateTime                       // when the PHONE took the fix
+  receivedAt DateTime @default(now())
+
+  @@index([fleetId])
+  @@index([recordedAt])
+}
+
 model DistAuditLog {
   id        String   @id @default(cuid())
   kind      String                              // koreksi | harga | input | impor | pelanggan

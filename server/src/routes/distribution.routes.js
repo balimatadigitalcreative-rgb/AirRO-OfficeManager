@@ -36,6 +36,17 @@ router.post('/adjustments/:id/reverse', requireAnyCap(CAN_ADJUST), validate({ pa
 router.get('/reports/adjustments', requireAnyCap(CAN_ADJUST), validate({ query: ctrl.schemas.adjustReportQuery }), ctrl.adjustmentReport);
 // LITERAL PATH FIRST - declared above /customers/:id, which would otherwise match "location-coverage"
 // as an id and answer 404 for a customer that does not exist.
+/*
+ * DRIVER POSITION (from the phone).
+ *
+ * POSTING one is delivery work - the driver is sending their OWN position, and the server files it
+ * under the session's fleet. READING other people's is tracking, so it sits behind the same
+ * distribusiLacakArmada gate as the vehicles and is logged the same way. Phone location is more
+ * personal than a truck's; it does not get a looser rule.
+ */
+router.post('/position', requireCap('distribusiPengiriman'), validate({ body: ctrl.schemas.positionSchema }), ctrl.recordPosition);
+router.get('/positions', requireCap('distribusiLacakArmada'), ctrl.listPositions);
+
 router.get('/customers/location-coverage', requireCap('distribusi'), ctrl.locationCoverage);
 
 router.get('/customers', requireCap('distribusi'), validate({ query: ctrl.schemas.custListQuery }), ctrl.listCustomers);

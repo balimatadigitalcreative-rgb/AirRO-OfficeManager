@@ -337,6 +337,10 @@
       // Cash Integration — one gated read (distribusiCashIntegrasi) returning { transactions, customers, audit }.
       cashIntegration: (qs) => req('GET', '/distribusi/cash-integration' + (qs ? '?' + qs : '')),
       // Delivery board: one stop per fleet per date (jadwal generated + tambahan orders).
+      // The driver's own phone position. Posted while the delivery screen is open; the server files it
+      // under the session's fleet, so there is no fleetId to send.
+      position: (body) => req('POST', '/distribusi/position', body),
+      positions: () => req('GET', '/distribusi/positions'),
       deliveries: {
         board: (date, fleet) => { const p = ['date=' + encodeURIComponent(date)]; if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return req('GET', '/distribusi/deliveries?' + p.join('&')); },
         addOrder: (data) => req('POST', '/distribusi/deliveries/order', data),
