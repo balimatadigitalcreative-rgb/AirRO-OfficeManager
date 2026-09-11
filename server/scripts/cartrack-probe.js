@@ -83,6 +83,17 @@ function dumpRow(row) {
   } else {
     console.log('    (no key name looks like a position or a timestamp)');
   }
+  // ONE LEVEL DOWN. The first run of this probe printed `location` as a bare key and stopped there —
+  // the coordinates were inside it all along. A nested object is exactly where a fix tends to hide.
+  for (const k of keys) {
+    const v = row[k];
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const inner = Object.keys(v);
+      if (inner.length) console.log(`    ${k}.* : ` + inner.map((ik) => `${ik}=${trunc(v[ik])}`).join('  '));
+    } else if (Array.isArray(v) && v.length && typeof v[0] === 'object') {
+      console.log(`    ${k}[0].* : ` + Object.keys(v[0]).map((ik) => `${ik}=${trunc(v[0][ik])}`).join('  '));
+    }
+  }
 }
 
 (async () => {

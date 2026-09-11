@@ -61,6 +61,8 @@ function pick(obj, names) {
   return undefined;
 }
 
+const num = (x) => { const n = Number(x); return Number.isFinite(n) ? n : null; };
+
 const F = {
   vehicleId: ['vehicle_id', 'vehicleId', 'id'],
   registration: ['registration', 'vehicle_registration', 'registration_number', 'plate', 'license_plate'],
@@ -76,7 +78,6 @@ const F = {
 // optional: /vehicles may or may not carry a last-known fix depending on the tenant, and "no fix yet"
 // is a legitimate state, not a failure.
 function normalizeVehicle(v) {
-  const num = (x) => { const n = Number(x); return Number.isFinite(n) ? n : null; };
   return {
     vehicleId: String(pick(v, F.vehicleId) != null ? pick(v, F.vehicleId) : '').trim(),
     registration: String(pick(v, F.registration) || '').trim(),
@@ -94,4 +95,49 @@ async function listVehicles() {
   return unwrapList(body).map(normalizeVehicle).filter((v) => v.vehicleId);
 }
 
-module.exports = { configured, listVehicles, normalizeVehicle, unwrapList, pick, FIELDS: F };
+/*
+ * THE FIX LIVES IN A DIFFERENT ENDPOINT. On this tenant `/vehicles` is pure identity — registration,
+ * model, licence — with no position on it at all, which is why every device read "belum ada posisi".
+ * `/vehicles/status` is the live feed: event_ts, speed, bearing, ignition, odometer and `location`.
+ *
+ * Its coordinates are NESTED inside `location`, not at the top level, so the shapes below are tried in
+ * turn. Other tenants flatten them, and GeoJSON puts them in an array the other way round
+ * ([longitude, latitude]) — a wrong guess there silently plots Bali into the Indian Ocean.
+ */
+function coordsOf(row) {
+  const bags = [row, row && row.location, row && row.position, row && row.gps,
+                row && row.location && row.location.position, row && row.location && row.location.geometry];
+  for (const b of bags) {
+    if (!b || typeof b !== 'object') continue;
+    const lat = num(pick(b, F.lat));
+    const lng = num(pick(b, F.lng));
+    if (lat !== null && lng !== null) return { lat, lng };
+    const c = b.coordinates;   // GeoJSON order is [lng, lat] — deliberately reversed on the way out.
+    if (Array.isArray(c) && c.length >= 2 && num(c[0]) !== null && num(c[1]) !== null) return { lat: num(c[1]), lng: num(c[0]) };
+  }
+  const m = (typeof (row && row.location) === 'string' ? row.location : '').match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (m) return { lat: num(m[1]), lng: num(m[2]) };
+  return { lat: null, lng: null };
+}
+
+// Normalise ONE row of the live feed. (0,0) is Null Island: a tracker that has never had a fix reports
+// it, and a vehicle in Bali never does — so it means "no position", not a position off West Africa.
+function normalizeStatus(s) {
+  const c = coordsOf(s);
+  const real = c.lat !== null && c.lng !== null && !(c.lat === 0 && c.lng === 0);
+  return {
+    vehicleId: String(pick(s, F.vehicleId) != null ? pick(s, F.vehicleId) : '').trim(),
+    registration: String(pick(s, F.registration) || '').trim(),
+    lat: real ? c.lat : null,
+    lng: real ? c.lng : null,
+    speedKph: num(pick(s, F.speed)),
+    rawTs: pick(s, F.ts),
+  };
+}
+
+async function listStatuses() {
+  const body = await get('/vehicles/status');
+  return unwrapList(body).map(normalizeStatus).filter((v) => v.vehicleId);
+}
+
+module.exports = { configured, listVehicles, listStatuses, normalizeVehicle, normalizeStatus, coordsOf, unwrapList, pick, FIELDS: F };

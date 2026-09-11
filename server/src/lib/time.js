@@ -47,7 +47,22 @@ function zonedNaiveToUtcMs(naiveUtcMs, tz) {
 }
 
 // Does this timestamp string carry its own offset? Only then is it self-describing.
-const HAS_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})\s*$/i;
+//
+// THE MINUTES ARE OPTIONAL, and that is not a nicety. Cartrack stamps a fix "2026-09-11 12:30:05+08" —
+// a TWO-digit offset. A pattern demanding a full +HH:MM misses it, the stamp is then taken for naive,
+// and CARTRACK_TZ is applied to a reading that already carried its own offset: with the UTC default
+// that is a silent EIGHT-hour error on every position, and it would have looked like real data.
+const HAS_OFFSET = /(?:Z|[+-]\d{2}(?::?\d{2})?)\s*$/i;
+
+// Put an offset-bearing stamp into a form V8 will actually parse. TWO repairs are needed and the second
+// is the easy one to miss: `new Date('2026-09-11T12:30:05+08')` is Invalid Date, because a bare +HH is
+// not valid ISO 8601. Widen it before Date ever sees the string.
+function isoish(s) {
+  return String(s).trim()
+    .replace(' ', 'T')
+    .replace(/([+-]\d{2})$/, '$1:00')         // +08   -> +08:00
+    .replace(/([+-]\d{2})(\d{2})$/, '$1:$2');  // +0800 -> +08:00
+}
 
 /*
  * Normalise a provider timestamp to a UTC instant.
@@ -66,7 +81,7 @@ function parseProviderTs(raw, assumeTz) {
   const s = String(raw == null ? '' : raw).trim();
   if (!s) return { at: null, assumedTz: '', raw: s };
   if (HAS_OFFSET.test(s)) {
-    const d = new Date(s.replace(' ', 'T'));
+    const d = new Date(isoish(s));
     return { at: isNaN(d.getTime()) ? null : d, assumedTz: '', raw: s };
   }
   // Naive: "YYYY-MM-DD HH:MM:SS" (or with a T, optional seconds/fraction).
@@ -86,4 +101,4 @@ function formatInTz(d, tz, opts) {
   }, opts || {})).format(d instanceof Date ? d : new Date(d));
 }
 
-module.exports = { todayISO, ymdInTz, offsetMinutes, zonedNaiveToUtcMs, parseProviderTs, formatInTz };
+module.exports = { todayISO, ymdInTz, offsetMinutes, zonedNaiveToUtcMs, parseProviderTs, formatInTz, isoish };

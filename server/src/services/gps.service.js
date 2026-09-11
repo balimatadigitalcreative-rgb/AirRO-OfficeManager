@@ -87,9 +87,18 @@ async function listDevices() {
 // ── sync ─────────────────────────────────────────────────────────────────────────────────────────
 async function syncDevices(actor) {
   const vehicles = await cartrack.listVehicles();
+  // TWO FEEDS, ONE ROW. /vehicles is identity (registration, name, licence) and carries no position on
+  // this tenant; /vehicles/status is where the fix actually lives. A tenant that lacks the status feed
+  // must still get its MAPPING synced — no position is "belum ada posisi", which is information, not a
+  // failure — so a broken position feed is recorded and stepped over, never allowed to fail the sync.
+  const statusById = new Map();
+  let positionFeed = true;
+  try {
+    (await cartrack.listStatuses()).forEach((st) => statusById.set(st.vehicleId, st));
+  } catch (e) { positionFeed = false; }
   const fleets = await knownFleets();
   const now = new Date();
-  const out = { created: 0, updated: 0, keptManual: 0, unmapped: 0, total: vehicles.length };
+  const out = { created: 0, updated: 0, keptManual: 0, unmapped: 0, positioned: 0, positionFeed, total: vehicles.length };
   for (const v of vehicles) {
     const existing = await prisma.gpsDevice.findUnique({ where: { provider_vehicleId: { provider: 'cartrack', vehicleId: v.vehicleId } } });
     // A HUMAN-SET mapping is never overwritten by a sync — that is what makes a provider rename safe.
@@ -98,12 +107,29 @@ async function syncDevices(actor) {
     const derived = deriveFleet(v.vehicleName, fleets);
     const fleetId = manual ? existing.fleetId : derived;
     if (!fleetId) out.unmapped++;
+    // The live feed wins where it has an answer; the identity row is the fallback for a tenant that
+    // does carry a fix there. A field missing from BOTH leaves the stored value untouched rather than
+    // blanking a good last-known position with a momentary gap in the feed.
+    const st = statusById.get(v.vehicleId) || {};
+    const fix = {
+      lat: st.lat != null ? st.lat : v.lat,
+      lng: st.lng != null ? st.lng : v.lng,
+      speedKph: st.speedKph != null ? st.speedKph : v.speedKph,
+      rawTs: st.rawTs != null ? st.rawTs : v.rawTs,
+    };
     // Normalise the fix timestamp to a UTC instant; keep the raw string + the zone we assumed.
-    const ts = parseProviderTs(v.rawTs, config.cartrack.tz);
+    const ts = parseProviderTs(fix.rawTs, config.cartrack.tz);
+    // A LAST-KNOWN POSITION ONLY MOVES FORWARD. A reading older than the one already stored is ignored
+    // outright — whether it arrived out of order, or came from the identity row standing in for a
+    // status feed that is down. Overwriting a fresh fix with a stale one would make the vehicle appear
+    // to jump backwards across town, which reads as real movement and is worse than showing nothing.
+    const stale = !!(existing && existing.lastFixAt && ts.at && ts.at.getTime() < new Date(existing.lastFixAt).getTime());
     const pos = {};
-    if (v.lat != null && v.lng != null) { pos.lastLat = v.lat; pos.lastLng = v.lng; }
-    if (v.speedKph != null) pos.lastSpeedKph = v.speedKph;
-    if (ts.at) { pos.lastFixAt = ts.at; pos.lastFixRaw = ts.raw; pos.lastFixAssumedTz = ts.assumedTz; }
+    if (!stale) {
+      if (fix.lat != null && fix.lng != null) { pos.lastLat = fix.lat; pos.lastLng = fix.lng; }
+      if (fix.speedKph != null) pos.lastSpeedKph = fix.speedKph;
+      if (ts.at) { pos.lastFixAt = ts.at; pos.lastFixRaw = ts.raw; pos.lastFixAssumedTz = ts.assumedTz; }
+    }
     const data = {
       registration: v.registration, vehicleName: v.vehicleName, providerTz: v.providerTz,
       fleetId, fleetSource: manual ? 'manual' : 'derived', lastSyncAt: now, active: true, ...pos,
@@ -111,7 +137,11 @@ async function syncDevices(actor) {
     if (existing) { await prisma.gpsDevice.update({ where: { id: existing.id }, data }); out.updated++; }
     else { await prisma.gpsDevice.create({ data: { provider: 'cartrack', vehicleId: v.vehicleId, ...data } }); out.created++; }
   }
-  return Object.assign(out, await listDevices());
+  const res = Object.assign(out, await listDevices());
+  // How many devices actually have a known position once the dust settles — the number the UI cares
+  // about, and not the same as how many rows the sync happened to write.
+  res.positioned = res.data.filter((d) => d.lat != null && d.lng != null).length;
+  return res;
 }
 
 // ── editable mapping ─────────────────────────────────────────────────────────────────────────────

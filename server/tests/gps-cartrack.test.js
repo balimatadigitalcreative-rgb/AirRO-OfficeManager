@@ -34,6 +34,7 @@ const VEHICLES = () => ([
 
 let gm, devices;
 const stub = (rows) => { cartrack.listVehicles = async () => cartrack.unwrapList(rows).map(cartrack.normalizeVehicle).filter((v) => v.vehicleId); };
+const stubStatus = (rows) => { cartrack.listStatuses = async () => cartrack.unwrapList(rows).map(cartrack.normalizeStatus).filter((v) => v.vehicleId); };
 
 beforeAll(async () => {
   await resetDb();
@@ -41,6 +42,7 @@ beforeAll(async () => {
   // The armada list the app knows about (Kelola Armada). KUNING is deliberately absent.
   await require('../src/services/settings.service').set('airro_fleet', ['Merah', 'Biru']);
   stub(VEHICLES());
+  stubStatus([]);        // default: no live feed, so these cases exercise the identity rows
 });
 afterAll(() => prisma.$disconnect());
 
@@ -138,6 +140,23 @@ describe('TIMEZONE — a Bangkok-stamped payload must display as Bali time', () 
     expect(Math.round((now.getTime() - d.fixAt) / 60000)).toBe(15);
   });
 
+  it('a TWO-DIGIT offset ("+08") is an offset, NOT a naive stamp', () => {
+    // Cartrack stamps its fixes this way. A pattern demanding +HH:MM misses it, the stamp is taken for
+    // naive, and CARTRACK_TZ is applied on top of an offset that was already there. Read as naive it
+    // would be 13:30 WITA here, or 20:30 with the UTC default — from a vehicle that reported 12:30.
+    const t = parseProviderTs('2026-09-11 12:30:05+08', 'Asia/Bangkok');
+    expect(t.assumedTz).toBe('');
+    expect(t.at.toISOString()).toBe('2026-09-11T04:30:05.000Z');
+    expect(formatInTz(t.at, 'Asia/Makassar')).toBe('2026-09-11, 12:30');
+  });
+
+  it('+0800 and +08:00 are the same instant as +08', () => {
+    const iso = (x) => parseProviderTs(x, 'UTC').at.toISOString();
+    expect(iso('2026-09-11 12:30:05+0800')).toBe('2026-09-11T04:30:05.000Z');
+    expect(iso('2026-09-11 12:30:05+08:00')).toBe('2026-09-11T04:30:05.000Z');
+    expect(iso('2026-09-11T04:30:05Z')).toBe('2026-09-11T04:30:05.000Z');
+  });
+
   it('a stamp with no offset and no configured zone falls back to UTC, and says so', () => {
     const t = parseProviderTs('2026-09-12 14:30:00', 'UTC');
     expect(t.at.toISOString()).toBe('2026-09-12T14:30:00.000Z');
@@ -150,6 +169,73 @@ describe('the business day is the APP timezone, not the host clock', () => {
     // This is the 00:00–08:00 WITA window where the old toISOString().slice(0,10) returned yesterday.
     expect(todayISO(new Date('2026-09-11T23:30:00Z'))).toBe('2026-09-12');
     expect(todayISO(new Date('2026-09-12T15:00:00Z'))).toBe('2026-09-12');
+  });
+});
+
+// /vehicles carries NO position on this tenant — every device read "belum ada posisi" until the probe
+// found the fix in /vehicles/status, nested inside `location` and stamped with a two-digit offset.
+describe('the position feed lives in /vehicles/status', () => {
+  // The provider's real payload, field-for-field.
+  const STATUS = () => ([
+    { vehicle_id: 452461087, registration: 'DK8919AQ', event_ts: '2026-09-12 16:30:05+08', speed: 44, bearing: 351,
+      ignition: true, idling: false, odometer: 111121900, road_speed: 50,
+      location: { latitude: -8.6712, longitude: 115.2126, address: 'Jl. Raya Kerobokan' } },
+    { vehicle_id: 452461090, registration: 'DK8184AP', event_ts: '2026-09-12 16:21:19+08', speed: 0, bearing: 48,
+      ignition: false, idling: false, odometer: 113936300, road_speed: 50,
+      location: { latitude: -8.6500, longitude: 115.2167, address: 'Jl. Sunset Road' } },
+  ]);
+
+  it('a sync takes the fix from the status feed and the identity from /vehicles', async () => {
+    stubStatus(STATUS());
+    const r = await request(app).post('/api/v1/gps/sync').set(auth(gm)).send({});
+    expect(r.status).toBe(200);
+    expect(r.body.data).toMatchObject({ positionFeed: true, positioned: 2 });
+    const merah = r.body.data.data.find((d) => d.vehicleId === '452461087');
+    expect(merah).toMatchObject({ registration: 'DK8919AQ', lat: -8.6712, lng: 115.2126, speedKph: 44 });
+  });
+
+  it('coordinates nested inside `location` are found, not silently dropped', async () => {
+    const list = (await request(app).get('/api/v1/gps/devices').set(auth(gm))).body.data;
+    const biru = list.find((d) => d.vehicleId === '452461090');
+    expect(biru.lat).toBe(-8.65);
+    expect(biru.lng).toBe(115.2167);
+    expect(biru.speedKph).toBe(0);            // parked is a real reading, not a missing one
+  });
+
+  it('the "+08" stamp renders as the SAME wall clock in Bali, not eight hours later', async () => {
+    const d = (await request(app).get('/api/v1/gps/devices').set(auth(gm))).body.data.find((x) => x.vehicleId === '452461087');
+    expect(new Date(d.fixAt).toISOString()).toBe('2026-09-12T08:30:05.000Z');
+    expect(d.fixAssumedTz).toBe('');                                   // the offset was honoured
+    expect(d.fixRaw).toBe('2026-09-12 16:30:05+08');
+    expect(formatInTz(d.fixAt, 'Asia/Makassar')).toBe('2026-09-12, 16:30');
+    expect(formatInTz(d.fixAt, 'Asia/Makassar')).not.toContain('00:30');   // the UTC-assumed reading
+    expect(formatInTz(d.fixAt, 'Asia/Makassar')).not.toContain('17:30');   // the Bangkok-assumed one
+  });
+
+  it('an OLDER reading never moves the position backwards', async () => {
+    // Out-of-order rows happen. Accepting one would draw the vehicle jumping to where it was an hour
+    // ago, which looks exactly like real movement.
+    stubStatus([{ vehicle_id: 452461087, registration: 'DK8919AQ', event_ts: '2026-09-12 09:00:00+08',
+                  speed: 12, location: { latitude: -8.9999, longitude: 115.9999 } }]);
+    await request(app).post('/api/v1/gps/sync').set(auth(gm)).send({});
+    const d = (await request(app).get('/api/v1/gps/devices').set(auth(gm))).body.data.find((x) => x.vehicleId === '452461087');
+    expect(d.lat).toBe(-8.6712);                                      // the 16:30 fix still stands
+    expect(new Date(d.fixAt).toISOString()).toBe('2026-09-12T08:30:05.000Z');
+  });
+
+  it('a broken position feed still syncs the MAPPING instead of failing the whole call', async () => {
+    // The REAL tenant shape: /vehicles is identity only, so an outage leaves nothing to fall back on
+    // and the last good fix must simply stand.
+    stub(VEHICLES().map((v) => { const c = Object.assign({}, v); delete c.latitude; delete c.longitude; delete c.speed; delete c.event_ts; return c; }));
+    const good = cartrack.listStatuses;
+    cartrack.listStatuses = async () => { throw new Error('404 Not Found'); };
+    const r = await request(app).post('/api/v1/gps/sync').set(auth(gm)).send({});
+    expect(r.status).toBe(200);
+    expect(r.body.data.positionFeed).toBe(false);        // reported, so the UI can say why
+    const merah = r.body.data.data.find((d) => d.vehicleId === '452461087');
+    expect(merah.fleetId).toBe('Merah');                 // mapping intact
+    expect(merah.lat).toBe(-8.6712);                     // last good fix NOT blanked by the outage
+    cartrack.listStatuses = good;
   });
 });
 
