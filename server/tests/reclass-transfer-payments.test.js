@@ -50,3 +50,33 @@ it('--apply moves the money from Kas to Bank, once', async () => {
   expect((await script.applyReclass({ id: null, name: 'test' })).changed).toBe(0);
   expect((await script.listLegacyTransfers()).count).toBe(0);
 });
+
+describe('closed periods (Tutup Buku)', () => {
+  let closedId;
+  beforeAll(async () => {
+    // A legacy transfer settlement in January, whose month is closed.
+    await request(app).post(`${D}/transactions`).set(auth(gm)).send({ customerId: cid, qty: 3, method: 'bon', txnDate: '2026-01-10' });
+    const r = await request(app).post(`${D}/transactions`).set(auth(gm)).send({ customerId: cid, method: 'pelunasan', payAmount: 5000, payMethod: 'cash', txnDate: '2026-01-15' });
+    closedId = r.body.data.id;
+    await prisma.distTransaction.update({ where: { id: closedId }, data: { payMethod: '', note: 'lama · Transfer' } });
+    await prisma.accountingPeriod.create({ data: { periodKey: '2026-01', year: 2026, month: 1, status: 'ditutup' } });
+  });
+
+  it('--list flags a row whose month is closed, and keeps it out of the applicable total', async () => {
+    const l = await script.listLegacyTransfers();
+    const row = l.rows.find((x) => x.id === closedId);
+    expect(row.periodClosed).toBe(true);
+    expect(l.closedCount).toBe(1);
+    expect(l.count).toBe(0);          // nothing left that --apply may change
+  });
+
+  it('--apply skips it: the closed month\'s Kas/Bank do not move', async () => {
+    const kas = await bal('1-1000'); const bank = await bal('1-1100');
+    const a = await script.applyReclass({ id: null, name: 'test' });
+    expect(a.changed).toBe(0);
+    expect(a.skippedClosed).toBe(1);
+    expect(await bal('1-1000')).toBe(kas);
+    expect(await bal('1-1100')).toBe(bank);
+    expect((await prisma.distTransaction.findUnique({ where: { id: closedId } })).payMethod).toBe('');
+  });
+});

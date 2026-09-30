@@ -16,13 +16,29 @@ async function candidates() {
   return rows.filter((r) => { const parts = String(r.note || '').split(' · '); return parts[parts.length - 1].trim().toLowerCase() === 'transfer'; });
 }
 
+// A row whose month is closed/locked (Tutup Buku) is NEVER rewritten — the adjusting journal would post
+// at its old date and change a closed month's Kas/Bank. It is listed (flagged) so the owner can decide
+// to reopen that month or book the move by hand in an open period.
+async function withPeriod(rows) {
+  const period = require('../src/services/period.service');
+  const status = {};
+  for (const r of rows) { const k = period.monthOf(r.txnDate); if (!(k in status)) status[k] = await period.statusForKey(k); }
+  return rows.map((r) => ({ row: r, closed: period.LOCKED.includes(status[period.monthOf(r.txnDate)]) }));
+}
+
 async function listLegacyTransfers() {
-  const rows = await candidates();
-  return { count: rows.length, total: rows.reduce((s, r) => s + Number(r.amount || 0), 0), rows: rows.map((r) => ({ id: r.id, date: r.txnDate, amount: Number(r.amount), fleetId: r.fleetId })) };
+  const all = await withPeriod(await candidates());
+  const open = all.filter((x) => !x.closed);
+  return {
+    count: open.length, total: open.reduce((s, x) => s + Number(x.row.amount || 0), 0),
+    closedCount: all.length - open.length, closedTotal: all.filter((x) => x.closed).reduce((s, x) => s + Number(x.row.amount || 0), 0),
+    rows: all.map((x) => ({ id: x.row.id, date: x.row.txnDate, amount: Number(x.row.amount), fleetId: x.row.fleetId, periodClosed: x.closed })),
+  };
 }
 
 async function applyReclass(actor) {
-  const rows = await candidates();
+  const all = await withPeriod(await candidates());
+  const rows = all.filter((x) => !x.closed).map((x) => x.row);
   let changed = 0;
   for (const r of rows) {
     await prisma.$transaction(async (tx) => {
@@ -31,7 +47,7 @@ async function applyReclass(actor) {
     });
     changed++;
   }
-  return { changed };
+  return { changed, skippedClosed: all.length - rows.length };
 }
 
 module.exports = { listLegacyTransfers, applyReclass };
@@ -41,12 +57,13 @@ if (require.main === module) {
     const apply = process.argv.includes('--apply');
     guard.printBanner(apply ? 'WRITE (--apply)' : 'READ-ONLY (daftar saja)');
     const l = await listLegacyTransfers();
-    console.log(`Pelunasan transfer lama yang tercatat ke Kas: ${l.count} baris, total Rp ${l.total.toLocaleString('id-ID')}`);
-    l.rows.forEach((r) => console.log(`  ${r.date}  ${r.fleetId}  Rp ${r.amount.toLocaleString('id-ID')}  ${r.id}`));
+    console.log(`Pelunasan transfer lama yang tercatat ke Kas: ${l.count} baris bisa dipindah, total Rp ${l.total.toLocaleString('id-ID')}`);
+    if (l.closedCount) console.log(`Di periode yang sudah DITUTUP/DIKUNCI (dilewati): ${l.closedCount} baris, total Rp ${l.closedTotal.toLocaleString('id-ID')}`);
+    l.rows.forEach((r) => console.log(`  ${r.date}  ${r.fleetId}  Rp ${r.amount.toLocaleString('id-ID')}  ${r.id}${r.periodClosed ? '  [periode ditutup — dilewati]' : ''}`));
     if (!apply) { console.log('\nMode daftar saja. Jalankan dengan --apply setelah disetujui pemilik.'); process.exit(0); }
     guard.assertWriteAllowed();
     const a = await applyReclass({ id: null, name: 'script reclass-transfer-payments' });
-    console.log(`Selesai: ${a.changed} baris dipindah Kas → Bank.`);
+    console.log(`Selesai: ${a.changed} baris dipindah Kas → Bank${a.skippedClosed ? `; ${a.skippedClosed} baris di periode tertutup dilewati` : ''}.`);
     process.exit(0);
   })().catch((e) => { console.error(e); process.exit(1); });
 }
