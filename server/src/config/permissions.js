@@ -378,11 +378,22 @@ function deriveManageUsers(perms, role) {
   return perms;
 }
 
+// OWNER-ONLY PER-ACCOUNT caps are never honoured from a ROLE template: a manageUsers holder (GM) may edit
+// roles, and a role grant would reach every user of that role without the owner's per-user guard in
+// user.service ever seeing it. Only a per-user override (owner-guarded) can carry them.
+const PER_USER_ONLY_CAPS = ['distribusiDemoLatihan', 'distribusiDemoPenuh'];
+function withoutPerUserOnly(p) {
+  if (!p || typeof p !== 'object') return p;
+  const out = { ...p };
+  PER_USER_ONLY_CAPS.forEach((k) => { delete out[k]; });
+  return out;
+}
 function resolvePerms(role, permsStrOrObj) {
   const override = parsePerms(permsStrOrObj);
   // Order matters: distribusi caps first (they seed distribusiGallon/Reset), THEN the gudang gallon
   // caps derive from them. Runs on EVERY request → in-flight tokens get the new caps with no re-login.
-  const resolved = derivePayrollCaps(deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(override || rolePerms(role) || ROLE_PERMS.finance), role)), role), role);
+  const base = override || withoutPerUserOnly(rolePerms(role) || ROLE_PERMS.finance);
+  const resolved = derivePayrollCaps(deriveGudangGalonCaps(deriveGudangCaps(deriveDistribusiCaps(deriveKasbonCaps(base), role)), role), role);
   return deriveManageUsers(resolved, role);
 }
 

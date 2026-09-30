@@ -64,6 +64,21 @@ describe('izin demo', () => {
   });
 });
 
+describe('izin demo tidak bisa datang dari peran', () => {
+  it('a GM putting Demo penuh on a ROLE does not give it to that role\'s users', async () => {
+    const r = await request(app).patch('/api/v1/roles/finance').set(auth(gm)).send({ permissions: { ...FIELD, distribusiDemoPenuh: true, distribusiDemoLatihan: true } });
+    expect(r.status).toBe(200);   // the role edit itself is allowed; the demo keys are simply never honoured from a role
+    const u = await reg({ name: 'Role User', username: 'fd_roleuser', password: 'secret123', role: 'finance' });
+    const tok = (await request(app).post('/api/v1/auth/login').send({ username: 'fd_roleuser', password: 'secret123' })).body.token;
+    const me = (await request(app).get('/api/v1/auth/me').set(auth(tok))).body;
+    const p = (me.data || me.user || me).permissions;
+    expect(u.user.id).toBeTruthy();
+    expect(p.distribusiPengiriman).toBe(true);    // the rest of the role applies
+    expect(p.distribusiDemoPenuh).toBe(false);
+    expect(p.distribusiDemoLatihan).toBe(false);
+  });
+});
+
 describe('katalog izin (klien)', () => {
   it('kedua izin demo ada di katalog sebagai ownerOnly, dan file ter-parse', () => {
     const fs = require('fs'); const path = require('path');
