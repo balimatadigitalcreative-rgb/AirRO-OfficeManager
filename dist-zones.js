@@ -271,6 +271,84 @@
     return { ok: true, slots: slots };
   }
 
+  // FIXED-DAY VISITS TAKE ROOM FIRST. Each slot (armada, day) has the quota left after its fixed-day
+  // visits; this moves regular customers out of slots that are over it, always choosing the move that
+  // adds the least distance (to the target slot's centre — its members' mean, or its home centre while
+  // empty), then runs the same move/swap refinement as capacitatedGroups, never breaking a quota.
+  // slots: [{ key, cap, ids, center }] — every point in exactly one slot. Deterministic.
+  function fitFixedLoad(points, slots) {
+    var pts = (points || []).filter(function (p) { return p && hasPoint(p.lat, p.lng); });
+    var S = (slots || []).map(function (s) { return { key: s.key, cap: Math.max(0, Math.floor(s.cap) || 0), home: s.center }; });
+    var available = S.reduce(function (t, s) { return t + s.cap; }, 0);
+    if (pts.length > available) return { ok: false, needed: pts.length, available: available };
+    var lat0 = pts.length ? pts.reduce(function (t, p) { return t + p.lat; }, 0) / pts.length : (S[0] && S[0].home ? S[0].home[0] : 0);
+    var cosLat = Math.cos((lat0 * Math.PI) / 180);
+    var byId = {}; pts.forEach(function (p) { byId[p.id] = p; });
+    var xy = function (p) { return [p.lng * cosLat, p.lat]; };
+    var d2 = function (a, b) { var dx = a[0] - b[0], dy = a[1] - b[1]; return dx * dx + dy * dy; };
+    var order = pts.map(function (p) { return p.id; });
+    var asg = {};
+    (slots || []).forEach(function (s, si) { (s.ids || []).forEach(function (id) { if (byId[id] && asg[id] == null) asg[id] = si; }); });
+    // Defensive: a point the caller did not place goes to the nearest slot by home centre.
+    order.forEach(function (id) {
+      if (asg[id] != null) return;
+      var best = 0, bd = Infinity;
+      S.forEach(function (s, si) { var v = s.home ? d2(xy(byId[id]), [s.home[1] * cosLat, s.home[0]]) : Infinity; if (v < bd) { bd = v; best = si; } });
+      asg[id] = best;
+    });
+    var members = function (si) { return order.filter(function (id) { return asg[id] === si; }); };
+    var centerOf = function (si) {
+      var m = members(si);
+      if (!m.length) return S[si].home ? [S[si].home[1] * cosLat, S[si].home[0]] : [0, 0];
+      return [m.reduce(function (t, id) { return t + xy(byId[id])[0]; }, 0) / m.length, m.reduce(function (t, id) { return t + xy(byId[id])[1]; }, 0) / m.length];
+    };
+    var load = function () { var L = S.map(function () { return 0; }); order.forEach(function (id) { L[asg[id]]++; }); return L; };
+    // 1) Clear overloads, cheapest extra distance first.
+    for (var guard = 0; guard < 100000; guard++) {
+      var L = load(), C = S.map(function (_, si) { return centerOf(si); }), best = null;
+      order.forEach(function (id) {
+        var s = asg[id];
+        if (L[s] <= S[s].cap) return;
+        var p = xy(byId[id]), ds = d2(p, C[s]);
+        S.forEach(function (t, ti) {
+          if (ti === s || L[ti] >= t.cap) return;
+          var cost = d2(p, C[ti]) - ds;
+          if (!best || cost < best.cost - 1e-15) best = { cost: cost, id: id, to: ti };
+        });
+      });
+      if (!best) break;
+      asg[best.id] = best.to;
+    }
+    // 2) Unstretch within the quotas.
+    var EPS = 1e-14;
+    for (var pass = 0; pass < 200; pass++) {
+      var C2 = S.map(function (_, si) { return centerOf(si); }), L2 = load(), moved = false;
+      order.forEach(function (id) {
+        var a = asg[id], p = xy(byId[id]);
+        for (var b = 0; b < S.length; b++) {
+          if (b === a || L2[b] >= S[b].cap) continue;
+          if (d2(p, C2[b]) < d2(p, C2[a]) - EPS) { L2[a]--; L2[b]++; asg[id] = b; a = b; moved = true; }
+        }
+      });
+      for (var i = 0; i < order.length; i++) {
+        for (var j = i + 1; j < order.length; j++) {
+          var A = asg[order[i]], B = asg[order[j]];
+          if (A === B) continue;
+          var pi = xy(byId[order[i]]), pj = xy(byId[order[j]]);
+          if (d2(pi, C2[B]) + d2(pj, C2[A]) < d2(pi, C2[A]) + d2(pj, C2[B]) - EPS) { asg[order[i]] = B; asg[order[j]] = A; moved = true; }
+        }
+      }
+      if (!moved) break;
+    }
+    return {
+      ok: true,
+      slots: S.map(function (s, si) {
+        var m = members(si), c = centerOf(si);
+        return { key: s.key, ids: m, center: [round6(c[1]), round6(c[0] / cosLat)], polygon: m.length ? zonePolygon(m.map(function (id) { return byId[id]; }), cosLat) : null };
+      }),
+    };
+  }
+
   function sameSet(a, b) {
     var x = (a || []).slice().sort().join(','), y = (b || []).slice().sort().join(',');
     return x === y;
@@ -316,7 +394,7 @@
   function colorAt(i) { return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length]; }
 
   return {
-    pointInPolygon: pointInPolygon, zoneFor: zoneFor, validatePolygon: validatePolygon, autoZones: autoZones, capacitatedGroups: capacitatedGroups, assignSlots: assignSlots, planMembership: planMembership,
+    pointInPolygon: pointInPolygon, zoneFor: zoneFor, validatePolygon: validatePolygon, autoZones: autoZones, capacitatedGroups: capacitatedGroups, assignSlots: assignSlots, fitFixedLoad: fitFixedLoad, planMembership: planMembership,
     colorAt: colorAt, PALETTE: PALETTE, MAX_VERTICES: MAX_VERTICES, MAX_ZONES: MAX_ZONES, MARGIN_M: MARGIN_M,
   };
 });

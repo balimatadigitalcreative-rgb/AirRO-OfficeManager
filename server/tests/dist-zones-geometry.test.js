@@ -262,6 +262,51 @@ describe('assignSlots — each zone gets an armada and a day', () => {
   });
 });
 
+describe('fitFixedLoad — regular customers into the room left after fixed-day visits', () => {
+  const P = (id, lat, lng) => ({ id, lat, lng });
+  // Slot A (west) holds 3 but has room for 2; slot B (east) is empty with room for 5.
+  const pts = [P(1, -8.60, 115.200), P(2, -8.60, 115.201), P(3, -8.60, 115.215), P(4, -8.60, 115.230)];
+  const slots = () => [
+    { key: 'A', cap: 2, ids: [1, 2, 3], center: [-8.60, 115.200] },
+    { key: 'B', cap: 5, ids: [4], center: [-8.60, 115.230] },
+  ];
+
+  it('no slot ends over its quota and everyone is placed once', () => {
+    const r = DZ.fitFixedLoad(pts, slots());
+    expect(r.ok).toBe(true);
+    const a = r.slots.find((s) => s.key === 'A'), b = r.slots.find((s) => s.key === 'B');
+    expect(a.ids.length).toBeLessThanOrEqual(2);
+    expect([...a.ids, ...b.ids].sort()).toEqual([1, 2, 3, 4]);
+  });
+
+  it('moves the customer that costs the least extra distance (the one nearest the other route)', () => {
+    const r = DZ.fitFixedLoad(pts, slots());
+    expect(r.slots.find((s) => s.key === 'B').ids).toContain(3);
+  });
+
+  it('an empty slot takes customers near its home centre', () => {
+    const r = DZ.fitFixedLoad([P(1, -8.60, 115.20), P(2, -8.60, 115.20), P(3, -8.70, 115.30)],
+      [{ key: 'A', cap: 2, ids: [1, 2, 3], center: [-8.60, 115.20] }, { key: 'E', cap: 3, ids: [], center: [-8.70, 115.30] }]);
+    expect(r.slots.find((s) => s.key === 'E').ids).toEqual([3]);
+  });
+
+  it('not enough room anywhere → not ok, with the numbers', () => {
+    expect(DZ.fitFixedLoad(pts, [{ key: 'A', cap: 1, ids: [1, 2], center: [-8.6, 115.2] }, { key: 'B', cap: 1, ids: [3, 4], center: [-8.6, 115.23] }]))
+      .toEqual({ ok: false, needed: 4, available: 2 });
+  });
+
+  it('a slot with quota 0 is emptied', () => {
+    const r = DZ.fitFixedLoad(pts, [{ key: 'A', cap: 0, ids: [1, 2], center: [-8.6, 115.2] }, { key: 'B', cap: 9, ids: [3, 4], center: [-8.6, 115.23] }]);
+    expect(r.slots.find((s) => s.key === 'A').ids).toEqual([]);
+    expect(r.slots.find((s) => s.key === 'A').polygon).toBeNull();
+  });
+
+  it('deterministic, valid polygons for non-empty slots', () => {
+    expect(DZ.fitFixedLoad(pts, slots())).toEqual(DZ.fitFixedLoad(pts, slots()));
+    DZ.fitFixedLoad(pts, slots()).slots.forEach((s) => { if (s.ids.length) expect(DZ.validatePolygon(s.polygon).ok).toBe(true); });
+  });
+});
+
 describe('palette', () => {
   it('gives distinct colours in order and wraps', () => {
     expect(DZ.colorAt(0)).not.toBe(DZ.colorAt(1));
