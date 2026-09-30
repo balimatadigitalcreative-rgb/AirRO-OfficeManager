@@ -4042,6 +4042,7 @@ function runClient(r, sold, corrs) {
     gallonsOut: eff.out, gallonsFullReturned: eff.full, gallonsEmptyReturned: eff.empty,
     baseGallonsOut: r.gallonsOut, baseGallonsFullReturned: r.gallonsFullReturned, baseGallonsEmptyReturned: r.gallonsEmptyReturned,
     sold, expectedRemaining, diff, diffReason: r.diffReason || '', note: r.note || '',
+    underSopReason: r.underSopReason || '',
     corrected: active.length > 0,
     corrections: cs.map((c) => ({ id: c.id, field: c.field, delta: c.delta, reason: c.reason, active: c.active, actorName: c.actorName || null, createdAt: runMs(c.createdAt) })),
     openedByName: r.openedByName || null, openedAt: runMs(r.openedAt), closedByName: r.closedByName || null, closedAt: runMs(r.closedAt),
@@ -4076,17 +4077,26 @@ async function openRun(body, actor) {
   if (!fleetId) throw ApiError.badRequest('Pilih armada.');
   const gallonsOut = int(body.gallonsOut);
   if (gallonsOut <= 0) throw ApiError.badRequest('Jumlah galon dimuat harus lebih dari 0.');
+  // ATURAN LAPANGAN — capacity is a physical limit (always, whenever the owner set one for this armada);
+  // the SOP minimum asks for a written reason below it, but only once the owner switched it on.
+  const fr = require('./fieldRules.service');
+  const rules = await fr.getRules();
+  const capacity = fr.capacityOf(rules, fleetId);
+  if (capacity && gallonsOut > capacity) throw ApiError.badRequest(`Muatan ${gallonsOut} galon melebihi kapasitas armada ${fleetId} (${capacity} galon).`, { code: 'OVER_CAPACITY', capacity });
+  const underSopReason = String(body.underSopReason || '').trim().slice(0, 300);
+  const underSop = rules.ritSop.enabled && gallonsOut < rules.ritSop.minLoad;
+  if (underSop && !underSopReason) throw ApiError.badRequest(`Muatan di bawah SOP (minimal ${rules.ritSop.minLoad} galon) — isi alasannya.`, { code: 'UNDER_SOP', minLoad: rules.ritSop.minLoad });
   const openExisting = await prisma.deliveryRun.findFirst({ where: { fleetId, status: 'open' } });
   if (openExisting) throw ApiError.badRequest(`Masih ada rit terbuka (rit-${openExisting.runNo}) untuk armada ini — tutup dulu.`, { runId: openExisting.id });
   const last = await prisma.deliveryRun.findFirst({ where: { date, fleetId }, orderBy: { runNo: 'desc' } });
   const runNo = (last ? last.runNo : 0) + 1;
   const snap = await actorSnap(actor);
-  const run = await prisma.deliveryRun.create({ data: { date, fleetId, runNo, gallonsOut, note: String(body.note || '').slice(0, 300), status: 'open', openedById: snap.actorId, openedByName: snap.actorName } });
+  const run = await prisma.deliveryRun.create({ data: { date, fleetId, runNo, gallonsOut, note: String(body.note || '').slice(0, 300), underSopReason: underSop ? underSopReason : '', status: 'open', openedById: snap.actorId, openedByName: snap.actorName } });
   // MUAT = relocate full gallons depot → armada in the ledger (load_out). This is the missing link
   // that makes "di armada" a real, ledger-derived location; it does NOT change total owned (relocation).
   // The FIRST load_out for a fleet is its armada cutover — deliveries from here on are armada→pelanggan.
   await prisma.gallonMovement.create({ data: { type: 'load_out', qty: gallonsOut, fleetId, active: true, note: `Muat rit-${runNo} · ${date}`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
-  await logAudit('pengiriman', `Muat rit-${runNo}: ${fleetId}`, `${gallonsOut} galon dimuat · ${date}`, snap, fleetId);
+  await logAudit('pengiriman', `Muat rit-${runNo}: ${fleetId}`, `${gallonsOut} galon dimuat · ${date}${underSop ? ` · di bawah SOP (${rules.ritSop.minLoad}): ${underSopReason}` : ''}`, snap, fleetId);
   return runClient(run, 0);
 }
 const RUN_RESOLUTIONS = ['kembali_besok', 'rusak', 'hilang', 'salah_hitung'];

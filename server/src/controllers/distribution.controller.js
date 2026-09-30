@@ -244,7 +244,7 @@ const bulkResolveSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(
 const undoCarrySchema = z.object({ items: z.array(z.object({ id: z.string().min(1), priorStatus: z.string().max(20).optional(), priorReason: z.string().max(300).optional(), createdId: z.string().nullable().optional(), createdMode: z.string().max(20).nullable().optional(), createdPrior: z.any().optional() })).min(1).max(2000) });
 const closeoutQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
 // Delivery runs (rit)
-const runOpenSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), gallonsOut: z.number().int().positive(), note: z.string().max(300).optional() });
+const runOpenSchema = z.object({ date: DATE, fleet: z.string().max(60).optional(), gallonsOut: z.number().int().positive(), note: z.string().max(300).optional(), underSopReason: z.string().max(300).optional() });
 const runCloseSchema = z.object({ gallonsFullReturned: z.number().int().nonnegative(), gallonsEmptyReturned: z.number().int().nonnegative(), diffReason: z.string().max(300).optional(), resolution: z.enum(['kembali_besok', 'rusak', 'hilang', 'salah_hitung']).optional() });
 // Koreksi Rit (append-only): CORRECTED absolute value(s) for muat/isi-kembali/kosong + a required
 // reason. At least one field must be present (enforced in the service via a zero-change check).

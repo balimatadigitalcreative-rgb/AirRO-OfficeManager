@@ -1184,6 +1184,7 @@ model DeliveryRun {
   gallonsEmptyReturned Int      @default(0)            // empty gallons brought back from customers (TUTUP)
   status               String   @default("open")       // open | closed
   diffReason           String   @default("")           // mandatory when the reconciliation difference ≠ 0
+  underSopReason       String   @default("")           // why this rit left with fewer gallons than the SOP minimum (fieldRules.ritSop)
   note                 String   @default("")
   openedById   String?
   openedByName String?
