@@ -46,6 +46,11 @@ it('rules are saved through the untagged owner API, never the adaptor', () => {
   expect(rules).toMatch(/window\.API\.distribusi\.fieldRules\.set\(/);
   expect(rules).not.toMatch(/\bapi\.\w+\(/);
 });
+it('on phones the app\'s own bottom nav steps aside while the field UI is open (it would cover the dock)', () => {
+  expect(jsx).toMatch(/document\.body\.classList\.add\('mlap-on'\)/);
+  expect(jsx).toMatch(/document\.body\.classList\.remove\('mlap-on'\)/);
+  expect(css).toMatch(/body\.mlap-on \.mobile-nav \{ display: none !important; \}/);
+});
 it('glass only on the functional layer + reduced transparency / motion honoured', () => {
   expect(css).toMatch(/@media \(prefers-reduced-transparency: reduce\)/);
   expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);

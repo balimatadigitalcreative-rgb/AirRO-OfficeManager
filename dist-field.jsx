@@ -47,6 +47,9 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   const key = 'latihan:' + ((user && user.id) || 'anon') + ':' + (fleet || '');
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2400); };
+  // The glass dock IS the navigation here: the app's own phone bottom nav steps aside while this is
+  // open (the topbar menu still reaches every other screen).
+  uEfl(() => { document.body.classList.add('mlap-on'); return () => { document.body.classList.remove('mlap-on'); }; }, []);
   uEfl(() => {
     let live = true; setApi(null); setErr(null);
     const real = window.FIELDAPI.real(window.API, { date: today, fleet });

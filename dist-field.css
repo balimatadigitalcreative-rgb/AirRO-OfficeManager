@@ -15,6 +15,9 @@
 }
 :root[data-theme="dark"] .mlap-root { --mlap-bg: #0C141A; --mlap-surface: #16222B; --mlap-ink: #E8EEF2; --mlap-sub: #9DB0BC; --mlap-line: #22313C; --mlap-accent: #5AA9E0; --mlap-accent-soft: #15324A; --mlap-glass: rgba(22,34,43,.72); --mlap-glass-line: rgba(255,255,255,.12); --mlap-warn: #F4A27A; --mlap-warn-soft: #3A2217; --mlap-warn-line: #6B3A22; --mlap-bon: #F2C46B; --mlap-bon-soft: #3A2E12; --mlap-ok: #7FD3A3; --mlap-ok-soft: #173326; --mlap-neg: #F19A8F; --mlap-neg-soft: #3A1B18; --mlap-teal-ink: #6ED3CC; --mlap-teal-soft: #123331; --mlap-grab: #4A5A66; }
 
+/* The glass dock is the navigation while the field UI is open: the app's phone bottom nav steps aside
+   (it would paint over the dock; the topbar hamburger still opens the full menu). */
+body.mlap-on .mobile-nav { display: none !important; }
 .mlap-ribbon { position: sticky; top: 0; z-index: 30; background: #C2410C; color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-align: center; padding: 6px 12px; }
 .mlap-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 6px; }
 .mlap-head h1 { margin: 0; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.02em; flex: 1; color: var(--mlap-ink); }
