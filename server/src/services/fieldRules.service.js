@@ -54,6 +54,11 @@ function describeChanges(a, b) {
   return out;
 }
 
+async function actorIsOwner(actor) {
+  if (!actor || !actor.id) return false;
+  const u = await require('../lib/prisma').user.findUnique({ where: { id: actor.id }, select: { role: true } });
+  return !!(u && require('../config/permissions').isOwnerRole(u.role));
+}
 async function setRules(patch, actor) {
   const p = patch || {};
   const cur = await getRules();
@@ -83,6 +88,9 @@ async function setRules(patch, actor) {
   }
   if (p.fieldUiDefault !== undefined) {
     if (p.fieldUiDefault !== 'old' && p.fieldUiDefault !== 'new') throw ApiError.badRequest('Tampilan utama harus "old" atau "new".');
+    // RELEASE is the owner's call alone (spec: 'Owner menekan tombol rilis'): it opens Mode asli to every
+    // field account, bypassing the owner-only Demo penuh grant. Role read LIVE, never from the token.
+    if (p.fieldUiDefault !== cur.fieldUiDefault && !(await actorIsOwner(actor))) throw ApiError.forbidden('Hanya Pemilik yang boleh merilis atau membatalkan rilis tampilan baru.');
     next.fieldUiDefault = p.fieldUiDefault;
   }
   const saved = normalize(next);

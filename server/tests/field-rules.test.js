@@ -33,6 +33,18 @@ describe('field rules', () => {
     });
   });
 
+  it('only the OWNER may release (or un-release) the new view — a GM gets 403 even through the API', async () => {
+    const r = await request(app).put(`${D}/field-rules`).set(auth(gm)).send({ fieldUiDefault: 'new' });
+    expect(r.status).toBe(403);
+    expect((await request(app).get(`${D}/field-rules`).set(auth(gm))).body.data.fieldUiDefault).toBe('old');
+    // resending the unchanged value alongside other edits is fine for a GM
+    expect((await request(app).put(`${D}/field-rules`).set(auth(gm)).send({ fieldUiDefault: 'old', wajibAlasanBatal: false })).status).toBe(200);
+    const owner = (await reg({ name: 'Pemilik', username: 'fr_owner', password: 'secret123', role: 'owner' })).token;
+    expect((await request(app).put(`${D}/field-rules`).set(auth(owner)).send({ fieldUiDefault: 'new' })).status).toBe(200);
+    expect((await request(app).put(`${D}/field-rules`).set(auth(gm)).send({ fieldUiDefault: 'old' })).status).toBe(403);
+    expect((await request(app).put(`${D}/field-rules`).set(auth(owner)).send({ fieldUiDefault: 'old' })).status).toBe(200);
+  });
+
   it('a driver cannot change the rules', async () => {
     const r = await request(app).put(`${D}/field-rules`).set(auth(driver)).send({ ritSop: { enabled: true } });
     expect(r.status).toBe(403);
