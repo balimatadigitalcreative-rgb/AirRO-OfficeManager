@@ -6250,6 +6250,7 @@ function useLiveKey(key) {
   return live;
 }
 
+const CARRY_OPEN_KEY = 'dist_carry_open';
 function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   const [res, setRes] = uSx(null);
   const [busy, setBusy] = uSx('');           // single-row id in flight
@@ -6263,6 +6264,11 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   const [bulkBusy, setBulkBusy] = uSx(false);
   const [undoT, setUndoT] = uSx(null);       // { msg, payload } — 15s undo toast
   const undoTimer = React.useRef(null);
+  // FOLDABLE. A long carry-over list pushed today's deliveries far down the screen. Folded (the default)
+  // it is one line — how many, how old — and the choice is remembered on this device. Only a viewer
+  // convenience, so storage that is blocked or empty just means "folded".
+  const [open, setOpen] = uSx(() => { try { return localStorage.getItem(CARRY_OPEN_KEY) === '1'; } catch (e) { return false; } });
+  const toggleOpen = () => setOpen((o) => { const n = !o; try { localStorage.setItem(CARRY_OPEN_KEY, n ? '1' : '0'); } catch (e) {} return n; });
   const latest = React.useRef(window.DISTLIVE.createLatest());
   // Refreshes IN PLACE: a realtime bump must not unmount the section (it returns null while `res` is
   // null) — that collapsed the page, jumped the scroll, and threw away the driver's ticks and search.
@@ -6337,11 +6343,20 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   return (
     <div className="card dist-card dist-carry">
       <div className="dist-carry-head">
-        <span className="dist-carry-ic"><IconTruck s={16} /></span>
-        <b>{trD('dist.carryHead', { n: res.count })}</b>
-        {res.oldest ? <span className="dist-carry-oldest">{trD('dist.carryOldest', { d: res.oldest })}</span> : null}
-        <div className="dist-carry-search"><IconSearch s={14} /><input value={q} placeholder={trD('dist.carrySearch')} onChange={(e) => setQ(e.target.value)} /></div>
+        <button type="button" className="dist-carry-toggle" aria-expanded={open} onClick={toggleOpen}>
+          <span className="dist-carry-ic"><IconTruck s={16} /></span>
+          <span className="dist-carry-title">
+            <b>{trD('dist.carryHead', { n: res.count })}</b>
+            {res.oldest ? <span className="dist-carry-oldest">{trD('dist.carryOldest', { d: res.oldest })}</span> : null}
+            {/* Ticks survive folding; say so, or a later bulk action would act on rows nobody can see. */}
+            {!open && selIds.length > 0 && <span className="dist-carry-oldest">{trD('dist.nSelected', { n: selIds.length })}</span>}
+          </span>
+          <span className="dist-carry-tog-lbl">{trD(open ? 'dist.carryHide' : 'dist.carryShow')}<IconCaret s={15} style={{ transform: open ? 'rotate(180deg)' : 'none' }} /></span>
+        </button>
+        {open && <div className="dist-carry-search"><IconSearch s={14} /><input value={q} placeholder={trD('dist.carrySearch')} onChange={(e) => setQ(e.target.value)} /></div>}
       </div>
+      {open && (
+      <>
       <div className="dist-carry-selrow">
         <label className="dist-check"><input type="checkbox" checked={allVisibleChecked} ref={(el) => { if (el) el.indeterminate = !allVisibleChecked && filtered.some((s) => sel[s.id]); }} onChange={() => setMany(filtered.map((s) => s.id), !allVisibleChecked)} /><span>{trD('dist.selectAllVisible')}</span></label>
         {ql && filtered.length < data.length && <button type="button" className="dist-link" onClick={() => setMany(data.map((s) => s.id), true)}>{trD('dist.selectAllN', { n: data.length })}</button>}
@@ -6383,6 +6398,8 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
             <button type="button" className="btn btn-ghost btn-sm" onClick={clearSel}>{trD('dist.cancel')}</button>
           </div>
         </div>
+      )}
+      </>
       )}
 
       {preview && (

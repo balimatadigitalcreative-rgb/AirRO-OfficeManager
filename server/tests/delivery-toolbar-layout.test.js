@@ -40,6 +40,24 @@ describe('delivery toolbar does not cover the list', () => {
   });
 });
 
+describe('Belum terkirim can be folded away', () => {
+  const src = (() => { const s = jsx.indexOf('function OutstandingSection('); return jsx.slice(s, jsx.indexOf('function DriverWatch(', s)); })();
+
+  it('starts folded and remembers the choice per device (storage failures fall back to folded)', () => {
+    expect(src).toMatch(/localStorage\.getItem\(CARRY_OPEN_KEY\) === '1'; \} catch \(e\) \{ return false; \}/);
+    expect(src).toMatch(/try \{ localStorage\.setItem\(CARRY_OPEN_KEY/);
+  });
+
+  it('the header is a real toggle button that says whether it is open', () => {
+    expect(src).toMatch(/<button type="button" className="dist-carry-toggle" aria-expanded=\{open\}/);
+  });
+
+  it('folded, the rows, the search and the bulk bar are not rendered — only the count line', () => {
+    expect(src).toMatch(/\{open && <div className="dist-carry-search">/);
+    expect(src).toMatch(/\{open && \(\s*<>\s*<div className="dist-carry-selrow">/);
+  });
+});
+
 describe('bulk carry bar is reachable on phones', () => {
   it('docks above the fixed bottom nav, not under it', () => {
     const m = css.match(/@media \(max-width: 640px\)\s*\{[\s\S]*?\.dist-carry-bar\s*\{([^}]*)\}/);
