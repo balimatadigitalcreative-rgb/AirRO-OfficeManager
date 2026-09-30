@@ -71,6 +71,8 @@ const CAPS = [
   // Owner-only waiver of segregation of duties: approve your OWN correction/void/dispute. Needs
   // distribusiApprove to mean anything; every self-approval is badged + logged. Only Pemilik may grant.
   ['distribusiApproveSelf', 'distribusi', 'Setujui Pengajuan Sendiri', 'Menyetujui koreksi/pembatalan/sengketa yang Anda ajukan sendiri — pelonggaran pemisahan tugas. Hanya Pemilik yang boleh memberi; setiap persetujuan mandiri ditandai & dicatat.', 3, { destructive: true, ownerOnly: true, dependsOn: 'distribusiApprove' }],
+  ['distribusiDemoLatihan', 'distribusi', 'Demo Mode Lapangan — Latihan', 'Mencoba tampilan HP baru dalam Mode latihan: data asli hanya dibaca, semua catatan tersimpan di HP itu saja dan tidak pernah masuk pembukuan. Hanya Pemilik yang boleh memberi.', 1, { ownerOnly: true }],
+  ['distribusiDemoPenuh', 'distribusi', 'Demo Mode Lapangan — Penuh', 'Mode latihan + Mode asli: mencatat transaksi sungguhan lewat tampilan HP baru selama masa demo. Hanya Pemilik yang boleh memberi.', 2, { destructive: true, ownerOnly: true }],
   ['distribusiLegacyImport', 'distribusi', 'Impor Riwayat (arsip)', 'Mengimpor riwayat transaksi lama (arsip).', 2],
   ['distribusiVoid', 'distribusi', 'Batalkan Transaksi', 'Membatalkan transaksi distribusi.', 3, { destructive: true }],
   ['distribusiCustomerDelete', 'distribusi', 'Hapus/Nonaktifkan Pelanggan', 'Menghapus atau menonaktifkan pelanggan.', 3, { destructive: true }],

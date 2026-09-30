@@ -103,6 +103,18 @@ async function assertSelfApproveGrantAllowed({ beforeRole, beforePerms, afterRol
     throw ApiError.forbidden('Hanya Pemilik yang boleh mengubah izin "Setujui Pengajuan Sendiri" atau batas nominalnya.');
   }
 }
+// MODE LAPANGAN DEMO access is owner-only in BOTH directions (grant and revoke), exactly like the
+// self-approval waiver: a GM may edit every other capability of the same user in the same request as
+// long as these two resolve to the same value before and after.
+const OWNER_ONLY_FIELD_CAPS = ['distribusiDemoLatihan', 'distribusiDemoPenuh'];
+async function assertOwnerOnlyCapsAllowed({ beforeRole, beforePerms, afterRole, afterPerms, actor }) {
+  const b = resolvePerms(beforeRole, beforePerms) || {};
+  const a = resolvePerms(afterRole, afterPerms) || {};
+  const changed = OWNER_ONLY_FIELD_CAPS.some((k) => !!b[k] !== !!a[k]);
+  if (changed && !(await actorIsOwner(actor))) {
+    throw ApiError.forbidden('Hanya Pemilik yang boleh memberi atau mencabut akses Demo Mode Lapangan.');
+  }
+}
 
 // Guard: a user's role must reference an existing role in the Role table.
 async function assertRole(role) {
@@ -142,6 +154,7 @@ async function create({ password, ...rest }, actor) {
   // Owner-only: a new user may only be created WITH self-approval already granted, or AS an owner, by an owner.
   await assertOwnerRoleGrantAllowed({ beforeRole: null, afterRole: rest.role, actor });
   await assertSelfApproveGrantAllowed({ beforeRole: rest.role, beforePerms: null, afterRole: rest.role, afterPerms: rest.permissions || null, actor });
+  await assertOwnerOnlyCapsAllowed({ beforeRole: rest.role, beforePerms: null, afterRole: rest.role, afterPerms: rest.permissions || null, actor });
   const passwordHash = await bcrypt.hash(password, 10);
   const u = await prisma.user.create({ data: { ...normalize(rest), passwordHash, weakPassword: isWeakPassword(password) }, select: PUBLIC_FIELDS });
   const pub = publicUser(u);
@@ -159,6 +172,12 @@ async function update(id, { password, ...rest }, actor) {
   }
   if ('permissions' in rest || 'role' in rest) {
     await assertSelfApproveGrantAllowed({
+      beforeRole: before.role, beforePerms: before.permissions,
+      afterRole: 'role' in rest ? rest.role : before.role,
+      afterPerms: 'permissions' in rest ? rest.permissions : before.permissions,
+      actor,
+    });
+    await assertOwnerOnlyCapsAllowed({
       beforeRole: before.role, beforePerms: before.permissions,
       afterRole: 'role' in rest ? rest.role : before.role,
       afterPerms: 'permissions' in rest ? rest.permissions : before.permissions,

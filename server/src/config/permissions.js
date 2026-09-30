@@ -263,6 +263,14 @@ function deriveDistribusiCaps(perms, role) {
   // waiver the owner grants per-user, so an absent value is ALWAYS false. It does NOT grant approval by
   // itself — the holder still needs distribusiApprove. Owner-only to grant (enforced in user.service).
   if (p.distribusiApproveSelf === undefined) p.distribusiApproveSelf = false;
+  // MODE LAPANGAN DEMO — two owner-granted tiers for trying the new phone UI before it is released.
+  // NEVER derived from a role (not even owner/GM): the owner decides per account who tries it.
+  //   • distribusiDemoLatihan — Mode latihan only (practice data kept on the phone, never sent);
+  //   • distribusiDemoPenuh   — latihan + Mode asli (real transactions through the new UI).
+  // Penuh implies Latihan. Owner-only to grant/revoke (enforced in user.service).
+  if (p.distribusiDemoPenuh === undefined) p.distribusiDemoPenuh = false;
+  if (p.distribusiDemoLatihan === undefined) p.distribusiDemoLatihan = false;
+  if (p.distribusiDemoPenuh) p.distribusiDemoLatihan = true;
   // maxSelfApproveAmount (a rupiah ceiling carried in the blob like maxLookbackDays; absent/0 =
   // unlimited) is NOT a boolean cap — it rides through untouched and is read by actorSnap.
   // BULK permanent deletion of transactions (owner/GM tier) — irreversible except by owner restore
