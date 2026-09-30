@@ -118,6 +118,23 @@ File baru di root. Semuanya masuk `build.mjs` FILES setelah `distribution.jsx` d
 kalau tampilan baru aktif dan akun berizin. Kalau tidak, `DIST.Deliveries` seperti sekarang. Menu
 kantor lain (persetujuan, laporan, peta zona, harga) tidak berubah.
 
+**Sesuai yang dibangun (Rencana 2, 2026-10-01):**
+- Urutan bundel: `rit-plan.js` dan `dist-field-sandbox.js` setelah `dist-zones.js`;
+  `dist-field-api.js` setelah `api.js`; `dist-field.jsx` setelah `dist-zones.jsx`. `dist-field.css`
+  masuk `CSS_FILES` dan `index.html`.
+- Semua file digabung dalam **satu cakupan**, jadi nama tingkat atas harus unik. Kelas CSS
+  berawalan `mlap-` karena awalan `fld` sudah dipakai form lama. Ada tes statis yang menjaga keduanya.
+- `API.distribusi.field.*` menandai setiap permintaan dengan `X-Airro-Ui: field`.
+  `API.distribusi.fieldRules` sengaja tanpa tanda.
+- Dua endpoint baru:
+  - `GET /distribusi/field-context`: hari ini, armada, aturan, gudang, dan perkiraan galon per stop;
+  - `PATCH /distribusi/customers/:id/phone`: izin `distribusiLokasiSimpan`, diaudit.
+- Adaptor bernama `FIELDAPI.real` dan `FIELDAPI.openLatihan`. Mesin latihannya adalah
+  `FIELDSANDBOX`. Aturan siapa-melihat-apa ada di satu fungsi murni, `FIELDAPI.prefState`.
+- Kalau penyimpanan HP gagal atau tidak menjawab dalam 3 detik, latihan tetap jalan di memori dan
+  layar memberi tahu bahwa latihan tidak tersimpan. "Koreksi saya" yang ditolak 403 dianggap kosong.
+- Aturan lapangan diambil ulang hanya saat ada event `rules`. Tombol rilis hanya tampil untuk Owner.
+
 ### 3. Aturan & fitur baru di server
 
 Semua migrasi **hanya menambah** kolom atau tabel. Tidak ada data lama yang diubah.
