@@ -57,6 +57,7 @@ const { todayISO } = require('../lib/time');   // business date in the app timez
 // CUSTOMER ZONES own the schedule of the customers inside them; every write that moves a customer's
 // point re-syncs its zone. Lazy require: zone.service requires this module back.
 const zoneSvc = () => require('./zone.service');
+const { planRit } = require('../lib/rit-plan');   // RUTE RIT: one trip from the warehouse, nearest first, within the load
 function scopeWhere(scope, today) {
   if (scope === 'bon') return { method: 'bon' };
   const sales = { method: { in: ['lunas', 'bon'] } };
@@ -4489,6 +4490,82 @@ async function routeDeliveries(user, query) {
 }
 
 // Toggle "urutan tetap" on one stop (a route concern -> distribusiRute). Never affects delivery status.
+// ── RUTE RIT ─────────────────────────────────────────────────────────────────
+// Plan the OPEN rit of one armada the way the owner runs deliveries: from the WAREHOUSE, nearest
+// customer first, while the gallons loaded for this rit still cover the next customer; then back to
+// the warehouse. The next rit — opened when the truck is back, with its own load — is planned from the
+// warehouse again over whatever is still pending. The planning itself is pure (lib/rit-plan.js).
+//
+// How many gallons a stop needs: the quantity on the stop when one was ordered, else the customer's
+// average over its last 5 real sales, at least 1.
+const DEMAND_HISTORY = 5;
+async function demandFor(rows) {
+  const need = rows.filter((r) => !(r.qty > 0)).map((r) => r.customerId);
+  const avg = {};
+  if (need.length) {
+    const txns = await prisma.distTransaction.findMany({
+      where: { customerId: { in: [...new Set(need)] }, ...LIVE_TXN, qty: { gt: 0 } },
+      orderBy: [{ txnDate: 'desc' }, { createdAt: 'desc' }], select: { customerId: true, qty: true },
+    });
+    const seen = {};
+    txns.forEach((t) => {
+      const s = seen[t.customerId] || (seen[t.customerId] = []);
+      if (s.length < DEMAND_HISTORY) s.push(t.qty);
+    });
+    Object.keys(seen).forEach((k) => { const a = seen[k]; avg[k] = Math.max(1, Math.round(a.reduce((x, y) => x + y, 0) / a.length)); });
+  }
+  const out = {};
+  rows.forEach((r) => { out[r.id] = r.qty > 0 ? r.qty : (avg[r.customerId] || 1); });
+  return out;
+}
+
+async function ritRoute(user, query) {
+  const q = query || {};
+  const date = q.date || todayISO();
+  // One armada: the rit, its load and its stops all belong to a single truck.
+  const scope = fleetScopeOf(user);
+  const fleet = (q.fleet && q.fleet !== 'all') ? String(q.fleet) : (scope && scope.length === 1 ? scope[0] : null);
+  if (!fleet) throw ApiError.badRequest('Pilih satu armada untuk menyusun rute rit.');
+  if (!fleetAllows(user, fleet)) throw ApiError.forbidden('Armada di luar akses Anda.');
+  const run = await prisma.deliveryRun.findFirst({ where: { date, fleetId: fleet, status: 'open' }, orderBy: { runNo: 'desc' } });
+  if (!run) throw ApiError.badRequest('Buka rit dulu (isi galon yang dimuat) — rute rit dihitung dari muatan rit itu.');
+  const depot = await depotOrigin();
+  if (!depot) throw ApiError.badRequest('Lokasi gudang belum diatur. Atur di Peta Zona → "Atur lokasi gudang".');
+  const rows = await prisma.delivery.findMany({
+    where: { date, fleetId: fleet, status: 'pending' },
+    include: { customer: true }, orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
+  });
+  const bon = await bonMapFor([...new Set(rows.map((r) => r.customerId))]);
+  const stops = rows.map((r) => deliveryClient(r, bon[r.customerId]));
+  const byId = new Map(stops.map((s) => [s.id, s]));
+  const qty = await demandFor(rows);
+  const plan = planRit({
+    depot, capacity: run.gallonsOut,
+    stops: stops.map((s) => ({ id: s.id, lat: s.lat, lng: s.lng, qty: qty[s.id], pinned: s.pinned })),
+  });
+  const withQty = (s) => Object.assign({}, byId.get(s.id), { qty: s.qty });
+  return {
+    date, fleet, run: { id: run.id, runNo: run.runNo, gallonsOut: run.gallonsOut },
+    origin: { lat: depot.lat, lng: depot.lng, source: 'depot' },
+    capacity: plan.capacity, used: plan.used, returnKm: plan.returnKm, totalKm: plan.totalKm,
+    rit: plan.rit.map((s, i) => Object.assign(withQty(s), { order: i + 1, legKm: s.legKm, cumKm: s.cumKm, loadAfter: s.loadAfter })),
+    leftover: plan.leftover.map(withQty), leftoverGallons: plan.leftoverGallons, estRits: plan.estRits,
+    tooBig: plan.tooBig.map(withQty),
+    unlocated: plan.unlocated.map((id) => byId.get(id)),
+  };
+}
+
+// The warehouse every rit starts from. One location for the business; owner/GM tier (it moves the
+// start of every truck's route), audited.
+async function setDepot(body, actor) {
+  const loc = normLatLng(body && body.lat, body && body.lng);
+  if (!loc || (loc.lat === 0 && loc.lng === 0)) throw ApiError.badRequest('Koordinat gudang tidak valid.');
+  await require('./settings.service').set('depotOrigin', { lat: loc.lat, lng: loc.lng });
+  const snap = await actorSnap(actor);
+  await logAudit('pengiriman', 'Lokasi gudang diatur', `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}`, snap, '');
+  return { lat: loc.lat, lng: loc.lng };
+}
+
 async function pinDelivery(user, id, body) {
   const row = await prisma.delivery.findUnique({ where: { id } });
   if (!row) throw ApiError.notFound('Pengiriman tidak ditemukan.');
@@ -4972,7 +5049,7 @@ module.exports = {
   requestChange, previewCorrection, listChangeRequests, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
-  deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, pinDelivery, closeDay, listCloseouts,
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, ritRoute, setDepot, depotOrigin, pinDelivery, closeDay, listCloseouts,
   outstandingDeliveries, outstandingSummary, resolveOutstanding, bulkCarry, bulkCarryPreview, bulkResolveOutstanding, undoBulkCarry,
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,

@@ -133,6 +133,7 @@ async function listZones(actor) {
       zoneId: c.zoneId || null, zoneManual: !!c.zoneManual, armada: c.armada || '', deliveryDays: parseDays(c.deliveryDays), sisaBon: bon[c.id] || 0, fixedDays: !!c.fixedDays,
     })),
     coverage: { total: custs.length, withCoords: located.length, withoutCoords: custs.length - located.length },
+    depot: await dist().depotOrigin(),   // the warehouse every rit starts from (null until set)
     canManage: scope === null,
   };
 }

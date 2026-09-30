@@ -200,6 +200,10 @@ router.get('/deliveries', requireCap('distribusiPengiriman'), validate({ query: 
 // which gates SAVING an order). Read-only: it suggests an order, it never writes one. Declared before
 // '/deliveries/:id' style paths so 'route' is never read as an id.
 router.get('/deliveries/route', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.routeQuery }), ctrl.deliveryRoute);
+// RUTE RIT — the open rit of one armada, from the warehouse, nearest first, within the rit's load.
+router.get('/deliveries/rit-route', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.ritQuery }), ctrl.ritRoute);
+// The warehouse every rit starts from: owner/GM tier (it moves the start of every route).
+router.put('/depot', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.depotSchema }), ctrl.setDepot);
 // CARRY-OVER of undelivered stops — its OWN back-office cap (distribusiBelumTerkirim), separate from the
 // field team's daily-route cap (distribusiPengiriman). Every surface below is gated on it; the outstanding
 // COUNT on the dashboard summary is gated in the service (see outstandingSummary). GET the actionable list
