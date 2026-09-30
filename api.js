@@ -24,11 +24,11 @@
   const RETRYABLE = { 429: 1, 502: 1, 503: 1, 504: 1 };
   const retryDelays = () => window.AIRRO_API_RETRY_MS || [800, 2500];
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function req(method, path, body) {
-    if (method !== 'GET') return once(method, path, body);
+  async function req(method, path, body, extra) {
+    if (method !== 'GET') return once(method, path, body, extra);
     const delays = retryDelays();
     for (let attempt = 0; ; attempt++) {
-      try { return await once(method, path, body); }
+      try { return await once(method, path, body, extra); }
       catch (e) {
         const transient = e && (e.offline || RETRYABLE[e.status]);
         if (!transient || attempt >= delays.length) throw e;
@@ -37,8 +37,8 @@
       }
     }
   }
-  async function once(method, path, body) {
-    const headers = { 'Content-Type': 'application/json' };
+  async function once(method, path, body, extra) {
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
     if (token) headers.Authorization = 'Bearer ' + token;
     let res;
     try {
@@ -86,6 +86,11 @@
 
   // Build a ?a=b&c=d query string, dropping null/'' values.
   const acctQs = (p) => { const q = []; Object.keys(p || {}).forEach((k) => { const v = p[k]; if (v != null && v !== '') q.push(k + '=' + encodeURIComponent(v)); }); return q.length ? '?' + q.join('&') : ''; };
+  // MODE LAPANGAN — every request the new phone UI makes is tagged, so the server's demo fence
+  // (middleware/fieldUi.js) can tell it apart from the old UI. Reads are retried like any GET.
+  const FIELD_UI = { 'X-Airro-Ui': 'field' };
+  const freq = (method, path, body) => req(method, path, body, FIELD_UI);
+  const qd = (date, fleet) => { const p = []; if (date) p.push('date=' + encodeURIComponent(date)); if (fleet && fleet !== 'all') p.push('fleet=' + encodeURIComponent(fleet)); return p.length ? '?' + p.join('&') : ''; };
 
   // ---- generic resource helpers ----
   const collection = (name) => ({
@@ -255,6 +260,39 @@
       // the map shows that preview before the owner confirms (a zone rewrites members' schedules).
       // The warehouse every rit starts from (owner/GM).
       setDepot: (lat, lng) => req('PUT', '/distribusi/depot', { lat, lng }),
+      // ATURAN LAPANGAN (owner/GM). Never tagged: an owner without Demo penuh must still save them.
+      fieldRules: {
+        get: () => req('GET', '/distribusi/field-rules'),
+        set: (patch) => req('PUT', '/distribusi/field-rules', patch),
+      },
+      // MODE LAPANGAN — the new phone UI's calls (all tagged X-Airro-Ui: field). FIELDAPI.real wraps these.
+      field: {
+        context: (date, fleet) => freq('GET', '/distribusi/field-context' + qd(date, fleet)),
+        board: (date, fleet) => freq('GET', '/distribusi/deliveries' + qd(date, fleet)),
+        customers: (fleet) => freq('GET', '/distribusi/customers' + qd(null, fleet)),
+        runs: (date, fleet) => freq('GET', '/distribusi/runs' + qd(date, fleet)),
+        ritRoute: (date, fleet) => freq('GET', '/distribusi/deliveries/rit-route' + qd(date, fleet)),
+        daySummary: (date, fleet) => freq('GET', '/distribusi/deliveries/day-summary' + qd(date, fleet)),
+        myChangeRequests: () => freq('GET', '/distribusi/change-requests/mine'),
+        mark: (id, body) => freq('PATCH', '/distribusi/deliveries/' + id, body),
+        sale: (body) => freq('POST', '/distribusi/transactions', body),
+        openRun: (body) => freq('POST', '/distribusi/runs/open', body),
+        closeRun: (id, body) => freq('POST', '/distribusi/runs/' + id + '/close', body),
+        setLocation: (id, body) => freq('PATCH', '/distribusi/customers/' + id + '/location', body),
+        setLocationPhoto: (id, photoId) => freq('PATCH', '/distribusi/customers/' + id + '/location-photo', { photoId: photoId || null }),
+        setPhone: (id, phone) => freq('PATCH', '/distribusi/customers/' + id + '/phone', { phone: phone || '' }),
+        addOrder: (body) => freq('POST', '/distribusi/deliveries/order', body),
+        adjust: (id, body) => freq('POST', '/distribusi/customers/' + id + '/adjustments', body),
+        gallonDamage: (id, body) => freq('POST', '/distribusi/customers/' + id + '/gallon-damage', body),
+        expense: (body) => freq('POST', '/distribusi/expenses', body),
+        correct: (id, body) => freq('POST', '/distribusi/transactions/' + id + '/corrections', body),
+        void: (id, body) => freq('POST', '/distribusi/transactions/' + id + '/void', body),
+        reassign: (body) => freq('POST', '/distribusi/change-requests/reassign', body),
+        withdraw: (id) => freq('POST', '/distribusi/change-requests/' + id + '/withdraw', {}),
+        closeDay: (body) => freq('POST', '/distribusi/deliveries/close', body),
+        upload: (body) => freq('POST', '/attachments', body),
+        photo: (id) => freq('GET', '/attachments/' + id),
+      },
       zones: {
         list: () => req('GET', '/distribusi/zones'),
         create: (body) => req('POST', '/distribusi/zones', body),
