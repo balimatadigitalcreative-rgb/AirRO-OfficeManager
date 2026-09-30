@@ -494,7 +494,7 @@ async function getCustomer(id, user) {
       else if (st === 'kerugian' && deduction) { disputeSummary.kerugian.n++; disputeSummary.kerugian.amount += deduction; kerugianTotal += deduction; }
     }
     const g = galBy[t.id] || { gallonOut: 0, gallonIn: 0 };
-    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, txnDate: t.txnDate, note: t.note, actorName: t.actorName, actorId: t.actorId || null, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, kind: t.kind || 'jual', gallonQty: t.gallonQty || 0, payMethod: t.payMethod || '', proofPhotoId: t.proofPhotoId || null, txnDate: t.txnDate, note: t.note, actorName: t.actorName, actorId: t.actorId || null, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
       gallonOut: g.gallonOut, gallonIn: g.gallonIn, pendingRequest: pendBy[t.id] || null,
       status: t.status || 'active', voided, voidReason: t.voidReason || null, voidedByName: t.voidedByName || null, voidedAt: t.voidedAt ? new Date(t.voidedAt).getTime() : null,
       dispute: ed ? { ...ed.latest, deducts: ed.deducts, trail: ed.trail } : null };
@@ -2903,7 +2903,13 @@ async function createInvoice(customerId, body, actor) {
     txns = txns.filter((t) => t.method === 'bon');   // "outstanding bon" bill = the bon sales
   }
   if (!txns.length) throw ApiError.badRequest('Tidak ada transaksi untuk ditagih pada pilihan ini.');
-  const items = txns.map((t) => { const amt = t.amount + priceDelta(t.corrections); return { txnId: t.id, date: t.txnDate, qty: t.qty, unitPrice: t.unitPriceLocked, amount: amt, method: t.method }; });
+  // A ganti rugi galon row is money-only (qty 0): on the customer's invoice it reads as the NUMBER OF
+  // GALLONS charged × the compensation price, labelled — never an impossible "0 × price = total".
+  const items = txns.map((t) => {
+    const amt = t.amount + priceDelta(t.corrections);
+    const charge = t.kind === 'ganti_rugi';
+    return { txnId: t.id, date: t.txnDate, qty: charge ? (t.gallonQty || 0) : t.qty, unitPrice: t.unitPriceLocked, amount: amt, method: t.method, kind: t.kind || 'jual', ...(charge ? { label: 'Ganti rugi galon' } : {}) };
+  });
   const total = items.reduce((s, it) => s + it.amount, 0);
   const sisaBon = await customerBonBalance(customerId);
   const issueDate = todayISO();

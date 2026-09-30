@@ -379,7 +379,7 @@
       'pc.preview': 'Preview & print', 'pc.back': 'Options',
       'pc.docStatement': 'TRANSACTION HISTORY', 'pc.docNota': 'RECEIPT', 'pc.printDate': 'Printed',
       'pc.audience': 'Version', 'pc.audCustomer': 'For customer', 'pc.audInternal': 'Internal archive',
-      'pc.ketBayar': 'Payment', 'pc.ketBeliBon': 'Purchase (credit)', 'pc.ketBeliLunas': 'Purchase (paid)', 'pc.colKet': 'Description',
+      'pc.ketBayar': 'Payment', 'pc.ketBeliBon': 'Purchase (credit)', 'pc.ketBeliLunas': 'Purchase (paid)', 'pc.ketGantiRugi': 'Gallon damage charge', 'pc.colKet': 'Description',
       'pc.docNoLbl': 'Doc no.', 'pc.monthSubtotal': 'Monthly subtotal', 'pc.payLbl': 'Payment', 'pc.payInfo': 'Cash or bank transfer — contact us for account details.', 'pc.sectitle': 'Adjustments',
       'inv.title': 'BILL', 'inv.no': 'Invoice no.', 'inv.totalItems': 'Total items', 'inv.amountDue': 'AMOUNT DUE', 'inv.listTitle': 'Invoices', 'inv.none': 'No invoices yet', 'inv.date': 'Date', 'inv.total': 'Total', 'inv.status': 'Status', 'inv.stLunas': 'Paid', 'inv.stSent': 'Sent', 'inv.reprint': 'Reprint',
       // WhatsApp send / templates / bulk queue
@@ -1467,7 +1467,7 @@
       'pc.preview': 'Pratinjau & Cetak', 'pc.back': 'Opsi',
       'pc.docStatement': 'RIWAYAT TRANSAKSI', 'pc.docNota': 'NOTA', 'pc.printDate': 'Dicetak',
       'pc.audience': 'Versi', 'pc.audCustomer': 'Untuk Pelanggan', 'pc.audInternal': 'Arsip Internal',
-      'pc.ketBayar': 'Pembayaran', 'pc.ketBeliBon': 'Pembelian (bon)', 'pc.ketBeliLunas': 'Pembelian (lunas)', 'pc.colKet': 'Keterangan',
+      'pc.ketBayar': 'Pembayaran', 'pc.ketBeliBon': 'Pembelian (bon)', 'pc.ketBeliLunas': 'Pembelian (lunas)', 'pc.ketGantiRugi': 'Ganti rugi galon', 'pc.colKet': 'Keterangan',
       'pc.docNoLbl': 'No. dok.', 'pc.monthSubtotal': 'Subtotal bulan', 'pc.payLbl': 'Pembayaran', 'pc.payInfo': 'Tunai atau transfer bank — hubungi kami untuk detail rekening.', 'pc.sectitle': 'Penyesuaian',
       'inv.title': 'TAGIHAN', 'inv.no': 'No. invoice', 'inv.totalItems': 'Total rincian', 'inv.amountDue': 'TOTAL TAGIHAN', 'inv.listTitle': 'Invoice', 'inv.none': 'Belum ada invoice', 'inv.date': 'Tanggal', 'inv.total': 'Total', 'inv.status': 'Status', 'inv.stLunas': 'Lunas', 'inv.stSent': 'Terkirim', 'inv.reprint': 'Cetak ulang',
       // WhatsApp kirim / template / antrean massal

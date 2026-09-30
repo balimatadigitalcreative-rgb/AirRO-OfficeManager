@@ -97,3 +97,31 @@ it('a correction request on a ganti rugi row is refused (void + re-enter instead
   expect(r.status).toBe(400);
   expect(r.body.error.message).toMatch(/ganti rugi/i);
 });
+
+it('on the customer invoice a bon charge reads as N galon ganti rugi, not "0 x price"', async () => {
+  expect((await charge({ qty: 1, kind: 'retak', payMethod: 'bon' })).status).toBe(201);
+  const r = await request(app).post(`${D}/customers/${cid}/invoices`).set(auth(gm)).send({ scope: 'unpaidBon', dueDate: '', note: '' });
+  expect(r.status).toBe(201);
+  const item = r.body.data.items.find((it) => it.kind === 'ganti_rugi');
+  expect(item).toBeTruthy();
+  expect(item.qty).toBe(1);
+  expect(item.unitPrice).toBe(45000);
+  expect(item.amount).toBe(45000);
+  expect(item.label).toBe('Ganti rugi galon');
+  const html = require('../src/services/invoiceShare.service').renderPublicHtml({ status: 'ok', invoice: { ...r.body.data, customer: { name: 'Pak Wayan' } } });
+  expect(html).toMatch(/Ganti rugi galon/);
+  const cust = (await request(app).get(`${D}/customers/${cid}`).set(auth(gm))).body.data;
+  const row = (cust.transactions || []).find((t) => t.kind === 'ganti_rugi' && t.method === 'bon' && t.status !== 'void');
+  expect(row.gallonQty).toBe(1);
+});
+
+it('client: the invoice viewer + printed statement label ganti rugi and show its gallon count', () => {
+  const fs = require('fs'); const path = require('path'); const { parse } = require('@babel/parser');
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'distribution.jsx'), 'utf8');
+  const i18n = fs.readFileSync(path.join(__dirname, '..', '..', 'finance-i18n.js'), 'utf8');
+  expect(() => parse(src, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow();
+  expect((src.match(/kind === 'ganti_rugi' \? trD\('pc\.ketGantiRugi'\)/g) || []).length).toBe(2);
+  expect(src).toMatch(/numX\(t\.kind === 'ganti_rugi' \? t\.gallonQty : t\.qty\)/);
+  expect((i18n.match(/'pc\.ketGantiRugi':/g) || []).length).toBe(2);
+  expect((i18n.match(/'dist\.gmDamageCust':/g) || []).length).toBe(2);
+});

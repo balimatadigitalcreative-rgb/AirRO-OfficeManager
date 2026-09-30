@@ -55,7 +55,7 @@ function renderPublicHtml(view) {
     return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tautan tidak berlaku</title><style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#f4f7f9;color:#334;display:grid;place-items:center;min-height:100vh;margin:0}.c{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:34px 40px;text-align:center;max-width:360px}.c h1{font-size:18px;margin:0 0 8px}.c p{color:#64748b;font-size:14px;margin:0}</style></head><body><div class="c"><h1>${esc(BIZ_NAME)}</h1><p>${esc(msg)}</p></div></body></html>`;
   }
   const iv = view.invoice; const c = iv.customer || {};
-  const rows = (iv.items || []).map((it) => `<tr><td>${esc(it.date)}</td><td class="r">${esc(it.qty)}</td><td class="r">${rp(it.unitPrice)}</td><td class="r">${rp(it.amount)}</td></tr>`).join('');
+  const rows = (iv.items || []).map((it) => `<tr><td>${esc(it.date)}${it.label ? ' · ' + esc(it.label) : ''}</td><td class="r">${esc(it.qty)}</td><td class="r">${rp(it.unitPrice)}</td><td class="r">${rp(it.amount)}</td></tr>`).join('');
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${esc(iv.number)}</title>
 <style>
 :root{color-scheme:light}*{box-sizing:border-box}body{font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#eef2f5;color:#1e293b;margin:0;padding:18px}

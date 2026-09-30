@@ -2858,7 +2858,7 @@ function InvoiceViewer({ invoice, onClose }) {
   uEx(() => { document.body.classList.add('invoice-open'); const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => { document.body.classList.remove('invoice-open'); window.removeEventListener('keydown', o); }; }, []);
   const iv = invoice; const cust = iv.customer || {};
   const [waOpen, setWaOpen] = uSx(false);
-  const ketOf = (it) => it.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
+  const ketOf = (it) => it.kind === 'ganti_rugi' ? trD('pc.ketGantiRugi') : it.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
   return (
     <div className="modal-scrim invoice-overlay pc-overlay" onClick={onClose} style={{ zIndex: 210 }}>
       <div className="invoice-sheet pc-sheet pc-doc pc-a4 pc-customer pc-invoice" onClick={(e) => e.stopPropagation()}>
@@ -3011,7 +3011,7 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
   docRows.forEach((t) => { const k = monthKeyOf(t) || '—'; if (!monthMap[k]) { monthMap[k] = { rows: [], galon: 0, pembelian: 0, pembayaran: 0, sisaBulan: 0 }; monthOrder.push(k); } const g = monthMap[k]; g.rows.push(t); if (!t.voided) { g.galon += (t.qty || 0); if (t.method === 'lunas' || t.method === 'bon') g.pembelian += effOf(t); else if (t.method === 'pelunasan') g.pembayaran += t.amount; } });
   monthOrder.forEach((k) => { const g = monthMap[k]; const last = g.rows[g.rows.length - 1]; g.sisaBulan = last ? Math.max(0, runMap[last.id] || 0) : 0; });
   // Plain-language description for the customer version — no codes, no badges.
-  const ketOf = (t) => t.method === 'pelunasan' ? trD('pc.ketBayar') : t.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
+  const ketOf = (t) => t.kind === 'ganti_rugi' ? trD('pc.ketGantiRugi') : t.method === 'pelunasan' ? trD('pc.ketBayar') : t.method === 'bon' ? trD('pc.ketBeliBon') : trD('pc.ketBeliLunas');
   const approvedAdj = (customer.adjustments || []).filter((a) => a.status === 'approved');
   const adjBonTotal = approvedAdj.filter((a) => a.kind === 'bon').reduce((s, a) => s + ((a.after || 0) - (a.before || 0)), 0);
   const sisaAkhir = customer.sisaBon || 0;   // == the on-screen Sisa Bon KPI, by construction
@@ -3093,7 +3093,7 @@ function PrintCenter({ customer, userName, mode, txn, initial, onClose }) {
           {dm ? <span className={'pc-tag ' + (t.dispute.status === 'kerugian' || t.dispute.status === 'tidak_diakui' ? 'batal' : t.dispute.status === 'diakui_kembali' ? 'pnys' : 'arsip')}>{trD(dm.label)}</span> : null}
           {internal && t.note ? <span className="pc-note"> · {t.note}</span> : null}
         </td>
-        <td className="r tnum">{t.method === 'pelunasan' ? '—' : numX(t.qty)}</td>
+        <td className="r tnum">{t.method === 'pelunasan' ? '—' : numX(t.kind === 'ganti_rugi' ? t.gallonQty : t.qty)}</td>
         <td className="r tnum">{t.method === 'pelunasan' ? '—' : rpFull(t.unitPriceLocked)}</td>
         <td className="r tnum">{dOut ? <><s>{rpFull(effOf(t))}</s> → {rpFull(t.dispute.customerClaimAmount || 0)}</> : rpFull(effOf(t))}</td>
         {!isNota && <td className="r tnum">{rpFull(Math.max(0, runMap[t.id] || 0))}</td>}
