@@ -93,7 +93,14 @@ const ceilingMsg = 'Nominal terlalu besar (maks Rp 1.000.000.000 per baris) — 
 // A pelunasan (bon settlement) is a bank TRANSFER — not field cash — when its note ends with the
 // " · Transfer" tag written at pay time (see createTransaction); otherwise it counts as cash. Used
 // by the dashboard cash split and the delivery report so both agree on what a driver owes in cash.
-const isTransferPayment = (r) => { if (r.method !== 'pelunasan') return false; const parts = String(r.note || '').split(' · '); return parts[parts.length - 1].trim().toLowerCase() === 'transfer'; };
+// Transfer money-in? The payMethod column wins (new rows: transfer sales + settlements); an older
+// pelunasan without it falls back to the legacy trailing " · Transfer" note tag.
+const isTransferPayment = (r) => {
+  if (r.payMethod) return r.payMethod === 'transfer';
+  if (r.method !== 'pelunasan') return false;
+  const parts = String(r.note || '').split(' · ');
+  return parts[parts.length - 1].trim().toLowerCase() === 'transfer';
+};
 const cleanDays = (v) => { const a = Array.isArray(v) ? v : []; return DAY_CODES.filter((d) => a.includes(d)); };   // dedup + canonical order
 
 // ── Fleet scope (per-user data separation) ──────────────────────────────────
@@ -1500,6 +1507,23 @@ async function reverseDispute(id, actor) {
   return disputeClient(withCust);
 }
 
+// FOTO BUKTI — validate the (optional) proof photo, and require it when the owner switched the photo
+// rule (`ruleKey`) on. Returns the columns to store.
+async function proofColumns(body, ruleKey) {
+  const rules = await require('./fieldRules.service').getRules();
+  const id = body.proofPhotoId ? String(body.proofPhotoId) : '';
+  if (!id) {
+    if (rules[ruleKey]) throw ApiError.badRequest('Foto bukti wajib dilampirkan.', { code: 'PROOF_REQUIRED' });
+    return {};
+  }
+  const att = await prisma.attachment.findUnique({ where: { id }, select: { id: true } });
+  if (!att) throw ApiError.badRequest('Foto bukti tidak ditemukan — unggah ulang fotonya.', { code: 'PROOF_MISSING' });
+  const t = body.proofTakenAt ? new Date(body.proofTakenAt) : null;
+  const num = (v) => (v != null && Number.isFinite(+v) ? +v : null);
+  return { proofPhotoId: id, proofTakenAt: t && !isNaN(t.getTime()) ? t : null, proofLat: num(body.proofLat), proofLng: num(body.proofLng) };
+}
+const normPayMethod = (v) => (v === 'transfer' ? 'transfer' : 'tunai');
+
 async function createTransaction(body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
   if (!customer) throw ApiError.badRequest('customerId does not reference an existing customer');
@@ -1519,7 +1543,9 @@ async function createTransaction(body, actor) {
     const sisaBon = await customerBonBalance(customer.id);
     if (sisaBon <= 0) throw ApiError.badRequest('Pelanggan ini tidak punya sisa bon.');
     if (payAmount > sisaBon) throw ApiError.badRequest(`Pembayaran (${payAmount}) melebihi sisa bon (${sisaBon}).`, { sisaBon });
-    const payMethod = (body.payMethod === 'transfer') ? 'Transfer' : 'Cash';
+    const payMethodCol = normPayMethod(body.payMethod);
+    const payMethod = payMethodCol === 'transfer' ? 'Transfer' : 'Cash';   // label kept in note + audit (legacy readers)
+    const proof = await proofColumns(body, 'wajibFotoTransaksi');
     const snap = await actorSnap(actor);
     const note = [(body.note || '').trim(), payMethod].filter(Boolean).join(' · ');
     // LIVE POSTING: the pelunasan (Dr Kas / Cr Piutang) and the per-customer AR reclass post in the
@@ -1527,6 +1553,7 @@ async function createTransaction(body, actor) {
     const txn = await prisma.$transaction(async (tx) => {
       const t = await tx.distTransaction.create({ data: {
         customerId: customer.id, fleetId, qty: 0, unitPriceLocked: 0, amount: payAmount, method: 'pelunasan', note,
+        payMethod: payMethodCol, ...proof,
         txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
       } });
       if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); await acc.postReceivablesReclass(customer.id, actor, tx); }
@@ -1544,11 +1571,15 @@ async function createTransaction(body, actor) {
   if (overCeiling(amount) || overCeiling(unitPriceLocked)) throw ApiError.badRequest(ceilingMsg, { amount, qty, unitPriceLocked });
   const snap = await actorSnap(actor);
   const deliveryRunId = await openRunIdFor(fleetId);   // tag the sale to the fleet's open rit (if any)
+  const proof = await proofColumns(body, 'wajibFotoTransaksi');
+  // A BON has no payment yet; lunas is cash unless the driver picked transfer.
+  const payMethodCol = method === 'bon' ? '' : normPayMethod(body.payMethod);
   // LIVE POSTING: the sale row and its journal (lunas → Dr Kas/Cr Pendapatan; bon → Dr Piutang/Cr
   // Pendapatan) post together; a bon also runs the AR reclass so Piutang == Σ Sisa Bon (flag-gated).
   const txn = await prisma.$transaction(async (tx) => {
     const t = await tx.distTransaction.create({ data: {
       customerId: customer.id, fleetId, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
+      payMethod: payMethodCol, ...proof,
       txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, deliveryRunId,
     } });
     if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); if (method === 'bon') await acc.postReceivablesReclass(customer.id, actor, tx); }
@@ -1560,7 +1591,7 @@ async function createTransaction(body, actor) {
   const gIn = Math.max(0, int(body.gallonIn));
   await recordDelivery(txn, customer, gOut, gIn, snap);
   const held = await gallonBalanceOf(customer.id);
-  await logAudit('input', `Transaksi: ${customer.name}`, `${qty} × ${unitPriceLocked} = ${amount} (${method}) · galon keluar ${gOut} masuk ${gIn}`, snap, fleetId);
+  await logAudit('input', `Transaksi: ${customer.name}`, `${qty} × ${unitPriceLocked} = ${amount} (${method}${payMethodCol === 'transfer' ? ' · transfer' : ''}) · galon keluar ${gOut} masuk ${gIn}${proof.proofPhotoId ? ' · foto bukti' : ''}`, snap, fleetId);
   return { ...txn, gallonOut: gOut, gallonIn: gIn, gallonsHeld: held };
 }
 
@@ -4890,6 +4921,7 @@ async function createExpense(body, actor) {
   const businessUnitId = await resolveUnitId(body.businessUnitId);
   const snap = await actorSnap(actor);
   const method = body.method === 'transfer' ? 'transfer' : 'tunai';
+  if (!body.photoId && (await require('./fieldRules.service').getRules()).wajibFotoPengeluaran) throw ApiError.badRequest('Foto nota wajib dilampirkan.', { code: 'PROOF_REQUIRED' });
   // LIVE POSTING: the field expense and its journal (Dr Beban / Cr Kas) post in one transaction.
   const e = await prisma.$transaction(async (tx) => {
     const row = await tx.distExpense.create({ data: {
@@ -5047,7 +5079,7 @@ async function deliveryReport(user, query) {
 }
 
 module.exports = {
-  bonMapFor, afterPointChange,
+  bonMapFor, afterPointChange, isTransferPayment,
   METHODS, DAY_CODES, PRICE_SCOPES, actorSnap,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,

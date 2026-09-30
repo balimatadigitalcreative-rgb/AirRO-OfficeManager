@@ -91,7 +91,11 @@ const txnSchema = z.object({
   gallonOut: z.number().int().nonnegative().optional(),   // full gallons delivered (default = qty)
   gallonIn: z.number().int().nonnegative().optional(),    // empty gallons returned
   payAmount: z.number().int().nonnegative().optional(),   // method='pelunasan': bon payment amount
-  payMethod: z.enum(['cash', 'transfer']).optional(),     // method='pelunasan': how it was paid
+  payMethod: z.enum(['cash', 'tunai', 'transfer']).optional(),   // lunas + pelunasan: how the money moved
+  proofPhotoId: z.string().max(60).optional(),
+  proofTakenAt: z.string().max(40).optional(),
+  proofLat: z.number().optional(),
+  proofLng: z.number().optional(),
 });
 // Gallon stock: a correction is a SIGNED delta (may be negative); reason required.
 const gallonCorrectionSchema = z.object({ qty: z.number().int(), customerId: z.string().min(1).optional(), reason: z.string().trim().min(1).max(300) });

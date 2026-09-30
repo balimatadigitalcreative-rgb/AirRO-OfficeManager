@@ -278,6 +278,12 @@ async function hppOnSaleLines(t, db) {
 async function distTxnLines(t, db = prisma) {
   if (t.status === 'void') return [];
   const f = t.fleetId || '';
+  // Where the money landed: a transfer (sale or settlement) is BANK; everything else KAS. Only the
+  // payMethod column decides — a legacy row tagged "· Transfer" in its note keeps posting to Kas until
+  // the owner-approved reclass script sets its payMethod (scripts/reclass-transfer-payments.js).
+  const cash = t.payMethod === 'transfer' ? BANK : KAS;
+  // Revenue account: gallon sales → Penjualan Air; ganti rugi galon → Pendapatan Lain.
+  const rev = t.kind === 'ganti_rugi' ? REV_OTHER : REV_MAIN;
   if (t.method === 'pelunasan') {
     if (!t.bonCounted) return [];   // pelunasan excluded from sisa bon → no AR movement
     const amt = n(t.amount); if (!amt) return [];
@@ -286,9 +292,9 @@ async function distTxnLines(t, db = prisma) {
     // This keeps accounting cash == the cash book (which also excludes it) while Piutang still falls,
     // so Piutang == Σ Sisa Bon holds (customerBonRaw counts a PNR row as an ordinary pelunasan).
     if (t.paymentNotReceived) return [{ code: LOSS_AR, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
-    return [{ code: KAS, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
+    return [{ code: cash, debit: amt, fleetId: f }, { code: AR, credit: amt, fleetId: f }];
   }
-  if (t.method !== 'bon') { const amt = n(t.amount); if (!amt) return []; return [{ code: KAS, debit: amt, fleetId: f }, { code: REV_MAIN, credit: amt, fleetId: f }, ...(await hppOnSaleLines(t, db))]; }
+  if (t.method !== 'bon') { const amt = n(t.amount); if (!amt) return []; return [{ code: cash, debit: amt, fleetId: f }, { code: rev, credit: amt, fleetId: f }, ...(t.kind === 'ganti_rugi' ? [] : await hppOnSaleLines(t, db))]; }
   if (!t.bonCounted) return [];   // bon excluded from sisa bon (archived/mistaken) → no Piutang
   const corrs = t.corrections || await db.correction.findMany({ where: { transactionId: t.id, kind: 'price', active: true }, select: { deltaAmount: true, kind: true, active: true } });
   const pdelta = (corrs || []).filter((c) => c.kind === 'price' && c.active).reduce((a, c) => a + Number(c.deltaAmount || 0), 0);
@@ -301,9 +307,9 @@ async function distTxnLines(t, db = prisma) {
   const rugi = Math.min(ddRugi, cap);
   const arNet = revenue - tidak - rugi;
   if (arNet <= 0 && revenue <= 0) return [];
-  const lines = [{ code: AR, debit: arNet, fleetId: f }, { code: REV_MAIN, credit: revenue - tidak, fleetId: f }];
+  const lines = [{ code: AR, debit: arNet, fleetId: f }, { code: rev, credit: revenue - tidak, fleetId: f }];
   if (rugi > 0) lines.push({ code: LOSS_AR, debit: rugi, fleetId: f });   // debits arNet + rugi = revenue − tidak = credit ✓
-  return [...lines, ...(await hppOnSaleLines(t, db))];   // HPP on sale at standard (no-op without an active standard)
+  return [...lines, ...(t.kind === 'ganti_rugi' ? [] : await hppOnSaleLines(t, db))];   // HPP on sale at standard (no-op without an active standard); never for ganti rugi
 }
 // LIVE post / backfill of a distribution transaction — INSERT-only under (dist_txn, id). At creation
 // there are no corrections/disputes yet, so this is the original figure; for a historical backfill it

@@ -1116,6 +1116,19 @@ model DistTransaction {
   amount          BigInt                          // qty * unitPriceLocked (server-computed)
   method          String   @default("lunas")   // lunas | bon | pelunasan
   note            String   @default("")
+  // HOW the money moved: 'tunai' | 'transfer' | '' (older rows — a pelunasan may still carry the legacy
+  // " · Transfer" note tag). A transfer SALE is method 'lunas' + payMethod 'transfer' so every existing
+  // "lunas" aggregate stays right; accounting posts it to Bank instead of Kas.
+  payMethod       String   @default("")
+  // KIND of row: 'jual' (every sale/bon/pelunasan so far) | 'ganti_rugi' (compensation for gallons a
+  // customer broke/lost — money only, qty 0; gallonQty holds the number of gallons).
+  kind            String   @default("jual")
+  gallonQty       Int      @default(0)
+  // FOTO BUKTI — Attachment id of the proof photo + when/where the phone took it (field UI).
+  proofPhotoId    String?
+  proofTakenAt    DateTime?
+  proofLat        Float?
+  proofLng        Float?
   txnDate         String                        // txn_date (YYYY-MM-DD)
   actorId         String?                       // actor_id
   actorRole       String?                       // actor_role (at input time)
