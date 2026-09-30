@@ -18,6 +18,7 @@ const summary = async () => (await request(app).get(`${D}/deliveries/day-summary
 
 beforeAll(async () => {
   await resetDb();
+  await prisma.distChangeRequest.deleteMany();   // resetDb keeps change requests; another suite's pending one would count
   gm = (await request(app).post('/api/v1/auth/register').send({ name: 'Boss', username: 'ds_gm', password: 'secret123', role: 'gm' })).body.token;
   c1 = (await request(app).post(`${D}/customers`).set(auth(gm)).send({ name: 'A', type: 'reguler', masterPrice: 10000, armada: 'DK 1', deliveryDays: ALL })).body.data.id;
   c2 = (await request(app).post(`${D}/customers`).set(auth(gm)).send({ name: 'B', type: 'reguler', masterPrice: 10000, armada: 'DK 1', deliveryDays: ALL })).body.data.id;
