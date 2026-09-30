@@ -210,6 +210,8 @@ router.get('/deliveries', requireCap('distribusiPengiriman'), validate({ query: 
 router.get('/deliveries/route', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.routeQuery }), ctrl.deliveryRoute);
 // RUTE RIT — the open rit of one armada, from the warehouse, nearest first, within the rit's load.
 router.get('/deliveries/rit-route', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.ritQuery }), ctrl.ritRoute);
+// SETORAN HARIAN — one armada, one day (before '/deliveries/:id' routes).
+router.get('/deliveries/day-summary', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.daySummaryQuery }), ctrl.daySummary);
 // The warehouse every rit starts from: owner/GM tier (it moves the start of every route).
 router.put('/depot', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.depotSchema }), ctrl.setDepot);
 // ATURAN LAPANGAN — anyone in distribusi may READ them (the phone UI follows them); only owner/GM write.

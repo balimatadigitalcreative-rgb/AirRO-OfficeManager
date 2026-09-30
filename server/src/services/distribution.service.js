@@ -5182,6 +5182,47 @@ async function deliveryReport(user, query) {
   return { from, to, period, fleets, totals, skips };
 }
 
+// SETORAN HARIAN — for ONE armada and ONE day: what the driver must hand over and what happened. Uses
+// the same predicates as deliveryReport (LIVE_TXN, noMoneyIn, isTransferPayment, active expenses) so the
+// two can never disagree: wajibSetor === deliveryReport fleet.cash.net for the same day + armada.
+async function daySummary(user, query) {
+  const q = query || {};
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(q.date || '')) ? q.date : todayISO();
+  const fleetId = resolveWriteFleet(user, q.fleet);
+  if (!fleetId) throw ApiError.badRequest('Pilih armada.');
+  const where = { fleetId };
+  const txns = await prisma.distTransaction.findMany({ where: { ...where, txnDate: date, ...LIVE_TXN }, include: { corrections: { select: { kind: true, deltaAmount: true, active: true } } } });
+  const out = { date, fleetId, tunaiPenjualan: 0, tunaiPelunasan: 0, tunaiGantiRugi: 0, transfer: 0, bonBaru: 0, pengeluaran: 0, wajibSetor: 0,
+    galon: { keluar: 0, kembali: 0, rusak: 0 }, stops: { terkirim: 0, ditunda: 0, batal: 0, pending: 0 }, koreksiMenunggu: 0, ritDiBawahSop: [] };
+  txns.forEach((t) => {
+    const eff = Number(t.amount) + Number(priceDelta(t.corrections));
+    if (t.method === 'bon') { out.bonBaru += eff; return; }
+    if (noMoneyIn(t)) return;
+    const inc = t.method === 'lunas' ? eff : t.method === 'pelunasan' ? Number(t.amount) : 0;
+    if (!inc) return;
+    if (isTransferPayment(t)) { out.transfer += inc; return; }
+    if (t.kind === 'ganti_rugi') out.tunaiGantiRugi += inc;
+    else if (t.method === 'pelunasan') out.tunaiPelunasan += inc;
+    else out.tunaiPenjualan += inc;
+  });
+  const exp = await prisma.distExpense.findMany({ where: { ...where, date, status: 'active' }, select: { amount: true } });
+  out.pengeluaran = exp.reduce((s, e) => s + Number(e.amount), 0);
+  out.wajibSetor = out.tunaiPenjualan + out.tunaiPelunasan + out.tunaiGantiRugi - out.pengeluaran;
+  const txnIds = txns.map((t) => t.id);
+  const movs = txnIds.length ? await prisma.gallonMovement.findMany({ where: { transactionId: { in: txnIds }, active: true }, select: { type: true, qty: true } }) : [];
+  movs.forEach((m) => {
+    if (m.type === 'delivery_out') out.galon.keluar += m.qty;
+    else if (m.type === 'return_in') out.galon.kembali += m.qty;
+    else if (CUSTOMER_DAMAGE.has(m.type)) out.galon.rusak += Math.abs(m.qty);
+  });
+  const stops = await prisma.delivery.findMany({ where: { ...where, date }, select: { status: true } });
+  stops.forEach((s) => { if (out.stops[s.status] != null) out.stops[s.status] += 1; });
+  out.koreksiMenunggu = await prisma.distChangeRequest.count({ where: { fleetId, status: 'pending' } });
+  const runs = await prisma.deliveryRun.findMany({ where: { ...where, date, NOT: { underSopReason: '' } }, orderBy: { runNo: 'asc' }, select: { runNo: true, gallonsOut: true, underSopReason: true } });
+  out.ritDiBawahSop = runs.map((r) => ({ runNo: r.runNo, gallonsOut: r.gallonsOut, reason: r.underSopReason }));
+  return out;
+}
+
 module.exports = {
   bonMapFor, afterPointChange, isTransferPayment,
   METHODS, DAY_CODES, PRICE_SCOPES, actorSnap,
@@ -5194,7 +5235,7 @@ module.exports = {
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
   requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
-  createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport,
+  createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport, daySummary,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, ritRoute, setDepot, depotOrigin, pinDelivery, closeDay, listCloseouts,
   outstandingDeliveries, outstandingSummary, resolveOutstanding, bulkCarry, bulkCarryPreview, bulkResolveOutstanding, undoBulkCarry,
   openRun, closeRun, listRuns, correctRun,
