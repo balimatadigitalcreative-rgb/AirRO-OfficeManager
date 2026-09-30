@@ -621,6 +621,17 @@ async function updateCustomer(id, body, actor) {
   // rather than let the next zone write silently undo it. (A moved point re-syncs below instead.)
   if (data.lat === undefined) await zoneSvc().assertScheduleEditable(cur, data);
   let c = await prisma.customer.update({ where: { id }, data });
+  // A point typed/pasted in the customer form is a location change like any other — it gets a history
+  // row (with the previous point), not just the generic "Ubah pelanggan" audit.
+  if (data.lat !== undefined && data.lat !== null && (data.lat !== cur.lat || data.lng !== cur.lng)) {
+    const prevPt = hasCoords(cur) ? { lat: cur.lat, lng: cur.lng } : null;
+    await prisma.customerLocationHistory.create({ data: {
+      customerId: id, action: 'set', method: 'form', lat: data.lat, lng: data.lng, accuracy: null,
+      prevLat: prevPt ? prevPt.lat : null, prevLng: prevPt ? prevPt.lng : null, prevAccuracy: prevPt ? cur.locationAccuracy : null,
+      movedM: prevPt ? Math.round(haversineKm(prevPt, { lat: data.lat, lng: data.lng }) * 1000) : null,
+      note: 'diubah lewat formulir pelanggan', actorId: snap.actorId, actorName: snap.actorName,
+    } });
+  }
   const fixedChanged = data.fixedDays !== undefined && data.fixedDays !== !!cur.fixedDays;
   const fixedNote = fixedChanged ? (data.fixedDays ? ` · hari tetap: ${willHaveDays.join(', ')}` : ' · hari tetap dimatikan')
     : (c.fixedDays && data.deliveryDays !== undefined && data.deliveryDays !== cur.deliveryDays ? ` · hari tetap: ${willHaveDays.join(', ')}` : '');
@@ -662,13 +673,19 @@ async function setCustomerLocation(id, body, actor) {
   // recomputed later, so the audit trail shows exactly what they were shown when they confirmed.
   const prev = hasCoords(cur) ? { lat: cur.lat, lng: cur.lng } : null;
   const movedM = prev ? Math.round(haversineKm(prev, loc) * 1000) : null;
+  // GESER TITIK — the pin may have been dragged away from the phone's own fix; keep both, and the gap.
+  const method = body.method === 'geser' ? 'geser' : 'gps';
+  const dev = normLatLng(body.deviceLat, body.deviceLng);
+  const fromDeviceM = dev ? Math.round(haversineKm(dev, loc) * 1000) : null;
+  const devAcc = (body.deviceAccuracy != null && Number.isFinite(+body.deviceAccuracy)) ? Math.max(0, Math.round(+body.deviceAccuracy)) : null;
   const c = await prisma.customer.update({ where: { id }, data });
   await prisma.customerLocationHistory.create({ data: {
     customerId: id, action: 'set', lat: loc.lat, lng: loc.lng, accuracy: acc,
     prevLat: prev ? prev.lat : null, prevLng: prev ? prev.lng : null, prevAccuracy: prev ? cur.locationAccuracy : null,
-    movedM, note: String(body.note || '').slice(0, 300), actorId: snap.actorId, actorName: snap.actorName,
+    movedM, method, deviceLat: dev ? dev.lat : null, deviceLng: dev ? dev.lng : null, deviceAccuracy: devAcc, fromDeviceM,
+    note: String(body.note || '').slice(0, 300), actorId: snap.actorId, actorName: snap.actorName,
   } });
-  await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}${acc != null ? ' · ±' + acc + ' m' : ''}${movedM != null ? ' · geser ' + movedM + ' m dari titik lama' : ''}`, snap, c.armada);
+  await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}${acc != null ? ' · ±' + acc + ' m' : ''}${movedM != null ? ' · geser ' + movedM + ' m dari titik lama' : ''}${method === 'geser' && fromDeviceM != null ? ' · pin digeser ' + fromDeviceM + ' m dari GPS perangkat' : ''}`, snap, c.armada);
   return custClient(await afterPointChange(c, actor));
 }
 
@@ -732,6 +749,7 @@ async function listLocationHistory(id, actor) {
   return rows.map((r) => ({
     id: r.id, action: r.action, lat: r.lat, lng: r.lng, accuracy: r.accuracy,
     prevLat: r.prevLat, prevLng: r.prevLng, movedM: r.movedM, note: r.note || '',
+    method: r.method || 'gps', deviceLat: r.deviceLat, deviceLng: r.deviceLng, deviceAccuracy: r.deviceAccuracy, fromDeviceM: r.fromDeviceM,
     actorName: r.actorName || '', at: r.createdAt ? new Date(r.createdAt).getTime() : null,
   }));
 }

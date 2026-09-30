@@ -48,7 +48,7 @@ const customerUpdateSchema = z.object({
   fixedDays: z.boolean().optional(),   // days are the customer's own; zones set only the armada
 });
 // Field GPS tag / paste — coordinates required; accuracy (metres) + address optional.
-const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]), accuracy: z.union([z.number(), z.string(), z.null()]).optional(), address: z.string().max(300).optional(), note: z.string().max(300).optional() });
+const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]), accuracy: z.union([z.number(), z.string(), z.null()]).optional(), address: z.string().max(300).optional(), note: z.string().max(300).optional(), method: z.enum(['gps', 'geser']).optional(), deviceLat: z.number().optional(), deviceLng: z.number().optional(), deviceAccuracy: z.number().optional() });
 // Clearing a location REQUIRES a reason - it throws away fieldwork, and the next person needs to know
 // whether the point was wrong, a duplicate, or a shop that moved.
 const clearLocationSchema = z.object({ note: z.string().min(3).max(300) });

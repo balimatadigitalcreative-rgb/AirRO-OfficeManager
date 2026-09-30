@@ -1491,6 +1491,13 @@ model CustomerLocationHistory {
   // Metres between the old point and the new one - STORED, so the audit shows the number the person
   // was actually shown when they confirmed, not one recomputed later from moved goalposts.
   movedM       Float?
+  // HOW the point was set: gps (phone fix) | geser (pin dragged on the map) | form (typed in the
+  // customer form) — plus the phone's own fix at that moment and how far the pin was moved from it.
+  method        String   @default("gps")
+  deviceLat     Float?
+  deviceLng     Float?
+  deviceAccuracy Float?
+  fromDeviceM   Float?
   note         String   @default("")
   actorId      String?
   actorName    String?
