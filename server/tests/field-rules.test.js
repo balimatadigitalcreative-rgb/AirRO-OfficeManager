@@ -57,3 +57,12 @@ describe('field rules', () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe('the generic settings route cannot bypass the rules cap + audit', () => {
+  it('PUT /settings/fieldRules is refused even for an admin with the settings cap', async () => {
+    const r = await request(app).put('/api/v1/settings/fieldRules').set(auth(gm)).send({ value: { fieldUiDefault: 'new' } });
+    expect(r.status).toBe(403);
+    const rules = (await request(app).get(`${D}/field-rules`).set(auth(gm))).body.data;
+    expect(rules.fieldUiDefault).toBe('old');
+  });
+});
