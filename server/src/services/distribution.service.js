@@ -1917,6 +1917,7 @@ async function previewCorrection(txnId, body, actor) {
   if (!txn) throw ApiError.notFound('Transaction not found');
   if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');
   if (txn.status === 'void') throw ApiError.badRequest('Transaksi ini sudah dibatalkan.');
+  if (txn.kind === 'ganti_rugi') throw ApiError.badRequest('Ganti rugi galon tidak bisa dikoreksi — ajukan pembatalan lalu catat ulang.');
   // Legacy rows are previewable — they feed Sisa Bon. Preview never throws on an issued invoice (it is
   // informational); it RETURNS the invoice number so the UI can show the block reason. The submit/apply
   // (requestChange/decideChangeRequest) is what actually refuses an invoiced row.
@@ -1966,6 +1967,7 @@ async function requestChange(txnId, kind, body, actor) {
   if (!txn) throw ApiError.notFound('Transaction not found');
   if (!fleetAllows(actor, txn.fleetId)) throw ApiError.notFound('Transaction not found');   // out of scope
   if (txn.status === 'void') throw ApiError.badRequest('Transaksi ini sudah dibatalkan.');
+  if (kind === 'correction' && txn.kind === 'ganti_rugi') throw ApiError.badRequest('Ganti rugi galon tidak bisa dikoreksi — ajukan pembatalan lalu catat ulang.');
   await assertNotInvoiced(txnId);   // legacy IS correctable/voidable now; only an issued invoice blocks it
   const reason = String(body.reason || '').trim();
   if (!reason) throw ApiError.badRequest('Alasan wajib diisi.');
@@ -2159,6 +2161,7 @@ async function computeReassign(body, actor) {
   if (toC.active === false) throw ApiError.badRequest('Pelanggan tujuan non-aktif — pilih pelanggan yang aktif.');
   if (!fleetAllows(actor, fromC.armada)) throw ApiError.notFound('Pelanggan asal tidak ditemukan.');   // out of fleet scope
   const txns = await prisma.distTransaction.findMany({ where: { id: { in: txnIds } }, include: { corrections: true, customer: { select: { name: true, code: true } } } });
+  if (txns.some((t) => t.kind === 'ganti_rugi')) throw ApiError.badRequest('Ganti rugi galon tidak bisa dipindahkan ke pelanggan lain — ajukan pembatalan lalu catat ulang.');
   if (txns.length !== txnIds.length) throw ApiError.badRequest('Sebagian transaksi tidak ditemukan.');
   for (const t of txns) {
     if (t.customerId !== fromId) throw ApiError.badRequest('Semua transaksi harus milik pelanggan asal yang sama.');
@@ -3051,8 +3054,12 @@ async function dashboardSummary(user, query) {
   const cashFleet = {};   // per-fleet CASH the driver should deposit (reconcile)
   rows.forEach((r) => {
     periodQty += r.qty;
-    const e = effOf(r); amount += e;
-    if (byMethod[r.method] != null && !noMoneyIn(r)) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e);
+    const e = effOf(r);
+    // Ganti rugi galon is compensation, not a sale: it stays out of the sales figures (amount/byMethod)
+    // but its cash/transfer is real money-in below (and a bon one is in the receivable).
+    const isCharge = r.kind === 'ganti_rugi';
+    if (!isCharge) amount += e;
+    if (!isCharge && byMethod[r.method] != null && !noMoneyIn(r)) byMethod[r.method] += (r.method === 'pelunasan' ? r.amount : e);
     const inc = moneyInOf(r);
     if (!inc) return;
     periodIn += inc;
@@ -3136,13 +3143,17 @@ async function dashboardSummary(user, query) {
 // purchase adds to the depot, correction is a signed adjustment (customer or depot).
 // 'penyesuaian' (customer balance adjustment) carries a SIGNED delta on the gallons a customer holds
 // (approved adjustments only ever reach the ledger), so it counts toward custEffect like a correction.
-const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'return_in' ? -m.qty : ((m.type === 'correction' || m.type === 'penyesuaian') && m.customerId) ? m.qty : 0);
+// GANTI RUGI GALON — gallons a customer broke/lost move PELANGGAN → RUSAK/HILANG in one row: they leave
+// the customer's balance and the good stock, and enter the rusak/hilang bucket, so
+// depot + armada + pelanggan + rusak/hilang === total dimiliki still holds.
+const CUSTOMER_DAMAGE = new Set(['damage_customer', 'loss_customer']);
+const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'return_in' ? -m.qty : ((m.type === 'correction' || m.type === 'penyesuaian') && m.customerId) ? m.qty : (CUSTOMER_DAMAGE.has(m.type) && m.customerId) ? -Math.abs(m.qty) : 0);
 // 'opening' is a depot baseline (owned + at depot, never at a customer). Its qty is a signed
 // delta so an adjustment (nilai_baru − nilai_lama) is another append, never an overwrite.
 // 'damage'/'loss' remove good gallons from the depot (broken/lost), qty positive → negative effect.
 const totalEffect = (m) => {
   if (m.type === 'purchase' || m.type === 'opening') return m.qty;
-  if (m.type === 'damage' || m.type === 'loss') return -Math.abs(m.qty);
+  if (m.type === 'damage' || m.type === 'loss' || CUSTOMER_DAMAGE.has(m.type)) return -Math.abs(m.qty);
   if (m.type === 'correction' && !m.customerId) return m.qty;
   if (m.type === 'penyesuaian') return m.qty;   // a customer gallon adjustment changes total owned too (at-depot unchanged)
   return 0;
@@ -3154,7 +3165,7 @@ const totalEffect = (m) => {
 // `totalEffect` above stays the GOOD-stock total (depot+armada+pelanggan) so every existing number
 // and test is untouched; rusak/hilang is a 4th bucket and totalDimiliki = good + rusak. custEffect
 // (pelanggan) is byte-identical — customer balances must never move.
-const DAMAGE_TYPES = new Set(['damage', 'loss']);
+const DAMAGE_TYPES = new Set(['damage', 'loss', 'damage_customer', 'loss_customer']);
 const rusakEffect = (m) => (DAMAGE_TYPES.has(m.type) ? Math.abs(m.qty) : 0);
 const grandTotalEffect = (m) => totalEffect(m) + rusakEffect(m);   // total dimiliki incl. rusak/hilang
 const movMs = (m) => (m && m.createdAt ? new Date(m.createdAt).getTime() : 0);
@@ -3638,6 +3649,50 @@ async function reportGallonDamage({ qty, kind, reason, fleetId, proof }, actor) 
   await logAudit('koreksi', `Galon ${kk} (${type === 'loss' ? 'hilang' : 'rusak'})`, `${n} galon · ${rsn}`, snap, fId);
   const stock = await gallonStock(actor, undefined);
   return { movement: mov, kind: kk, type, qty: n, goodStock: stock.totalOwned };
+}
+// GANTI RUGI GALON (no approval — owner decision). One DB transaction:
+//   1. a damage_customer / loss_customer movement (customer → rusak/hilang), linked to the txn so a VOID
+//      deactivates it like any sale movement;
+//   2. a money-only DistTransaction kind 'ganti_rugi' (qty 0 → never a gallon sale; gallonQty = count):
+//      tunai/transfer → method 'lunas' (+payMethod), bon → method 'bon' (feeds Sisa Bon);
+//   3. journal via distTxnLines (Kas/Bank or Piutang / Pendapatan Lain) + AR reclass for a bon.
+const DAMAGE_KINDS = ['pecah', 'bocor', 'retak', 'hilang'];
+async function gallonDamageCharge(customerId, body, actor) {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) throw ApiError.notFound('Pelanggan tidak ditemukan.');
+  if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');
+  const qty = int(body.qty);
+  if (qty <= 0) throw ApiError.badRequest('Jumlah galon harus lebih dari 0.');
+  const kind = DAMAGE_KINDS.includes(body.kind) ? body.kind : 'pecah';
+  const pay = ['tunai', 'bon', 'transfer'].includes(body.payMethod) ? body.payMethod : 'tunai';
+  if (!body.photoId) throw ApiError.badRequest('Foto galon rusak wajib dilampirkan.', { code: 'PROOF_REQUIRED' });
+  const att = await prisma.attachment.findUnique({ where: { id: String(body.photoId) }, select: { id: true } });
+  if (!att) throw ApiError.badRequest('Foto tidak ditemukan — unggah ulang fotonya.', { code: 'PROOF_MISSING' });
+  const held = await gallonBalanceOf(customer.id);
+  if (qty > held) throw ApiError.badRequest(`Pelanggan hanya memegang ${held} galon — tidak bisa mengganti rugi ${qty}.`, { held });
+  const price = (await require('./fieldRules.service').getRules()).hargaGantiRugiGalon;
+  if (!price) throw ApiError.badRequest('Harga ganti rugi galon belum diatur pemilik.', { code: 'NO_PRICE' });
+  const amount = qty * price;
+  if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
+  const txnDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.txnDate || '')) ? body.txnDate : todayISO();
+  const fleetId = customer.armada || '';
+  const snap = await actorSnap(actor);
+  const note = `Ganti rugi ${qty} galon ${kind}${body.note ? ' · ' + String(body.note).trim().slice(0, 200) : ''}`;
+  const txn = await prisma.$transaction(async (tx) => {
+    const t = await tx.distTransaction.create({ data: {
+      customerId: customer.id, fleetId, qty: 0, unitPriceLocked: price, amount, method: pay === 'bon' ? 'bon' : 'lunas',
+      payMethod: pay === 'bon' ? '' : pay, kind: 'ganti_rugi', gallonQty: qty, note, txnDate,
+      proofPhotoId: att.id, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    } });
+    await tx.gallonMovement.create({ data: {
+      type: kind === 'hilang' ? 'loss_customer' : 'damage_customer', qty, customerId: customer.id, transactionId: t.id, fleetId,
+      active: true, note, proof: JSON.stringify({ attachmentId: att.id }), actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
+    } });
+    if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); if (pay === 'bon') await acc.postReceivablesReclass(customer.id, actor, tx); }
+    return t;
+  });
+  await logAudit('input', `Ganti rugi galon: ${customer.name}`, `${qty} galon ${kind} × ${price} = ${amount} (${pay})`, snap, fleetId);
+  return { transaction: txn, gallonsHeld: await gallonBalanceOf(customer.id), sisaBon: await customerBonBalance(customer.id) };
 }
 // Public helper so sibling modules (Gudang) can append a Distribusi audit row using the same
 // actor-snapshot + trail. Keeps sensitive cross-module events in one auditable place.
@@ -5109,7 +5164,7 @@ async function deliveryReport(user, query) {
 module.exports = {
   bonMapFor, afterPointChange, isTransferPayment,
   METHODS, DAY_CODES, PRICE_SCOPES, actorSnap,
-  gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
+  gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, gallonDamageCharge, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
   gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance, openingRowsPanel, openingRowsBulk, restoreOpeningRowsBatch,
   recordPosition, myPosition, listPositions, listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, clearCustomerLocation, revertCustomerLocation, listLocationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,

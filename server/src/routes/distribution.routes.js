@@ -88,6 +88,8 @@ router.post('/customers/location/bulk-clear', requireCap('distribusiCustomers'),
 // Location photo (bytes already in the Attachment store; this stores only the id + who/when).
 // Delivery helpers may photograph while delivering; customer managers may replace/remove.
 router.patch('/customers/:id/location-photo', requireAnyCap(['distribusiInput', 'distribusiPengiriman', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationPhotoSchema }), ctrl.setLocationPhoto);
+// GANTI RUGI GALON — a field action, recorded directly (no approval: owner decision).
+router.post('/customers/:id/gallon-damage', requireCap('distribusiInput'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonDamageSchema }), ctrl.gallonDamageCharge);
 // BULK spreadsheet import — its own capability. Creating one customer is routine; creating
 // hundreds in one call is a different risk (duplicates, bad phone/price data at scale), so it
 // is granted separately. Back-filled from distribusiCustomers so nobody loses it on upgrade.
