@@ -19,6 +19,10 @@ it('the old board keeps every prop it had', () => {
   ['refreshKey={distTick}', 'canOrder={!!p.distribusiOrder}', 'canRoute={!!p.distribusiRute}', 'canKoreksi={!!p.distribusiKoreksi}', 'canBelumTerkirim={!!p.distribusiBelumTerkirim}', 'canGps={!!p.distribusiLacakArmada}', 'canGpsMap={!!p.settings}', 'canLoc={!!p.distribusiLokasiSimpan}', 'setDistFleet={setDistFleet}', 'onChanged={() => setDistTick((t) => t + 1)}']
     .forEach((prop) => expect(block).toContain(prop));
 });
+it('field rules are refetched only on a rules change, not on every distribusi event (no request storm)', () => {
+  expect(shell).toMatch(/evt\.entity === 'distribusi' && evt\.action === 'rules'\) setFieldRulesTick\(/);
+  expect(shell).toMatch(/\}, \[user, p\.distribusiPengiriman, fieldRulesTick\]\);/);
+});
 it('rules nav + screen for owner/GM; release button for the owner only', () => {
   expect(shell).toMatch(/\{ id: 'dist-field-rules', label: tr\('nav\.distFieldRules'\), icon: 'IconSettings', caps: \['distribusiAturanLapangan'\] \}/);
   expect(shell).toMatch(/screen === 'dist-field-rules' && p\.distribusiAturanLapangan && window\.FIELD && <window\.FIELD\.RulesScreen[^>]*canRelease=\{!!user && user\.role === 'owner'\}/);

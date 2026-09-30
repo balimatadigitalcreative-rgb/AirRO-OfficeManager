@@ -271,6 +271,7 @@ function FApp() {
   const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
   // MODE LAPANGAN: the owner's field rules (release switch) + this phone's view/mode preference.
   const [fieldRules, setFieldRules] = uSh(null);
+  const [fieldRulesTick, setFieldRulesTick] = uSh(0);   // bumped only by a 'rules' event — not every distribusi event
   const [fieldPrefs, setFieldPrefs] = uSh(() => (window.FIELDAPI ? window.FIELDAPI.loadPrefs() : {}));
   const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
@@ -345,7 +346,7 @@ function FApp() {
     let live = true;
     window.API.distribusi.fieldRules.get().then((r) => { if (live) setFieldRules((r && r.data) || null); }).catch(() => { /* rules unreadable → treated as not released */ });
     return () => { live = false; };
-  }, [user, p.distribusiPengiriman, distTick]);
+  }, [user, p.distribusiPengiriman, fieldRulesTick]);
   // `manageUsers` is a NEW cap: an override saved before it existed omits it. Derive an
   // ABSENT value from the legacy `reset` toggle or the role default — mirrors the server's
   // resolvePerms exactly, so the sidebar and the API agree on who may administer users.
@@ -1243,6 +1244,7 @@ function FApp() {
       else if (evt.entity === 'focus' && Date.now() - configFocusAt >= CONFIG_FOCUS_MIN_MS) { configFocusAt = Date.now(); reloadConfig(); }
       if (evt.entity === 'role') reloadRoles();
       if (evt.entity === 'distribusi' || evt.entity === 'focus') setDistTick((t) => t + 1);   // Distribusi dashboard self-refetches
+      if (evt.entity === 'distribusi' && evt.action === 'rules') setFieldRulesTick((t) => t + 1);   // owner changed Aturan lapangan / released the new view
     };
     return () => { if (window.CLOUD) { window.CLOUD.onSync = null; window.CLOUD.onStatus = null; window.CLOUD.onEvent = null; window.CLOUD.onSessionExpired = null; } };
   }, []);
