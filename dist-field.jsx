@@ -9,6 +9,9 @@ const trFl = (k, v) => window.t(k, v);
 const fldPlates = (list) => (list || []).map((f) => (typeof f === 'string' ? f : (f && (f.plate || f.name || f.id)) || '')).map((s) => String(s).trim()).filter(Boolean);
 const fldErrMsg = (e) => (e && e.body && e.body.error && e.body.error.message) || (e && e.message) || '';
 const FldIco = (name, s) => { const C = window[name]; return C ? <C s={s || 20} /> : null; };
+// Releasing makes this the main view for EVERY field account. Locked until the full field screens
+// (Plan 3) replace the foundation stub; flip to true then. Un-releasing is always allowed.
+const FLD_SCREENS_READY = false;
 
 function FldSheet({ title, body, confirmLabel, danger, onConfirm, onClose }) {
   return (
@@ -134,7 +137,7 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
               : <button type="button" className="mlap-menu-item" onClick={() => askSwitch('latihan')}>{trFl('fld.useLatihan')}</button>)}
             {mode === 'latihan' && api && <button type="button" className="mlap-menu-item" onClick={askReset}>{trFl('fld.resetLatihan')}</button>}
             {onOpenRules && <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onOpenRules(); }}>{trFl('fld.rules')}</button>}
-            {!pref.released && <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onExit(); }}>{trFl('fld.backOld')}</button>}
+            <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onExit(); }}>{trFl('fld.backOld')}</button>
           </div>
         </>
       )}
@@ -254,7 +257,8 @@ function FldRules({ fleetList, canRelease, onSaved }) {
             <small>{r.fieldUiDefault === 'new' ? trFl('fld.released') : trFl('fld.releaseSub')}</small>
             {r.fieldUiDefault === 'new'
               ? <button type="button" className="mlap-btn" disabled={busy} onClick={() => setAsk('old')}>{trFl('fld.unreleaseBtn')}</button>
-              : <button type="button" className="mlap-btn danger" disabled={busy} onClick={() => setAsk('new')}>{trFl('fld.releaseBtn')}</button>}
+              : <button type="button" className="mlap-btn danger" disabled={busy || !FLD_SCREENS_READY} onClick={() => setAsk('new')}>{trFl('fld.releaseBtn')}</button>}
+            {r.fieldUiDefault !== 'new' && !FLD_SCREENS_READY && <small>{trFl('fld.releaseLater')}</small>}
           </div>
         )}
       </div>

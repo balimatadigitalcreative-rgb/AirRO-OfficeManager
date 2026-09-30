@@ -31,6 +31,16 @@ it('latihan ribbon + confirmed mode switch + reset', () => {
   expect(jsx).toMatch(/trFl\('fld\.resetLatihanB'\)/);
   expect(jsx).toMatch(/openLatihan\(\{ key, real, storage: storageRef\.current, today \}\)/);   // yesterday's practice copy is never reused
 });
+it('the old view stays reachable from the menu, also after release (spec 5: masa transisi)', () => {
+  expect(jsx).toMatch(/onClick=\{\(\) => \{ setMenu\(false\); onExit\(\); \}\}>\{trFl\('fld\.backOld'\)\}/);
+  expect(jsx).not.toMatch(/!pref\.released && <button[^\n]*fld\.backOld/);
+});
+it('releasing is locked while the field screens are still the foundation stub; un-releasing never is', () => {
+  expect(jsx).toMatch(/^const FLD_SCREENS_READY = false;/m);
+  expect(jsx).toMatch(/className="mlap-btn danger" disabled=\{busy \|\| !FLD_SCREENS_READY\}/);
+  expect(jsx).toMatch(/!FLD_SCREENS_READY && <small>\{trFl\('fld\.releaseLater'\)\}<\/small>/);
+  expect(jsx).toMatch(/className="mlap-btn" disabled=\{busy\} onClick=\{\(\) => setAsk\('old'\)\}/);
+});
 it('rules are saved through the untagged owner API, never the adaptor', () => {
   const rules = jsx.slice(jsx.indexOf('function FldRules('));
   expect(rules).toMatch(/window\.API\.distribusi\.fieldRules\.set\(/);
