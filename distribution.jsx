@@ -3958,8 +3958,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
   };
   const defReminder = () => ({ enabled: false, dueDay: 0, weekday: '', overdueDays: 0, gallonThreshold: 0, bonThreshold: 0 });
   const remOf = (r) => (r && typeof r === 'object') ? { ...defReminder(), ...r, enabled: !!r.enabled } : defReminder();
-  const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '', reminder: defReminder(), address: '', mapsUrl: '' }); };
-  const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '', reminder: remOf(d.reminder), address: d.address || '', mapsUrl: d.mapsUrl || '' }); };
+  const openAdd = () => { setFormErr(''); setForm({ id: null, name: '', phone: '', type: defaultType(), price: '', deliveryDays: [], armada: '', reminder: defReminder(), address: '', mapsUrl: '', fixedDays: false }); };
+  const openEdit = (d) => { setFormErr(''); setForm({ id: d.id, name: d.name || '', phone: d.phone || '', type: d.type || defaultType(), price: '', deliveryDays: Array.isArray(d.deliveryDays) ? d.deliveryDays : [], armada: d.armada || '', reminder: remOf(d.reminder), address: d.address || '', mapsUrl: d.mapsUrl || '', fixedDays: !!d.fixedDays }); };
   const toggleDay = (d) => setForm((f) => ({ ...f, deliveryDays: f.deliveryDays.includes(d) ? f.deliveryDays.filter((x) => x !== d) : [...f.deliveryDays, d] }));
 
   const commitForm = () => {
@@ -3970,6 +3970,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     const finish = (msg, data) => { setSaving(false); setForm(null); flash(msg); reload(); if (data) setDetail((d) => (d && d.id === data.id ? { ...d, ...data } : d)); if (onChanged) onChanged(); };
     const mu = (form.mapsUrl || '').trim();
     if (mu && !/^https?:\/\//i.test(mu)) { setFormErr(trD('dist.mapsUrlInvalid')); return; }
+    if (form.fixedDays && !form.deliveryDays.length) { setFormErr(trD('cust.fixedNeedDay')); return; }
     const locFields = { address: (form.address || '').trim(), mapsUrl: mu };
     // GPS-captured point → also send lat/lng/accuracy so the ±m is stored (not just the link).
     if (form._lat != null && form._lng != null) { locFields.lat = form._lat; locFields.lng = form._lng; locFields.accuracy = form._accuracy != null ? form._accuracy : null; }
@@ -3977,10 +3978,10 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
     if (!form.id) {
       const price = parseInt(String(form.price).replace(/[^0-9]/g, ''), 10);
       if (!price) { setSaving(false); setFormErr(trD('dist.cfPriceReq')); return; }
-      window.API.distribusi.customers.create({ name, phone: form.phone.trim(), type: form.type, masterPrice: price, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder, ...locFields })
+      window.API.distribusi.customers.create({ name, phone: form.phone.trim(), type: form.type, masterPrice: price, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder, fixedDays: !!form.fixedDays, ...locFields })
         .then(() => finish(trD('dist.custAdded'))).catch(onErr);
     } else {
-      window.API.distribusi.customers.update(form.id, { name, phone: form.phone.trim(), type: form.type, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder, ...locFields })
+      window.API.distribusi.customers.update(form.id, { name, phone: form.phone.trim(), type: form.type, deliveryDays: form.deliveryDays, armada: form.armada, reminder: form.reminder, fixedDays: !!form.fixedDays, ...locFields })
         .then((r) => finish(trD('dist.custSaved'), r.data)).catch(onErr);
     }
   };
@@ -4132,6 +4133,8 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
           </div>
           <label className="fld-label">{trD('dist.cfDays')}</label>
           <div className="dist-typechips">{DAY_CODES.map((dd) => <button type="button" key={dd} className={`dist-typechip ${form.deliveryDays.includes(dd) ? 'on' : ''}`} onClick={() => toggleDay(dd)}>{dd}</button>)}</div>
+          <label className="dist-check cust-fixed"><input type="checkbox" checked={!!form.fixedDays} onChange={(e) => setForm({ ...form, fixedDays: e.target.checked })} /><span>{trD('cust.fixedDays')}</span></label>
+          {form.fixedDays && <div className="cust-fixed-hint">{trD('cust.fixedHint')}</div>}
           <label className="fld-label">{trD('dist.cfArmada')}</label>
           <UI.Dropdown value={form.armada} options={fleetOptsFor(form.armada)} placeholder={trD('dist.noArmada')} onChange={(v) => setForm({ ...form, armada: v })} fluid />
           <label className="fld-label">{trD('dist.cfAddress')}</label>
@@ -4560,7 +4563,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                 </div>
                 <div className="card cd-card">
                   <div className="dist-card-head"><div className="sec-title">{trD('cd.pengiriman')}</div>{canCustomers && <button type="button" className="dist-link" onClick={() => openEdit(d)}><IconPencil s={12} />{trD('dist.editCust')}</button>}</div>
-                  <div className="cd-kv"><span>{trD('cd.hariKirim')}</span><b>{days ? <span className="cd-daychips">{DAY_CODES.map((dd) => <span key={dd} className={'cd-daychip ' + ((d.deliveryDays || []).includes(dd) ? 'on' : '')}>{dd}</span>)}</span> : '—'}</b></div>
+                  <div className="cd-kv"><span>{trD('cd.hariKirim')}</span><b>{days ? <span className="cd-daychips">{DAY_CODES.map((dd) => <span key={dd} className={'cd-daychip ' + ((d.deliveryDays || []).includes(dd) ? 'on' : '')}>{dd}</span>)}</span> : '—'}{d.fixedDays ? <span className="cust-fixed-badge">{trD('cust.fixedBadge')}</span> : null}</b></div>
                   <div className="cd-kv"><span>{trD('dist.armada')}</span><b>{d.armada ? armadaFull(d.armada) : '—'}</b></div>
                   {d.locationSetByName ? <div className="cd-kv"><span>{trD('cd.locNote')}</span><b>{trD('dist.locSetBy', { d: fmtDateShort(d.locationSetAt), who: d.locationSetByName })}</b></div> : null}
                 </div>

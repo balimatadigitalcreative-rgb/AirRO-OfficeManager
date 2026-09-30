@@ -4791,3 +4791,8 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
   .zn-overlay .dist-chips { flex-wrap: nowrap; overflow-x: auto; }
   .zn-overlay .dist-chip { flex: none; }
 }
+
+/* Fixed delivery days (hari tetap) — customer form + detail. */
+.cust-fixed { margin-top: 8px; }
+.cust-fixed-hint { font-size: 12px; color: var(--text-mut); margin-top: 2px; line-height: 1.45; }
+.cust-fixed-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; background: var(--sand-soft); color: #6B4A08; font-size: 11px; font-weight: 800; vertical-align: middle; }

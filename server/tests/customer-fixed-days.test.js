@@ -175,3 +175,23 @@ describe('the daily planner counts fixed-day visits', () => {
     expect(r.body.error.message).toMatch(/pelanggan biasa/);
   });
 });
+
+describe('the customer form offers the switch', () => {
+  const fs = require('fs'); const path = require('path');
+  const jsx = fs.readFileSync(path.join(__dirname, '..', '..', 'distribution.jsx'), 'utf8');
+  it('form state, both saves, and the detail badge carry fixedDays', () => {
+    expect(jsx).toMatch(/fixedDays: !!d\.fixedDays/);                            // openEdit
+    expect((jsx.match(/fixedDays: !!form\.fixedDays/g) || []).length).toBe(2);   // create + update payloads
+    expect(jsx).toMatch(/trD\('cust\.fixedDays'\)/);
+    expect(jsx).toMatch(/trD\('cust\.fixedBadge'\)/);
+  });
+  it('the edited screens still compile (a static match cannot see a JSX syntax error)', () => {
+    const esbuild = require(path.join(__dirname, '..', '..', 'node_modules', 'esbuild'));
+    ['distribution.jsx', 'dist-zones.jsx'].forEach((f) => {
+      expect(() => esbuild.transformSync(fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8'), { loader: 'jsx' })).not.toThrow();
+    });
+  });
+  it('a fixed customer with no day is caught before saving', () => {
+    expect(jsx).toMatch(/form\.fixedDays && !form\.deliveryDays\.length\) \{ setFormErr\(trD\('cust\.fixedNeedDay'\)\)/);
+  });
+});
