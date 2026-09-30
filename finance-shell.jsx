@@ -77,6 +77,7 @@ function navForRole(p, role) {
     // user still reaches the host screen; #dist-expenses deeplinks are redirected here (see normId).
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi', 'distribusiExpense'] },
     { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
+    { id: 'dist-zones', label: tr('nav.distZones'), icon: 'IconPin', caps: ['distribusiZona'] },
     { id: 'dist-delivery-report', label: tr('nav.distDeliveryReport'), icon: 'IconShield', caps: ['distribusiPengirimanReport'] },
     // INTERNAL loss report (Kerugian / Uang Tidak Diterima). Same owner/GM-tier cap as the action
     // that creates the rows; never customer-facing.
@@ -1826,10 +1827,17 @@ function FApp() {
           {screen === 'dist-integration' && p.distribusiCashIntegrasi && (
             <DIST.Integration refreshKey={distTick} today={FIN.TODAY} />
           )}
+          {screen === 'dist-zones' && p.distribusiZona && (
+            <DIST.Zones refreshKey={distTick} canManage={!!p.distribusiZonaKelola} fleet={fleet}
+              onChanged={() => setDistTick((t) => t + 1)}
+              /* Deep-link into the customer's detail: the same ?c=<id>#dist-customers URL a refresh would
+                 restore, handed to the shell's single popstate handler (which re-syncs the screen). */
+              onOpenCustomer={(id) => { history.pushState({ screen: 'dist-customers', sub: 1 }, '', location.pathname + '?c=' + encodeURIComponent(id) + '#dist-customers'); window.dispatchEvent(new PopStateEvent('popstate', { state: history.state })); }} />
+          )}
           {screen === 'dist-audit' && p.distribusiAudit && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-adjust-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-adjust-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit', 'dist-zones'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
           </>)}
 
           {/* Warehouse (gudang) + Setoran are module screens too — show the same friendly notice when

@@ -225,6 +225,16 @@
     },
     // Distribusi module (separate from the cash book). Append-only: no update/delete.
     distribusi: {
+      // CUSTOMER ZONES. Every write takes { dryRun: true } to get the change list without saving —
+      // the map shows that preview before the owner confirms (a zone rewrites members' schedules).
+      zones: {
+        list: () => req('GET', '/distribusi/zones'),
+        create: (body) => req('POST', '/distribusi/zones', body),
+        update: (id, body) => req('PUT', '/distribusi/zones/' + encodeURIComponent(id), body),
+        remove: (id, dryRun) => req('DELETE', '/distribusi/zones/' + encodeURIComponent(id) + (dryRun ? '?dryRun=1' : '')),
+        assign: (body) => req('POST', '/distribusi/zones/assign', body),
+        auto: (body) => req('POST', '/distribusi/zones/auto', body),
+      },
       // A `fleet` filter ('Merah'/'Biru'/…) narrows a full-access user to one fleet;
       // scoped users are always restricted server-side regardless. Falsy/'all' = no filter.
       customers: {

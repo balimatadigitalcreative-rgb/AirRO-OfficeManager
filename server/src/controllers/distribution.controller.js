@@ -286,6 +286,20 @@ const custListQuery = z.object({
   priceMax: z.coerce.number().int().min(0).optional(),
 });
 const idParams = z.object({ id: z.string().min(1) });
+// ── Customer zones ────────────────────────────────────────────────────────────
+// Boundaries are checked in depth by dist-zones.js (area, ranges, vertex cap); zod only bounds size.
+const ZONE_POLY = z.array(z.array(z.union([z.number(), z.string()])).length(2)).max(200);
+const zoneCreateSchema = z.object({
+  name: z.string().trim().min(1).max(60), color: z.string().max(9).optional(), polygon: ZONE_POLY,
+  armada: z.string().max(40).optional(), deliveryDays: DAYS.optional(), dryRun: z.boolean().optional(),
+});
+const zoneUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(60).optional(), color: z.string().max(9).optional(), polygon: ZONE_POLY.optional(),
+  armada: z.string().max(40).optional(), deliveryDays: DAYS.optional(), dryRun: z.boolean().optional(),
+});
+const zoneDeleteQuery = z.object({ dryRun: z.enum(['0', '1']).optional() });
+const zoneAssignSchema = z.object({ customerId: z.string().min(1).max(60), zoneId: z.string().max(60).nullable().optional(), auto: z.boolean().optional(), dryRun: z.boolean().optional() });
+const zoneAutoSchema = z.object({ k: z.coerce.number().int().min(1).max(30), keepManual: z.boolean().optional(), dryRun: z.boolean().optional() });
 const batchParams = z.object({ batchId: z.string().min(1) });
 const invoiceCreateSchema = z.object({
   scope: z.enum(['unpaidBon', 'period', 'selected']).optional(),
@@ -488,7 +502,18 @@ const gallonMovDeleteSchema = z.object({ note: z.string().trim().min(1).max(500)
 const openingResetSchema = z.object({ mode: z.enum(['delta', 'void_all']).optional(), targetQty: z.coerce.number().int().min(0).optional(), fleetId: z.string().max(60).optional(), note: z.string().trim().min(1).max(500), confirm: z.string().max(30).optional() });
 const openingResetImpactSchema = z.object({ mode: z.enum(['delta', 'void_all']).optional(), targetQty: z.coerce.number().int().min(0).optional(), fleetId: z.string().max(60).optional() });
 
+// Zones: a write that is only a preview (dryRun) changes nothing, so it broadcasts nothing.
+const zones = require('../services/zone.service');
+const zoneBcast = (r, body) => { if (!(body && (body.dryRun === true || body.dryRun === '1'))) bcast('zone', ''); return r; };
+const listZones = asyncHandler(async (req, res) => res.json({ data: await zones.listZones(req.user) }));
+const createZone = asyncHandler(async (req, res) => { const r = zoneBcast(await zones.createZone(req.body, req.user), req.body); res.status(req.body.dryRun ? 200 : 201).json({ data: r }); });
+const updateZone = asyncHandler(async (req, res) => res.json({ data: zoneBcast(await zones.updateZone(req.params.id, req.body, req.user), req.body) }));
+const deleteZone = asyncHandler(async (req, res) => res.json({ data: zoneBcast(await zones.deleteZone(req.params.id, req.query, req.user), req.query) }));
+const assignZone = asyncHandler(async (req, res) => res.json({ data: zoneBcast(await zones.assignCustomer(req.body, req.user), req.body) }));
+const autoZones = asyncHandler(async (req, res) => res.json({ data: zoneBcast(await zones.autoZones(req.body, req.user), req.body) }));
+
 module.exports = {
+  listZones, createZone, updateZone, deleteZone, assignZone, autoZones,
   recordPosition, listPositions, listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, clearLocation, revertLocation, locationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
@@ -502,5 +527,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, clearLocationSchema, bulkPreviewSchema, bulkClearSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, positionSchema, reorderSchema, routeQuery, pinSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { zoneCreateSchema, zoneUpdateSchema, zoneDeleteQuery, zoneAssignSchema, zoneAutoSchema, openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, clearLocationSchema, bulkPreviewSchema, bulkClearSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, positionSchema, reorderSchema, routeQuery, pinSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };

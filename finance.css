@@ -4649,3 +4649,133 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .dist-pos-privacy { margin-top: 10px; font-size: 11px; line-height: 1.45; opacity: .85; }
 .dist-pos-ok { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 18px 0; font-size: 11.5px; color: var(--text-mut); }
 .dist-pos-ok em { font-style: normal; color: var(--text-faint); }
+
+/* ── PETA ZONA PELANGGAN ─────────────────────────────────────────────────────────────────────────
+   Desktop: zones | map | selected zone. Phone: map first, then the zone, then the list.
+   .zn-map gets its own stacking context (z-index:0) so Leaflet's panes/controls (z 400–1000) stay
+   INSIDE the map and never float over modals or the bottom nav. */
+.zn-head { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.zn-title { display: flex; flex-direction: column; gap: 3px; flex: 1 1 320px; min-width: 0; }
+.zn-title h2 { margin: 0; font-family: 'Poppins', system-ui, sans-serif; font-size: 20px; color: var(--green-900); }
+.zn-mut { font-size: 12px; color: var(--text-mut); }
+.zn-head-act { display: flex; gap: 8px; flex-wrap: wrap; }
+.zn-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 14px; height: calc(100vh - 230px); min-height: 560px; }
+.zn-layout.has-side { grid-template-columns: 290px minmax(0, 1fr) 340px; }
+.zn-list, .zn-side { padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; }
+/* The panels scroll; their children must keep their size instead of shrinking to fit (a flex column
+   of fixed height squeezes every item — the armada select collapsed to a sliver). */
+.zn-list > *, .zn-side > * { flex-shrink: 0; }
+.zn-cov { display: flex; flex-direction: column; gap: 7px; padding: 12px; background: var(--card-soft); border-radius: 12px; }
+.zn-cov-top { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 700; }
+.zn-list-h { padding: 4px 2px 0; font-size: 13.5px; color: var(--green-900); }
+.zn-empty { font-size: 12.5px; color: var(--text-mut); padding: 6px 2px; line-height: 1.45; }
+.zn-zlist { display: flex; flex-direction: column; gap: 6px; }
+.zn-zitem { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 7px 11px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--card); text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.zn-zitem.on { border-color: var(--zc, var(--green-800)); box-shadow: inset 0 0 0 1px var(--zc, var(--green-800)); background: var(--card-soft); }
+.zn-zitem-m { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.zn-zitem-m b { font-size: 13.5px; }
+.zn-zitem-m em { font-style: normal; font-size: 11.5px; color: var(--text-mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zn-zitem-n { font-size: 13px; font-weight: 800; color: var(--green-900); }
+.zn-none { border-style: dashed; border-color: var(--text-faint); }
+.zn-sw { width: 13px; height: 13px; border-radius: 4px; flex: none; display: inline-block; }
+.zn-sw.dashed { background: #fff; border: 2px dashed var(--text-mut); border-radius: 50%; box-sizing: border-box; }
+.zn-sw.lg { width: 18px; height: 18px; border-radius: 6px; }
+.zn-mapcard { position: relative; padding: 0; overflow: hidden; min-height: 0; }
+.zn-map { position: absolute; inset: 0; z-index: 0; background: #F4F9F7; }
+.zn-map-err { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; align-content: center; gap: 8px; padding: 24px; text-align: center; font-size: 13px; color: var(--text-mut); background: rgba(255,255,255,.9); }
+.zn-overlay { position: absolute; left: 12px; top: 12px; right: 60px; z-index: 5; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.zn-overlay > * { pointer-events: auto; }
+.zn-search { position: relative; max-width: 340px; }
+.zn-search .dist-search { max-width: none; box-shadow: var(--shadow-md); }
+.zn-results { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); overflow: hidden; }
+.zn-results button { display: flex; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--border-soft); background: none; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.zn-results em { font-style: normal; font-size: 11px; font-weight: 800; color: var(--green-800); background: var(--mint-100); border-radius: 6px; padding: 1px 6px; }
+.zn-chip { box-shadow: var(--shadow-sm); }
+.dist-chip.zn-chip:not(.on) { background: var(--card); }
+.zn-drawbar { position: absolute; left: 12px; right: 12px; top: 12px; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: var(--green-900); color: #fff; border-radius: 12px; font-size: 12.5px; box-shadow: var(--shadow-lg); }
+.zn-drawbar > span { flex: 1 1 220px; }
+.zn-drawbar-act { display: flex; gap: 6px; flex-wrap: wrap; }
+.zn-drawbar .btn-ghost { background: rgba(255,255,255,.14); color: #fff; border-color: transparent; }
+.zn-pop { position: absolute; left: 12px; bottom: 50px; z-index: 5; width: min(340px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 9px; padding: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); box-sizing: border-box; }
+.zn-pop-h { display: flex; gap: 10px; align-items: flex-start; }
+.zn-pop-m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.zn-pop-m > div { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.zn-pop-m em { font-style: normal; font-size: 12px; color: var(--text-mut); }
+.zn-pop-bon { font-size: 12.5px; }
+.zn-pop-act { display: flex; gap: 6px; flex-wrap: wrap; }
+.zn-pop-act .btn { min-height: 38px; }
+.zn-move { display: flex; flex-direction: column; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }
+.zn-move button { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--border-soft); background: none; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.zn-move button:hover, .zn-results button:hover { background: var(--card-soft); }
+.zn-legend { position: absolute; left: 12px; bottom: 12px; z-index: 4; display: flex; gap: 12px; flex-wrap: wrap; padding: 6px 10px; background: rgba(255,255,255,.94); border: 1px solid var(--border); border-radius: 10px; font-size: 11.5px; font-weight: 600; }
+.zn-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.zn-pop ~ .zn-legend { display: none; }
+.zn-lg-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green-800); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--green-800); display: inline-block; }
+.zn-lg-dot.none { background: #fff; border: 2px dashed var(--text-mut); box-shadow: none; box-sizing: border-box; }
+.zn-lg-dot.bon { box-shadow: 0 0 0 3px var(--sand); border: 0; }
+/* Leaflet divIcons (zone label, draft vertex). */
+.zn-lbl-wrap { background: none; border: 0; }
+.zn-lbl { display: inline-block; transform: translate(-50%, -130%); padding: 3px 9px; border-radius: 99px; border: 1px solid var(--zc); background: rgba(255,255,255,.94); color: var(--zc); font: 800 11.5px/1.3 'Inter', system-ui, sans-serif; white-space: nowrap; }
+.zn-lbl.on { background: var(--zc); color: #fff; }
+.zn-vtx-wrap { background: none; border: 0; }
+.zn-vtx { display: block; width: 14px; height: 14px; margin: 4px; border-radius: 50%; background: #fff; border: 3px solid var(--zc); box-sizing: border-box; box-shadow: 0 1px 4px rgba(0,0,0,.3); cursor: grab; }
+/* Selected zone panel. */
+.zn-side-draw b { font-size: 15px; color: var(--green-900); }
+.zn-side-draw p { margin: 6px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-mut); }
+.zn-side-h { display: flex; align-items: center; gap: 8px; }
+.zn-side-h h3 { margin: 0; flex: 1; font-size: 17px; color: var(--green-900); }
+.zn-name { flex: 1; min-width: 0; font-weight: 700; }
+.zn-colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.zn-color { width: 30px; height: 30px; border-radius: 9px; border: 2px solid transparent; cursor: pointer; }
+.zn-color.on { border-color: var(--ink); box-shadow: inset 0 0 0 2px #fff; }
+.zn-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.zn-stats > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; background: var(--card-soft); border-radius: 12px; }
+.zn-stats span { font-size: 11.5px; color: var(--text-mut); }
+.zn-stats b { font-size: 17px; color: var(--green-900); }
+.zn-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.zn-day { min-height: 42px; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--card); font: inherit; font-size: 12px; font-weight: 700; color: var(--text-mut); cursor: pointer; }
+.zn-day.on { background: var(--green-800); border-color: var(--green-800); color: #fff; }
+.zn-day:disabled { cursor: default; }
+.zn-rule { line-height: 1.45; }
+.zn-mem-h { display: flex; justify-content: space-between; align-items: baseline; padding-top: 4px; font-size: 13px; }
+.zn-mem { display: flex; flex-direction: column; }
+.zn-mem-r { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 4px 2px; border: 0; border-bottom: 1px solid var(--border-soft); background: none; font: inherit; text-align: left; cursor: pointer; color: inherit; }
+.zn-mem-m { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.zn-mem-m b { font-size: 13px; }
+.zn-mem-m em { font-style: normal; font-size: 11.5px; color: var(--text-mut); }
+.zn-mem-bon { font-size: 11.5px; font-weight: 700; color: var(--warn); white-space: nowrap; }
+.zn-side-act { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
+.zn-side-act .btn-primary { flex: 1; justify-content: center; }
+/* Preview (change list) + automatic zones. */
+.zn-confirm { max-width: 760px; width: calc(100vw - 24px); }
+.zn-impact { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--card-soft); font-size: 13px; margin-top: 8px; }
+.zn-impact.warn { background: var(--warn-bg); color: #6B4A08; }
+.zn-chg { margin-top: 10px; border: 1px solid var(--border-soft); border-radius: 10px; max-height: 50vh; overflow: auto; }
+.zn-chg-h, .zn-chg-r { display: grid; grid-template-columns: 1.4fr 1.2fr 1fr 1.2fr; gap: 10px; padding: 8px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border-soft); min-width: 560px; }
+.zn-chg-h { position: sticky; top: 0; background: var(--card-soft); font-weight: 700; color: var(--text-mut); }
+.zn-chg-r .chg { font-weight: 700; color: var(--green-800); }
+.zn-chg-n em { font-style: normal; font-size: 11px; font-weight: 800; color: var(--green-800); margin-right: 6px; }
+.zn-chg-more { padding: 8px 10px; font-size: 12px; color: var(--text-mut); }
+.zn-auto { max-width: 720px; width: calc(100vw - 24px); }
+.zn-sub { font-size: 12.5px; color: var(--text-mut); margin-top: 3px; line-height: 1.45; }
+.zn-auto-ctl { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.zn-step { display: flex; align-items: center; gap: 8px; }
+.zn-step .btn { width: 44px; height: 44px; padding: 0; justify-content: center; font-size: 18px; }
+.zn-step b { min-width: 44px; text-align: center; font-size: 18px; color: var(--green-900); }
+.zn-auto-map { position: relative; z-index: 0; height: 280px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border-soft); background: #F4F9F7; }
+.zn-auto-rows { display: flex; flex-direction: column; margin-top: 10px; }
+.zn-auto-row { display: grid; grid-template-columns: 14px 1.2fr 1fr 1.2fr; align-items: center; gap: 10px; min-height: 36px; font-size: 13px; border-bottom: 1px solid var(--border-soft); }
+@media (max-width: 1024px) {
+  .zn-layout, .zn-layout.has-side { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+  .zn-mapcard { order: 1; height: 58vh; min-height: 360px; }
+  .zn-side { order: 2; overflow: visible; }
+  .zn-list { order: 3; overflow: visible; }
+  .zn-zlist { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  .zn-zlist .zn-zitem { flex: 0 0 auto; min-width: 190px; }
+  .zn-overlay { right: 56px; }
+  .zn-legend { display: none; }
+  .zn-pop { bottom: 12px; }
+  /* One scrollable row of filter chips, so they never stack over the map. */
+  .zn-overlay .dist-chips { flex-wrap: nowrap; overflow-x: auto; }
+  .zn-overlay .dist-chip { flex: none; }
+}

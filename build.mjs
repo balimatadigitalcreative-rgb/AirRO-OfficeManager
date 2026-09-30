@@ -46,6 +46,7 @@ const FILES = [
   'finance-totals.js',
   'finance-cost-class.js',
   'dist-live.js',
+  'dist-zones.js',
   'data.js',
   'finance-store.js',
   'finance-hrd.js',
@@ -70,6 +71,7 @@ const FILES = [
   'finance-setoran.jsx',
   'finance-users.jsx',
   'distribution.jsx',
+  'dist-zones.jsx',
   'gudang.jsx',
   'finance-shell.jsx',
 ];

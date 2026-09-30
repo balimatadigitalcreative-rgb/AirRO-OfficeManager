@@ -54,6 +54,9 @@ const NOT_PNR = { paymentNotReceived: { not: true } };   // query-side twin of n
 // Retroactive-price-change scopes (option b). Payments (pelunasan) are never re-priced.
 const PRICE_SCOPES = ['all', 'cycle', 'bon'];
 const { todayISO } = require('../lib/time');   // business date in the app timezone (APP_TZ), never UTC
+// CUSTOMER ZONES own the schedule of the customers inside them; every write that moves a customer's
+// point re-syncs its zone. Lazy require: zone.service requires this module back.
+const zoneSvc = () => require('./zone.service');
 function scopeWhere(scope, today) {
   if (scope === 'bon') return { method: 'bon' };
   const sales = { method: { in: ['lunas', 'bon'] } };
@@ -569,8 +572,9 @@ async function createCustomer(body, actor) {
   if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; if (body.accuracy != null && Number.isFinite(+body.accuracy)) cols.locationAccuracy = Math.max(0, Math.round(+body.accuracy)); }
   if (loc || cols.mapsUrl) { cols.locationSetAt = new Date(); cols.locationSetByName = snap.actorName; }   // location provided at creation → stamp
   cols.code = await allocateCustomerCode();
-  const c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
+  let c = await prisma.customer.create({ data: { ...cols, createdById: snap.actorId, createdByName: snap.actorName, createdByRole: snap.actorRole } });
   await logAudit('pelanggan', `Pelanggan baru: ${c.name}`, `Tipe ${c.type} · harga master ${c.masterPrice}`, snap, c.armada);
+  if (loc && (await zoneSvc().syncCustomers([c.id], actor)).length) c = await prisma.customer.findUnique({ where: { id: c.id } });
   return custClient(c);
 }
 // Edit an existing customer's editable fields (name/phone/type/deliveryDays/armada).
@@ -598,9 +602,19 @@ async function updateCustomer(id, body, actor) {
     if (loc) { data.lat = loc.lat; data.lng = loc.lng; data.locationSetAt = new Date(); data.locationSetByName = snap.actorName; data.locationAccuracy = null; }
     else if ((body.lat === null || body.lat === '') && (body.lng === null || body.lng === '')) { data.lat = null; data.lng = null; data.locationAccuracy = null; }
   }
-  const c = await prisma.customer.update({ where: { id }, data });
+  // Inside a zone that sets the schedule, armada/days belong to the zone — refuse a direct change
+  // rather than let the next zone write silently undo it. (A moved point re-syncs below instead.)
+  if (data.lat === undefined) await zoneSvc().assertScheduleEditable(cur, data);
+  let c = await prisma.customer.update({ where: { id }, data });
   await logAudit('pelanggan', `Ubah pelanggan: ${c.name}`, `Tipe ${c.type}`, snap, c.armada);
+  if (data.lat !== undefined && (await zoneSvc().syncCustomers([id], actor)).length) c = await prisma.customer.findUnique({ where: { id } });
   return custClient(c);
+}
+// A customer's point changed (set / cleared / reverted): put them in the right zone and apply its
+// schedule. Returns the row as it now is, so the caller answers with the post-zone state.
+async function afterPointChange(c, actor) {
+  const plan = await zoneSvc().syncCustomers([c.id], actor);
+  return plan.length ? prisma.customer.findUnique({ where: { id: c.id } }) : c;
 }
 // Coordinate validation: finite numbers within earth bounds (or null if invalid).
 function normLatLng(lat, lng) {
@@ -636,7 +650,7 @@ async function setCustomerLocation(id, body, actor) {
     movedM, note: String(body.note || '').slice(0, 300), actorId: snap.actorId, actorName: snap.actorName,
   } });
   await logAudit('pelanggan', `Set lokasi: ${c.name}`, `${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}${acc != null ? ' · ±' + acc + ' m' : ''}${movedM != null ? ' · geser ' + movedM + ' m dari titik lama' : ''}`, snap, c.armada);
-  return custClient(c);
+  return custClient(await afterPointChange(c, actor));
 }
 
 // REMOVE a customer's location, returning them to the "belum ada lokasi" group.
@@ -662,7 +676,7 @@ async function clearCustomerLocation(id, body, actor) {
     note: note.slice(0, 300), actorId: snap.actorId, actorName: snap.actorName,
   } });
   await logAudit('pelanggan', `Hapus lokasi: ${c.name}`, `${hasCoords(cur) ? cur.lat.toFixed(6) + ', ' + cur.lng.toFixed(6) : '(link maps)'} · alasan: ${note}`, snap, c.armada);
-  return custClient(c);
+  return custClient(await afterPointChange(c, actor));
 }
 
 // Put back the point this customer had BEFORE the last change - the way out of a bad capture without
@@ -688,7 +702,7 @@ async function revertCustomerLocation(id, actor) {
     note: 'Kembalikan titik sebelumnya', actorId: snap.actorId, actorName: snap.actorName,
   } });
   await logAudit('pelanggan', `Kembalikan lokasi: ${c.name}`, `${prev.lat.toFixed(6)}, ${prev.lng.toFixed(6)}`, snap, c.armada);
-  return custClient(c);
+  return custClient(await afterPointChange(c, actor));
 }
 
 async function listLocationHistory(id, actor) {
@@ -769,6 +783,7 @@ async function bulkClearLocations(body, actor) {
     } });
   }
   await logAudit('pelanggan', `Hapus lokasi massal: ${prev.affected.length} pelanggan`, `alasan: ${note} · ${prev.affected.map((a) => a.name).slice(0, 20).join(', ')}${prev.affected.length > 20 ? ' …' : ''}`, snap, '');
+  await zoneSvc().syncCustomers(prev.affected.map((a) => a.id), actor);   // no point → out of its zone
   return { cleared: prev.affected.length, skipped: prev.skipped };
 }
 // Attach / replace / remove a customer's LOCATION PHOTO. The photo bytes already live in the
@@ -3923,12 +3938,25 @@ async function deliveryBoard(user, date, qFleet) {
     return Array.isArray(d) && d.includes(dow) && (c.armada || '').trim();
   });
   // idempotent generation — one jadwal row per scheduled customer per day.
+  // A stop that already exists follows the customer's CURRENT armada only while it is still ahead of
+  // us: pending, and today or later. A stop already delivered, cancelled, or on a past day keeps the
+  // armada it was run on — otherwise one schedule change (a zone moving a whole area to another truck)
+  // would rewrite history the next time anyone opened an old day's board.
+  const today = todayISO();
+  const existing = scheduled.length ? await prisma.delivery.findMany({
+    where: { date, source: 'jadwal', customerId: { in: scheduled.map((c) => c.id) } },
+    select: { id: true, customerId: true, fleetId: true, status: true },
+  }) : [];
+  const have = new Map(existing.map((r) => [r.customerId, r]));
   for (const c of scheduled) {
-    await prisma.delivery.upsert({
-      where: { date_customerId_source: { date, customerId: c.id, source: 'jadwal' } },
-      update: { fleetId: c.armada || '' },
-      create: { date, customerId: c.id, source: 'jadwal', fleetId: c.armada || '', status: 'pending', seq: 0 },
-    });
+    const fleet = c.armada || '';
+    const ex = have.get(c.id);
+    if (!ex) {
+      try { await prisma.delivery.create({ data: { date, customerId: c.id, source: 'jadwal', fleetId: fleet, status: 'pending', seq: 0 } }); }
+      catch (e) { if (!(e && e.code === 'P2002')) throw e; }   // generated concurrently by another request
+    } else if (ex.fleetId !== fleet && ex.status === 'pending' && date >= today) {
+      await prisma.delivery.update({ where: { id: ex.id }, data: { fleetId: fleet } });
+    }
   }
   const rows = await resilientFindMany(prisma.delivery, {
     where: { date, ...fleetWhere(user, 'fleetId', qFleet) },
@@ -4921,6 +4949,7 @@ async function deliveryReport(user, query) {
 }
 
 module.exports = {
+  bonMapFor, afterPointChange,
   METHODS, DAY_CODES, PRICE_SCOPES, actorSnap,
   gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,

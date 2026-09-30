@@ -953,6 +953,13 @@ model Customer {
   locationPhotoAt  DateTime?                     // when the photo was taken/uploaded
   locationPhotoByName String?                    // who took it
   locationHistory CustomerLocationHistory[]
+  // ZONE membership. Normally DERIVED from the point (the first zone, in sortOrder, whose boundary
+  // contains lat/lng). zoneManual = someone placed this customer by hand (zoneId may then be null =
+  // "keep out of every zone"), so boundary edits and new coordinates no longer move them.
+  // While in a zone, the zone's armada / deliveryDays (where set) are written onto this customer.
+  zoneId        String?
+  zone          DistZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  zoneManual    Boolean  @default(false)
   active        Boolean  @default(true)         // false = deactivated (hidden from active list + new txn/delivery, history kept)
   deactivatedAt DateTime?
   deactivatedByName String?
@@ -968,6 +975,7 @@ model Customer {
   disputes     DistTransactionDispute[]
 
   @@index([type])
+  @@index([zoneId])
 }
 
 // Customer BALANCE ADJUSTMENT (penyesuaian) — a correction of the CURRENT gallons-held or outstanding
@@ -1432,6 +1440,26 @@ model GallonMovement {
 // Immutable, append-only audit trail for every distribusi write.
 // Every change to a customer's coordinates. One row per CHANGE, holding both sides of it, so a bad
 // capture is reverted by reading the previous point - never by replaying a chain.
+// CUSTOMER ZONE — an area drawn on the map (or grouped automatically) that owns the delivery schedule
+// of the customers inside it. armada '' / deliveryDays [] mean "not set by the zone": that field is
+// left as the customer has it, so a half-configured zone can never wipe anyone's schedule.
+model DistZone {
+  id            String   @id @default(cuid())
+  name          String
+  color         String   @default("#0B6FA8")
+  polygon       String   // JSON [[lat,lng], …] — validated by dist-zones.js
+  armada        String   @default("")
+  deliveryDays  String   @default("[]") // JSON day codes, e.g. ["Sen","Kam"]
+  sortOrder     Int      @default(0)    // overlap rule: the lower sortOrder owns the point
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  customers Customer[]
+
+  @@index([sortOrder])
+}
+
 model CustomerLocationHistory {
   id           String   @id @default(cuid())
   customerId   String

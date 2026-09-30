@@ -58,6 +58,7 @@ async function resetDb() {
   await prisma.distAdjustment.deleteMany();    // balance adjustments (FK → customer, RESTRICT)
   await prisma.distTransactionDispute.deleteMany();   // transaction disputes (FK → customer, RESTRICT)
   await prisma.customer.deleteMany();
+  await prisma.distZone.deleteMany();          // customer zones (customers reference them, SET NULL)
   await prisma.customerCode.deleteMany();       // customer-code counter (append-only in prod)
   await prisma.customerType.deleteMany();
   // Gudang (children before parents): stock movements → inventory items.

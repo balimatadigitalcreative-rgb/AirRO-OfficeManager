@@ -14,7 +14,7 @@ const ROLE_PERMS = {
     interUnitTransfer: true,     // owner-tier: record/void inter-unit money movements (Stage 4)
     // Distribusi — each view is its own cap (Pemilik = all).
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true, distribusiLokasiSimpan: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiZona: true, distribusiZonaKelola: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiHardDelete: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true, distribusiLokasiSimpan: true,
     // View-window (time-restriction): Pemilik sees all history + Sisa Bon.
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     'distribusi.galon.reset_total': true,   // OWNER ONLY — clean-slate reset of the whole gallon ledger
@@ -32,7 +32,7 @@ const ROLE_PERMS = {
     kasbon: true, kasbonApprove: true, manageUsers: true,
     manageBusinessUnits: true, interUnitTransfer: true,
     distribusiInput: true, distribusiKoreksi: true, distribusiCustomers: true, distribusiHargaMaster: true, distribusiAudit: true,
-    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true, distribusiLokasiSimpan: true,
+    distribusiDashboard: true, distribusiCashIntegrasi: true, distribusiGallon: true, distribusiPengiriman: true, distribusiBelumTerkirim: true, distribusiOrder: true, distribusiRute: true, distribusiZona: true, distribusiZonaKelola: true, distribusiCustomerDelete: true, distribusiGallonReset: true, distribusiLegacyImport: true, distribusiCustomerImport: true, distribusiVoid: true, distribusiExpense: true, distribusiDashHistory: true, distribusiPengirimanReport: true, distribusiBonAdjust: true, distribusiPenyesuaianGalon: true, distribusiPenyesuaianBon: true, distribusiApprove: true, distribusiLacakArmada: true, distribusiLokasiSimpan: true,
     'distribusi.lihat.semua': true, 'distribusi.lihat.sisa_bon': true, 'distribusi.lihat.hari_ini': true, 'distribusi.transaksi.hapus': true,
     gudangView: true, gudangDamage: true, gudangReport: true,
     gudangAddStock: true, gudangKoreksi: true, gudangBuffer: true, gudangItems: true, gudangSupplier: true,
@@ -235,6 +235,11 @@ function deriveDistribusiCaps(perms, role) {
   // distribusiPengiriman therefore gets FALSE here and cannot see or act on the carry-over surfaces.
   if (p.distribusiBelumTerkirim === undefined) p.distribusiBelumTerkirim = isOwnerGm;
   if (p.distribusiBonAdjust === undefined) p.distribusiBonAdjust = isOwnerGm;
+  // CUSTOMER ZONES. Seeing the zone map is a planning view (owner/GM by default; an admin can grant it
+  // to a route planner). MANAGING zones rewrites the armada + delivery days of every customer inside
+  // them — a bulk schedule change — so it is owner/GM tier and NEVER derived from a field cap.
+  if (p.distribusiZona === undefined) p.distribusiZona = isOwnerGm;
+  if (p.distribusiZonaKelola === undefined) p.distribusiZonaKelola = isOwnerGm;
   // Creating balance ADJUSTMENTS (penyesuaian). The old SINGLE cap `distribusiPenyesuaian` covered BOTH
   // gallon and bon, which forced handing helper staff the power to alter customer DEBT just to correct
   // gallon counts. It is now SPLIT per kind:
@@ -279,7 +284,7 @@ function deriveDistribusiCaps(perms, role) {
   if (p['distribusi.lihat.sisa_bon'] === undefined) p['distribusi.lihat.sisa_bon'] = true;
   p.distribusi = !!(p.distribusiInput || p.distribusiKoreksi || p.distribusiCustomers || p.distribusiHargaMaster
     || p.distribusiAudit || p.distribusiDashboard || p.distribusiCashIntegrasi || p.distribusiGallon
-    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport || p.distribusiBonAdjust || p.distribusiPenyesuaian || p.distribusiApprove);
+    || p.distribusiPengiriman || p.distribusiOrder || p.distribusiRute || p.distribusiCustomerDelete || p.distribusiGallonReset || p.distribusiLegacyImport || p.distribusiCustomerImport || p.distribusiExpense || p.distribusiPengirimanReport || p.distribusiBonAdjust || p.distribusiPenyesuaian || p.distribusiApprove || p.distribusiZona);
   return p;
 }
 

@@ -149,6 +149,18 @@ cdn.sheetjs.com or fonts.googleapis.com is blocked or down, the app still boots.
 | `react.production.min.js`, `react-dom.production.min.js` (18.3.1) | unpkg outage = app never boots |
 | `xlsx.full.min.js` (SheetJS 0.20.3) | this CDN **has already failed once**; still lazy-loaded, only when an `.xlsx` is picked |
 | `fonts.css` + `fonts/*.woff2` (Poppins, Inter — latin + latin-ext) | Google Fonts `@import` stalls the whole stylesheet if unreachable, and leaks every staff IP to Google |
+| `leaflet/` (Leaflet 1.9.4 — `leaflet.js`, `leaflet.css`, `images/`) | the Peta Zona map library; lazy-loaded only when that screen opens |
+
+**The one deliberate exception — OpenStreetMap tiles (Peta Zona only).** The street map on
+Distribusi → Peta Zona loads its tile images from `https://tile.openstreetmap.org`. The owner chose
+this knowingly (2026-09-30): customers cannot be placed into zones without streets, and self-hosting
+tiles is out of scope. Consequences to keep in mind:
+- a browser that opens Peta Zona contacts OSM's tile servers (its IP is visible to them); no other
+  screen does, and the rest of the app still boots with OSM blocked — only the map background is blank;
+- the OSM attribution (`© OpenStreetMap`) is a licence condition and must stay visible on the map;
+- OSM's tile usage policy expects light use: fine for an office screen, not for bulk pre-fetching.
+- `/vendor/` is served `immutable` for a year: upgrading Leaflet means a NEW folder (e.g. `leaflet-1.9.5/`),
+  never overwriting files in place.
 
 `integrity`/`crossorigin` attributes were dropped: they exist for cross-origin CDN
 fetches and are meaningless for same-origin files we ship ourselves.

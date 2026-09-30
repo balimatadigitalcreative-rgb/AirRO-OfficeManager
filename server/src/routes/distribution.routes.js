@@ -49,6 +49,15 @@ router.get('/positions', requireCap('distribusiLacakArmada'), ctrl.listPositions
 
 router.get('/customers/location-coverage', requireCap('distribusi'), ctrl.locationCoverage);
 
+// CUSTOMER ZONES. Seeing the map is distribusiZona; every change is distribusiZonaKelola (a zone
+// rewrites the armada + delivery days of the customers inside it). Literal paths before '/:id'.
+router.get('/zones', requireCap('distribusiZona'), ctrl.listZones);
+router.post('/zones/auto', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.zoneAutoSchema }), ctrl.autoZones);
+router.post('/zones/assign', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.zoneAssignSchema }), ctrl.assignZone);
+router.post('/zones', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.zoneCreateSchema }), ctrl.createZone);
+router.put('/zones/:id', requireCap('distribusiZonaKelola'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.zoneUpdateSchema }), ctrl.updateZone);
+router.delete('/zones/:id', requireCap('distribusiZonaKelola'), validate({ params: ctrl.schemas.idParams, query: ctrl.schemas.zoneDeleteQuery }), ctrl.deleteZone);
+
 router.get('/customers', requireCap('distribusi'), validate({ query: ctrl.schemas.custListQuery }), ctrl.listCustomers);
 router.get('/customers/:id', requireCap('distribusi'), validate({ params: ctrl.schemas.idParams }), ctrl.getCustomer);
 // NOTE: the delivery-fleet list is NOT served here — armada has a single app-wide
