@@ -99,23 +99,38 @@
     };
   }
 
+  // A storage call that does not answer in time counts as failed (some Safari builds never fire
+  // indexedDB.open's callbacks) — practice must never hang on "Memuat…".
+  function timed(p, ms) {
+    return new Promise(function (res, rej) {
+      var t = setTimeout(function () { rej(Object.assign(new Error('Penyimpanan HP tidak menjawab.'), { storageTimeout: true })); }, ms);
+      Promise.resolve(p).then(function (v) { clearTimeout(t); res(v); }, function (e) { clearTimeout(t); rej(e); });
+    });
+  }
+
   // Open practice: reuse this phone's saved copy, else copy the real data once and save it. A failed
-  // copy saves nothing and rejects (the screen shows the error + "Coba lagi").
+  // COPY saves nothing and rejects (the screen shows the error + "Coba lagi"). Phone storage that fails
+  // or does not answer → practice still opens, in memory only, flagged `persisted: false` (the screen
+  // says the practice is lost when the page closes).
   function openLatihan(opts) {
     var o = opts || {}; var SB = o.sandbox || root.FIELDSANDBOX; var planRit = o.planRit || (root.RITPLAN && root.RITPLAN.planRit);
-    return Promise.resolve(o.storage.get(o.key)).then(function (saved) {
+    var ms = o.storageTimeoutMs || 3000;
+    var store = o.storage; var persisted = true;
+    var toMemory = function () { persisted = false; store = memoryStorage(); };
+    return timed(store.get(o.key), ms).catch(function () { toMemory(); return undefined; }).then(function (saved) {
       if (saved && saved.v === SB.VERSION) return saved;
       return snapshot(o.real).then(function (snap) {
         var st = SB.fromSnapshot(snap, { key: o.key });
-        return Promise.resolve(o.storage.set(o.key, st)).then(function () { return st; });
+        return timed(store.set(o.key, st), ms).catch(function () { toMemory(); }).then(function () { return st; });
       });
     }).then(function (state) {
       var chain = Promise.resolve();   // saves happen in order, each with the latest state
       var a = SB.createSandbox(state, { planRit: planRit, onChange: function (st) {
         var copy = JSON.parse(JSON.stringify(st));
-        chain = chain.then(function () { return o.storage.set(o.key, copy); }).catch(function () {});
+        chain = chain.then(function () { return timed(store.set(o.key, copy), ms); }).catch(function () {});
       } });
-      a.reset = function () { return chain.then(function () { return o.storage.del(o.key); }); };
+      a.persisted = persisted;
+      a.reset = function () { return chain.then(function () { return timed(store.del(o.key), ms); }).catch(function () {}); };
       return a;
     });
   }

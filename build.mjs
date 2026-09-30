@@ -75,6 +75,7 @@ const FILES = [
   'finance-users.jsx',
   'distribution.jsx',
   'dist-zones.jsx',
+  'dist-field.jsx',
   'gudang.jsx',
   'finance-shell.jsx',
 ];
@@ -108,7 +109,7 @@ async function build() {
   // The stylesheets are NOT bundled (served as their own <link>s) but they ARE part of "what the app
   // looks like", so include their content in the version hash. That makes a CSS-only change bump the
   // version → the index.html ?v token below changes → browsers can't hold a stale stylesheet either.
-  const CSS_FILES = ['styles.css', 'app.css', 'finance.css', 'desktop-scale.css'];
+  const CSS_FILES = ['styles.css', 'app.css', 'finance.css', 'desktop-scale.css', 'dist-field.css'];
   const cssSrcs = [];
   for (const f of CSS_FILES) { try { cssSrcs.push(f + '\0' + await readFile(join(ROOT, f), 'utf8')); } catch { /* optional */ } }
   const version = createHash('sha256').update([...srcs.map((s) => s.file + '\0' + s.src), ...cssSrcs].join('\0')).digest('hex').slice(0, 12);

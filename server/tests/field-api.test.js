@@ -54,6 +54,19 @@ it('latihan: a failed copy stores nothing and reports the error', async () => {
   await expect(FA.openLatihan({ key: 'u2', real: REAL({ board: () => Promise.reject(Object.assign(new Error('offline'), { offline: true })) }), storage, sandbox: SB })).rejects.toMatchObject({ offline: true });
   expect(await storage.get('u2')).toBeUndefined();
 });
+it('latihan: phone storage that never answers (seen on some Safari builds) → practice still opens, in memory, flagged not persisted', async () => {
+  const hung = { get: () => new Promise(() => {}), set: () => new Promise(() => {}), del: () => new Promise(() => {}) };
+  const a = await FA.openLatihan({ key: 'u4', real: REAL(), storage: hung, sandbox: SB, storageTimeoutMs: 20 });
+  expect(a.persisted).toBe(false);
+  expect((await a.board())[0].id).toBe('s1');
+  await a.holdStop('s1', 'tutup');
+  expect((await a.board())[0].status).toBe('ditunda');
+});
+it('latihan: storage that throws → same fallback; working storage → persisted', async () => {
+  const broken = { get: () => Promise.reject(new Error('QuotaExceeded')), set: () => Promise.reject(new Error('x')), del: () => Promise.resolve() };
+  expect((await FA.openLatihan({ key: 'u5', real: REAL(), storage: broken, sandbox: SB })).persisted).toBe(false);
+  expect((await FA.openLatihan({ key: 'u6', real: REAL(), storage: FA.memoryStorage(), sandbox: SB })).persisted).toBe(true);
+});
 it('latihan: a driver without correction rights (403 on "Koreksi saya") still gets a practice copy', async () => {
   const storage = FA.memoryStorage();
   const denied = () => Promise.reject(Object.assign(new Error('Forbidden'), { status: 403 }));
