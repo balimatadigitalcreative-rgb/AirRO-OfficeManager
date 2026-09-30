@@ -4256,7 +4256,11 @@ async function markDelivery(id, body, actor) {
   const d = await prisma.delivery.findUnique({ where: { id }, include: { customer: true } });
   if (!d) throw ApiError.notFound('Delivery not found');
   if (!fleetAllows(actor, d.fleetId)) throw ApiError.forbidden('Pengiriman di luar akses Anda.');
-  const status = ['pending', 'terkirim', 'batal'].includes(body.status) ? body.status : d.status;
+  const status = ['pending', 'terkirim', 'batal', 'ditunda'].includes(body.status) ? body.status : d.status;
+  // TUNDA / BATAL from the board carry a reason (pendingReason — the same column the day-closeout writes).
+  const reason = String(body.reason || '').trim().slice(0, 300);
+  if (status === 'ditunda' && !reason) throw ApiError.badRequest('Alasan tunda wajib diisi.', { code: 'REASON_REQUIRED' });
+  if (status === 'batal' && !reason && (await require('./fieldRules.service').getRules()).wajibAlasanBatal) throw ApiError.badRequest('Alasan batal wajib diisi.', { code: 'REASON_REQUIRED' });
   // POSITION REQUIRED TO COMPLETE - opt-in (setting `wajibPosisiSelesai`), because turning it on
   // changes how every stop is closed and that is a business decision, not a deploy side-effect.
   //
@@ -4275,8 +4279,14 @@ async function markDelivery(id, body, actor) {
     }
   }
   const data = { status };
+  if (status === 'ditunda' || status === 'batal') data.pendingReason = reason;
+  else if (status === 'pending') data.pendingReason = '';
   if (body.transactionId) data.transactionId = String(body.transactionId);
   const row = await prisma.delivery.update({ where: { id }, data, include: { customer: true } });
+  if ((status === 'ditunda' || status === 'batal') && status !== d.status) {
+    const snap = await actorSnap(actor);
+    await logAudit('pengiriman', `${status === 'ditunda' ? 'Tunda' : 'Batal'}: ${row.customer ? row.customer.name : ''}`, reason ? 'alasan: ' + reason : 'tanpa alasan', snap, row.fleetId);
+  }
   if (status === 'terkirim' && noLocReason) {
     // Logged whenever it is given, whether or not the setting made it mandatory: a stop closed without
     // a position is exactly the thing somebody will want to look up later.

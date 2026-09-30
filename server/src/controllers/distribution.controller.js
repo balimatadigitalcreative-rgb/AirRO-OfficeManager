@@ -204,7 +204,7 @@ const boardQuery = z.object({ date: DATE, fleet: z.string().max(60).optional() }
 const orderSchema = z.object({ customerId: z.string().min(1), date: DATE, qty: z.number().int().nonnegative().optional(), note: z.string().max(300).optional() });
 // `noLocationReason` is the override for completing a stop with no usable fix. It is never defaulted
 // and never inferred - if it is absent, the driver had a position or the requirement is off.
-const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal']), transactionId: z.string().min(1).optional(), noLocationReason: z.string().max(300).optional() });
+const markSchema = z.object({ status: z.enum(['pending', 'terkirim', 'batal', 'ditunda']), transactionId: z.string().min(1).optional(), noLocationReason: z.string().max(300).optional(), reason: z.string().max(300).optional() });
 // A position from the driver's phone. There is deliberately no fleetId field: attribution comes from
 // the session, so a crafted body cannot file a position under somebody else's armada.
 const positionSchema = z.object({
