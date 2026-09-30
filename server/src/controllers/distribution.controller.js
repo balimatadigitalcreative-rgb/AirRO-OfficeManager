@@ -389,6 +389,8 @@ const previewCorrection = asyncHandler(async (req, res) => { res.json({ data: aw
 const previewReassign = asyncHandler(async (req, res) => { res.json({ data: await service.previewReassign(req.body, req.user) }); });
 const requestReassign = asyncHandler(async (req, res) => { const r = await service.requestReassign(req.body, req.user); bcast('changereq', r.id); res.status(201).json({ data: r }); });
 const listChangeRequests = asyncHandler(async (req, res) => res.json(await service.listChangeRequests(req.user, req.query)));
+const listMyChangeRequests = asyncHandler(async (req, res) => res.json(await service.listMyChangeRequests(req.user)));
+const withdrawChangeRequest = asyncHandler(async (req, res) => { const r = await service.withdrawChangeRequest(req.params.id, req.user); bcast('change-request', req.params.id); res.json({ data: r }); });
 const approveChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'approve', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
 const rejectChangeRequest = asyncHandler(async (req, res) => { const r = await service.decideChangeRequest(req.params.id, 'reject', req.body, req.user); bcast('changereq', req.params.id); res.json({ data: r }); });
 const setTransactionArchive = asyncHandler(async (req, res) => { const t = await service.setTransactionArchive(req.params.id, req.body.legacy, req.body, req.user); bcast('archive', req.params.id); res.json({ data: t }); });
@@ -551,7 +553,7 @@ module.exports = {
   recordPosition, listPositions, listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, clearLocation, revertLocation, locationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, gallonDamageCharge, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
   listTypes, createType, updateType, deleteType,
-  listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, previewReassign, requestReassign, listChangeRequests, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
+  listTransactions, createTransaction, requestCorrection, previewCorrection, requestVoid, previewReassign, requestReassign, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, approveChangeRequest, rejectChangeRequest, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkTxn, bulkTxnRestore, listAudit, dashboardSummary,
   gallonSummary, gallonCorrection, setOpeningStock, resetGallon, gallonMovementImpact, gallonMovementVoid, gallonMovementRestore, gallonMovementDelete, openingResetImpact, openingReset, stockOpname, opnameHistory, gallonIntegrity, gallonIntegrityRepair, resetTotalPreview, resetTotalCommit, resetTotalRestore, openingRowsList, openingRowsBulkPreview, openingRowsBulk, openingRowsRestore, createInvoice, listInvoices, getInvoice, invoiceLink, invoiceRevoke, invoiceDispatch, invoiceDispatches, billingReminders, cashIntegration,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, deliveryRoute, pinDelivery, closeDay, listCloseouts, outstandingDeliveries, resolveOutstanding,
   bulkCarryPreview, bulkCarry, bulkResolveOutstanding, undoBulkCarry,
