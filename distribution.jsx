@@ -6236,6 +6236,20 @@ function RunPanel({ date, ef, fleetScope, fleet, distFleet, canKoreksi, refreshK
 // Fetches the server's outstanding list (the ONE rule lives there; the UI never re-derives it) and adds a
 // MULTI-SELECT to move several stops into today at once — mirrors the Transaksi bulk pattern. Renders
 // NOTHING while loading or when empty. All bulk work is server-side (preview → confirm → undo).
+// A refreshKey that follows `key` but changes at most once per LIVE_WAIT_MS: a burst of realtime
+// events (a write, its SSE echo, the caller's own onChanged bump, a focus resync) becomes ONE reload.
+// Coalesced, not debounced — a steady stream of events can never postpone the update indefinitely.
+const LIVE_WAIT_MS = 1200;
+function useLiveKey(key) {
+  const [live, setLive] = uSx(key);
+  const want = React.useRef(key);
+  const co = React.useRef(null);
+  if (!co.current) co.current = window.DISTLIVE.createCoalescer(() => setLive(want.current), LIVE_WAIT_MS);
+  uEx(() => { want.current = key; co.current.trigger(); }, [key]);
+  uEx(() => () => co.current.cancel(), []);
+  return live;
+}
+
 function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   const [res, setRes] = uSx(null);
   const [busy, setBusy] = uSx('');           // single-row id in flight
@@ -6249,9 +6263,19 @@ function OutstandingSection({ ef, today, refreshKey, onResolved }) {
   const [bulkBusy, setBulkBusy] = uSx(false);
   const [undoT, setUndoT] = uSx(null);       // { msg, payload } — 15s undo toast
   const undoTimer = React.useRef(null);
-  const load = () => window.API.distribusi.deliveries.outstanding({ fleet: ef, asOf: today })
-    .then((r) => setRes(r)).catch(() => setRes({ data: [], count: 0, oldest: 0 }));
-  uEx(() => { setRes(null); setSel({}); setQ(''); if (window.API && window.API.distribusi) load(); }, [ef, today, refreshKey]);
+  const latest = React.useRef(window.DISTLIVE.createLatest());
+  // Refreshes IN PLACE: a realtime bump must not unmount the section (it returns null while `res` is
+  // null) — that collapsed the page, jumped the scroll, and threw away the driver's ticks and search.
+  const load = () => {
+    const t = latest.current.next();
+    return window.API.distribusi.deliveries.outstanding({ fleet: ef, asOf: today })
+      .then((r) => { if (latest.current.isCurrent(t)) setRes(r); })
+      .catch(() => { if (latest.current.isCurrent(t)) setRes((prev) => prev || { data: [], count: 0, oldest: 0 }); });
+  };
+  // A different armada/day is a different list: start clean. Same list, newer data: reload silently.
+  uEx(() => { setRes(null); setSel({}); setQ(''); if (window.API && window.API.distribusi) load(); }, [ef, today]);
+  const liveMounted = React.useRef(false);
+  uEx(() => { if (!liveMounted.current) { liveMounted.current = true; return; } if (window.API && window.API.distribusi) load(); }, [refreshKey]);
   uEx(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
   if (!res || !res.count) return null;
 
@@ -6696,19 +6720,41 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   const [legs, setLegs] = uSx({});               // deliveryId -> { legKm, cumKm, order }
   const [noLocIds, setNoLocIds] = uSx([]);       // trailing "belum ada lokasi" group
   const ef = effFleet(fleetScope, distFleet);
+  // REFRESH IN PLACE. refreshKey bumps on every distribusi write by anyone, on tab focus and on SSE
+  // reconnect — several times a minute on a busy day. Blanking the board for each one made the list
+  // flash "Memuat…", jump, and lose a route-sorted order. So: a burst of bumps becomes ONE reload
+  // (liveKey), the loading state is reserved for a different day/armada, and a late response from an
+  // older request is dropped.
+  const liveKey = useLiveKey(refreshKey);
+  const latest = React.useRef(window.DISTLIVE.createLatest());
+  const routeIds = React.useRef(null);   // display order to keep while a proximity route is shown
   const reload = () => {
     if (!(window.API && window.API.distribusi)) return;
+    const t = latest.current.next();
     // The board carries the day's closeout state for the fleets in scope (no separate admin
     // /closeouts call — that one is distribusiDashboard-gated and would 403 for a helper).
     window.API.distribusi.deliveries.board(date, ef)
-      .then((r) => { setBoard(r.data || []); setCloseouts(r.closeouts || []); })
-      // On failure fall back to an EMPTY board, never null: `board === null` means "still loading" and
-      // would hide "Selesai Kerja Hari Ini". A secondary failure must never hide the primary action.
-      .catch(() => { setBoard([]); setCloseouts([]); });
-    // Customers only feed the "add order" picker — a 403 here must not affect the board or closeout.
-    window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => setCusts([]));
+      .then((r) => {
+        if (!latest.current.isCurrent(t)) return;
+        setBoard(window.DISTLIVE.orderByIds(r.data || [], routeIds.current));
+        setCloseouts(r.closeouts || []);
+      })
+      // On failure keep what is on screen; with nothing yet, fall back to an EMPTY board, never null:
+      // `board === null` means "still loading" and would hide "Selesai Kerja Hari Ini". A secondary
+      // failure must never hide the primary action.
+      .catch(() => { if (latest.current.isCurrent(t)) setBoard((prev) => prev || []); });
   };
-  uEx(() => { setBoard(null); reload(); }, [refreshKey, ef, date]);
+  // Customers only feed the "add order" picker — fetched per armada, not on every realtime event (the
+  // full list is the heaviest call on this screen), and refreshed when the picker opens. A 403 here
+  // must not affect the board or closeout.
+  const loadCusts = () => { if (window.API && window.API.distribusi) window.API.distribusi.customers.list(ef).then((r) => setCusts(r.data || [])).catch(() => setCusts([])); };
+  uEx(() => { loadCusts(); }, [ef]);
+  uEx(() => { if (orderOpen) loadCusts(); }, [orderOpen]);
+  // A different board: show loading, and drop a route computed for the other day/armada.
+  uEx(() => { setBoard(null); routeIds.current = null; setRouteOn(false); setLegs({}); setNoLocIds([]); setRouteMeta(null); reload(); }, [ef, date]);
+  // Same board, newer data: reload silently (skip the mount — the effect above already loaded).
+  const liveMounted = React.useRef(false);
+  uEx(() => { if (liveMounted.current) reload(); else liveMounted.current = true; }, [liveKey]);
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   // Whether THIS session currently has a usable fix, reported up by DriverWatch.
   const [posState, setPosState] = uSx({ granted: false, at: 0 });
@@ -6749,7 +6795,9 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
     // the full permutation matters: persistOrder writes every id, so the tail must travel with it.
     const byId = {}; (board || []).forEach((x) => { byId[x.id] = x; });
     const next = (r.data || []).map((x) => byId[x.id]).filter(Boolean).concat((r.unlocated || []).map((x) => byId[x.id]).filter(Boolean));
-    if (next.length) setBoard(next);
+    // Keep this order through background reloads — the server still returns the SAVED seq until
+    // [Simpan urutan], and re-sorting to it under the driver was the "list changes back" bug.
+    if (next.length) { routeIds.current = next.map((x) => x.id); setBoard(next); }
   };
   const fetchRoute = (strategy, coords) => {
     setRouteBusy(true);
@@ -6765,7 +6813,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   };
-  const clearRoute = () => { setRouteOn(false); setLegs({}); setNoLocIds([]); setRouteMeta(null); reload(); };
+  const clearRoute = () => { routeIds.current = null; setRouteOn(false); setLegs({}); setNoLocIds([]); setRouteMeta(null); reload(); };
   const saveRoute = () => persistOrder(board || [], 'proximity').then(() => flash(trD('dist.routeSaved')));
   // "Urutan tetap" - a fixed time window this stop must keep; proximity reorders around it.
   const togglePin = (s) => window.API.distribusi.deliveries.pin(s.id, !s.pinned)
@@ -6776,6 +6824,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
     const next = (board || []).slice();
     if (to >= next.length) return;
     const [it] = next.splice(from, 1); next.splice(to, 0, it);
+    if (routeIds.current) routeIds.current = next.map((x) => x.id);   // a manual nudge on a route-sorted list sticks too
     setBoard(next); persistOrder(next);
   };
   const bar = <FleetBar fleetScope={fleetScope} fleet={fleet} value={distFleet} onChange={setDistFleet} />;
@@ -6818,8 +6867,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       <GpsPanel canGps={canGps} canGpsMap={canGpsMap} onFlash={flash} />
       {/* Carry-over — a BACK-OFFICE surface (distribusiBelumTerkirim); hidden entirely for field staff who
           hold only distribusiPengiriman. Renders nothing when empty, so the screen stays clean either way. */}
-      {canBelumTerkirim && <OutstandingSection ef={ef} today={today} refreshKey={refreshKey} onResolved={() => { reload(); if (onChanged) onChanged(); }} />}
-      <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={refreshKey} onChanged={reload} />
+      {canBelumTerkirim && <OutstandingSection ef={ef} today={today} refreshKey={liveKey} onResolved={() => { reload(); if (onChanged) onChanged(); }} />}
+      <RunPanel date={date} ef={ef} fleetScope={fleetScope} fleet={fleet} distFleet={distFleet} canKoreksi={canKoreksi} refreshKey={liveKey} onChanged={reload} />
       {closeouts.map((c) => (
         <div key={c.id} className="card dist-closed-banner">
           <span className="dist-closed-ic"><IconCheck s={17} /></span>

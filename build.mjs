@@ -45,6 +45,7 @@ const FILES = [
   'finance-entry-source.js',
   'finance-totals.js',
   'finance-cost-class.js',
+  'dist-live.js',
   'data.js',
   'finance-store.js',
   'finance-hrd.js',
