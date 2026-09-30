@@ -60,3 +60,13 @@ it('matches the delivery report cash (tunai − expense)', async () => {
   expect(f.cash.net).toBe((await summary()).wajibSetor);
   expect(f.cash.transfer).toBe(20000);
 });
+
+it('a today-only driver asking for an old day gets TODAY (clamped), never the old day\'s cash', async () => {
+  const u = (await request(app).post('/api/v1/auth/register').send({ name: 'Sopir', username: 'ds_driver', password: 'secret123', role: 'finance' })).body;
+  await prisma.user.update({ where: { id: u.user.id }, data: { permissions: JSON.stringify({ distribusi: true, distribusiPengiriman: true }) } });
+  const tok = (await request(app).post('/api/v1/auth/login').send({ username: 'ds_driver', password: 'secret123' })).body.token;
+  const r = await request(app).get(`${D}/deliveries/day-summary?date=2026-01-15&fleet=DK%201`).set(auth(tok));
+  expect(r.status).toBe(200);
+  expect(r.body.data.date).toBe(today);
+  expect(r.body.data.clamped).toBe(true);
+});

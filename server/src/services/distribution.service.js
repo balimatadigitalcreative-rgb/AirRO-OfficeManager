@@ -5193,12 +5193,16 @@ async function deliveryReport(user, query) {
 // two can never disagree: wajibSetor === deliveryReport fleet.cash.net for the same day + armada.
 async function daySummary(user, query) {
   const q = query || {};
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(q.date || '')) ? q.date : todayISO();
+  const asked = /^\d{4}-\d{2}-\d{2}$/.test(String(q.date || '')) ? q.date : todayISO();
   const fleetId = resolveWriteFleet(user, q.fleet);
   if (!fleetId) throw ApiError.badRequest('Pilih armada.');
+  // The caller's READ window applies (a today-only driver never reads an older day's cash) — the same
+  // server-side clamp deliveryReport uses; a clamped request answers for the nearest allowed day.
+  const cw = await windowFor(user, asked, asked, 'GET /distribusi/deliveries/day-summary', fleetId);
+  const date = cw.clamped ? cw.to : asked;
   const where = { fleetId };
   const txns = await prisma.distTransaction.findMany({ where: { ...where, txnDate: date, ...LIVE_TXN }, include: { corrections: { select: { kind: true, deltaAmount: true, active: true } } } });
-  const out = { date, fleetId, tunaiPenjualan: 0, tunaiPelunasan: 0, tunaiGantiRugi: 0, transfer: 0, bonBaru: 0, pengeluaran: 0, wajibSetor: 0,
+  const out = { date, fleetId, clamped: !!cw.clamped, tunaiPenjualan: 0, tunaiPelunasan: 0, tunaiGantiRugi: 0, transfer: 0, bonBaru: 0, pengeluaran: 0, wajibSetor: 0,
     galon: { keluar: 0, kembali: 0, rusak: 0 }, stops: { terkirim: 0, ditunda: 0, batal: 0, pending: 0 }, koreksiMenunggu: 0, ritDiBawahSop: [] };
   txns.forEach((t) => {
     const eff = Number(t.amount) + Number(priceDelta(t.corrections));
