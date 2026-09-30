@@ -55,6 +55,7 @@ const FILES = [
   'company-store.js',
   'app-config.js',
   'api.js',
+  'dist-field-api.js',
   'cloud.js',
   'icons.jsx',
   'charts.jsx',
