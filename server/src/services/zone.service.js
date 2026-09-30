@@ -317,25 +317,87 @@ async function autoDaily(body, actor) {
   const custs = await prisma.customer.findMany({ where: { active: { not: false } }, select: CUST_SELECT });
   const keptOut = (c) => keepManual && c.zoneManual && !c.zoneId;   // placed OUT of every zone by hand
   const pool = custs.filter(hasCoords).filter((c) => !keptOut(c));
-  const groups = DZ.capacitatedGroups(pool.map((c) => ({ id: c.id, lat: c.lat, lng: c.lng })), max);
+  const regular = pool.filter((c) => !c.fixedDays);
+  const fixed = pool.filter((c) => c.fixedDays);
+  if (!regular.length) throw ApiError.badRequest('Belum ada pelanggan biasa bertitik untuk dibagi ke rute harian.');
+  const pt = (c) => ({ id: c.id, lat: c.lat, lng: c.lng });
+  // 1. Territories from regular customers (as before).
+  const groups = DZ.capacitatedGroups(regular.map(pt), max);
   const fit = DZ.assignSlots(groups, armadas, DAILY_DAYS);
   if (!fit.ok) {
-    throw ApiError.badRequest(`Kapasitas kurang: ${pool.length} pelanggan butuh ${fit.needed} rute harian (maks ${max} per hari), `
+    throw ApiError.badRequest(`Kapasitas kurang: ${regular.length} pelanggan biasa butuh ${fit.needed} rute harian (maks ${max} per hari), `
       + `tapi ${armadas.length} armada × ${DAILY_DAYS.length} hari = ${fit.available} rute. Naikkan maksimal per hari atau tambah armada.`);
   }
-  const drafts = groups.map((g, i) => {
-    const s = fit.slots[i];
+  const keyOf = (a, d) => a + '|' + d;
+  const routeCenters = groups.map((g, i) => ({ armada: fit.slots[i].armada, center: g.center }));
+  const near = (c, list) => list.reduce((b, r) => { const dd = (r.center[0] - c.lat) ** 2 + (r.center[1] - c.lng) ** 2; return !b || dd < b.dd ? { r, dd } : b; }, null).r;
+  // 2. Each fixed customer: the armada of its nearest route. 3. Its visits per (armada, day).
+  const fixedArmada = new Map(fixed.map((c) => [c.id, near(c, routeCenters).armada]));
+  const visits = {}, visitNames = {};
+  let sundayVisits = 0;
+  fixed.forEach((c) => parseDays(c.deliveryDays).forEach((d) => {
+    if (!DAILY_DAYS.includes(d)) { if (d === 'Min') sundayVisits++; return; }
+    const k = keyOf(fixedArmada.get(c.id), d);
+    visits[k] = (visits[k] || 0) + 1;
+    (visitNames[k] = visitNames[k] || []).push(c.name);
+  }));
+  // 4. Quota left per slot; fixed visits alone over the maximum → refuse, naming who.
+  const over = Object.keys(visits).filter((k) => visits[k] > max);
+  if (over.length) {
+    const lines = over.map((k) => { const [a, d] = k.split('|'); return `${DAY_NAME[d]} · ${a}: ${visits[k]} kunjungan hari tetap (${visitNames[k].slice(0, 5).join(', ')}${visitNames[k].length > 5 ? ', …' : ''})`; });
+    throw ApiError.badRequest(`Hari penuh oleh pelanggan hari tetap (maks ${max} per hari): ${lines.join('; ')}. Naikkan maksimal per hari, tambah armada, atau ubah hari tetap pelanggan tersebut.`);
+  }
+  // 5-6. Fit regular customers into what is left.
+  const armadaCentre = (a) => {
+    const mine = routeCenters.filter((r) => r.armada === a);
+    const list = mine.length ? mine : routeCenters;
+    return [list.reduce((s, r) => s + r.center[0], 0) / list.length, list.reduce((s, r) => s + r.center[1], 0) / list.length];
+  };
+  const slotList = [];
+  armadas.forEach((a) => DAILY_DAYS.forEach((d) => {
+    const gi = fit.slots.findIndex((s) => s.armada === a && s.day === d);
+    slotList.push({ key: keyOf(a, d), armada: a, day: d, cap: max - (visits[keyOf(a, d)] || 0), ids: gi >= 0 ? groups[gi].ids.slice() : [], center: gi >= 0 ? groups[gi].center : armadaCentre(a) });
+  }));
+  const fitted = DZ.fitFixedLoad(regular.map(pt), slotList);
+  if (!fitted.ok) {
+    const totalVisits = Object.values(visits).reduce((s, v) => s + v, 0);
+    throw ApiError.badRequest(`Kapasitas kurang: ${regular.length} pelanggan biasa, tapi setelah ${totalVisits} kunjungan hari tetap hanya tersisa ${fitted.available} tempat `
+      + `(${armadas.length} armada × ${DAILY_DAYS.length} hari × maks ${max}). Naikkan maksimal per hari atau tambah armada.`);
+  }
+  const bySlot = new Map(fitted.slots.map((s) => [s.key, s]));
+  // 7. A zone per slot that has regular members.
+  let drafts = slotList.filter((s) => bySlot.get(s.key).ids.length).map((s, i) => {
+    const f = bySlot.get(s.key);
     return {
-      id: '__day_' + i, name: `${DAY_NAME[s.day]} · ${s.armada}`, color: DZ.colorAt(i), polygon: g.polygon,
-      armada: s.armada, deliveryDays: [s.day], day: s.day, ids: g.ids,
+      id: '__day_' + i, key: s.key, name: `${DAY_NAME[s.day]} · ${s.armada}`, color: DZ.colorAt(i), polygon: f.polygon,
+      armada: s.armada, deliveryDays: [s.day], day: s.day, ids: f.ids, fixed: visits[s.key] || 0,
       sortOrder: armadas.indexOf(s.armada) * 7 + DAILY_DAYS.indexOf(s.day) + 1,
     };
-  }).sort((a, b) => a.sortOrder - b.sortOrder);
-  // Who needs locking: their point's outline (overlap rule) is not the route they were counted in.
+  });
+  // An armada that serves fixed customers but ended with no zone gets one from those customers'
+  // points, on its slot with the most room — otherwise nothing would give them that armada.
+  armadas.forEach((a) => {
+    if (drafts.some((d) => d.armada === a)) return;
+    const mine = fixed.filter((c) => fixedArmada.get(c.id) === a);
+    if (!mine.length) return;
+    const s = slotList.filter((x) => x.armada === a).sort((p, q) => q.cap - p.cap)[0];
+    const g = DZ.autoZones(mine.map(pt), 1)[0];
+    drafts.push({ id: '__day_fx_' + a, key: s.key, name: `${DAY_NAME[s.day]} · ${a}`, color: DZ.colorAt(drafts.length), polygon: g.polygon, armada: a, deliveryDays: [s.day], day: s.day, ids: [], fixed: visits[s.key] || 0, sortOrder: armadas.indexOf(a) * 7 + DAILY_DAYS.indexOf(s.day) + 1 });
+  });
+  drafts = drafts.sort((a, b) => a.sortOrder - b.sortOrder);
+  // Membership: regular customers locked where their outline disagrees with their route (as before);
+  // 8. every fixed customer locked to a zone of ITS armada (the one containing it, else the nearest).
   const planZones = drafts.map(planZone);
   const assigned = new Map();
   drafts.forEach((d) => d.ids.forEach((id) => assigned.set(id, d.id)));
-  const locked = new Set(pool.filter((c) => DZ.zoneFor(c.lat, c.lng, planZones) !== assigned.get(c.id)).map((c) => c.id));
+  const locked = new Set(regular.filter((c) => DZ.zoneFor(c.lat, c.lng, planZones) !== assigned.get(c.id)).map((c) => c.id));
+  fixed.forEach((c) => {
+    const own = drafts.filter((d) => d.armada === fixedArmada.get(c.id));
+    const inside = DZ.zoneFor(c.lat, c.lng, own.map(planZone));
+    const home = inside || near(c, own.map((d) => ({ id: d.id, center: [d.polygon.reduce((s, p) => s + p[0], 0) / d.polygon.length, d.polygon.reduce((s, p) => s + p[1], 0) / d.polygon.length] }))).id;
+    assigned.set(c.id, home);
+    locked.add(c.id);
+  });
   const existing = await loadZones();
   const gone = new Set(existing.map((z) => z.id));
   const override = (c) => {
@@ -345,12 +407,17 @@ async function autoDaily(body, actor) {
   };
   const summary = {
     mode: 'daily', replaces: existing.length, withoutCoords: custs.filter((c) => !hasCoords(c)).length,
-    capacity: { max, needed: fit.slots.length, available: armadas.length * DAILY_DAYS.length }, locked: locked.size,
+    capacity: { max, needed: drafts.length, available: armadas.length * DAILY_DAYS.length }, locked: locked.size - fixed.length,
+    fixedCustomers: fixed.length, sundayVisits,
   };
+  // Preview rows: every zone, plus any slot that only has fixed-day visits.
+  const previewGroups = () => drafts.map((d) => ({ name: d.name, color: d.color, polygon: d.polygon, armada: d.armada, day: d.day, count: d.ids.length, fixed: d.fixed, max }))
+    .concat(slotList.filter((s) => visits[s.key] && !drafts.some((d) => d.key === s.key))
+      .map((s) => ({ name: `${DAY_NAME[s.day]} · ${s.armada}`, color: '#93A6AE', polygon: null, armada: s.armada, day: s.day, count: 0, fixed: visits[s.key], max })));
   if (body.dryRun) {
     const plan = await planFor(prisma, drafts, {}, override);
     return Object.assign(summary, {
-      groups: drafts.map((d) => ({ name: d.name, color: d.color, polygon: d.polygon, armada: d.armada, day: d.day, count: d.ids.length, max })),
+      groups: previewGroups(),
       applied: 0, changes: describe(plan, drafts),
     });
   }
@@ -361,8 +428,9 @@ async function autoDaily(body, actor) {
     await tx.distZone.deleteMany({});
     for (const d of drafts) {
       const z = await tx.distZone.create({ data: { name: d.name, color: d.color, polygon: JSON.stringify(d.polygon), armada: d.armada, deliveryDays: JSON.stringify(d.deliveryDays), sortOrder: d.sortOrder, createdByName: snap.actorName } });
-      const lock = d.ids.filter((id) => locked.has(id));
-      const free = d.ids.filter((id) => !locked.has(id));
+      const mineAll = [...assigned.entries()].filter(([, zid]) => zid === d.id).map(([cid]) => cid);
+      const lock = mineAll.filter((id) => locked.has(id));
+      const free = mineAll.filter((id) => !locked.has(id));
       if (lock.length) await tx.customer.updateMany({ where: { id: { in: lock } }, data: { zoneManual: true, zoneId: z.id } });
       if (free.length) await tx.customer.updateMany({ where: { id: { in: free } }, data: { zoneManual: false } });
     }
@@ -373,7 +441,7 @@ async function autoDaily(body, actor) {
   }, TX);
   await dist().logDistAudit('pelanggan', `Zona per hari: ${drafts.length} rute (maks ${max}/hari)`,
     `${existing.length ? 'mengganti ' + existing.length + ' zona lama · ' : ''}armada ${armadas.join(', ')} · ${res.plan.length} pelanggan ikut jadwal zona${locked.size ? ' · ' + locked.size + ' dikunci di rutenya' : ''}`, actor, '');
-  return Object.assign(summary, { zones: res.all, applied: res.plan.length, changes: describe(res.plan, res.all) });
+  return Object.assign(summary, { zones: res.all, groups: previewGroups(), applied: res.plan.length, changes: describe(res.plan, res.all) });
 }
 
 // ── Hooks for the rest of distribusi ─────────────────────────────────────────

@@ -295,6 +295,13 @@ describe('fitFixedLoad — regular customers into the room left after fixed-day 
       .toEqual({ ok: false, needed: 4, available: 2 });
   });
 
+  it('never opens an extra route when no route is over its quota', () => {
+    // B is empty but its home sits right on customer 3: tidying up must not start a new day for it.
+    const r = DZ.fitFixedLoad([P(1, -8.60, 115.20), P(2, -8.60, 115.201), P(3, -8.60, 115.23)],
+      [{ key: 'A', cap: 5, ids: [1, 2, 3], center: [-8.60, 115.20] }, { key: 'B', cap: 5, ids: [], center: [-8.60, 115.23] }]);
+    expect(r.slots.find((s) => s.key === 'B').ids).toEqual([]);
+  });
+
   it('a slot with quota 0 is emptied', () => {
     const r = DZ.fitFixedLoad(pts, [{ key: 'A', cap: 0, ids: [1, 2], center: [-8.6, 115.2] }, { key: 'B', cap: 9, ids: [3, 4], center: [-8.6, 115.23] }]);
     expect(r.slots.find((s) => s.key === 'A').ids).toEqual([]);

@@ -319,14 +319,17 @@
       if (!best) break;
       asg[best.id] = best.to;
     }
-    // 2) Unstretch within the quotas.
+    // 2) Unstretch within the quotas — between routes that already run. Tidying never opens a new
+    //    route: an empty slot is only ever filled by an overload in step 1, so the number of routes
+    //    stays what the customers need, not one per nearby empty day.
     var EPS = 1e-14;
     for (var pass = 0; pass < 200; pass++) {
       var C2 = S.map(function (_, si) { return centerOf(si); }), L2 = load(), moved = false;
       order.forEach(function (id) {
         var a = asg[id], p = xy(byId[id]);
         for (var b = 0; b < S.length; b++) {
-          if (b === a || L2[b] >= S[b].cap) continue;
+          if (b === a || L2[b] >= S[b].cap || L2[b] === 0) continue;
+          if (L2[a] === 1) continue;   // moving the last customer out would just relocate the route
           if (d2(p, C2[b]) < d2(p, C2[a]) - EPS) { L2[a]--; L2[b]++; asg[id] = b; a = b; moved = true; }
         }
       });

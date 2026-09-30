@@ -115,3 +115,63 @@ describe('the delivery board shows a fixed customer on each of its days', () => 
     }
   });
 });
+
+describe('the daily planner counts fixed-day visits', () => {
+  // Fresh world: 10 regular customers in one neighbourhood + 2 hotels there on Sen/Rab/Jum.
+  const P = (i) => ({ lat: -8.650 + (i % 5) * 0.001, lng: 115.220 + Math.floor(i / 5) * 0.001 });
+  let hotels;
+  beforeAll(async () => {
+    // Delivery rows from the board test reference customers: start from a clean database.
+    await resetDb();
+    gm = (await reg({ name: 'Boss', username: 'gm_fixed_plan', password: 'secret123', role: 'gm' })).token;
+    for (let i = 0; i < 10; i++) await mk('Biasa ' + i, P(i));
+    hotels = [(await mk('Hotel X', Object.assign({ fixedDays: true, deliveryDays: ['Sen', 'Rab', 'Jum'] }, P(2)))).data.id,
+      (await mk('Hotel Y', Object.assign({ fixedDays: true, deliveryDays: ['Sen', 'Min'] }, P(3)))).data.id];
+    await mk('Hotel Tanpa Titik', { fixedDays: true, deliveryDays: ['Sel', 'Kam'] });
+  });
+  const auto = (body) => request(app).post(`${Z}/auto`).set(auth(gm)).send(Object.assign({ mode: 'daily', armadas: ['DK 1'] }, body));
+
+  it('a slot counts regular + fixed and never exceeds the maximum', async () => {
+    const r = await auto({ maxPerDay: 4, dryRun: true });
+    expect(r.status).toBe(200);
+    r.body.data.groups.forEach((g) => expect(g.count + g.fixed).toBeLessThanOrEqual(4));
+    const sen = r.body.data.groups.find((g) => g.day === 'Sen');
+    expect(sen.fixed).toBe(2);                                  // Hotel X + Hotel Y
+    expect(r.body.data.groups.reduce((s, g) => s + g.count, 0)).toBe(10);   // every regular placed
+    expect(r.body.data.fixedCustomers).toBe(2);
+    expect(r.body.data.sundayVisits).toBe(1);                   // Hotel Y's Minggu: kept, not counted
+  });
+
+  it('fixed visits alone over the maximum → 400 naming the day and the customers', async () => {
+    // Two armadas so 10 one-customer routes fit (12 slots) and the FIXED check is what refuses.
+    const r = await auto({ maxPerDay: 1, armadas: ['DK 1', 'DK 2'], dryRun: true });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/Senin/);
+    expect(r.body.error.message).toMatch(/Hotel X/);
+  });
+
+  it('not enough room once fixed visits are counted → 400 Kapasitas kurang', async () => {
+    const r = await auto({ maxPerDay: 2, dryRun: true });     // 6 slots × 2 = 12 − 4 fixed visits = 8 < 10
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/Kapasitas kurang/);
+  });
+
+  it('applying keeps every fixed day, gives hotels the armada, and a hotel without a point is untouched', async () => {
+    const r = await auto({ maxPerDay: 4 });
+    expect(r.status).toBe(200);
+    const x = await prisma.customer.findUnique({ where: { id: hotels[0] } });
+    expect(JSON.parse(x.deliveryDays)).toEqual(['Sen', 'Rab', 'Jum']);
+    expect(x.armada).toBe('DK 1');
+    expect(x.zoneId).not.toBeNull();
+    const nop = await prisma.customer.findFirst({ where: { name: 'Hotel Tanpa Titik' } });
+    expect(JSON.parse(nop.deliveryDays)).toEqual(['Sel', 'Kam']);
+    expect(nop.zoneId).toBeNull();
+  });
+
+  it('with no regular customers at all → a clear 400', async () => {
+    await prisma.customer.updateMany({ where: { fixedDays: false }, data: { lat: null, lng: null } });
+    const r = await auto({ maxPerDay: 4, dryRun: true });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/pelanggan biasa/);
+  });
+});
