@@ -567,6 +567,9 @@ async function createCustomer(body, actor) {
   if (!cols.name) throw ApiError.badRequest('name is required');
   cols.type = await validTypeId(body.type);
   cols.armada = resolveWriteFleet(actor, cols.armada);   // scoped staff → forced to their fleet
+  // FIXED delivery days: the customer's own days, never rewritten by a zone. They need a day to be fixed to.
+  cols.fixedDays = !!body.fixedDays;
+  if (cols.fixedDays && !JSON.parse(cols.deliveryDays).length) throw ApiError.badRequest('Hari tetap butuh minimal satu hari kirim.');
   const snap = await actorSnap(actor);
   const loc = normLatLng(body.lat, body.lng);            // optional coordinates at creation
   if (loc) { cols.lat = loc.lat; cols.lng = loc.lng; if (body.accuracy != null && Number.isFinite(+body.accuracy)) cols.locationAccuracy = Math.max(0, Math.round(+body.accuracy)); }
@@ -592,6 +595,10 @@ async function updateCustomer(id, body, actor) {
   if (body.reminder !== undefined) data.reminder = cleanReminder(body.reminder);        // billing-reminder settings
   if (body.type != null) data.type = await validTypeId(body.type);
   if (body.address !== undefined) data.address = String(body.address || '').slice(0, 300);
+  if (body.fixedDays !== undefined) data.fixedDays = !!body.fixedDays;
+  const willBeFixed = data.fixedDays !== undefined ? data.fixedDays : !!cur.fixedDays;
+  const willHaveDays = data.deliveryDays !== undefined ? JSON.parse(data.deliveryDays) : (() => { try { return JSON.parse(cur.deliveryDays || '[]'); } catch (e) { return []; } })();
+  if (willBeFixed && !willHaveDays.length) throw ApiError.badRequest('Hari tetap butuh minimal satu hari kirim.');
   const snap = await actorSnap(actor);
   // Google Maps link (pasted). '' clears it. A non-empty link stamps who/when. A pasted link
   // carries no GPS accuracy → clear locationAccuracy so a stale ±m from an old reading can't mislead.
@@ -606,8 +613,12 @@ async function updateCustomer(id, body, actor) {
   // rather than let the next zone write silently undo it. (A moved point re-syncs below instead.)
   if (data.lat === undefined) await zoneSvc().assertScheduleEditable(cur, data);
   let c = await prisma.customer.update({ where: { id }, data });
-  await logAudit('pelanggan', `Ubah pelanggan: ${c.name}`, `Tipe ${c.type}`, snap, c.armada);
-  if (data.lat !== undefined && (await zoneSvc().syncCustomers([id], actor)).length) c = await prisma.customer.findUnique({ where: { id } });
+  const fixedChanged = data.fixedDays !== undefined && data.fixedDays !== !!cur.fixedDays;
+  const fixedNote = fixedChanged ? (data.fixedDays ? ` · hari tetap: ${willHaveDays.join(', ')}` : ' · hari tetap dimatikan')
+    : (c.fixedDays && data.deliveryDays !== undefined && data.deliveryDays !== cur.deliveryDays ? ` · hari tetap: ${willHaveDays.join(', ')}` : '');
+  await logAudit('pelanggan', `Ubah pelanggan: ${c.name}`, `Tipe ${c.type}${fixedNote}`, snap, c.armada);
+  // A moved point, or a fixed flag switched either way, changes what the zone decides for this customer.
+  if ((data.lat !== undefined || fixedChanged) && (await zoneSvc().syncCustomers([id], actor)).length) c = await prisma.customer.findUnique({ where: { id } });
   return custClient(c);
 }
 // A customer's point changed (set / cleared / reverted): put them in the right zone and apply its

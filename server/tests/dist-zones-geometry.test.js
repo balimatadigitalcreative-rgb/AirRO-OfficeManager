@@ -158,6 +158,15 @@ describe('planMembership — the schedule follows the zone', () => {
   it('day order does not count as a change', () => {
     expect(DZ.planMembership([cust({ zoneId: 'z1', armada: 'DK 1', days: ['Kam', 'Sen'] })], [Z1])).toEqual([]);
   });
+
+  it('a FIXED-day customer takes the zone armada but keeps its own days', () => {
+    const out = DZ.planMembership([cust({ fixed: true, days: ['Sen', 'Rab', 'Jum'] })], [Z1]);
+    expect(out[0].to).toEqual({ zoneId: 'z1', armada: 'DK 1', days: ['Sen', 'Rab', 'Jum'] });
+  });
+
+  it('a fixed customer already on the zone armada → no change at all', () => {
+    expect(DZ.planMembership([cust({ fixed: true, zoneId: 'z1', armada: 'DK 1', days: ['Sen', 'Rab', 'Jum'] })], [Z1])).toEqual([]);
+  });
 });
 
 describe('capacitatedGroups — one zone = one day\'s route, never over the daily maximum', () => {

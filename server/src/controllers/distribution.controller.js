@@ -30,6 +30,7 @@ const customerSchema = z.object({
   lat: z.union([z.number(), z.string(), z.null()]).optional(),
   lng: z.union([z.number(), z.string(), z.null()]).optional(),
   accuracy: z.union([z.number(), z.string(), z.null()]).optional(),
+  fixedDays: z.boolean().optional(),   // days are the customer's own; zones set only the armada
 });
 // Edit: every field optional; masterPrice is NOT accepted here (owner-gated price route).
 const LATLNG = z.union([z.number(), z.string(), z.null()]).optional();
@@ -44,6 +45,7 @@ const customerUpdateSchema = z.object({
   mapsUrl: z.string().max(500).optional(),
   lat: LATLNG,
   lng: LATLNG,
+  fixedDays: z.boolean().optional(),   // days are the customer's own; zones set only the armada
 });
 // Field GPS tag / paste — coordinates required; accuracy (metres) + address optional.
 const locationSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]), accuracy: z.union([z.number(), z.string(), z.null()]).optional(), address: z.string().max(300).optional(), note: z.string().max(300).optional() });

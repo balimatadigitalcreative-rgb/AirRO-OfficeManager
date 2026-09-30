@@ -960,6 +960,9 @@ model Customer {
   zoneId        String?
   zone          DistZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   zoneManual    Boolean  @default(false)
+  // FIXED delivery days (e.g. a hotel on Sen/Rab/Jum): the days in deliveryDays are the customer's
+  // own — zones never change them (they still set the armada). At least one day when true.
+  fixedDays     Boolean  @default(false)
   active        Boolean  @default(true)         // false = deactivated (hidden from active list + new txn/delivery, history kept)
   deactivatedAt DateTime?
   deactivatedByName String?

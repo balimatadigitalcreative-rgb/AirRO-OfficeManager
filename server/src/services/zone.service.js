@@ -33,8 +33,8 @@ function zoneClient(z) {
   return { id: z.id, name: z.name, color: z.color, polygon: parsePoly(z.polygon), armada: z.armada || '', deliveryDays: parseDays(z.deliveryDays), sortOrder: z.sortOrder || 0 };
 }
 const planZone = (z) => ({ id: z.id, polygon: z.polygon, sortOrder: z.sortOrder || 0, armada: z.armada || '', days: z.deliveryDays || [] });
-const planCust = (c) => ({ id: c.id, lat: c.lat, lng: c.lng, zoneId: c.zoneId || null, zoneManual: !!c.zoneManual, armada: c.armada || '', days: parseDays(c.deliveryDays) });
-const CUST_SELECT = { id: true, code: true, name: true, lat: true, lng: true, zoneId: true, zoneManual: true, armada: true, deliveryDays: true };
+const planCust = (c) => ({ id: c.id, lat: c.lat, lng: c.lng, zoneId: c.zoneId || null, zoneManual: !!c.zoneManual, armada: c.armada || '', days: parseDays(c.deliveryDays), fixed: !!c.fixedDays });
+const CUST_SELECT = { id: true, code: true, name: true, lat: true, lng: true, zoneId: true, zoneManual: true, armada: true, deliveryDays: true, fixedDays: true };
 
 // Zones span every armada, so managing them from a fleet-scoped account would let that account move
 // other fleets' customers. The capability says "may manage zones"; this says "over everything".
@@ -130,7 +130,7 @@ async function listZones(actor) {
     zones: zones.map((z) => Object.assign(z, { count: count[z.id] || 0, sisaBon: bonSum[z.id] || 0 })),
     customers: located.map((c) => ({
       id: c.id, code: c.code || '', name: c.name, phone: c.phone || '', type: c.type, lat: c.lat, lng: c.lng,
-      zoneId: c.zoneId || null, zoneManual: !!c.zoneManual, armada: c.armada || '', deliveryDays: parseDays(c.deliveryDays), sisaBon: bon[c.id] || 0,
+      zoneId: c.zoneId || null, zoneManual: !!c.zoneManual, armada: c.armada || '', deliveryDays: parseDays(c.deliveryDays), sisaBon: bon[c.id] || 0, fixedDays: !!c.fixedDays,
     })),
     coverage: { total: custs.length, withCoords: located.length, withoutCoords: custs.length - located.length },
     canManage: scope === null,
@@ -408,7 +408,10 @@ async function assertScheduleEditable(cur, data) {
   if (!z) return;
   const zDays = parseDays(z.deliveryDays);
   const armadaLocked = z.armada && data.armada !== undefined && data.armada !== z.armada;
-  const daysLocked = zDays.length && data.deliveryDays !== undefined && parseDays(data.deliveryDays).slice().sort().join() !== zDays.slice().sort().join();
+  // A fixed-day customer's days are its own (only its armada is the zone's). data.fixedDays may switch
+  // the flag in this same request, so decide on the value the row will HAVE.
+  const fixed = data.fixedDays !== undefined ? !!data.fixedDays : !!cur.fixedDays;
+  const daysLocked = !fixed && zDays.length && data.deliveryDays !== undefined && parseDays(data.deliveryDays).slice().sort().join() !== zDays.slice().sort().join();
   if (armadaLocked || daysLocked) {
     throw ApiError.conflict(`Jadwal pelanggan ini diatur oleh zona "${z.name}". Ubah armada/hari kirim di Peta Zona, atau keluarkan pelanggan dari zona.`);
   }

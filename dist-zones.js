@@ -284,7 +284,8 @@
   //     if that zone no longer exists, the customer falls back to their point (manualCleared);
   //   - otherwise → the zone their point is in (zoneFor), or none;
   //   - in a zone → the zone's armada / days where the zone sets them ('' / [] = leave the customer's);
-  //   - in no zone → the schedule is left exactly as it is (leaving a zone never blanks a schedule).
+  //   - in no zone → the schedule is left exactly as it is (leaving a zone never blanks a schedule);
+  //   - a fixed-day customer (c.fixed) never takes the zone's days, only its armada.
   // customers: [{ id, lat, lng, zoneId, zoneManual, armada, days[] }]
   // zones:     [{ id, polygon, sortOrder, armada, days[] }]
   function planMembership(customers, zones) {
@@ -300,7 +301,9 @@
       } else target = zoneFor(c.lat, c.lng, zones);
       var z = target ? byId[target] : null;
       var armada = z && z.armada ? z.armada : (c.armada || '');
-      var days = z && z.days && z.days.length ? z.days.slice() : (c.days || []).slice();
+      // A FIXED-day customer (hotel: Sen/Rab/Jum) keeps its own days whatever the zone says; the zone
+      // still decides which armada serves it.
+      var days = !c.fixed && z && z.days && z.days.length ? z.days.slice() : (c.days || []).slice();
       var from = { zoneId: c.zoneId == null ? null : c.zoneId, armada: c.armada || '', days: (c.days || []).slice() };
       if (from.zoneId === target && from.armada === armada && sameSet(from.days, days) && !manualCleared) return;
       var row = { id: c.id, from: from, to: { zoneId: target, armada: armada, days: sameSet(from.days, days) ? from.days : days } };
