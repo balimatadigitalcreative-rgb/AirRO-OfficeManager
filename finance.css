@@ -2822,6 +2822,11 @@ button.ub-row:hover { background: var(--surface-2, #f7fafc); }
 .cr-status { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 6px; }
 .cr-status.approved { background: #e6f5f0; color: #159a6b; }
 .cr-status.rejected { background: var(--neg-bg); color: var(--neg); }
+.cr-status.withdrawn { background: var(--surface-2, #eef2f6); color: var(--text-mut); }
+/* Mode Lapangan demo entry on the old Pengiriman board (demo accounts only) */
+.fld-try { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2, #e8f1f8); color: var(--ink); border: 1px solid var(--border); }
+.fld-try small { color: var(--text-mut); }
+@media (max-width: 520px) { .fld-try { flex-direction: column; align-items: stretch; } }
 .cr-amounts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 9px 12px; border-radius: 10px; background: var(--surface-2, #f6f8f9); }
 .cr-amounts > div { display: flex; flex-direction: column; gap: 1px; }
 .cr-amounts span { font-size: 10px; font-weight: 700; color: var(--text-mut); text-transform: uppercase; letter-spacing: .03em; }

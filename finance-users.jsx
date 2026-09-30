@@ -73,6 +73,7 @@ const CAPS = [
   ['distribusiApproveSelf', 'distribusi', 'Setujui Pengajuan Sendiri', 'Menyetujui koreksi/pembatalan/sengketa yang Anda ajukan sendiri — pelonggaran pemisahan tugas. Hanya Pemilik yang boleh memberi; setiap persetujuan mandiri ditandai & dicatat.', 3, { destructive: true, ownerOnly: true, dependsOn: 'distribusiApprove' }],
   ['distribusiDemoLatihan', 'distribusi', 'Demo Mode Lapangan — Latihan', 'Mencoba tampilan HP baru dalam Mode latihan: data asli hanya dibaca, semua catatan tersimpan di HP itu saja dan tidak pernah masuk pembukuan. Hanya Pemilik yang boleh memberi.', 1, { ownerOnly: true }],
   ['distribusiDemoPenuh', 'distribusi', 'Demo Mode Lapangan — Penuh', 'Mode latihan + Mode asli: mencatat transaksi sungguhan lewat tampilan HP baru selama masa demo. Hanya Pemilik yang boleh memberi.', 2, { destructive: true, ownerOnly: true }],
+  ['distribusiAturanLapangan', 'distribusi', 'Aturan Lapangan & Armada', 'Mengatur SOP muatan, kapasitas armada, foto/alasan wajib, harga ganti rugi galon, dan rilis tampilan HP baru. Berlaku untuk semua sopir.', 3, { destructive: true }],
   ['distribusiLegacyImport', 'distribusi', 'Impor Riwayat (arsip)', 'Mengimpor riwayat transaksi lama (arsip).', 2],
   ['distribusiVoid', 'distribusi', 'Batalkan Transaksi', 'Membatalkan transaksi distribusi.', 3, { destructive: true }],
   ['distribusiCustomerDelete', 'distribusi', 'Hapus/Nonaktifkan Pelanggan', 'Menghapus atau menonaktifkan pelanggan.', 3, { destructive: true }],

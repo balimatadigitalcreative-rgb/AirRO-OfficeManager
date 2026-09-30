@@ -98,6 +98,7 @@ function navForRole(p, role) {
     { id: 'dist-transactions', label: tr('nav.distTransactions'), icon: 'IconTx', caps: ['distribusiInput', 'distribusiKoreksi', 'distribusiExpense'] },
     { id: 'dist-deliveries', label: tr('nav.distDeliveries'), icon: 'IconTruck', caps: ['distribusiPengiriman'] },
     { id: 'dist-zones', label: tr('nav.distZones'), icon: 'IconPin', caps: ['distribusiZona'] },
+    { id: 'dist-field-rules', label: tr('nav.distFieldRules'), icon: 'IconSettings', caps: ['distribusiAturanLapangan'] },
     { id: 'dist-delivery-report', label: tr('nav.distDeliveryReport'), icon: 'IconShield', caps: ['distribusiPengirimanReport'] },
     // INTERNAL loss report (Kerugian / Uang Tidak Diterima). Same owner/GM-tier cap as the action
     // that creates the rows; never customer-facing.
@@ -268,6 +269,9 @@ function FApp() {
   const [changeReqAlerts, setChangeReqAlerts] = uSh([]); // AlertBell: pending distribusi correction/void requests (approvers)
   const [acctAlerts, setAcctAlerts] = uSh([]);           // AlertBell: unmapped categories / journal drift (reports users, flag on)
   const [distFormTick, setDistFormTick] = uSh(0);   // bumps when "Input Cepat" wants the Transaksi form opened
+  // MODE LAPANGAN: the owner's field rules (release switch) + this phone's view/mode preference.
+  const [fieldRules, setFieldRules] = uSh(null);
+  const [fieldPrefs, setFieldPrefs] = uSh(() => (window.FIELDAPI ? window.FIELDAPI.loadPrefs() : {}));
   const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
   // Roles are DATA (managed via /roles). Seed FS with the cached list for instant
@@ -331,6 +335,17 @@ function FApp() {
 
   // Per-user permission override (set by the GM) takes precedence over the role defaults.
   const p = FS.normKasbon((user && user.permissions) ? user.permissions : FS.perms(user ? user.role : 'cashier'));
+  // MODE LAPANGAN — which view the Pengiriman screen opens (old board or the new phone UI) and in which
+  // mode; decided by one pure rule (FIELDAPI.prefState) from the caps, the owner's release switch and
+  // this phone's preference. No demo cap and not released → the old board exactly as before.
+  const fieldPref = window.FIELDAPI ? window.FIELDAPI.prefState({ perms: p, rules: fieldRules, prefs: fieldPrefs }) : { eligible: false, ui: 'old', mode: 'latihan' };
+  const setFieldPref = (next) => { const merged = Object.assign({}, fieldPrefs, next); setFieldPrefs(merged); if (window.FIELDAPI) window.FIELDAPI.savePrefs(merged); };
+  uEh(() => {
+    if (!user || !p.distribusiPengiriman || !window.API || !window.API.distribusi || !window.API.distribusi.fieldRules) { setFieldRules(null); return undefined; }
+    let live = true;
+    window.API.distribusi.fieldRules.get().then((r) => { if (live) setFieldRules((r && r.data) || null); }).catch(() => { /* rules unreadable → treated as not released */ });
+    return () => { live = false; };
+  }, [user, p.distribusiPengiriman, distTick]);
   // `manageUsers` is a NEW cap: an override saved before it existed omits it. Derive an
   // ABSENT value from the legacy `reset` toggle or the role default — mirrors the server's
   // resolvePerms exactly, so the sidebar and the API agree on who may administer users.
@@ -1816,15 +1831,28 @@ function FApp() {
               onGoApprovals={p.distribusiApprove ? () => go('approvals', false) : null}
               onOpenLoss={p.distribusiBonAdjust ? () => go('dist-loss-report', false) : null} />
           )}
-          {screen === 'dist-deliveries' && p.distribusiPengiriman && (
-            <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}
-              canBelumTerkirim={!!p.distribusiBelumTerkirim}
-              /* TWO separate rights: seeing the tracking panel at all, and being allowed to re-map a
-                 vehicle to another armada. A driver holds the first and must never hold the second. */
-              canGps={!!p.distribusiLacakArmada} canGpsMap={!!p.settings} canLoc={!!p.distribusiLokasiSimpan}
-              fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
-              onChanged={() => setDistTick((t) => t + 1)} />
+          {screen === 'dist-deliveries' && p.distribusiPengiriman && fieldPref.ui === 'new' && window.FIELD && (
+            <window.FIELD.App user={user} pref={fieldPref} today={FIN.TODAY}
+              fleetList={fleet} fleetScope={user && user.fleetScope} refreshKey={distTick}
+              onExit={() => setFieldPref({ ui: 'old' })} onPref={setFieldPref}
+              onOpenRules={p.distribusiAturanLapangan ? () => go('dist-field-rules') : null} />
           )}
+          {screen === 'dist-deliveries' && p.distribusiPengiriman && !(fieldPref.ui === 'new' && window.FIELD) && (
+            <>
+              {fieldPref.eligible && <div className="fld-try" role="region" aria-label={tr('fld.tryNew')}>
+                <span><b>{tr('fld.tryNew')}</b><br /><small>{tr('fld.tryNewSub')}</small></span>
+                <button type="button" className="btn btn-primary" onClick={() => setFieldPref({ ui: 'new' })}>{tr('fld.tryNewBtn')}</button>
+              </div>}
+              <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}
+                canBelumTerkirim={!!p.distribusiBelumTerkirim}
+                /* TWO separate rights: seeing the tracking panel at all, and being allowed to re-map a
+                   vehicle to another armada. A driver holds the first and must never hold the second. */
+                canGps={!!p.distribusiLacakArmada} canGpsMap={!!p.settings} canLoc={!!p.distribusiLokasiSimpan}
+                fleetScope={user && user.fleetScope} fleet={fleet} distFleet={distFleet} setDistFleet={setDistFleet}
+                onChanged={() => setDistTick((t) => t + 1)} />
+            </>
+          )}
+          {screen === 'dist-field-rules' && p.distribusiAturanLapangan && window.FIELD && <window.FIELD.RulesScreen fleetList={fleet} canRelease={!!user && user.role === 'owner'} onSaved={(r) => setFieldRules(r)} />}
           {/* Pengeluaran (field expenses) moved into the Transaksi screen — no standalone route. */}
           {screen === 'dist-delivery-report' && p.distribusiPengirimanReport && (
             <DIST.DeliveryReport refreshKey={distTick} today={FIN.TODAY}
@@ -1858,7 +1886,7 @@ function FApp() {
           {screen === 'dist-audit' && p.distribusiAudit && (
             <DIST.Audit refreshKey={distTick} canAudit={!!p.distribusiAudit} onChanged={() => setDistTick((t) => t + 1)} />
           )}
-          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-adjust-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit', 'dist-zones'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
+          {screen && screen.indexOf('dist-') === 0 && !['dist-dashboard', 'dist-transactions', 'dist-deliveries', 'dist-delivery-report', 'dist-loss-report', 'dist-adjust-report', 'dist-customers', 'dist-gallon', 'dist-integration', 'dist-prices', 'dist-audit', 'dist-zones', 'dist-field-rules'].includes(screen) && <DistPlaceholder screen={screen} nav={NAV} />}
           </>)}
 
           {/* Warehouse (gudang) + Setoran are module screens too — show the same friendly notice when
