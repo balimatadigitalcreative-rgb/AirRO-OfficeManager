@@ -48,6 +48,7 @@ const FILES = [
   'dist-live.js',
   'dist-zones.js',
   'rit-plan.js',
+  'dist-field-sandbox.js',
   'data.js',
   'finance-store.js',
   'finance-hrd.js',
