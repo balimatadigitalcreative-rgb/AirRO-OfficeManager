@@ -88,6 +88,8 @@ router.post('/customers/location/bulk-clear', requireCap('distribusiCustomers'),
 // Location photo (bytes already in the Attachment store; this stores only the id + who/when).
 // Delivery helpers may photograph while delivering; customer managers may replace/remove.
 router.patch('/customers/:id/location-photo', requireAnyCap(['distribusiInput', 'distribusiPengiriman', 'distribusiCustomers']), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.locationPhotoSchema }), ctrl.setLocationPhoto);
+// Lengkapi data (Mode Lapangan): a driver may fix the WhatsApp number with the location cap.
+router.patch('/customers/:id/phone', requireCap('distribusiLokasiSimpan'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.phoneSchema }), ctrl.setCustomerPhone);
 // GANTI RUGI GALON — a field action, recorded directly (no approval: owner decision).
 router.post('/customers/:id/gallon-damage', requireCap('distribusiInput'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.gallonDamageSchema }), ctrl.gallonDamageCharge);
 // BULK spreadsheet import — its own capability. Creating one customer is routine; creating
@@ -217,6 +219,8 @@ router.put('/depot', requireCap('distribusiZonaKelola'), validate({ body: ctrl.s
 // ATURAN LAPANGAN — anyone in distribusi may READ them (the phone UI follows them); only owner/GM write.
 router.get('/field-rules', requireCap('distribusi'), ctrl.getFieldRules);
 router.put('/field-rules', requireCap('distribusiAturanLapangan'), validate({ body: ctrl.schemas.fieldRulesSchema }), ctrl.putFieldRules);
+// MODE LAPANGAN: what the phone needs once per day/armada (rules, warehouse, expected gallons per stop).
+router.get('/field-context', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.fieldContextQuery }), ctrl.fieldContext);
 // CARRY-OVER of undelivered stops — its OWN back-office cap (distribusiBelumTerkirim), separate from the
 // field team's daily-route cap (distribusiPengiriman). Every surface below is gated on it; the outstanding
 // COUNT on the dashboard summary is gated in the service (see outstandingSummary). GET the actionable list

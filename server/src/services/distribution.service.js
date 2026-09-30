@@ -4717,6 +4717,47 @@ async function setDepot(body, actor) {
   return { lat: loc.lat, lng: loc.lng };
 }
 
+// FIELD CONTEXT (Mode Lapangan) — everything the phone needs once per day/armada: the armada (and the
+// ones it may pick), the owner's field rules, the warehouse and each pending stop's expected gallons
+// (the same demand the rit plan uses), so Mode latihan can plan rits without the server.
+async function fleetListFor(user) {
+  let list = [];
+  try {
+    const v = await require('./settings.service').get('airro_fleet');
+    list = (Array.isArray(v) ? v : []).map((f) => (typeof f === 'string' ? f : (f && (f.plate || f.name || f.id)) || '')).map((s) => String(s).trim()).filter(Boolean);   // same reading as zone.service validArmada
+  } catch (e) { list = []; }
+  const scope = fleetScopeOf(user);
+  return scope === null ? list : list.filter((p) => scope.includes(p)).concat(scope.filter((p) => !list.includes(p)));
+}
+async function fieldContext(user, query) {
+  const q = query || {};
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(q.date || '')) ? q.date : todayISO();
+  const fleets = await fleetListFor(user);
+  const chosen = (q.fleet && q.fleet !== 'all') ? resolveWriteFleet(user, q.fleet) : '';
+  const scope = fleetScopeOf(user);
+  const fleet = chosen || (scope && scope.length === 1 ? scope[0] : '') || fleets[0] || '';
+  const rules = await require('./fieldRules.service').getRules();
+  const depot = await depotOrigin();
+  let demand = {};
+  if (fleet) {
+    const rows = await prisma.delivery.findMany({ where: { date: today, fleetId: fleet, status: 'pending' }, select: { id: true, customerId: true, qty: true } });
+    demand = await demandFor(rows);
+  }
+  return { today, fleet, fleets, rules, depot, demand };
+}
+// A driver fixing a customer's WhatsApp number in the field (Lengkapi data) — the same cap that lets
+// them save the location; audited. '' clears it.
+async function setCustomerPhone(id, body, actor) {
+  const cur = await prisma.customer.findUnique({ where: { id } });
+  if (!cur) throw ApiError.notFound('Customer not found');
+  if (!fleetAllows(actor, cur.armada)) throw ApiError.notFound('Customer not found');   // out of scope
+  const phone = body && body.phone != null ? normalizePhone(body.phone) : '';
+  const c = await prisma.customer.update({ where: { id }, data: { phone } });
+  const snap = await actorSnap(actor);
+  await logAudit('pelanggan', `Ubah nomor WA: ${c.name}`, `${cur.phone || '—'} → ${phone || '—'}`, snap, c.armada);
+  return custClient(c);
+}
+
 async function pinDelivery(user, id, body) {
   const row = await prisma.delivery.findUnique({ where: { id } });
   if (!row) throw ApiError.notFound('Pengiriman tidak ditemukan.');
@@ -5246,7 +5287,7 @@ module.exports = {
   requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport, daySummary,
-  deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, ritRoute, setDepot, depotOrigin, pinDelivery, closeDay, listCloseouts,
+  deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, ritRoute, setDepot, depotOrigin, fieldContext, setCustomerPhone, pinDelivery, closeDay, listCloseouts,
   outstandingDeliveries, outstandingSummary, resolveOutstanding, bulkCarry, bulkCarryPreview, bulkResolveOutstanding, undoBulkCarry,
   openRun, closeRun, listRuns, correctRun,
   listExpenses, createExpense, voidExpense, DEFAULT_EXP_CATS,
