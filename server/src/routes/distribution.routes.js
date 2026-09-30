@@ -3,6 +3,7 @@ const { Router } = require('express');
 const ctrl = require('../controllers/distribution.controller');
 const validate = require('../middleware/validate');
 const { requireAuth, requireCap, requireAnyCap, requireUnit, requireModule } = require('../middleware/auth');
+const { fieldUiGuard } = require('../middleware/fieldUi');
 
 const router = Router();
 router.use(requireAuth);
@@ -16,6 +17,8 @@ router.use(requireUnit('air'));
 // and a default-'all' unit is always available. It only 403s when distribusi is off for every unit
 // the caller can see.
 router.use(requireModule('distribusi'));
+// MODE LAPANGAN demo fence (see middleware/fieldUi.js).
+router.use(fieldUiGuard);
 
 // ── Customers ──
 // Viewing the customer list/detail is part of base module access ('distribusi').
