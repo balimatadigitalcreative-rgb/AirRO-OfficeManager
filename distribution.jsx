@@ -6739,6 +6739,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   const [routeMeta, setRouteMeta] = uSx(null);   // { origin:{source}, totalKm, coverage, strategy }
   const [legs, setLegs] = uSx({});               // deliveryId -> { legKm, cumKm, order }
   const [noLocIds, setNoLocIds] = uSx([]);       // trailing "belum ada lokasi" group
+  const [ritMeta, setRitMeta] = uSx(null);       // RUTE RIT summary while a rit plan is shown
+  const [openRuns, setOpenRuns] = uSx([]);       // today's open rits — "Rute rit" needs one for the armada shown
   const ef = effFleet(fleetScope, distFleet);
   // REFRESH IN PLACE. refreshKey bumps on every distribusi write by anyone, on tab focus and on SSE
   // reconnect — several times a minute on a busy day. Blanking the board for each one made the list
@@ -6763,6 +6765,8 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       // `board === null` means "still loading" and would hide "Selesai Kerja Hari Ini". A secondary
       // failure must never hide the primary action.
       .catch(() => { if (latest.current.isCurrent(t)) setBoard((prev) => prev || []); });
+    // Open rits for the day: the rit plan uses the gallons loaded for the armada's open rit.
+    if (window.API.distribusi.runs) window.API.distribusi.runs.list(date, ef, 'open').then((r) => setOpenRuns(r.data || [])).catch(() => setOpenRuns([]));
   };
   // Customers only feed the "add order" picker — fetched per armada, not on every realtime event (the
   // full list is the heaviest call on this screen), and refreshed when the picker opens. A 403 here
@@ -6810,6 +6814,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
     setLegs(map);
     setNoLocIds((r.unlocated || []).map((x) => x.id));
     setRouteMeta({ origin: r.origin || null, totalKm: r.totalKm, coverage: r.coverage, strategy: r.strategy });
+    setRitMeta(null);
     setRouteOn(true);
     // Reorder the DISPLAY to the suggestion (located stops first, then the no-location group). Keeping
     // the full permutation matters: persistOrder writes every id, so the tail must travel with it.
@@ -6833,7 +6838,30 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   };
-  const clearRoute = () => { routeIds.current = null; setRouteOn(false); setLegs({}); setNoLocIds([]); setRouteMeta(null); reload(); };
+  const clearRoute = () => { routeIds.current = null; setRouteOn(false); setLegs({}); setNoLocIds([]); setRouteMeta(null); setRitMeta(null); reload(); };
+  // RUTE RIT: plan the OPEN rit of the armada shown — from the warehouse, nearest first, within the
+  // gallons loaded for it. What does not fit waits for the next rit, planned the same way once opened.
+  const planRitRoute = () => {
+    setRouteBusy(true);
+    window.API.distribusi.deliveries.ritRoute({ date, fleet: closeFleet })
+      .then((r) => {
+        const d = r.data;
+        const map = {}; d.rit.forEach((x) => { map[x.id] = { legKm: x.legKm, cumKm: x.cumKm, order: x.order, loadAfter: x.loadAfter, qty: x.qty }; });
+        const tooBig = {}; d.tooBig.forEach((x) => { tooBig[x.id] = x.qty; });
+        setLegs(map);
+        setNoLocIds(d.unlocated.map((x) => x.id));
+        setRouteMeta({ origin: d.origin, totalKm: d.totalKm, coverage: null, strategy: 'rit' });
+        // Display order: this rit, then what waits for the next rit, then what never fits, then no point.
+        const byId = {}; (board || []).forEach((x) => { byId[x.id] = x; });
+        const planned = d.rit.concat(d.leftover, d.tooBig, d.unlocated).map((x) => x.id);
+        const next = planned.map((id) => byId[id]).filter(Boolean).concat((board || []).filter((x) => planned.indexOf(x.id) < 0));
+        setRouteOn(true);
+        if (next.length) { routeIds.current = next.map((x) => x.id); setBoard(next); }
+        setRitMeta({ runNo: d.run.runNo, capacity: d.capacity, used: d.used, totalKm: d.totalKm, returnKm: d.returnKm, firstLeftover: d.leftover.length ? d.leftover[0].id : null, leftoverCount: d.leftover.length, leftoverGallons: d.leftoverGallons, estRits: d.estRits, tooBig });
+      })
+      .catch((e) => flash((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')))
+      .then(() => setRouteBusy(false));
+  };
   const saveRoute = () => persistOrder(board || [], 'proximity').then(() => flash(trD('dist.routeSaved')));
   // "Urutan tetap" - a fixed time window this stop must keep; proximity reorders around it.
   const togglePin = (s) => window.API.distribusi.deliveries.pin(s.id, !s.pinned)
@@ -6862,6 +6890,7 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   const closeFleet = fleetIds.length === 1 ? fleetIds[0]
     : (scopedFleets && scopedFleets.length === 1) ? scopedFleets[0]
     : (distFleet && distFleet !== 'all') ? distFleet : null;
+  const ritRun = closeFleet ? openRuns.find((r) => r.fleetId === closeFleet) : null;
   const closedFor = closeFleet ? closeouts.find((c) => c.fleetId === closeFleet) : null;
   const pendingStops = closeFleet ? rows.filter((s) => s.status === 'pending' && s.fleetId === closeFleet) : [];
   const srcBadge = (s) => <span className={`dist-src ${s}`}>{trD(s === 'tambahan' ? 'dist.srcTambahan' : 'dist.srcJadwal')}</span>;
@@ -6876,7 +6905,9 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
         <div style={{ minWidth: 190 }}><DP.DateField value={date} onChange={setDate} allowFuture /></div>
         <div style={{ flex: 1 }} />
         {board !== null && rows.length > 0 && <button type="button" className="btn btn-ghost" disabled={routeBusy} onClick={() => routeFromMe('nearest')}><IconPin s={16} />{routeBusy ? '…' : trD('dist.routeFromMe')}</button>}
-        {routeOn && <button type="button" className="btn btn-ghost" disabled={routeBusy} onClick={() => routeFromMe(routeMeta && routeMeta.strategy === 'farthest' ? 'nearest' : 'farthest')}><IconRefresh s={16} />{trD(routeMeta && routeMeta.strategy === 'farthest' ? 'dist.routeNearest' : 'dist.routeFarthest')}</button>}
+        {board !== null && rows.length > 0 && <button type="button" className="btn btn-ghost" disabled={routeBusy || !ritRun} title={!closeFleet ? trD('dist.ritPickFleet') : !ritRun ? trD('dist.ritNeedRun') : ''} onClick={planRitRoute}><IconTruck s={16} />{trD('dist.ritRoute')}</button>}
+        {board !== null && rows.length > 0 && !ritRun && <span className="dist-rit-need">{!closeFleet ? trD('dist.ritPickFleet') : trD('dist.ritNeedRun')}</span>}
+        {routeOn && !ritMeta && <button type="button" className="btn btn-ghost" disabled={routeBusy} onClick={() => routeFromMe(routeMeta && routeMeta.strategy === 'farthest' ? 'nearest' : 'farthest')}><IconRefresh s={16} />{trD(routeMeta && routeMeta.strategy === 'farthest' ? 'dist.routeNearest' : 'dist.routeFarthest')}</button>}
         {routeOn && canRoute && <button type="button" className="btn btn-primary" onClick={saveRoute}><IconCheck s={16} />{trD('dist.routeSave')}</button>}
         {canOrder && <button type="button" className="btn btn-ghost" onClick={() => setOrderOpen(true)}><IconPlus s={16} />{trD('dist.addOrder')}</button>}
         {canClose && closeFleet && !closedFor && board !== null && <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>}
@@ -6900,13 +6931,15 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
       ))}
       {routeOn && routeMeta && (
         <div className="card dist-route-bar">
-          <span className="dist-route-total"><IconPin s={14} />{trD('dist.routeTotal', { km: kmTxt(routeMeta.totalKm) })}</span>
+          <span className="dist-route-total">{ritMeta ? <IconTruck s={14} /> : <IconPin s={14} />}{ritMeta
+            ? trD('dist.ritSummary', { n: ritMeta.runNo, u: ritMeta.used, c: ritMeta.capacity, km: kmTxt(ritMeta.totalKm), r: kmTxt(ritMeta.returnKm) })
+            : trD('dist.routeTotal', { km: kmTxt(routeMeta.totalKm) })}</span>
           {/* WHICH SOURCE, AND HOW OLD. "dari depot" and "posisi ponsel - 8 detik lalu" are very
               different claims; a banner that does not distinguish them invites the wrong one. */}
-          <span className="dist-route-origin">
+          {!ritMeta && <span className="dist-route-origin">
             {trD('dist.routeOrigin_' + ((routeMeta.origin && routeMeta.origin.source) || 'none'))}
             {routeMeta.origin && routeMeta.origin.ageMs != null ? ' \u00b7 ' + agoShort(routeMeta.origin.ageMs) : ''}
-          </span>
+          </span>}
           {routeMeta.coverage && routeMeta.coverage.withoutCoords > 0 && (
             <span className="dist-route-cov"><IconWarn s={12} />{trD('dist.routeCoverage', { n: routeMeta.coverage.withoutCoords, total: routeMeta.coverage.total })}</span>
           )}
@@ -6922,6 +6955,9 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
           <React.Fragment key={s.id}>
           {/* Trailing group: stops whose customer has no coordinates. They are never dropped from the
               board - they simply cannot be ordered by distance until someone captures the location. */}
+          {routeOn && ritMeta && ritMeta.firstLeftover === s.id && (
+            <div className="dist-route-group"><IconTruck s={12} />{trD('dist.ritNext', { n: ritMeta.leftoverCount, g: ritMeta.leftoverGallons, r: ritMeta.estRits })}</div>
+          )}
           {routeOn && noLocIds.length > 0 && noLocIds[0] === s.id && (
             <div className="dist-route-group"><IconPin s={12} />{trD('dist.routeNoLocGroup', { n: noLocIds.length })}</div>
           )}
@@ -6941,8 +6977,11 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
               <div className="dist-txn-sub">{s.phone || '—'}{s.deliveryDays && s.deliveryDays.length ? ' · ' + fmtDays(s.deliveryDays) : ''}{s.qty ? ' · ' + numX(s.qty) + ' ' + trD('dist.galonUnit') : ''}{s.sisaBon > 0 ? ' · ' + trD('dist.sisaBon') + ' ' + rpFull(s.sisaBon) : ''}{s.note ? ' · ' + s.note : ''}</div>
               {s.pendingReason ? <div className="dist-deliv-reason"><IconInvoice s={11} />{trD('dist.pendingReason')}: {s.pendingReason}</div> : null}
               {routeOn && legs[s.id] ? (
-                <div className="dist-route-km"><IconPin s={11} />{kmTxt(legs[s.id].legKm)} km · {trD('dist.routeCum')} {kmTxt(legs[s.id].cumKm)} km</div>
+                <div className="dist-route-km"><IconPin s={11} />{legs[s.id].loadAfter != null
+                  ? trD('dist.ritLeg', { km: kmTxt(legs[s.id].legKm), q: legs[s.id].qty, l: legs[s.id].loadAfter })
+                  : <>{kmTxt(legs[s.id].legKm)} km · {trD('dist.routeCum')} {kmTxt(legs[s.id].cumKm)} km</>}</div>
               ) : null}
+              {routeOn && ritMeta && ritMeta.tooBig[s.id] ? <div className="dist-deliv-reason"><IconWarn s={11} />{trD('dist.ritTooBig', { q: ritMeta.tooBig[s.id], c: ritMeta.capacity })}</div> : null}
               <div className="dist-deliv-loc no-print">
                 {s.mapsLink
                   ? <a href={s.mapsLink} target="_blank" rel="noopener noreferrer" className="dist-link"><IconPin s={12} />{trD('dist.directions')}</a>

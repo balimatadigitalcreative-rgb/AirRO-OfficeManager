@@ -244,6 +244,8 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
   const [pick, setPick] = uSz(null);         // customer id whose card is open
   const [mode, setMode] = uSz('view');       // view | draw | edit
   const [draft, setDraft] = uSz([]);         // vertices while drawing / editing a boundary
+  const [depotMode, setDepotMode] = uSz(false);   // choosing the warehouse on the map (owner/GM)
+  const [depotPt, setDepotPt] = uSz(null);         // [lat, lng] picked, not yet saved
   const [form, setForm] = uSz(null);         // { id|null, name, color, armada, days }
   const [confirm, setConfirm] = uSz(null);   // { title, changes, applied, run }
   const [busy, setBusy] = uSz(false);
@@ -294,6 +296,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
 
   // ── Map layers ────────────────────────────────────────────────────────────────────────────────
   uEz(() => { clickRef.current = (e) => {
+    if (depotMode) { setDepotPt([+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]); return; }
     if (mode === 'draw') setDraft((d) => d.concat([[+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]]));
     else if (mode === 'edit') setDraft((d) => znInsertVertex(d, [+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]));
     else setPick(null);
@@ -312,7 +315,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
     const L = window.L;
     const ly = layers.current;
     ['zones', 'custs', 'draw'].forEach((k) => { if (ly[k]) ly[k].remove(); });
-    const interactive = mode === 'view';
+    const interactive = mode === 'view' && !depotMode;
     // Zones (the one being re-drawn is shown by the draft instead).
     const zg = L.layerGroup().addTo(map);
     zones.forEach((z) => {
@@ -346,6 +349,13 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
       m.addTo(cg);
     });
     ly.custs = cg;
+    // The warehouse every rit starts from — and, while choosing it, the point picked.
+    if (ly.depot) ly.depot.remove();
+    const dg = L.layerGroup().addTo(map);
+    const house = (cls) => L.divIcon({ className: 'zn-depot-wrap', iconSize: [30, 30], html: '<span class="zn-depot' + cls + '" title="' + znEsc(trD('zn.depot')) + '"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 11 12 4l9 7v9H3z\"/><path d=\"M9 20v-6h6v6\"/></svg></span>' });
+    if (data && data.depot) L.marker([data.depot.lat, data.depot.lng], { interactive: false, keyboard: false, icon: house('') }).addTo(dg);
+    if (depotMode && depotPt) L.marker(depotPt, { interactive: false, keyboard: false, icon: house(' new') }).addTo(dg);
+    ly.depot = dg;
     // Draft boundary with its vertices.
     if (mode !== 'view') {
       const dg = L.layerGroup().addTo(map);
@@ -363,7 +373,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
       });
       ly.draw = dg;
     }
-  }, [map, data, selId, filter, pick, mode, draft, form && form.color]);
+  }, [map, data, selId, filter, pick, mode, draft, form && form.color, depotMode, depotPt]);
 
   // ── Actions ───────────────────────────────────────────────────────────────────────────────────
   // Preview first; save straight away only when the preview shows nobody's schedule changes.
@@ -439,9 +449,10 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
     <div className="dist-dash screen-enter zn-screen">
       <div className="zn-head">
         <div className="zn-title"><h2>{trD('nav.distZones')}</h2><span className="zn-mut">{trD('zn.lead')}</span></div>
-        {canManage && !drawing && (
+        {canManage && !drawing && !depotMode && (
           <div className="zn-head-act">
             <button type="button" className="btn btn-ghost" onClick={() => setAutoOpen(true)} disabled={!custs.length}><IconSparkle s={16} />{trD('zn.auto')}</button>
+            <button type="button" className="btn btn-ghost" onClick={() => { setPick(null); setDepotPt(data && data.depot ? [data.depot.lat, data.depot.lng] : null); setDepotMode(true); }}><IconHome s={16} />{trD('zn.depotSet')}</button>
             <button type="button" className="btn btn-primary" onClick={startDraw}><IconPlus s={16} />{trD('zn.draw')}</button>
           </div>
         )}
@@ -482,7 +493,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
         <div className="card zn-mapcard">
           <div ref={mapEl} className="zn-map" />
           {mapErr && <div className="zn-map-err"><IconWarn s={18} />{trD('zn.mapErr')}</div>}
-          {!drawing && (
+          {!drawing && !depotMode && (
             <div className="zn-overlay">
               <div className="zn-search">
                 <label className="dist-search"><IconSearch s={16} /><input value={q} placeholder={trD('zn.search')} aria-label={trD('zn.search')} onChange={(e) => setQ(e.target.value)} /></label>
@@ -494,6 +505,15 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
                 {[['all', trD('zn.fAll', { n: custs.length })], ['bon', trD('zn.fBon', { n: bonN })], ['fixed', trD('zn.fFixed', { n: fixedN })], ['none', trD('zn.fNone', { n: noZoneN })]].map(([k, l]) => (
                   <button key={k} type="button" className={'dist-chip zn-chip' + (filter === k ? ' on' : '')} aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>
                 ))}
+              </div>
+            </div>
+          )}
+          {depotMode && (
+            <div className="zn-drawbar">
+              <span>{trD('zn.depotHint')}</span>
+              <div className="zn-drawbar-act">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDepotMode(false); setDepotPt(null); }}>{trD('dist.cancel')}</button>
+                <button type="button" className="btn btn-primary btn-sm" disabled={!depotPt || busy} onClick={() => { setBusy(true); window.API.distribusi.setDepot(depotPt[0], depotPt[1]).then(() => { setBusy(false); setDepotMode(false); setDepotPt(null); return done(trD('zn.depotSaved')); }).catch((e) => { setBusy(false); flash(errMsg(e)); }); }}><IconCheck s={14} />{trD('zn.depotSave')}</button>
               </div>
             </div>
           )}
@@ -549,6 +569,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
             <span><i className="zn-lg-dot none" />{trD('zn.noZone')}</span>
             <span><i className="zn-lg-dot bon" />{trD('zn.lgBon')}</span>
             <span><i className="zn-fx zn-lg-fx" style={{ '--zc': '#065489' }}>3×</i>{trD('zn.lgFixed')}</span>
+            <span><i className="zn-lg-depot" />{trD('zn.depot')}</span>
           </div>
         </div>
 

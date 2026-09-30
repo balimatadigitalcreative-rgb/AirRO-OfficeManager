@@ -253,6 +253,8 @@
     distribusi: {
       // CUSTOMER ZONES. Every write takes { dryRun: true } to get the change list without saving —
       // the map shows that preview before the owner confirms (a zone rewrites members' schedules).
+      // The warehouse every rit starts from (owner/GM).
+      setDepot: (lat, lng) => req('PUT', '/distribusi/depot', { lat, lng }),
       zones: {
         list: () => req('GET', '/distribusi/zones'),
         create: (body) => req('POST', '/distribusi/zones', body),
@@ -384,6 +386,8 @@
         reorder: (data) => req('PUT', '/distribusi/deliveries/reorder', data),   // { date, fleet, order:[ids], source? }
         // ROUTE ORDERING BY PROXIMITY (phase 1: straight-line). lat/lng optional - without them the
         // server falls back to the depot setting, then the centroid, and says which origin it used.
+        // RUTE RIT: the open rit of ONE armada, from the warehouse, nearest first, within its load.
+        ritRoute: (o) => { const q = o || {}; const p2 = ['date=' + encodeURIComponent(q.date)]; if (q.fleet && q.fleet !== 'all') p2.push('fleet=' + encodeURIComponent(q.fleet)); return req('GET', '/distribusi/deliveries/rit-route?' + p2.join('&')); },
         route: (o) => { const q = o || {}; const p2 = ['date=' + encodeURIComponent(q.date)]; if (q.fleet && q.fleet !== 'all') p2.push('fleet=' + encodeURIComponent(q.fleet)); if (q.lat != null && q.lng != null) { p2.push('lat=' + q.lat); p2.push('lng=' + q.lng); } if (q.strategy) p2.push('strategy=' + q.strategy); return req('GET', '/distribusi/deliveries/route?' + p2.join('&')); },
         pin: (id, pinned) => req('PATCH', '/distribusi/deliveries/' + id + '/pin', { pinned: !!pinned }),
         close: (data) => req('POST', '/distribusi/deliveries/close', data),      // { date, fleet, generalNote, reasons:{id:reason} }

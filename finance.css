@@ -4804,3 +4804,10 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .zn-lg-fx { font-style: normal; height: 16px; min-width: 22px; font-size: 9.5px; }
 .zn-pop-fx { font-size: 12.5px; }
 .zn-fx-edit { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border-soft); border-radius: 10px; }
+
+/* RUTE RIT — warehouse on the zone map + board hint. */
+.zn-depot-wrap { background: none; border: 0; }
+.zn-depot { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #06334F; color: #fff; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(6,51,79,.4); box-sizing: border-box; }
+.zn-depot.new { background: var(--sand); color: #06334F; }
+.zn-lg-depot { width: 12px; height: 12px; border-radius: 50%; background: #06334F; border: 2px solid #fff; box-shadow: 0 0 0 1px #06334F; display: inline-block; }
+.dist-rit-need { font-size: 12px; color: var(--text-mut); }
