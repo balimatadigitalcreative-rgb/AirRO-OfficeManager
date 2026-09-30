@@ -204,6 +204,9 @@ router.get('/deliveries/route', requireCap('distribusiPengiriman'), validate({ q
 router.get('/deliveries/rit-route', requireCap('distribusiPengiriman'), validate({ query: ctrl.schemas.ritQuery }), ctrl.ritRoute);
 // The warehouse every rit starts from: owner/GM tier (it moves the start of every route).
 router.put('/depot', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.depotSchema }), ctrl.setDepot);
+// ATURAN LAPANGAN — anyone in distribusi may READ them (the phone UI follows them); only owner/GM write.
+router.get('/field-rules', requireCap('distribusi'), ctrl.getFieldRules);
+router.put('/field-rules', requireCap('distribusiAturanLapangan'), validate({ body: ctrl.schemas.fieldRulesSchema }), ctrl.putFieldRules);
 // CARRY-OVER of undelivered stops — its OWN back-office cap (distribusiBelumTerkirim), separate from the
 // field team's daily-route cap (distribusiPengiriman). Every surface below is gated on it; the outstanding
 // COUNT on the dashboard summary is gated in the service (see outstandingSummary). GET the actionable list

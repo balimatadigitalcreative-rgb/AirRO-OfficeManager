@@ -214,6 +214,16 @@ const reorderSchema = z.object({ date: DATE.optional(), fleet: z.string().max(60
 // RUTE RIT: the open rit of ONE armada, planned from the warehouse within its load.
 const ritQuery = z.object({ date: DATE.optional(), fleet: z.string().max(60).optional() });
 const depotSchema = z.object({ lat: z.union([z.number(), z.string()]), lng: z.union([z.number(), z.string()]) });
+// ATURAN LAPANGAN (owner/GM). Every field optional — a PATCH-style merge; the service validates ranges.
+const fieldRulesSchema = z.object({
+  ritSop: z.object({ enabled: z.boolean().optional(), minLoad: z.number().int().optional() }).optional(),
+  fleetCapacity: z.record(z.union([z.number(), z.string(), z.null()])).optional(),
+  wajibFotoTransaksi: z.boolean().optional(),
+  wajibFotoPengeluaran: z.boolean().optional(),
+  wajibAlasanBatal: z.boolean().optional(),
+  hargaGantiRugiGalon: z.number().int().optional(),
+  fieldUiDefault: z.string().max(10).optional(),
+});
 const routeQuery = z.object({
   date: DATE, fleet: z.string().max(60).optional(),
   lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional(),
@@ -424,6 +434,9 @@ const reorderDeliveries = asyncHandler(async (req, res) => { const r = await ser
 // Proximity route - read-only suggestion (no write, no broadcast). Persisting it is the reorder call.
 const deliveryRoute = asyncHandler(async (req, res) => res.json(await service.routeDeliveries(req.user, req.query)));
 const ritRoute = asyncHandler(async (req, res) => res.json({ data: await service.ritRoute(req.user, req.query) }));
+const fieldRules = require('../services/fieldRules.service');
+const getFieldRules = asyncHandler(async (req, res) => res.json({ data: await fieldRules.getRules() }));
+const putFieldRules = asyncHandler(async (req, res) => { const r = await fieldRules.setRules(req.body, req.user); bcast('rules', 'fieldRules'); res.json({ data: r }); });
 const setDepot = asyncHandler(async (req, res) => { const r = await service.setDepot(req.body, req.user); bcast('depot', ''); res.json({ data: r }); });
 const pinDelivery = asyncHandler(async (req, res) => { const r = await service.pinDelivery(req.user, req.params.id, req.body); bcast('delivery', req.params.id); res.json({ data: r }); });
 const closeDay = asyncHandler(async (req, res) => {
@@ -526,7 +539,7 @@ const assignZone = asyncHandler(async (req, res) => res.json({ data: zoneBcast(a
 const autoZones = asyncHandler(async (req, res) => res.json({ data: zoneBcast(await zones.autoZones(req.body, req.user), req.body) }));
 
 module.exports = {
-  ritRoute, setDepot,
+  ritRoute, setDepot, getFieldRules, putFieldRules,
   listZones, createZone, updateZone, deleteZone, assignZone, autoZones,
   recordPosition, listPositions, listCustomers, getCustomer, createCustomer, createOpeningBon, updateCustomer, setLocation, clearLocation, revertLocation, locationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTxns, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,
   deactivateCustomer, reactivateCustomer, deleteCustomer,
@@ -541,5 +554,5 @@ module.exports = {
   raiseDispute, approveDispute, reverseDispute,
   kerugianImpact, voidKerugian, hardDeleteKerugian, bulkDeleteKerugian, editKerugianNote,
   createAdjustment, listAdjustments, approveAdjustment, reverseAdjustment, adjustmentReport,
-  schemas: { ritQuery, depotSchema, zoneCreateSchema, zoneUpdateSchema, zoneDeleteQuery, zoneAssignSchema, zoneAutoSchema, openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, clearLocationSchema, bulkPreviewSchema, bulkClearSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, positionSchema, reorderSchema, routeQuery, pinSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
+  schemas: { ritQuery, depotSchema, fieldRulesSchema,zoneCreateSchema, zoneUpdateSchema, zoneDeleteQuery, zoneAssignSchema, zoneAutoSchema, openingBonSchema, adjustCreateSchema, adjustReportQuery, customerSchema, customerUpdateSchema, locationSchema, clearLocationSchema, bulkPreviewSchema, bulkClearSchema, locationPhotoSchema, importSchema, legacyImportSchema, legacyBatchParams, priceSchema, pricePreviewSchema, txnSchema, correctionSchema, correctionPreviewSchema, voidSchema, changeReqQuery, rejectSchema, reassignPreviewSchema, reassignSchema, archiveSchema, pnrSchema, lossQuery, disputeSchema, disputeApproveSchema, kerugianQuery, kerugianVoidSchema, kerugianDeleteSchema, kerugianNoteSchema, kerugianBulkSchema, hardDeleteSchema, bulkTxnPreviewSchema, bulkTxnSchema, bulkRestoreSchema, listTxnQuery, auditQuery, summaryQuery, deliveryReportQuery, cashIntegQuery, boardQuery, orderSchema, markSchema, positionSchema, reorderSchema, routeQuery, pinSchema, closeSchema, outstandingQuery, outstandingResolveSchema, bulkCarrySchema, bulkResolveSchema, undoCarrySchema, closeoutQuery, runOpenSchema, runCloseSchema, runCorrectionSchema, runQuery, expenseSchema, expenseVoidSchema, expenseQuery, custListQuery, gallonQuery, gallonCorrectionSchema, openingStockSchema, gallonResetSchema, gallonVoidSchema, gallonRestoreSchema, gallonMovDeleteSchema, openingResetSchema, openingResetImpactSchema, opnameSchema, resetTotalSchema, resetTotalRestoreSchema, openingRowsBulkSchema, idParams, typeCreateSchema, typeRenameSchema, typeDeleteQuery, batchParams, invoiceCreateSchema, dispatchSchema, dispatchQuery },
 };

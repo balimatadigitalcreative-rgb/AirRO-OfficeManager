@@ -240,6 +240,9 @@ function deriveDistribusiCaps(perms, role) {
   // them — a bulk schedule change — so it is owner/GM tier and NEVER derived from a field cap.
   if (p.distribusiZona === undefined) p.distribusiZona = isOwnerGm;
   if (p.distribusiZonaKelola === undefined) p.distribusiZonaKelola = isOwnerGm;
+  // ATURAN LAPANGAN (SOP muatan, kapasitas armada, foto/alasan wajib, harga ganti rugi, rilis tampilan
+  // baru) change how every driver works — owner/GM tier, never derived from a field cap.
+  if (p.distribusiAturanLapangan === undefined) p.distribusiAturanLapangan = isOwnerGm;
   // Creating balance ADJUSTMENTS (penyesuaian). The old SINGLE cap `distribusiPenyesuaian` covered BOTH
   // gallon and bon, which forced handing helper staff the power to alter customer DEBT just to correct
   // gallon counts. It is now SPLIT per kind:
