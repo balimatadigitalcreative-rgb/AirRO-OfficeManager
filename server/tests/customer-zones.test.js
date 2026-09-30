@@ -275,6 +275,66 @@ describe('the delivery board never rewrites a day already done', () => {
   });
 });
 
+describe('automatic zones per delivery day (one zone = the route of one day)', () => {
+  const DAYS6 = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+  beforeAll(async () => {
+    // A few more located customers, so capacity can actually run out.
+    for (let i = 0; i < 4; i++) await mk('Harian ' + i, { lat: IN_S.lat + i * 0.001, lng: IN_S.lng + i * 0.001 });
+  });
+  const locatedPool = async () => (await prisma.customer.findMany({ where: { active: true, lat: { not: null } } }))
+    .filter((c) => !(c.zoneManual && !c.zoneId));   // a customer kept OUT by hand stays out
+
+  it('dryRun: every zone has one day + one armada, no slot twice, none over the maximum — nothing written', async () => {
+    const before = await prisma.distZone.findMany();
+    const r = await request(app).post(`${Z}/auto`).set(auth(gm)).send({ mode: 'daily', maxPerDay: 3, armadas: ['DK 1', 'DK 2'], dryRun: true });
+    expect(r.status).toBe(200);
+    const g = r.body.data.groups;
+    const pool = await locatedPool();
+    expect(g.length).toBe(Math.ceil(pool.length / 3));
+    g.forEach((z) => { expect(z.count).toBeLessThanOrEqual(3); expect(DAYS6).toContain(z.day); expect(['DK 1', 'DK 2']).toContain(z.armada); });
+    expect(new Set(g.map((z) => z.armada + z.day)).size).toBe(g.length);
+    expect(g.reduce((s, z) => s + z.count, 0)).toBe(pool.length);
+    expect((await prisma.distZone.findMany()).map((z) => z.id)).toEqual(before.map((z) => z.id));
+  });
+
+  it('not enough capacity → 400 that says what to change', async () => {
+    const pool = await locatedPool();
+    expect(pool.length).toBeGreaterThan(6);                  // one armada × 6 days of 1 customer
+    const r = await request(app).post(`${Z}/auto`).set(auth(gm)).send({ mode: 'daily', maxPerDay: 1, armadas: ['DK 1'], dryRun: true });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/Kapasitas kurang/);
+    expect(r.body.error.message).toMatch(/armada/);
+  });
+
+  it('applying: each customer gets exactly the ONE day of its zone and armada, and no zone is over the maximum', async () => {
+    const r = await request(app).post(`${Z}/auto`).set(auth(gm)).send({ mode: 'daily', maxPerDay: 3, armadas: ['DK 1', 'DK 2'] });
+    expect(r.status).toBe(200);
+    const zones = await prisma.distZone.findMany();
+    zones.forEach((z) => {
+      expect(JSON.parse(z.deliveryDays)).toHaveLength(1);
+      expect(z.name).toMatch(/^(Senin|Selasa|Rabu|Kamis|Jumat|Sabtu) · DK [12]$/);
+    });
+    const byZone = {};
+    for (const c of await locatedPool()) {
+      expect(c.zoneId).not.toBeNull();
+      const z = zones.find((x) => x.id === c.zoneId);
+      expect(c.armada).toBe(z.armada);
+      expect(JSON.parse(c.deliveryDays)).toEqual(JSON.parse(z.deliveryDays));
+      byZone[z.id] = (byZone[z.id] || 0) + 1;
+    }
+    Object.values(byZone).forEach((n) => expect(n).toBeLessThanOrEqual(3));
+  });
+
+  it('a customer kept out of every zone by hand is still out', async () => {
+    expect(await prisma.customer.findFirst({ where: { name: 'Kost Pindahan' } })).toMatchObject({ zoneId: null, zoneManual: true });
+  });
+
+  it('asking for no armada or no maximum is refused', async () => {
+    expect((await request(app).post(`${Z}/auto`).set(auth(gm)).send({ mode: 'daily', maxPerDay: 3, armadas: [], dryRun: true })).status).toBe(400);
+    expect((await request(app).post(`${Z}/auto`).set(auth(gm)).send({ mode: 'daily', armadas: ['DK 1'], dryRun: true })).status).toBe(400);
+  });
+});
+
 describe('the zone map screen is wired in, and honest about its third party', () => {
   const fs = require('fs');
   const path = require('path');

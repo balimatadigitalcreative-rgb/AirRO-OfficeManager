@@ -105,8 +105,15 @@ function ZnConfirm({ title, changes, applied, busy, onCancel, onConfirm, confirm
 }
 
 // ── Automatic zones: group the points, preview on a map, then replace the zones ──────────────────
-function ZnAuto({ initialK, onClose, onApplied }) {
+// Two ways to cut the map:
+//   'daily' — one zone per (armada, day), each at most `max` customers: the route of one day. The
+//             owner sets the daily maximum and which armadas run; days are Senin–Sabtu.
+//   'count' — k zones by proximity; armada suggested, days left for the owner.
+function ZnAuto({ initialK, armadaOpts, armadaDefault, onClose, onApplied }) {
+  const [mode, setMode] = uSz('daily');
   const [k, setK] = uSz(initialK || 5);
+  const [max, setMax] = uSz(40);
+  const [armadas, setArmadas] = uSz(armadaDefault && armadaDefault.length ? armadaDefault : armadaOpts);
   const [keepManual, setKeepManual] = uSz(true);
   const [prev, setPrev] = uSz(null);
   const [err, setErr] = uSz('');
@@ -115,21 +122,25 @@ function ZnAuto({ initialK, onClose, onApplied }) {
   const el = uRz(null);
   const map = useZnMap(el);
   const layer = uRz(null);
+  const body = () => (mode === 'daily' ? { mode, maxPerDay: max, armadas, keepManual } : { mode, k, keepManual });
   uEz(() => { const o = (e) => e.key === 'Escape' && !confirm && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, [confirm]);
   uEz(() => {
     let live = true;
     setErr('');
     const t = setTimeout(() => {
-      window.API.distribusi.zones.auto({ k, keepManual, dryRun: true })
+      window.API.distribusi.zones.auto(Object.assign(body(), { dryRun: true }))
         .then((r) => { if (live) setPrev(r.data); })
-        .catch((e) => { if (live) setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
-    }, 250);
+        // A refused preview (e.g. not enough capacity) must not leave the previous one on screen.
+        .catch((e) => { if (live) { setPrev(null); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); } });
+    }, 300);
     return () => { live = false; clearTimeout(t); };
-  }, [k, keepManual]);
+  }, [mode, k, max, armadas.join('|'), keepManual]);
   uEz(() => {
-    if (!map || !prev) return;
+    if (!map) return;
     const L = window.L;
     if (layer.current) layer.current.remove();
+    layer.current = null;
+    if (!prev) return;
     const g = L.layerGroup().addTo(map);
     const bounds = [];
     prev.groups.forEach((z) => { L.polygon(z.polygon, { color: z.color, weight: 2, fillOpacity: 0.18 }).addTo(g); z.polygon.forEach((p) => bounds.push(p)); });
@@ -138,48 +149,84 @@ function ZnAuto({ initialK, onClose, onApplied }) {
   }, [map, prev]);
   const apply = () => {
     setBusy(true);
-    window.API.distribusi.zones.auto({ k, keepManual })
+    window.API.distribusi.zones.auto(body())
       .then((r) => { setBusy(false); onApplied(r.data); })
       .catch((e) => { setBusy(false); setConfirm(false); setErr((e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr')); });
   };
+  const toggleArmada = (a) => setArmadas((xs) => (xs.includes(a) ? xs.filter((x) => x !== a) : armadaOpts.filter((x) => x === a || xs.includes(x))));
+  const setMaxSafe = (v) => setMax(Math.max(1, Math.min(500, parseInt(v, 10) || 1)));
+  const applyLabel = prev ? trD(mode === 'daily' ? 'zn.dailyApply' : 'zn.autoApply', { n: prev.groups.length }) : trD('zn.autoApply', { n: mode === 'daily' ? '…' : k });
   return (
     <div className="modal-scrim" onClick={onClose} style={{ zIndex: 240 }}>
       <div className="modal-card zn-auto" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('zn.autoTitle')}</div><div className="zn-sub">{trD('zn.autoSub')}</div></div>
+          <div><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('zn.autoTitle')}</div><div className="zn-sub">{trD(mode === 'daily' ? 'zn.dailySub' : 'zn.autoSub')}</div></div>
           <button className="jp-icon" onClick={onClose} aria-label={trD('dist.cancel')}><IconClose s={18} /></button>
         </div>
         <div className="modal-body">
-          <div className="zn-auto-ctl">
-            <div>
-              <div className="fld-label">{trD('zn.autoK')}</div>
-              <div className="zn-step">
-                <button type="button" className="btn btn-ghost" aria-label={trD('zn.autoLess')} disabled={k <= 1} onClick={() => setK((v) => Math.max(1, v - 1))}>−</button>
-                <b>{k}</b>
-                <button type="button" className="btn btn-ghost" aria-label={trD('zn.autoMore')} disabled={k >= 30} onClick={() => setK((v) => Math.min(30, v + 1))}>+</button>
+          <div className="zn-seg" role="group" aria-label={trD('zn.autoMode')}>
+            <button type="button" className={mode === 'daily' ? 'on' : ''} aria-pressed={mode === 'daily'} onClick={() => setMode('daily')}>{trD('zn.modeDaily')}</button>
+            <button type="button" className={mode === 'count' ? 'on' : ''} aria-pressed={mode === 'count'} onClick={() => setMode('count')}>{trD('zn.modeCount')}</button>
+          </div>
+          {mode === 'daily' ? (
+            <div className="zn-auto-ctl">
+              <div>
+                <label className="fld-label" htmlFor="zn-max">{trD('zn.dailyMax')}</label>
+                <div className="zn-step">
+                  <button type="button" className="btn btn-ghost" aria-label={trD('zn.autoLess')} disabled={max <= 1} onClick={() => setMaxSafe(max - 5)}>−</button>
+                  <input id="zn-max" className="fld zn-num" type="number" inputMode="numeric" min={1} max={500} value={max} onChange={(e) => setMaxSafe(e.target.value)} />
+                  <button type="button" className="btn btn-ghost" aria-label={trD('zn.autoMore')} disabled={max >= 500} onClick={() => setMaxSafe(max + 5)}>+</button>
+                </div>
+              </div>
+              <div className="zn-armadas">
+                <div className="fld-label">{trD('zn.dailyArmadas')}</div>
+                <div className="zn-armada-list">
+                  {armadaOpts.map((a) => (
+                    <label key={a} className={'zn-armada' + (armadas.includes(a) ? ' on' : '')}><input type="checkbox" checked={armadas.includes(a)} onChange={() => toggleArmada(a)} />{a}</label>
+                  ))}
+                  {!armadaOpts.length && <span className="zn-mut">{trD('zn.dailyNoArmada')}</span>}
+                </div>
+              </div>
+              <div className="zn-mut zn-days-note">{trD('zn.dailyDays')}</div>
+            </div>
+          ) : (
+            <div className="zn-auto-ctl">
+              <div>
+                <div className="fld-label">{trD('zn.autoK')}</div>
+                <div className="zn-step">
+                  <button type="button" className="btn btn-ghost" aria-label={trD('zn.autoLess')} disabled={k <= 1} onClick={() => setK((v) => Math.max(1, v - 1))}>−</button>
+                  <b>{k}</b>
+                  <button type="button" className="btn btn-ghost" aria-label={trD('zn.autoMore')} disabled={k >= 30} onClick={() => setK((v) => Math.min(30, v + 1))}>+</button>
+                </div>
               </div>
             </div>
-            <label className="dist-check"><input type="checkbox" checked={keepManual} onChange={(e) => setKeepManual(e.target.checked)} /><span>{trD('zn.autoKeep')}</span></label>
-          </div>
+          )}
+          <label className="dist-check"><input type="checkbox" checked={keepManual} onChange={(e) => setKeepManual(e.target.checked)} /><span>{trD('zn.autoKeep')}</span></label>
           <div className="zn-auto-map" ref={el} />
           {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
           {prev && (<>
+            {prev.capacity && <div className="zn-impact"><IconTruck s={15} /><span>{trD('zn.dailyCapacity', { n: prev.capacity.needed, a: prev.capacity.available })}</span></div>}
             <div className="zn-auto-rows">
               {prev.groups.map((g) => (
-                <div key={g.name} className="zn-auto-row"><span className="zn-sw" style={{ background: g.color }} /><b>{g.name}</b><span>{trD('zn.nCust', { n: g.count })}</span><span className="zn-mut">{g.armada ? trD('zn.suggest', { a: g.armada }) : trD('zn.armadaUnset')}</span></div>
+                <div key={g.name} className="zn-auto-row">
+                  <span className="zn-sw" style={{ background: g.color }} /><b>{g.name}</b>
+                  <span className={g.max && g.count >= g.max ? 'zn-full' : ''}>{g.max ? trD('zn.nOfMax', { n: g.count, m: g.max }) : trD('zn.nCust', { n: g.count })}</span>
+                  <span className="zn-mut">{g.day ? '' : (g.armada ? trD('zn.suggest', { a: g.armada }) : trD('zn.armadaUnset'))}</span>
+                </div>
               ))}
             </div>
             {prev.replaces > 0 && <div className="zn-impact warn"><IconWarn s={15} /><span>{trD('zn.autoReplaces', { n: prev.replaces })}</span></div>}
+            {prev.locked > 0 && <div className="zn-impact"><IconLock s={15} /><span>{trD('zn.dailyLocked', { n: prev.locked })}</span></div>}
             {prev.withoutCoords > 0 && <div className="zn-impact"><IconPin s={15} /><span>{trD('zn.autoNoCoords', { n: prev.withoutCoords })}</span></div>}
-            <div className="zn-mut" style={{ marginTop: 6 }}>{trD('zn.autoDaysNote')}</div>
+            <div className="zn-mut" style={{ marginTop: 6 }}>{trD(mode === 'daily' ? 'zn.dailyNote' : 'zn.autoDaysNote')}</div>
           </>)}
         </div>
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button>
-          <button className="btn btn-primary" disabled={!prev || !prev.groups.length} onClick={() => setConfirm(true)}>{trD('zn.autoApply', { n: prev ? prev.groups.length : k })}</button>
+          <button className="btn btn-primary" disabled={!prev || !prev.groups.length} onClick={() => setConfirm(true)}>{applyLabel}</button>
         </div>
       </div>
-      {confirm && prev && <ZnConfirm title={trD('zn.autoApply', { n: prev.groups.length })} changes={prev.changes} busy={busy} onCancel={() => setConfirm(false)} onConfirm={apply} />}
+      {confirm && prev && <ZnConfirm title={applyLabel} changes={prev.changes} busy={busy} onCancel={() => setConfirm(false)} onConfirm={apply} />}
     </div>
   );
 }
@@ -228,6 +275,8 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
   const noZoneN = custs.filter((c) => !c.zoneId).length;
   const bonN = custs.filter((c) => c.sisaBon > 0).length;
   const fleetOpts = [...new Set((fleet || []).filter(Boolean).concat(form && form.armada ? [form.armada] : []))];
+  // Armadas offered for daily routes: those customers already use, then the rest of the fleet list.
+  const armadaOpts = [...new Set(custs.map((c) => c.armada).filter(Boolean).sort().concat((fleet || []).filter(Boolean)))];
   const ql = q.trim().toLowerCase();
   const matches = ql ? custs.filter((c) => (c.name || '').toLowerCase().includes(ql) || (c.code || '').toLowerCase().includes(ql)).slice(0, 8) : [];
   const picked = pick ? custs.find((c) => c.id === pick) : null;
@@ -549,7 +598,7 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
       </div>
 
       {confirm && <ZnConfirm title={confirm.title} changes={confirm.changes} confirmLabel={confirm.confirmLabel} busy={busy} onCancel={() => setConfirm(null)} onConfirm={runConfirm} />}
-      {autoOpen && <ZnAuto initialK={zones.length || 5} onClose={() => setAutoOpen(false)} onApplied={(r) => { setAutoOpen(false); setSelId(null); done(trD('zn.autoDone', { z: (r.zones || []).length, n: r.applied })); }} />}
+      {autoOpen && <ZnAuto initialK={zones.length || 5} armadaOpts={armadaOpts} armadaDefault={[...new Set(custs.map((c) => c.armada).filter(Boolean))].sort()} onClose={() => setAutoOpen(false)} onApplied={(r) => { setAutoOpen(false); setSelId(null); done(trD('zn.autoDone', { z: (r.zones || []).length, n: r.applied })); }} />}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
   );

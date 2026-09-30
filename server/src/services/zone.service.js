@@ -250,6 +250,8 @@ async function assignCustomer(body, actor) {
 // everybody's delivery days is the owner's call, made per zone afterwards.
 async function autoZones(body, actor) {
   assertCanManage(actor);
+  if (body.mode === 'daily') return autoDaily(body, actor);
+  if (!(parseInt(body.k, 10) >= 1)) throw ApiError.badRequest('Isi jumlah zona.');
   const k = Math.max(1, Math.min(DZ.MAX_ZONES, parseInt(body.k, 10) || 1));
   const keepManual = body.keepManual !== false;
   const custs = await prisma.customer.findMany({ where: { active: { not: false } }, select: CUST_SELECT });
@@ -293,6 +295,85 @@ async function autoZones(body, actor) {
   }, TX);
   await dist().logDistAudit('pelanggan', `Zona otomatis: ${drafts.length} zona`, `${existing.length ? 'mengganti ' + existing.length + ' zona lama · ' : ''}${res.plan.length} pelanggan ikut jadwal zona`, actor, '');
   return { zones: res.all, applied: res.plan.length, changes: describe(res.plan, res.all) };
+}
+
+// ONE ZONE = ONE DAY'S ROUTE for ONE armada. The owner sets the most customers an armada can serve in
+// a day; located customers are grouped into compact routes of at most that many, and each route gets
+// an (armada, day) so every truck works one continuous territory, Senin to Sabtu. Deliveries are once
+// a week, so each zone carries exactly one day.
+//
+// Capacity-limited groups sit side by side, and their outlines can overlap a little at the seams. A
+// customer whose point falls in a neighbour's outline is LOCKED to the route it was counted in
+// (zoneManual) — otherwise the overlap rule would move them and push that day over the maximum.
+const DAILY_DAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+const DAY_NAME = { Sen: 'Senin', Sel: 'Selasa', Rab: 'Rabu', Kam: 'Kamis', Jum: 'Jumat', Sab: 'Sabtu', Min: 'Minggu' };
+async function autoDaily(body, actor) {
+  const max = parseInt(body.maxPerDay, 10);
+  if (!(max >= 1)) throw ApiError.badRequest('Isi maksimal pelanggan per armada per hari.');
+  const armadas = [...new Set((body.armadas || []).map((s) => String(s || '').trim()).filter(Boolean))];
+  if (!armadas.length) throw ApiError.badRequest('Pilih minimal satu armada.');
+  for (const a of armadas) await validArmada(a);
+  const keepManual = body.keepManual !== false;
+  const custs = await prisma.customer.findMany({ where: { active: { not: false } }, select: CUST_SELECT });
+  const keptOut = (c) => keepManual && c.zoneManual && !c.zoneId;   // placed OUT of every zone by hand
+  const pool = custs.filter(hasCoords).filter((c) => !keptOut(c));
+  const groups = DZ.capacitatedGroups(pool.map((c) => ({ id: c.id, lat: c.lat, lng: c.lng })), max);
+  const fit = DZ.assignSlots(groups, armadas, DAILY_DAYS);
+  if (!fit.ok) {
+    throw ApiError.badRequest(`Kapasitas kurang: ${pool.length} pelanggan butuh ${fit.needed} rute harian (maks ${max} per hari), `
+      + `tapi ${armadas.length} armada × ${DAILY_DAYS.length} hari = ${fit.available} rute. Naikkan maksimal per hari atau tambah armada.`);
+  }
+  const drafts = groups.map((g, i) => {
+    const s = fit.slots[i];
+    return {
+      id: '__day_' + i, name: `${DAY_NAME[s.day]} · ${s.armada}`, color: DZ.colorAt(i), polygon: g.polygon,
+      armada: s.armada, deliveryDays: [s.day], day: s.day, ids: g.ids,
+      sortOrder: armadas.indexOf(s.armada) * 7 + DAILY_DAYS.indexOf(s.day) + 1,
+    };
+  }).sort((a, b) => a.sortOrder - b.sortOrder);
+  // Who needs locking: their point's outline (overlap rule) is not the route they were counted in.
+  const planZones = drafts.map(planZone);
+  const assigned = new Map();
+  drafts.forEach((d) => d.ids.forEach((id) => assigned.set(id, d.id)));
+  const locked = new Set(pool.filter((c) => DZ.zoneFor(c.lat, c.lng, planZones) !== assigned.get(c.id)).map((c) => c.id));
+  const existing = await loadZones();
+  const gone = new Set(existing.map((z) => z.id));
+  const override = (c) => {
+    if (assigned.has(c.id)) return Object.assign({}, c, locked.has(c.id) ? { zoneManual: true, zoneId: assigned.get(c.id) } : { zoneManual: false });
+    if (c.zoneManual && !keptOut(c) && (!keepManual || (c.zoneId && gone.has(c.zoneId)))) return Object.assign({}, c, { zoneManual: false });
+    return c;
+  };
+  const summary = {
+    mode: 'daily', replaces: existing.length, withoutCoords: custs.filter((c) => !hasCoords(c)).length,
+    capacity: { max, needed: fit.slots.length, available: armadas.length * DAILY_DAYS.length }, locked: locked.size,
+  };
+  if (body.dryRun) {
+    const plan = await planFor(prisma, drafts, {}, override);
+    return Object.assign(summary, {
+      groups: drafts.map((d) => ({ name: d.name, color: d.color, polygon: d.polygon, armada: d.armada, day: d.day, count: d.ids.length, max })),
+      applied: 0, changes: describe(plan, drafts),
+    });
+  }
+  const snap = await dist().actorSnap(actor);
+  const res = await prisma.$transaction(async (tx) => {
+    if (!keepManual) await tx.customer.updateMany({ where: { zoneManual: true }, data: { zoneManual: false } });
+    else if (gone.size) await tx.customer.updateMany({ where: { zoneManual: true, zoneId: { in: [...gone] } }, data: { zoneManual: false } });
+    await tx.distZone.deleteMany({});
+    for (const d of drafts) {
+      const z = await tx.distZone.create({ data: { name: d.name, color: d.color, polygon: JSON.stringify(d.polygon), armada: d.armada, deliveryDays: JSON.stringify(d.deliveryDays), sortOrder: d.sortOrder, createdByName: snap.actorName } });
+      const lock = d.ids.filter((id) => locked.has(id));
+      const free = d.ids.filter((id) => !locked.has(id));
+      if (lock.length) await tx.customer.updateMany({ where: { id: { in: lock } }, data: { zoneManual: true, zoneId: z.id } });
+      if (free.length) await tx.customer.updateMany({ where: { id: { in: free } }, data: { zoneManual: false } });
+    }
+    const all = await loadZones(tx);
+    const plan = await planFor(tx, all);
+    await applyPlan(tx, plan);
+    return { plan, all };
+  }, TX);
+  await dist().logDistAudit('pelanggan', `Zona per hari: ${drafts.length} rute (maks ${max}/hari)`,
+    `${existing.length ? 'mengganti ' + existing.length + ' zona lama · ' : ''}armada ${armadas.join(', ')} · ${res.plan.length} pelanggan ikut jadwal zona${locked.size ? ' · ' + locked.size + ' dikunci di rutenya' : ''}`, actor, '');
+  return Object.assign(summary, { zones: res.all, applied: res.plan.length, changes: describe(res.plan, res.all) });
 }
 
 // ── Hooks for the rest of distribusi ─────────────────────────────────────────

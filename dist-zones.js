@@ -158,6 +158,119 @@
     return groups;
   }
 
+  // ONE ZONE = ONE DAY'S ROUTE. Group points into ceil(n / maxPer) compact groups, NONE larger than
+  // maxPer — k-means alone balances nothing, so a dense neighbourhood would become an impossible day.
+  // Each round assigns points most-constrained first (largest "regret": how much worse their second-
+  // nearest centre is) to the nearest centre that still has room, then moves the centres to the mean
+  // of what they got. Total room (k × maxPer) always covers n, so everyone is placed.
+  // Returns [{ ids, center:[lat,lng], polygon }], sorted like autoZones. Deterministic.
+  function capacitatedGroups(points, maxPer) {
+    var pts = (points || []).filter(function (p) { return p && hasPoint(p.lat, p.lng); });
+    var cap = Math.max(1, Math.floor(maxPer) || 1);
+    if (!pts.length) return [];
+    var k = Math.ceil(pts.length / cap);
+    var lat0 = pts.reduce(function (s, p) { return s + p.lat; }, 0) / pts.length;
+    var cosLat = Math.cos((lat0 * Math.PI) / 180);
+    var xy = pts.map(function (p) { return [p.lng * cosLat, p.lat]; });
+    var d2 = function (a, b) { var dx = a[0] - b[0], dy = a[1] - b[1]; return dx * dx + dy * dy; };
+    // Seed from plain k-means (same seed rules as autoZones) — good starting centres.
+    var seeds = autoZones(pts, k).map(function (g) { return [g.center[1] * cosLat, g.center[0]]; });
+    var centers = seeds.slice();
+    while (centers.length < k) centers.push(xy[centers.length % xy.length]);   // coincident points: fewer seeds
+
+    var n = xy.length, assign = null;
+    for (var iter = 0; iter < 40; iter++) {
+      var dist = xy.map(function (p) { return centers.map(function (c) { return d2(p, c); }); });
+      var order = xy.map(function (_, i) {
+        var s = dist[i].slice().sort(function (a, b) { return a - b; });
+        return { i: i, regret: s.length > 1 ? s[1] - s[0] : 0 };
+      }).sort(function (a, b) { return b.regret - a.regret || a.i - b.i; });
+      var load = centers.map(function () { return 0; });
+      var next = new Array(n).fill(-1);
+      order.forEach(function (o) {
+        var pref = centers.map(function (_, c) { return c; }).sort(function (a, b) { return dist[o.i][a] - dist[o.i][b] || a - b; });
+        for (var j = 0; j < pref.length; j++) if (load[pref[j]] < cap) { next[o.i] = pref[j]; load[pref[j]]++; break; }
+      });
+      var same = assign && next.every(function (v, i) { return v === assign[i]; });
+      assign = next;
+      if (same) break;
+      centers = centers.map(function (c, ci) {
+        var mine = xy.filter(function (_, i2) { return assign[i2] === ci; });
+        if (!mine.length) return c;
+        return [mine.reduce(function (s, p) { return s + p[0]; }, 0) / mine.length, mine.reduce(function (s, p) { return s + p[1]; }, 0) / mine.length];
+      });
+    }
+    // UNSTRETCH. The greedy pass can leave a straggler in a far route because the near one filled up
+    // first — a route that crosses town. Keep improving until nothing can: move a customer to a closer
+    // route that still has room, or swap two customers between routes when both end up closer to
+    // their route's centre. Neither step can break the daily maximum, and each lowers the total
+    // distance, so this stops.
+    var mean = function (ci) {
+      var mine = xy.filter(function (_, i2) { return assign[i2] === ci; });
+      if (!mine.length) return centers[ci];
+      return [mine.reduce(function (s, p) { return s + p[0]; }, 0) / mine.length, mine.reduce(function (s, p) { return s + p[1]; }, 0) / mine.length];
+    };
+    var EPS = 1e-14;
+    for (var pass = 0; pass < 200; pass++) {
+      centers = centers.map(function (_, ci) { return mean(ci); });
+      var load2 = centers.map(function () { return 0; });
+      assign.forEach(function (a) { load2[a]++; });
+      var moved = false;
+      for (var i = 0; i < n; i++) {
+        var a = assign[i], di = d2(xy[i], centers[a]);
+        for (var b = 0; b < centers.length; b++) {
+          if (b === a || load2[b] >= cap) continue;
+          if (d2(xy[i], centers[b]) < di - EPS) { load2[a]--; load2[b]++; assign[i] = b; a = b; di = d2(xy[i], centers[b]); moved = true; }
+        }
+      }
+      for (var p = 0; p < n; p++) {
+        for (var q = p + 1; q < n; q++) {
+          var A = assign[p], B = assign[q];
+          if (A === B) continue;
+          if (d2(xy[p], centers[B]) + d2(xy[q], centers[A]) < d2(xy[p], centers[A]) + d2(xy[q], centers[B]) - EPS) { assign[p] = B; assign[q] = A; moved = true; }
+        }
+      }
+      if (!moved) break;
+    }
+    var groups = centers.map(function (c, ci) {
+      var members = pts.filter(function (_, i3) { return assign[i3] === ci; });
+      return { ids: members.map(function (p) { return p.id; }), center: [round6(c[1]), round6(c[0] / cosLat)], polygon: members.length ? zonePolygon(members, cosLat) : null };
+    }).filter(function (g) { return g.ids.length; });
+    groups.sort(function (a, b) { return b.ids.length - a.ids.length || (a.center[0] - b.center[0]) || (a.center[1] - b.center[1]); });
+    return groups;
+  }
+
+  // Give each group an (armada, day). Groups are ordered by bearing around the common centre, starting
+  // just after the widest empty gap, and cut into one contiguous run per armada — so each truck works
+  // one continuous territory rather than scattered patches. Within a run, days follow `days` in order.
+  // Runs differ in length by at most one. More groups than armadas × days cannot be scheduled.
+  // Returns { ok, slots:[{armada, day}] aligned with `groups` } or { ok:false, needed, available }.
+  function assignSlots(groups, armadas, days) {
+    var A = (armadas || []).filter(Boolean), D = (days || []).filter(Boolean);
+    var needed = (groups || []).length, available = A.length * D.length;
+    if (!needed) return { ok: true, slots: [] };
+    if (needed > available) return { ok: false, needed: needed, available: available };
+    var cy = groups.reduce(function (s, g) { return s + g.center[0]; }, 0) / needed;
+    var cx = groups.reduce(function (s, g) { return s + g.center[1]; }, 0) / needed;
+    var byAngle = groups.map(function (g, i) { return { i: i, a: Math.atan2(g.center[0] - cy, g.center[1] - cx) }; })
+      .sort(function (p, q) { return p.a - q.a || p.i - q.i; });
+    var start = 0, gap = -1;
+    for (var j = 0; j < byAngle.length; j++) {
+      var here = byAngle[j].a, prev = byAngle[(j - 1 + byAngle.length) % byAngle.length].a;
+      var g2 = j === 0 ? here - prev + 2 * Math.PI : here - prev;
+      if (g2 > gap) { gap = g2; start = j; }
+    }
+    var ring = byAngle.slice(start).concat(byAngle.slice(0, start));
+    var usedArmadas = Math.min(A.length, needed);
+    var base = Math.floor(needed / usedArmadas), extra = needed % usedArmadas;
+    var slots = new Array(needed), pos = 0;
+    for (var a = 0; a < usedArmadas; a++) {
+      var len = base + (a < extra ? 1 : 0);
+      for (var d = 0; d < len; d++) slots[ring[pos++].i] = { armada: A[a], day: D[d] };
+    }
+    return { ok: true, slots: slots };
+  }
+
   function sameSet(a, b) {
     var x = (a || []).slice().sort().join(','), y = (b || []).slice().sort().join(',');
     return x === y;
@@ -200,7 +313,7 @@
   function colorAt(i) { return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length]; }
 
   return {
-    pointInPolygon: pointInPolygon, zoneFor: zoneFor, validatePolygon: validatePolygon, autoZones: autoZones, planMembership: planMembership,
+    pointInPolygon: pointInPolygon, zoneFor: zoneFor, validatePolygon: validatePolygon, autoZones: autoZones, capacitatedGroups: capacitatedGroups, assignSlots: assignSlots, planMembership: planMembership,
     colorAt: colorAt, PALETTE: PALETTE, MAX_VERTICES: MAX_VERTICES, MAX_ZONES: MAX_ZONES, MARGIN_M: MARGIN_M,
   };
 });

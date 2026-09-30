@@ -299,7 +299,13 @@ const zoneUpdateSchema = z.object({
 });
 const zoneDeleteQuery = z.object({ dryRun: z.enum(['0', '1']).optional() });
 const zoneAssignSchema = z.object({ customerId: z.string().min(1).max(60), zoneId: z.string().max(60).nullable().optional(), auto: z.boolean().optional(), dryRun: z.boolean().optional() });
-const zoneAutoSchema = z.object({ k: z.coerce.number().int().min(1).max(30), keepManual: z.boolean().optional(), dryRun: z.boolean().optional() });
+// mode 'count' (default): k zones by proximity. mode 'daily': one zone per (armada, day), each at most
+// maxPerDay customers — the service checks the fields each mode needs.
+const zoneAutoSchema = z.object({
+  mode: z.enum(['count', 'daily']).optional(), k: z.coerce.number().int().min(1).max(30).optional(),
+  maxPerDay: z.coerce.number().int().min(1).max(500).optional(), armadas: z.array(z.string().max(40)).max(10).optional(),
+  keepManual: z.boolean().optional(), dryRun: z.boolean().optional(),
+});
 const batchParams = z.object({ batchId: z.string().min(1) });
 const invoiceCreateSchema = z.object({
   scope: z.enum(['unpaidBon', 'period', 'selected']).optional(),

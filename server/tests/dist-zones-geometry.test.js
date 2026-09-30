@@ -160,6 +160,99 @@ describe('planMembership — the schedule follows the zone', () => {
   });
 });
 
+describe('capacitatedGroups — one zone = one day\'s route, never over the daily maximum', () => {
+  const blob = (lat, lng, n, seed) => Array.from({ length: n }, (_, i) => ({ id: seed + i, lat: lat + Math.sin(i * 1.3 + seed) * 0.006, lng: lng + Math.cos(i * 2.1 + seed) * 0.006 }));
+
+  it('makes ceil(n / max) groups, none bigger than max, every customer exactly once', () => {
+    const pts = blob(-8.65, 115.22, 95, 1);
+    const g = DZ.capacitatedGroups(pts, 20);
+    expect(g).toHaveLength(5);
+    g.forEach((x) => expect(x.ids.length).toBeLessThanOrEqual(20));
+    const all = g.flatMap((x) => x.ids).sort((a, b) => a - b);
+    expect(all).toEqual(pts.map((p) => p.id).sort((a, b) => a - b));
+  });
+
+  it('keeps real neighbourhoods together when they fit', () => {
+    const pts = [...blob(-8.60, 115.20, 12, 1), ...blob(-8.66, 115.26, 9, 50), ...blob(-8.72, 115.18, 7, 90)];
+    const g = DZ.capacitatedGroups(pts, 12);
+    expect(g.map((x) => x.ids.length).sort((a, b) => a - b)).toEqual([7, 9, 12]);
+  });
+
+  it('splits a neighbourhood that is too big for one day', () => {
+    const g = DZ.capacitatedGroups(blob(-8.65, 115.22, 25, 3), 10);
+    expect(g).toHaveLength(3);
+    g.forEach((x) => expect(x.ids.length).toBeLessThanOrEqual(10));
+  });
+
+  it('is deterministic, and every group has a valid boundary', () => {
+    const pts = blob(-8.65, 115.22, 40, 7);
+    expect(DZ.capacitatedGroups(pts, 15)).toEqual(DZ.capacitatedGroups(pts, 15));
+    DZ.capacitatedGroups(pts, 15).forEach((x) => expect(DZ.validatePolygon(x.polygon).ok).toBe(true));
+  });
+
+  it('ignores points without coordinates; empty input → no groups', () => {
+    expect(DZ.capacitatedGroups([{ id: 1, lat: null, lng: null }], 5)).toEqual([]);
+  });
+
+  it('no stretched routes: nobody could swap with someone in another route and both be closer to home', () => {
+    // Two towns side by side plus scattered stragglers, with a tight daily maximum — the case where
+    // the greedy pass leaves a straggler in a far route because the near one filled up first.
+    const Z = [[[-8.615, 115.195], [-8.615, 115.235], [-8.64, 115.24], [-8.645, 115.2]], [[-8.64, 115.245], [-8.63, 115.28], [-8.67, 115.285], [-8.675, 115.25]], [[-8.67, 115.2], [-8.668, 115.24], [-8.71, 115.235], [-8.705, 115.195]]];
+    let sd = 7; const r = () => { sd = (sd * 1664525 + 1013904223) % 4294967296; return sd / 4294967296; };
+    const pts = []; let n = 0;
+    Z.forEach((q) => { const la = q.reduce((a, v) => a + v[0], 0) / 4, ln = q.reduce((a, v) => a + v[1], 0) / 4; for (let i = 0; i < 14; i++) { n++; pts.push({ id: n, lat: la + (r() - 0.5) * 0.018, lng: ln + (r() - 0.5) * 0.02 }); r(); } });
+    for (let i = 0; i < 5; i++) { n++; pts.push({ id: n, lat: -8.69 + r() * 0.02, lng: 115.27 + r() * 0.02 }); }
+    const groups = DZ.capacitatedGroups(pts, 3);
+    const byId = new Map(pts.map((p) => [p.id, p]));
+    const cos = Math.cos((-8.62 * Math.PI) / 180);
+    const d = (p, c) => { const dx = (p.lng - c[1]) * cos, dy = p.lat - c[0]; return dx * dx + dy * dy; };
+    let improvable = 0;
+    groups.forEach((A, a) => groups.forEach((B, b) => {
+      if (b <= a) return;
+      A.ids.forEach((i) => B.ids.forEach((j) => {
+        const pi = byId.get(i), pj = byId.get(j);
+        if (d(pi, B.center) + d(pj, A.center) < d(pi, A.center) + d(pj, B.center) - 1e-12) improvable++;
+      }));
+    }));
+    expect(improvable).toBe(0);
+    groups.forEach((x) => expect(x.ids.length).toBeLessThanOrEqual(3));
+  });
+});
+
+describe('assignSlots — each zone gets an armada and a day', () => {
+  // Four zones around a centre, one per compass direction.
+  const g = (id, lat, lng) => ({ id, center: [lat, lng] });
+  const groups = [g('n', -8.60, 115.22), g('e', -8.65, 115.27), g('s', -8.70, 115.22), g('w', -8.65, 115.17)];
+  const DAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+  it('each armada gets a CONTIGUOUS territory; days run Sen, Sel, … inside it', () => {
+    const r = DZ.assignSlots(groups, ['A', 'B'], DAYS);
+    expect(r.ok).toBe(true);
+    const by = {}; r.slots.forEach((s, i) => { (by[s.armada] = by[s.armada] || []).push({ id: groups[i].id, day: s.day }); });
+    expect(Object.keys(by).sort()).toEqual(['A', 'B']);
+    Object.values(by).forEach((list) => {
+      expect(list).toHaveLength(2);
+      expect(list.map((x) => x.day).sort()).toEqual(['Sel', 'Sen']);
+      // Neighbours on the compass, never opposite sides (n+s or e+w).
+      const pair = list.map((x) => x.id).sort().join('');
+      expect(['en', 'es', 'sw', 'nw']).toContain(pair);
+    });
+  });
+
+  it('no (armada, day) is used twice', () => {
+    const r = DZ.assignSlots(groups, ['A'], DAYS);
+    const keys = r.slots.map((s) => s.armada + s.day);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('more zones than armada × days → not ok, says how many are short', () => {
+    const r = DZ.assignSlots(groups, ['A'], ['Sen', 'Sel', 'Rab']);
+    expect(r.ok).toBe(false);
+    expect(r.needed).toBe(4);
+    expect(r.available).toBe(3);
+  });
+});
+
 describe('palette', () => {
   it('gives distinct colours in order and wraps', () => {
     expect(DZ.colorAt(0)).not.toBe(DZ.colorAt(1));
