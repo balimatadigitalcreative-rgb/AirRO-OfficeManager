@@ -240,9 +240,11 @@ describe('the customer form offers the switch', () => {
     expect(jsx).toMatch(/trD\('cust\.fixedBadge'\)/);
   });
   it('the edited screens still compile (a static match cannot see a JSX syntax error)', () => {
-    const esbuild = require(path.join(__dirname, '..', '..', 'node_modules', 'esbuild'));
+    // @babel/parser, NOT the frontend's esbuild: the deploy runs these tests in a checkout that has only
+    // the SERVER's dependencies installed, and @babel/parser always ships with jest.
+    const { parse } = require('@babel/parser');
     ['distribution.jsx', 'dist-zones.jsx'].forEach((f) => {
-      expect(() => esbuild.transformSync(fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8'), { loader: 'jsx' })).not.toThrow();
+      expect(() => parse(fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8'), { sourceType: 'script', plugins: ['jsx'] })).not.toThrow();
     });
   });
   it('a fixed customer with no day is caught before saving', () => {
