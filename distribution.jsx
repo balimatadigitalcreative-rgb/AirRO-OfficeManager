@@ -6801,7 +6801,9 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
   return (
     <div className="dist-dash screen-enter">
       {bar}
-      <div className="dist-tx-toolbar">
+      {/* is-flow: NOT sticky on mobile. Four wrapping buttons pinned over the list hid a third of a phone
+          screen; the day-close action is repeated at the end of the list (dist-close-foot). */}
+      <div className="dist-tx-toolbar is-flow">
         <div style={{ minWidth: 190 }}><DP.DateField value={date} onChange={setDate} allowFuture /></div>
         <div style={{ flex: 1 }} />
         {board !== null && rows.length > 0 && <button type="button" className="btn btn-ghost" disabled={routeBusy} onClick={() => routeFromMe('nearest')}><IconPin s={16} />{routeBusy ? '…' : trD('dist.routeFromMe')}</button>}
@@ -6894,6 +6896,11 @@ function DistDeliveries({ refreshKey, today, canOrder, canRoute, canClose, canKo
           </React.Fragment>
         ))}
       </div>
+      {canClose && closeFleet && !closedFor && board !== null && rows.length > 0 && (
+        <div className="dist-close-foot no-print">
+          <button type="button" className="btn btn-primary" onClick={() => setCloseOpen(true)}><IconCheck s={16} />{trD('dist.closeDay')}</button>
+        </div>
+      )}
       {orderOpen && <DeliveryOrderModal date={date} customers={custs} onClose={() => setOrderOpen(false)} onSaved={() => { setOrderOpen(false); flash(trD('dist.orderSaved')); reload(); if (onChanged) onChanged(); }} />}
       {needReason && (
         <div className="modal-scrim" onClick={() => setNeedReason(null)} style={{ zIndex: 260 }}>
