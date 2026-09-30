@@ -49,7 +49,7 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
     const real = window.FIELDAPI.real(window.API, { date: today, fleet });
     if (mode === 'asli') { setApi(real); return () => { live = false; }; }
     if (!storageRef.current) storageRef.current = window.indexedDB ? window.FIELDAPI.idbStorage() : window.FIELDAPI.memoryStorage();
-    window.FIELDAPI.openLatihan({ key, real, storage: storageRef.current })
+    window.FIELDAPI.openLatihan({ key, real, storage: storageRef.current, today })
       .then((a) => { if (live) setApi(a); })
       .catch((e) => { if (live) setErr(e); });
     return () => { live = false; };

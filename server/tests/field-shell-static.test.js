@@ -29,6 +29,7 @@ it('latihan ribbon + confirmed mode switch + reset', () => {
   expect(jsx).toMatch(/askSwitch\(/);
   expect(jsx).toMatch(/trFl\('fld\.switchToAsliB'\)/);
   expect(jsx).toMatch(/trFl\('fld\.resetLatihanB'\)/);
+  expect(jsx).toMatch(/openLatihan\(\{ key, real, storage: storageRef\.current, today \}\)/);   // yesterday's practice copy is never reused
 });
 it('rules are saved through the untagged owner API, never the adaptor', () => {
   const rules = jsx.slice(jsx.indexOf('function FldRules('));

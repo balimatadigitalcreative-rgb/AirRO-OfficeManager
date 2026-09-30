@@ -118,7 +118,8 @@
     var store = o.storage; var persisted = true;
     var toMemory = function () { persisted = false; store = memoryStorage(); };
     return timed(store.get(o.key), ms).catch(function () { toMemory(); return undefined; }).then(function (saved) {
-      if (saved && saved.v === SB.VERSION) return saved;
+      // Reuse only today's copy: a practice board from yesterday under today's date would teach nothing.
+      if (saved && saved.v === SB.VERSION && (!o.today || saved.date === o.today)) return saved;
       return snapshot(o.real).then(function (snap) {
         var st = SB.fromSnapshot(snap, { key: o.key });
         return timed(store.set(o.key, st), ms).catch(function () { toMemory(); }).then(function () { return st; });

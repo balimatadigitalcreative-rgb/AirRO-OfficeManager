@@ -49,6 +49,21 @@ it('latihan: snapshot once, persist, reopen from storage, reset re-copies', asyn
   const c = await FA.openLatihan({ key: 'u1', real: REAL(), storage, sandbox: SB });
   expect((await c.board())[0].status).toBe('pending');
 });
+it('latihan: yesterday\'s saved copy is never reused — a new day re-copies the real board', async () => {
+  const storage = FA.memoryStorage();
+  const a = await FA.openLatihan({ key: 'u7', real: REAL(), storage, sandbox: SB, today: '2026-10-01' });
+  await a.holdStop('s1', 'tutup');
+  const tomorrow = REAL({
+    context: () => Promise.resolve({ data: { today: '2026-10-02', fleet: 'DK 1', fleets: ['DK 1'], rules: {}, depot: null, demand: {} } }),
+    board: () => Promise.resolve({ data: [{ id: 's9', date: '2026-10-02', fleetId: 'DK 1', customerId: 'c1', status: 'pending', seq: 0 }] }),
+  });
+  const b = await FA.openLatihan({ key: 'u7', real: tomorrow, storage, sandbox: SB, today: '2026-10-02' });
+  expect((await b.board()).map((s) => s.id)).toEqual(['s9']);
+  expect((await b.context()).today).toBe('2026-10-02');
+  // same day → the saved practice is kept
+  const c = await FA.openLatihan({ key: 'u7', real: REAL({ board: () => Promise.reject(new Error('should not re-copy')) }), storage, sandbox: SB, today: '2026-10-02' });
+  expect((await c.board()).map((s) => s.id)).toEqual(['s9']);
+});
 it('latihan: a failed copy stores nothing and reports the error', async () => {
   const storage = FA.memoryStorage();
   await expect(FA.openLatihan({ key: 'u2', real: REAL({ board: () => Promise.reject(Object.assign(new Error('offline'), { offline: true })) }), storage, sandbox: SB })).rejects.toMatchObject({ offline: true });
