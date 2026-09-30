@@ -476,9 +476,11 @@ async function assertScheduleEditable(cur, data) {
   if (!z) return;
   const zDays = parseDays(z.deliveryDays);
   const armadaLocked = z.armada && data.armada !== undefined && data.armada !== z.armada;
-  // A fixed-day customer's days are its own (only its armada is the zone's). data.fixedDays may switch
-  // the flag in this same request, so decide on the value the row will HAVE.
-  const fixed = data.fixedDays !== undefined ? !!data.fixedDays : !!cur.fixedDays;
+  // A fixed-day customer's days are its own (only its armada is the zone's). The days are unlocked when
+  // the row is fixed now OR becomes fixed in this request — and also when this request switches the
+  // flag OFF: the screens send the old fixed days along, and the zone takes the days over right after
+  // (updateCustomer re-syncs on a flag change), so refusing would only block a legitimate untick.
+  const fixed = !!cur.fixedDays || (data.fixedDays !== undefined && !!data.fixedDays);
   const daysLocked = !fixed && zDays.length && data.deliveryDays !== undefined && parseDays(data.deliveryDays).slice().sort().join() !== zDays.slice().sort().join();
   if (armadaLocked || daysLocked) {
     throw ApiError.conflict(`Jadwal pelanggan ini diatur oleh zona "${z.name}". Ubah armada/hari kirim di Peta Zona, atau keluarkan pelanggan dari zona.`);

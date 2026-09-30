@@ -249,7 +249,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
   const [busy, setBusy] = uSz(false);
   const [autoOpen, setAutoOpen] = uSz(false);
   const [moveOpen, setMoveOpen] = uSz(false);
-  const [fx, setFx] = uSz(null);           // { on, days } while editing a picked customer's fixed days
+  const [fx, setFx] = uSz(null);           // { id, on, days } — the fixed-days editor, bound to ONE customer
   const [toast, setToast] = uSz('');
   const liveKey = useLiveKey(refreshKey);
   const latest = uRz(window.DISTLIVE.createLatest());
@@ -519,14 +519,14 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
                 <button type="button" className="jp-icon" aria-label={trD('dist.cancel')} onClick={() => setPick(null)}><IconClose s={16} /></button>
               </div>
               {picked.sisaBon > 0 && <div className="zn-pop-bon">{trD('dist.sisaBon')} <b>{rp(picked.sisaBon)}</b></div>}
-                  {picked.fixedDays && !fx && <div className="zn-pop-fx"><span className="cust-fixed-badge">{trD('cust.fixedBadge')}</span> {picked.deliveryDays.join(', ')}</div>}
-                  {fx && (
+                  {picked.fixedDays && !(fx && fx.id === picked.id) && <div className="zn-pop-fx"><span className="cust-fixed-badge">{trD('cust.fixedBadge')}</span> {picked.deliveryDays.join(', ')}</div>}
+                  {fx && fx.id === picked.id && (
                     <div className="zn-fx-edit">
                       <label className="dist-check"><input type="checkbox" checked={fx.on} onChange={(e) => setFx((f) => ({ ...f, on: e.target.checked }))} /><span>{trD('cust.fixedDays')}</span></label>
                       <div className="zn-days">{ZN_DAYS.map((d) => { const on = fx.days.includes(d); return <button key={d} type="button" className={'zn-day' + (on ? ' on' : '')} aria-pressed={on} onClick={() => setFx((f) => ({ ...f, days: on ? f.days.filter((x) => x !== d) : ZN_DAYS.filter((x) => x === d || f.days.includes(x)) }))}>{d}</button>; })}</div>
                       <div className="zn-pop-act">
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFx(null)}>{trD('dist.cancel')}</button>
-                        <button type="button" className="btn btn-primary btn-sm" disabled={busy || (fx.on && !fx.days.length)} onClick={() => { setBusy(true); window.API.distribusi.customers.update(picked.id, { fixedDays: fx.on, deliveryDays: fx.days }).then(() => { setBusy(false); setFx(null); return done(trD('zn.fxSaved')); }).catch((e) => { setBusy(false); flash(errMsg(e)); }); }}>{trD('zn.save')}</button>
+                        <button type="button" className="btn btn-primary btn-sm" disabled={busy || (fx.on && !fx.days.length)} onClick={() => { setBusy(true); window.API.distribusi.customers.update(fx.id, { fixedDays: fx.on, deliveryDays: fx.days }).then(() => { setBusy(false); setFx(null); return done(trD('zn.fxSaved')); }).catch((e) => { setBusy(false); flash(errMsg(e)); }); }}>{trD('zn.save')}</button>
                       </div>
                     </div>
                   )}
@@ -540,7 +540,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
               )}
               <div className="zn-pop-act">
                 {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMoveOpen((o) => !o)}>{trD('zn.move')}</button>}
-                {canCustomers && !fx && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFx({ on: !!picked.fixedDays, days: picked.deliveryDays.slice() })}>{trD('zn.fxEdit')}</button>}
+                {canCustomers && !(fx && fx.id === picked.id) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFx({ id: picked.id, on: !!picked.fixedDays, days: picked.deliveryDays.slice() })}>{trD('zn.fxEdit')}</button>}
                 <a className="btn btn-ghost btn-sm" href={'https://www.google.com/maps?q=' + picked.lat + ',' + picked.lng} target="_blank" rel="noopener noreferrer"><IconPin s={13} />{trD('dist.directions')}</a>
                 {onOpenCustomer && <button type="button" className="btn btn-primary btn-sm" onClick={() => onOpenCustomer(picked.id)}>{trD('zn.openCust')}</button>}
               </div>

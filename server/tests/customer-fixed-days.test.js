@@ -84,6 +84,15 @@ describe('zones never touch fixed days', () => {
     expect(days(await prisma.customer.findUnique({ where: { id: hotel } }))).toEqual(['Sab']);
   });
 
+  it('switching OFF with the payload the screens really send (old fixed days still in it) → 200 + the zone day', async () => {
+    // Both the customer form and the map popup always send deliveryDays, pre-filled with the old
+    // fixed days. That must not trip the "days belong to the zone" lock — the zone takes them over.
+    await request(app).patch(`${C}/${hotel}`).set(auth(gm)).send({ fixedDays: true, deliveryDays: ['Sen', 'Rab', 'Jum'] });
+    const r = await request(app).patch(`${C}/${hotel}`).set(auth(gm)).send({ name: 'Hotel A', armada: 'DK 1', deliveryDays: ['Sen', 'Rab', 'Jum'], fixedDays: false });
+    expect(r.status).toBe(200);
+    expect(r.body.data.deliveryDays).toEqual(['Sab']);
+  });
+
   it('switching it ON again keeps whatever days are sent', async () => {
     const r = await request(app).patch(`${C}/${hotel}`).set(auth(gm)).send({ fixedDays: true, deliveryDays: ['Sen', 'Rab', 'Jum'] });
     expect(r.status).toBe(200);
@@ -176,6 +185,47 @@ describe('the daily planner counts fixed-day visits', () => {
   });
 });
 
+describe('an armada whose whole quota goes to fixed-day customers', () => {
+  // West: 2 regular customers + 2 hotels fixed on EVERY working day. East: 2 regular customers.
+  // Max 2/day: the west armada's quota is used up by the hotels on all six days, so its regular
+  // customers must move to the east armada — and the west armada still needs a zone, or nothing
+  // would give the hotels their armada.
+  const SIX = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+  let hotelIds;
+  beforeAll(async () => {
+    await resetDb();
+    gm = (await reg({ name: 'Boss', username: 'gm_fixed_only', password: 'secret123', role: 'gm' })).token;
+    await mk('Barat 1', { lat: -8.650, lng: 115.100 }); await mk('Barat 2', { lat: -8.651, lng: 115.101 });
+    await mk('Timur 1', { lat: -8.650, lng: 115.400 }); await mk('Timur 2', { lat: -8.651, lng: 115.401 });
+    hotelIds = [(await mk('Hotel B1', { lat: -8.652, lng: 115.100, fixedDays: true, deliveryDays: SIX })).data.id,
+      (await mk('Hotel B2', { lat: -8.649, lng: 115.102, fixedDays: true, deliveryDays: SIX })).data.id];
+  });
+  const auto = (extra) => request(app).post(`${Z}/auto`).set(auth(gm)).send(Object.assign({ mode: 'daily', maxPerDay: 2, armadas: ['DK 1', 'DK 2'] }, extra));
+
+  it('preview: every day of the west armada shows the 2 fixed visits and no regular customer', async () => {
+    const r = await auto({ dryRun: true });
+    expect(r.status).toBe(200);
+    const west = r.body.data.groups.filter((g) => g.fixed === 2);
+    expect(west.map((g) => g.day).sort()).toEqual(SIX.slice().sort());
+    west.forEach((g) => expect(g.count).toBe(0));
+    r.body.data.groups.forEach((g) => expect(g.count + g.fixed).toBeLessThanOrEqual(2));
+    expect(r.body.data.locked).toBeGreaterThanOrEqual(0);            // fixed customers are not counted as "locked"
+    expect(r.body.data.locked).toBeLessThanOrEqual(4);
+  });
+
+  it('applying: the hotels keep all six days and get the west armada through a zone of that armada', async () => {
+    const r = await auto({});
+    expect(r.status).toBe(200);
+    const hotels = await prisma.customer.findMany({ where: { id: { in: hotelIds } } });
+    const westArmada = hotels[0].armada;
+    hotels.forEach((h) => { expect(days(h)).toEqual(SIX); expect(h.armada).toBe(westArmada); expect(h.zoneId).not.toBeNull(); });
+    const z = await prisma.distZone.findUnique({ where: { id: hotels[0].zoneId } });
+    expect(z.armada).toBe(westArmada);
+    const west = await prisma.customer.findMany({ where: { name: { startsWith: 'Barat' } } });
+    west.forEach((c) => expect(c.armada).not.toBe(westArmada));      // moved to the other armada
+  });
+});
+
 describe('the customer form offers the switch', () => {
   const fs = require('fs'); const path = require('path');
   const jsx = fs.readFileSync(path.join(__dirname, '..', '..', 'distribution.jsx'), 'utf8');
@@ -205,7 +255,11 @@ describe('the zone map shows and edits fixed days', () => {
     expect(jsx).toMatch(/\['fixed', trD\('zn\.fFixed'/);
   });
   it('the popup edits fixed days through the customer API, only with the customer capability', () => {
-    expect(jsx).toMatch(/customers\.update\(picked\.id, \{ fixedDays: fx\.on, deliveryDays: fx\.days \}\)/);
+    // The editor belongs to the customer it was opened for: shown only for them and saved to THEM —
+    // never to whoever is picked now (searching or clicking elsewhere changes the pick).
+    expect(jsx).toMatch(/customers\.update\(fx\.id, \{ fixedDays: fx\.on, deliveryDays: fx\.days \}\)/);
+    expect(jsx).toMatch(/fx && fx\.id === picked\.id/);
+    expect(jsx).not.toMatch(/customers\.update\(picked\.id/);
     expect(shell).toMatch(/<DIST\.Zones[^>]*canCustomers=\{!!p\.distribusiCustomers\}/);
   });
   it('the daily preview shows regular + fixed against the maximum and skips polygon-less rows on the map', () => {
