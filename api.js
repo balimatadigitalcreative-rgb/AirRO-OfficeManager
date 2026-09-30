@@ -16,7 +16,28 @@
   class ApiOffline extends Error { constructor(m) { super(m || 'backend unreachable'); this.offline = true; } }
   class ApiError extends Error { constructor(status, body) { super((body && body.error && body.error.message) || ('HTTP ' + status)); this.status = status; this.body = body; } }
 
+  // RIDE OUT A MOMENT OF OVERLOAD. A 429 (the minute's request budget is used up) or a 502/503/504
+  // (the backend restarting) used to be final: every screen that was loading showed "gagal memuat" at
+  // the same instant. A READ is retried twice after a short pause (Retry-After when the server gives
+  // one, capped); a WRITE never is — the server may already have applied it, and repeating it could
+  // record it twice. A real answer (400/403/404…) is returned at once: asking again changes nothing.
+  const RETRYABLE = { 429: 1, 502: 1, 503: 1, 504: 1 };
+  const retryDelays = () => window.AIRRO_API_RETRY_MS || [800, 2500];
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
   async function req(method, path, body) {
+    if (method !== 'GET') return once(method, path, body);
+    const delays = retryDelays();
+    for (let attempt = 0; ; attempt++) {
+      try { return await once(method, path, body); }
+      catch (e) {
+        const transient = e && (e.offline || RETRYABLE[e.status]);
+        if (!transient || attempt >= delays.length) throw e;
+        const ra = e.retryAfter ? Math.min(e.retryAfter * 1000, 5000) : 0;
+        await pause(Math.max(delays[attempt], ra));
+      }
+    }
+  }
+  async function once(method, path, body) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = 'Bearer ' + token;
     let res;
@@ -34,13 +55,18 @@
     if (res.status === 204) return null;
     let data = null;
     try { data = await res.json(); } catch (e) {}
-    if (!res.ok) throw new ApiError(res.status, data);
+    if (!res.ok) {
+      const err = new ApiError(res.status, data);
+      const ra = res.headers && res.headers.get && parseInt(res.headers.get('retry-after'), 10);
+      if (ra > 0) err.retryAfter = ra;
+      throw err;
+    }
     return data;
   }
 
   // Quick liveness check used by the cloud adapter before hydrating.
   async function ping() {
-    try { await req('GET', '/health'); return true; } catch (e) { return false; }
+    try { await once('GET', '/health'); return true; } catch (e) { return false; }   // a liveness probe answers now: no retries
   }
 
   // ---- auth ----

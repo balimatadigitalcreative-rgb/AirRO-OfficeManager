@@ -10,6 +10,26 @@ const normId = (id) => SCREEN_ALIAS[id] || id;
 // Which primary nav item "owns" a hidden hub-child screen (so it stays highlighted on that child).
 const HUB_OF = { ledger: 'reports', 'acct-neraca': 'reports', 'acct-labarugi': 'reports', 'acct-subscriptions': 'biaya-tetap', 'acct-accrual': 'biaya-tetap', 'acct-assets': 'biaya-tetap', moneyspots: 'entries' };
 
+// BACKSTOP POLLING. Each REST resource is re-fetched on its SSE event; the timed polls below only
+// cover a missed event. While the realtime stream is connected they therefore run every 2 minutes,
+// not every 15-20s — six timers per open tab (one of them the whole cash book, up to 5000 rows)
+// were a large share of the traffic that tipped the API into 429 for everyone behind one office IP.
+// With the stream down they keep their original cadence, since then they are the only source.
+const BACKSTOP_LIVE_MS = 120000;
+const backstopLast = {};
+function backstopDue(key) {
+  const live = !!(window.CLOUD && typeof window.CLOUD.sseLive === 'function' && window.CLOUD.sseLive());
+  if (!live) return true;
+  const now = Date.now();
+  if (now - (backstopLast[key] || 0) < BACKSTOP_LIVE_MS) return false;
+  backstopLast[key] = now;
+  return true;
+}
+// Config (accounts, categories, settings, fleet, roles, units … ~14 requests) changes rarely and has
+// its own 'config' / 'role' events; a tab-focus resync refreshes it at most every 10 minutes.
+const CONFIG_FOCUS_MIN_MS = 10 * 60 * 1000;
+let configFocusAt = 0;
+
 function navForRole(p, role) {
   // User & role administration follows the `manageUsers` CAPABILITY only — never role===.
   // Owner is configurable like anyone else; the server's lockout guard guarantees at least
@@ -653,7 +673,7 @@ function FApp() {
     load();
     const iv = setInterval(load, 60000);
     return () => { live = false; clearInterval(iv); };
-  }, [user, screen, distTick]);
+  }, [user, screen]);   // not distTick: a distribusi write says nothing about password resets
   // Distribusi correction/void requests awaiting approval (AlertBell) — approvers only. Refreshed on
   // any distribusi SSE event (distTick) so a new request surfaces promptly.
   uEh(() => {
@@ -729,7 +749,7 @@ function FApp() {
     reloadSetoran();
     // SSE (CLOUD.onEvent → reloadSetoran) is the primary realtime path; this timer is
     // just a slow backstop in case an event is missed while the stream is down.
-    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadSetoran(); }, 15000);
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active && backstopDue('setoran')) reloadSetoran(); }, 15000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadSetoran(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -817,7 +837,7 @@ function FApp() {
   uEh(() => {
     if (!p.cashflow || !(window.API && window.API.entries)) return;
     reloadEntries();
-    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadEntries(); }, 15000);
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active && backstopDue('entries')) reloadEntries(); }, 15000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadEntries(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -910,7 +930,7 @@ function FApp() {
   uEh(() => {
     if (!canViewRoster || !(window.API && window.API.employees)) return;
     reloadStaff();
-    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadStaff(); }, 20000);
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active && backstopDue('staff')) reloadStaff(); }, 20000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadStaff(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -950,7 +970,7 @@ function FApp() {
   uEh(() => {
     if (!p.kasbonView || !(window.API && window.API.cashbon)) return;
     reloadCashbons();
-    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadCashbons(); }, 20000);
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active && backstopDue('cashbons')) reloadCashbons(); }, 20000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadCashbons(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -983,7 +1003,7 @@ function FApp() {
   uEh(() => {
     if (!p.approvals || !(window.API && window.API.approvals)) return;
     reloadApprovals();
-    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadApprovals(); }, 20000);
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active && backstopDue('approvals')) reloadApprovals(); }, 20000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadApprovals(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -1017,7 +1037,7 @@ function FApp() {
   uEh(() => {
     if (!canViewCal || !(window.API && window.API.calendar)) return;
     reloadEvents();
-    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active) reloadEvents(); }, 20000);
+    const iv = setInterval(() => { if (document.visibilityState === 'visible' && window.CLOUD && window.CLOUD.active && backstopDue('events')) reloadEvents(); }, 20000);
     const onVis = () => { if (document.visibilityState === 'visible') reloadEvents(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
@@ -1204,7 +1224,8 @@ function FApp() {
       if (evt.entity === 'cashbon' || evt.entity === 'focus') reloadCashbons();
       if (evt.entity === 'approval' || evt.entity === 'focus') reloadApprovals();
       if (evt.entity === 'calendar' || evt.entity === 'focus') reloadEvents();
-      if (evt.entity === 'config' || evt.entity === 'focus') reloadConfig();
+      if (evt.entity === 'config') reloadConfig();
+      else if (evt.entity === 'focus' && Date.now() - configFocusAt >= CONFIG_FOCUS_MIN_MS) { configFocusAt = Date.now(); reloadConfig(); }
       if (evt.entity === 'role') reloadRoles();
       if (evt.entity === 'distribusi' || evt.entity === 'focus') setDistTick((t) => t + 1);   // Distribusi dashboard self-refetches
     };

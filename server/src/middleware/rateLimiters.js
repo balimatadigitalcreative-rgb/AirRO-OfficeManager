@@ -7,7 +7,8 @@
 // would trip the API limiter. They are therefore INERT under NODE_ENV=test UNLESS a request opts
 // in with the header `x-ratelimit-test: on` (the rate-limit test does; nothing else does). SSE and
 // health are always exempt from the general limiter so realtime + probes never get throttled.
-const { rateLimit } = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 const config = require('./../config/env');
 
 const LOGIN_MSG = 'Terlalu banyak percobaan, coba lagi dalam beberapa menit.';
@@ -37,8 +38,21 @@ const forgotLimiter = rateLimit({
 // General API guard: generous cap on ALL /api/v1 traffic so a bug/abuse can't hammer the box.
 // SSE (long-lived) and the health probe are always exempt.
 const isExemptPath = (req) => { const p = (req.originalUrl || '').split('?')[0]; return p === '/api/v1/events' || p === '/api/v1/health' || p === '/api/v1/version'; };
+// WHO the budget belongs to. Counting per IP made a whole office (one public IP behind the router)
+// and phones on mobile data (carrier NAT) share ONE budget: a few open tabs used it up and every
+// dashboard in the building failed with 429 at once. A signed-in request is counted per USER; only
+// anonymous traffic falls back to the IP. The token must VERIFY — a made-up token is anonymous, so it
+// cannot buy a fresh bucket.
+function apiKey(req) {
+  const h = req.headers.authorization || '';
+  if (h.startsWith('Bearer ')) {
+    try { const p = jwt.verify(h.slice(7), config.jwt.secret); if (p && p.sub) return 'u:' + p.sub; } catch (e) { /* anonymous */ }
+  }
+  return 'ip:' + ipKeyGenerator(req.ip || '');
+}
+const API_MAX = config.rateLimit.apiMax;
 const apiLimiter = rateLimit({
-  ...common, windowMs: config.rateLimit.apiWindowMs, limit: config.rateLimit.apiMax,
+  ...common, windowMs: config.rateLimit.apiWindowMs, limit: API_MAX, keyGenerator: apiKey,
   skip: (req) => isExemptPath(req) || testInert(req), handler: send429(API_MSG),
 });
 
@@ -51,4 +65,4 @@ const wipeLimiter = rateLimit({
   skip: testInert, handler: send429(WIPE_MSG),
 });
 
-module.exports = { loginLimiter, forgotLimiter, apiLimiter, wipeLimiter, LOGIN_MSG, FORGOT_MSG, API_MSG, WIPE_MSG };
+module.exports = { loginLimiter, forgotLimiter, apiLimiter, wipeLimiter, apiKey, API_MAX, LOGIN_MSG, FORGOT_MSG, API_MSG, WIPE_MSG };

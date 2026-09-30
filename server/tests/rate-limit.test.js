@@ -59,3 +59,33 @@ describe('Rate limiting — general API limiter (SSE + polling unaffected)', () 
     expect(r.headers['ratelimit-policy'] || r.headers['ratelimit']).toBeDefined();
   });
 });
+
+// A WHOLE OFFICE SHARES ONE PUBLIC IP (and phones on mobile data share carrier NAT). Counting the API
+// budget per IP meant a handful of open tabs used up everybody's quota and every dashboard in the
+// office failed at once with 429. A signed-in request is now counted per USER; only anonymous traffic
+// is counted per IP. A token that does not verify is anonymous — it cannot buy a fresh bucket.
+describe('Rate limiting — general API limiter is per USER when signed in', () => {
+  const OFFICE_IP = '203.0.113.50';
+  const { API_MAX } = require('../src/middleware/rateLimiters');
+  let tokA, tokB;
+  beforeAll(async () => {
+    tokA = (await request(app).post('/api/v1/auth/register').send({ name: 'A', username: 'rl_a', password: 'strongpass1', role: 'gm' })).body.token;
+    tokB = (await request(app).post('/api/v1/auth/register').send({ name: 'B', username: 'rl_b', password: 'strongpass1', role: 'gm' })).body.token;
+  });
+  const me = (tok, ip) => request(app).get('/api/v1/auth/me').set('X-Forwarded-For', ip).set(ON).set(tok ? { Authorization: 'Bearer ' + tok } : {});
+
+  it('one user using up their budget does not block a colleague on the same IP', async () => {
+    for (let i = 0; i < API_MAX; i++) await me(tokA, OFFICE_IP);
+    const a = await me(tokA, OFFICE_IP);
+    expect(a.status).toBe(429);
+    const b = await me(tokB, OFFICE_IP);
+    expect(b.status).toBe(200);
+  }, 60000);
+
+  it('a forged token is anonymous: it shares the IP bucket instead of getting a fresh one', async () => {
+    const ip = '203.0.113.77';
+    for (let i = 0; i < API_MAX; i++) await me(null, ip);
+    const forged = await me('not.a.real.token', ip);
+    expect(forged.status).toBe(429);
+  }, 60000);
+});

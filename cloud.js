@@ -213,7 +213,19 @@
   // The poll is now a SAFETY NET behind SSE (below). With the event stream healthy,
   // updates arrive in well under a second; the 5s poll only backfills anything an SSE
   // hiccup might have missed. (Was 3s when poll was the primary channel.)
-  function startPoll() { if (!pollTimer) pollTimer = setInterval(poll, 5000); }
+  // The 5s tick is the safety net for when the event stream is DOWN. While the stream is live every
+  // change already arrives as an event (and a 'state' event polls at once), so the net only needs to
+  // run every 30s; and a hidden tab does not poll at all (it catches up on return). Polling every 5s
+  // from every open tab regardless was a large share of the request volume that tipped the API into
+  // 429 for a whole office sharing one IP.
+  let lastPollRun = 0;
+  function pollTick() {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (sseLive() && Date.now() - lastPollRun < 30000) return;
+    lastPollRun = Date.now();
+    poll();
+  }
+  function startPoll() { if (!pollTimer) pollTimer = setInterval(pollTick, 5000); }
   function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
   // ---- SSE realtime: push change notices instead of waiting for the next poll ----
@@ -223,6 +235,19 @@
   // (e.g. setoran). EventSource auto-reconnects; on (re)connect and on tab-focus we
   // run a full poll to close any gap while the stream was down.
   let es = null;
+  const sseLive = () => !!(es && es.readyState === 1);
+  // A RESYNC ('focus' to the shell) re-fetches every REST resource the app holds — ~25-30 requests.
+  // It used to fire on EVERY return to the tab and EVERY stream reconnect, so a driver flicking
+  // between WhatsApp, Maps and the app, or a flaky mobile connection, fired bursts all day. Now:
+  // at most one per 30s, and none for the stream's first open (the app has just loaded everything).
+  const RESYNC_MIN_MS = 30000;
+  let lastResync = 0, openedOnce = false;
+  function resync(action) {
+    const now = Date.now();
+    if (now - lastResync < RESYNC_MIN_MS) return;
+    lastResync = now;
+    if (typeof window.CLOUD.onEvent === 'function') { try { window.CLOUD.onEvent({ entity: 'focus', action, id: null }); } catch (e) {} }
+  }
   function handleEvent(evt) {
     if (!evt || !evt.entity) return;
     if (evt.entity === 'state') { poll(); return; }
@@ -236,16 +261,16 @@
     if (!base || !tok) return;
     try {
       es = new EventSource(base + '/events?token=' + encodeURIComponent(tok));
-      es.onopen = () => {   // catch up on connect/reconnect: pull /state AND re-fetch REST entities
+      es.onopen = () => {   // catch up on RECONNECT: pull /state AND re-fetch REST entities
         hadError = false; poll();
-        if (typeof window.CLOUD.onEvent === 'function') { try { window.CLOUD.onEvent({ entity: 'focus', action: 'reconnect', id: null }); } catch (e) {} }
+        if (openedOnce) resync('reconnect'); else { openedOnce = true; lastResync = Date.now(); }
         emit();
       };
       es.onmessage = (m) => { let evt; try { evt = JSON.parse(m.data); } catch (e) { return; } handleEvent(evt); };
       es.onerror = () => { /* browser auto-reconnects using our retry hint */ };
     } catch (e) { es = null; }
   }
-  function stopEvents() { if (es) { try { es.close(); } catch (e) {} es = null; } }
+  function stopEvents() { if (es) { try { es.close(); } catch (e) {} es = null; } openedOnce = false; }   // next session: its first open is a load, not a reconnect
 
   // When the tab regains focus, run one full sync (poll + let the shell refetch its
   // REST entities) to cover events missed while the connection was asleep/offline.
@@ -253,8 +278,8 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible' || !state.active) return;
       startEvents();   // reopen if the stream was dropped while hidden
-      poll();
-      if (typeof window.CLOUD.onEvent === 'function') { try { window.CLOUD.onEvent({ entity: 'focus', action: 'resync', id: null }); } catch (e) {} }
+      poll();          // incremental and cheap: always
+      resync('resync');   // the full REST re-fetch: at most once per 30s
     });
   }
 
@@ -377,6 +402,7 @@
     get user() { return state.user || null; },
     unitScopeArr, allowedUnits,
     login, logout, restore, activate, frontendUser,
+    sseLive,          // is the realtime stream connected? (the shell slows its backstop polls when it is)
     onSync: null,     // set by the app shell to re-read slices on remote change
     onStatus: null,   // set by the app shell to show a saving/saved/error indicator
     onEvent: null,    // set by the app shell to react to a non-state SSE entity notice
