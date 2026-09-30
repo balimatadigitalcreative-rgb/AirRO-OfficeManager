@@ -47,6 +47,7 @@ const FILES = [
   'finance-cost-class.js',
   'dist-live.js',
   'dist-zones.js',
+  'rit-plan.js',
   'data.js',
   'finance-store.js',
   'finance-hrd.js',
