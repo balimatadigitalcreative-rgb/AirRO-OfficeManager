@@ -195,3 +195,21 @@ describe('the customer form offers the switch', () => {
     expect(jsx).toMatch(/form\.fixedDays && !form\.deliveryDays\.length\) \{ setFormErr\(trD\('cust\.fixedNeedDay'\)\)/);
   });
 });
+
+describe('the zone map shows and edits fixed days', () => {
+  const fs = require('fs'); const path = require('path');
+  const jsx = fs.readFileSync(path.join(__dirname, '..', '..', 'dist-zones.jsx'), 'utf8');
+  const shell = fs.readFileSync(path.join(__dirname, '..', '..', 'finance-shell.jsx'), 'utf8');
+  it('fixed customers get their own marker and filter', () => {
+    expect(jsx).toMatch(/c\.fixedDays[\s\S]{0,400}zn-fx/);
+    expect(jsx).toMatch(/\['fixed', trD\('zn\.fFixed'/);
+  });
+  it('the popup edits fixed days through the customer API, only with the customer capability', () => {
+    expect(jsx).toMatch(/customers\.update\(picked\.id, \{ fixedDays: fx\.on, deliveryDays: fx\.days \}\)/);
+    expect(shell).toMatch(/<DIST\.Zones[^>]*canCustomers=\{!!p\.distribusiCustomers\}/);
+  });
+  it('the daily preview shows regular + fixed against the maximum and skips polygon-less rows on the map', () => {
+    expect(jsx).toMatch(/trD\('zn\.nPlusFixed'/);
+    expect(jsx).toMatch(/if \(!z\.polygon\) return;/);
+  });
+});

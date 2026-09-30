@@ -1849,7 +1849,7 @@ function FApp() {
             <DIST.Integration refreshKey={distTick} today={FIN.TODAY} />
           )}
           {screen === 'dist-zones' && p.distribusiZona && (
-            <DIST.Zones refreshKey={distTick} canManage={!!p.distribusiZonaKelola} fleet={fleet}
+            <DIST.Zones refreshKey={distTick} canManage={!!p.distribusiZonaKelola} canCustomers={!!p.distribusiCustomers} fleet={fleet}
               onChanged={() => setDistTick((t) => t + 1)}
               /* Deep-link into the customer's detail: the same ?c=<id>#dist-customers URL a refresh would
                  restore, handed to the shell's single popstate handler (which re-syncs the screen). */

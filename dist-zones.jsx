@@ -143,7 +143,7 @@ function ZnAuto({ initialK, armadaOpts, armadaDefault, onClose, onApplied }) {
     if (!prev) return;
     const g = L.layerGroup().addTo(map);
     const bounds = [];
-    prev.groups.forEach((z) => { L.polygon(z.polygon, { color: z.color, weight: 2, fillOpacity: 0.18 }).addTo(g); z.polygon.forEach((p) => bounds.push(p)); });
+    prev.groups.forEach((z) => { if (!z.polygon) return; L.polygon(z.polygon, { color: z.color, weight: 2, fillOpacity: 0.18 }).addTo(g); z.polygon.forEach((p) => bounds.push(p)); });
     layer.current = g;
     if (bounds.length) map.fitBounds(bounds, { padding: [16, 16] });
   }, [map, prev]);
@@ -210,13 +210,15 @@ function ZnAuto({ initialK, armadaOpts, armadaDefault, onClose, onApplied }) {
               {prev.groups.map((g) => (
                 <div key={g.name} className="zn-auto-row">
                   <span className="zn-sw" style={{ background: g.color }} /><b>{g.name}</b>
-                  <span className={g.max && g.count >= g.max ? 'zn-full' : ''}>{g.max ? trD('zn.nOfMax', { n: g.count, m: g.max }) : trD('zn.nCust', { n: g.count })}</span>
+                  <span className={g.max && g.count + (g.fixed || 0) >= g.max ? 'zn-full' : ''}>{g.max ? (g.fixed ? trD('zn.nPlusFixed', { n: g.count, f: g.fixed, t: g.count + g.fixed, m: g.max }) : trD('zn.nOfMax', { n: g.count, m: g.max })) : trD('zn.nCust', { n: g.count })}</span>
                   <span className="zn-mut">{g.day ? '' : (g.armada ? trD('zn.suggest', { a: g.armada }) : trD('zn.armadaUnset'))}</span>
                 </div>
               ))}
             </div>
             {prev.replaces > 0 && <div className="zn-impact warn"><IconWarn s={15} /><span>{trD('zn.autoReplaces', { n: prev.replaces })}</span></div>}
             {prev.locked > 0 && <div className="zn-impact"><IconLock s={15} /><span>{trD('zn.dailyLocked', { n: prev.locked })}</span></div>}
+            {prev.fixedCustomers > 0 && <div className="zn-impact"><IconCalendar s={15} /><span>{trD('zn.dailyFixed', { n: prev.fixedCustomers })}</span></div>}
+            {prev.sundayVisits > 0 && <div className="zn-impact"><IconWarn s={15} /><span>{trD('zn.dailySunday', { n: prev.sundayVisits })}</span></div>}
             {prev.withoutCoords > 0 && <div className="zn-impact"><IconPin s={15} /><span>{trD('zn.autoNoCoords', { n: prev.withoutCoords })}</span></div>}
             <div className="zn-mut" style={{ marginTop: 6 }}>{trD(mode === 'daily' ? 'zn.dailyNote' : 'zn.autoDaysNote')}</div>
           </>)}
@@ -232,7 +234,7 @@ function ZnAuto({ initialK, armadaOpts, armadaDefault, onClose, onApplied }) {
 }
 
 // ── The screen ───────────────────────────────────────────────────────────────────────────────────
-function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenCustomer }) {
+function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onChanged, onOpenCustomer }) {
   const [data, setData] = uSz(null);
   const [loadErr, setLoadErr] = uSz(false);
   const [mapErr, setMapErr] = uSz(false);
@@ -247,6 +249,7 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
   const [busy, setBusy] = uSz(false);
   const [autoOpen, setAutoOpen] = uSz(false);
   const [moveOpen, setMoveOpen] = uSz(false);
+  const [fx, setFx] = uSz(null);           // { on, days } while editing a picked customer's fixed days
   const [toast, setToast] = uSz('');
   const liveKey = useLiveKey(refreshKey);
   const latest = uRz(window.DISTLIVE.createLatest());
@@ -274,6 +277,7 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
   const members = uMz(() => custs.filter((c) => c.zoneId === selId), [data, selId]);
   const noZoneN = custs.filter((c) => !c.zoneId).length;
   const bonN = custs.filter((c) => c.sisaBon > 0).length;
+  const fixedN = custs.filter((c) => c.fixedDays).length;
   const fleetOpts = [...new Set((fleet || []).filter(Boolean).concat(form && form.armada ? [form.armada] : []))];
   // Armadas offered for daily routes: those customers already use, then the rest of the fleet list.
   const armadaOpts = [...new Set(custs.map((c) => c.armada).filter(Boolean).sort().concat((fleet || []).filter(Boolean)))];
@@ -325,15 +329,22 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
     const cg = L.layerGroup().addTo(map);
     custs.forEach((c) => {
       const z = c.zoneId ? zoneById[c.zoneId] : null;
-      const shown = filter === 'all' || (filter === 'bon' && c.sisaBon > 0) || (filter === 'none' && !c.zoneId);
+      const shown = filter === 'all' || (filter === 'bon' && c.sisaBon > 0) || (filter === 'none' && !c.zoneId) || (filter === 'fixed' && c.fixedDays);
       const dim = !shown ? 0.15 : (selId && c.zoneId !== selId ? 0.5 : 1);
       const isPick = c.id === pick;
       if (c.sisaBon > 0 && shown) L.circleMarker([c.lat, c.lng], { radius: isPick ? 11 : 9, color: '#F7CB6C', weight: 3, fill: false, opacity: dim, interactive: false }).addTo(cg);
-      const m = L.circleMarker([c.lat, c.lng], z
-        ? { radius: isPick ? 8 : 6, color: isPick ? '#06334F' : '#fff', weight: isPick ? 3 : 2, fillColor: z.color, fillOpacity: dim, opacity: dim, interactive }
-        : { radius: isPick ? 8 : 6, color: isPick ? '#06334F' : '#5E7480', weight: isPick ? 3 : 2, dashArray: isPick ? null : '2 2', fillColor: '#fff', fillOpacity: dim, opacity: dim, interactive });
-      if (interactive) m.on('click', (e) => { L.DomEvent.stopPropagation(e); setPick(c.id); setMoveOpen(false); });
+      let m;
+      if (c.fixedDays) {
+        // Fixed-day customers: a labelled marker ("3×") so they stand out from once-a-week customers.
+        m = L.marker([c.lat, c.lng], { interactive, keyboard: false, opacity: dim, icon: L.divIcon({ className: 'zn-fx-wrap', iconSize: [30, 20], html: '<span class="zn-fx' + (isPick ? ' on' : '') + '" style="--zc:' + znEsc(z ? z.color : '#5E7480') + '">' + (c.deliveryDays || []).length + '×</span>' }) });
+      } else {
+        m = L.circleMarker([c.lat, c.lng], z
+          ? { radius: isPick ? 8 : 6, color: isPick ? '#06334F' : '#fff', weight: isPick ? 3 : 2, fillColor: z.color, fillOpacity: dim, opacity: dim, interactive }
+          : { radius: isPick ? 8 : 6, color: isPick ? '#06334F' : '#5E7480', weight: isPick ? 3 : 2, dashArray: isPick ? null : '2 2', fillColor: '#fff', fillOpacity: dim, opacity: dim, interactive });
+      }
+      if (interactive) m.on('click', (e) => { L.DomEvent.stopPropagation(e); setPick(c.id); setMoveOpen(false); setFx(null); });
       m.addTo(cg);
+    
     });
     ly.custs = cg;
     // Draft boundary with its vertices.
@@ -481,7 +492,7 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
                 )}
               </div>
               <div className="dist-chips">
-                {[['all', trD('zn.fAll', { n: custs.length })], ['bon', trD('zn.fBon', { n: bonN })], ['none', trD('zn.fNone', { n: noZoneN })]].map(([k, l]) => (
+                {[['all', trD('zn.fAll', { n: custs.length })], ['bon', trD('zn.fBon', { n: bonN })], ['fixed', trD('zn.fFixed', { n: fixedN })], ['none', trD('zn.fNone', { n: noZoneN })]].map(([k, l]) => (
                   <button key={k} type="button" className={'dist-chip zn-chip' + (filter === k ? ' on' : '')} aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>
                 ))}
               </div>
@@ -508,6 +519,18 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
                 <button type="button" className="jp-icon" aria-label={trD('dist.cancel')} onClick={() => setPick(null)}><IconClose s={16} /></button>
               </div>
               {picked.sisaBon > 0 && <div className="zn-pop-bon">{trD('dist.sisaBon')} <b>{rp(picked.sisaBon)}</b></div>}
+                  {picked.fixedDays && !fx && <div className="zn-pop-fx"><span className="cust-fixed-badge">{trD('cust.fixedBadge')}</span> {picked.deliveryDays.join(', ')}</div>}
+                  {fx && (
+                    <div className="zn-fx-edit">
+                      <label className="dist-check"><input type="checkbox" checked={fx.on} onChange={(e) => setFx((f) => ({ ...f, on: e.target.checked }))} /><span>{trD('cust.fixedDays')}</span></label>
+                      <div className="zn-days">{ZN_DAYS.map((d) => { const on = fx.days.includes(d); return <button key={d} type="button" className={'zn-day' + (on ? ' on' : '')} aria-pressed={on} onClick={() => setFx((f) => ({ ...f, days: on ? f.days.filter((x) => x !== d) : ZN_DAYS.filter((x) => x === d || f.days.includes(x)) }))}>{d}</button>; })}</div>
+                      <div className="zn-pop-act">
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFx(null)}>{trD('dist.cancel')}</button>
+                        <button type="button" className="btn btn-primary btn-sm" disabled={busy || (fx.on && !fx.days.length)} onClick={() => { setBusy(true); window.API.distribusi.customers.update(picked.id, { fixedDays: fx.on, deliveryDays: fx.days }).then(() => { setBusy(false); setFx(null); return done(trD('zn.fxSaved')); }).catch((e) => { setBusy(false); flash(errMsg(e)); }); }}>{trD('zn.save')}</button>
+                      </div>
+                    </div>
+                  )}
+                  
               {moveOpen && canManage && (
                 <div className="zn-move">
                   {zones.filter((z) => z.id !== picked.zoneId).map((z) => <button key={z.id} type="button" onClick={() => moveTo(picked, z.id)}><span className="zn-sw" style={{ background: z.color }} />{z.name}</button>)}
@@ -517,6 +540,7 @@ function DistZones({ refreshKey, canManage: capManage, fleet, onChanged, onOpenC
               )}
               <div className="zn-pop-act">
                 {canManage && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMoveOpen((o) => !o)}>{trD('zn.move')}</button>}
+                {canCustomers && !fx && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFx({ on: !!picked.fixedDays, days: picked.deliveryDays.slice() })}>{trD('zn.fxEdit')}</button>}
                 <a className="btn btn-ghost btn-sm" href={'https://www.google.com/maps?q=' + picked.lat + ',' + picked.lng} target="_blank" rel="noopener noreferrer"><IconPin s={13} />{trD('dist.directions')}</a>
                 {onOpenCustomer && <button type="button" className="btn btn-primary btn-sm" onClick={() => onOpenCustomer(picked.id)}>{trD('zn.openCust')}</button>}
               </div>
