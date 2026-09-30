@@ -440,7 +440,7 @@ async function autoDaily(body, actor) {
     return { plan, all };
   }, TX);
   await dist().logDistAudit('pelanggan', `Zona per hari: ${drafts.length} rute (maks ${max}/hari)`,
-    `${existing.length ? 'mengganti ' + existing.length + ' zona lama · ' : ''}armada ${armadas.join(', ')} · ${res.plan.length} pelanggan ikut jadwal zona${locked.size ? ' · ' + locked.size + ' dikunci di rutenya' : ''}`, actor, '');
+    `${existing.length ? 'mengganti ' + existing.length + ' zona lama · ' : ''}armada ${armadas.join(', ')} · ${res.plan.length} pelanggan ikut jadwal zona${summary.locked ? ' · ' + summary.locked + ' dikunci di rutenya' : ''}`, actor, '');   // same count as the preview: fixed customers are not "locked by the border"
   return Object.assign(summary, { zones: res.all, groups: previewGroups(), applied: res.plan.length, changes: describe(res.plan, res.all) });
 }
 

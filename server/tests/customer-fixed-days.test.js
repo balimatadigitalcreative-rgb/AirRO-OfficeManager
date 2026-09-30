@@ -216,6 +216,10 @@ describe('an armada whose whole quota goes to fixed-day customers', () => {
   it('applying: the hotels keep all six days and get the west armada through a zone of that armada', async () => {
     const r = await auto({});
     expect(r.status).toBe(200);
+    // The audit states the same "locked" count the owner saw in the preview; hotels are not counted.
+    const log = await prisma.distAuditLog.findFirst({ where: { title: { startsWith: 'Zona per hari' } }, orderBy: { createdAt: 'desc' } });
+    if (r.body.data.locked > 0) expect(log.detail).toContain(r.body.data.locked + ' dikunci di rutenya');
+    else expect(log.detail).not.toMatch(/dikunci di rutenya/);
     const hotels = await prisma.customer.findMany({ where: { id: { in: hotelIds } } });
     const westArmada = hotels[0].armada;
     hotels.forEach((h) => { expect(days(h)).toEqual(SIX); expect(h.armada).toBe(westArmada); expect(h.zoneId).not.toBeNull(); });
@@ -257,10 +261,18 @@ describe('the zone map shows and edits fixed days', () => {
   it('the popup edits fixed days through the customer API, only with the customer capability', () => {
     // The editor belongs to the customer it was opened for: shown only for them and saved to THEM —
     // never to whoever is picked now (searching or clicking elsewhere changes the pick).
-    expect(jsx).toMatch(/customers\.update\(fx\.id, \{ fixedDays: fx\.on, deliveryDays: fx\.days \}\)/);
+    expect(jsx).toMatch(/customers\.update\(fx\.id, fx\.on \? \{ fixedDays: true, deliveryDays: fx\.days \} : \{ fixedDays: false \}\)/);
+    expect(jsx).toMatch(/\{fx\.on && <div className="zn-days">/);   // no day chips while the switch is off
     expect(jsx).toMatch(/fx && fx\.id === picked\.id/);
     expect(jsx).not.toMatch(/customers\.update\(picked\.id/);
     expect(shell).toMatch(/<DIST\.Zones[^>]*canCustomers=\{!!p\.distribusiCustomers\}/);
+  });
+  it('the legend explains the 3x marker, and the popup button reads "Atur hari tetap"', () => {
+    expect(jsx).toMatch(/zn-lg-fx[\s\S]{0,80}trD\('zn\.lgFixed'\)/);
+    const i18n = fs.readFileSync(path.join(__dirname, '..', '..', 'finance-i18n.js'), 'utf8');
+    expect(i18n).toMatch(/'zn\.fxEdit': 'Atur hari tetap'/);
+    expect(i18n).toMatch(/'zn\.fxEdit': 'Set fixed days'/);
+    expect(i18n).toMatch(/'zn\.lgFixed': 'Hari tetap/);
   });
   it('the daily preview shows regular + fixed against the maximum and skips polygon-less rows on the map', () => {
     expect(jsx).toMatch(/trD\('zn\.nPlusFixed'/);

@@ -344,7 +344,6 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
       }
       if (interactive) m.on('click', (e) => { L.DomEvent.stopPropagation(e); setPick(c.id); setMoveOpen(false); setFx(null); });
       m.addTo(cg);
-    
     });
     ly.custs = cg;
     // Draft boundary with its vertices.
@@ -519,18 +518,17 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
                 <button type="button" className="jp-icon" aria-label={trD('dist.cancel')} onClick={() => setPick(null)}><IconClose s={16} /></button>
               </div>
               {picked.sisaBon > 0 && <div className="zn-pop-bon">{trD('dist.sisaBon')} <b>{rp(picked.sisaBon)}</b></div>}
-                  {picked.fixedDays && !(fx && fx.id === picked.id) && <div className="zn-pop-fx"><span className="cust-fixed-badge">{trD('cust.fixedBadge')}</span> {picked.deliveryDays.join(', ')}</div>}
-                  {fx && fx.id === picked.id && (
-                    <div className="zn-fx-edit">
-                      <label className="dist-check"><input type="checkbox" checked={fx.on} onChange={(e) => setFx((f) => ({ ...f, on: e.target.checked }))} /><span>{trD('cust.fixedDays')}</span></label>
-                      <div className="zn-days">{ZN_DAYS.map((d) => { const on = fx.days.includes(d); return <button key={d} type="button" className={'zn-day' + (on ? ' on' : '')} aria-pressed={on} onClick={() => setFx((f) => ({ ...f, days: on ? f.days.filter((x) => x !== d) : ZN_DAYS.filter((x) => x === d || f.days.includes(x)) }))}>{d}</button>; })}</div>
-                      <div className="zn-pop-act">
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFx(null)}>{trD('dist.cancel')}</button>
-                        <button type="button" className="btn btn-primary btn-sm" disabled={busy || (fx.on && !fx.days.length)} onClick={() => { setBusy(true); window.API.distribusi.customers.update(fx.id, { fixedDays: fx.on, deliveryDays: fx.days }).then(() => { setBusy(false); setFx(null); return done(trD('zn.fxSaved')); }).catch((e) => { setBusy(false); flash(errMsg(e)); }); }}>{trD('zn.save')}</button>
-                      </div>
-                    </div>
-                  )}
-                  
+              {picked.fixedDays && !(fx && fx.id === picked.id) && <div className="zn-pop-fx"><span className="cust-fixed-badge">{trD('cust.fixedBadge')}</span> {picked.deliveryDays.join(', ')}</div>}
+              {fx && fx.id === picked.id && (
+                <div className="zn-fx-edit">
+                  <label className="dist-check"><input type="checkbox" checked={fx.on} onChange={(e) => setFx((f) => ({ ...f, on: e.target.checked }))} /><span>{trD('cust.fixedDays')}</span></label>
+                  {fx.on && <div className="zn-days">{ZN_DAYS.map((d) => { const on = fx.days.includes(d); return <button key={d} type="button" className={'zn-day' + (on ? ' on' : '')} aria-pressed={on} onClick={() => setFx((f) => ({ ...f, days: on ? f.days.filter((x) => x !== d) : ZN_DAYS.filter((x) => x === d || f.days.includes(x)) }))}>{d}</button>; })}</div>}
+                  <div className="zn-pop-act">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFx(null)}>{trD('dist.cancel')}</button>
+                    <button type="button" className="btn btn-primary btn-sm" disabled={busy || (fx.on && !fx.days.length)} onClick={() => { setBusy(true); window.API.distribusi.customers.update(fx.id, fx.on ? { fixedDays: true, deliveryDays: fx.days } : { fixedDays: false }).then(() => { setBusy(false); setFx(null); return done(trD('zn.fxSaved')); }).catch((e) => { setBusy(false); flash(errMsg(e)); }); }}>{trD('zn.save')}</button>
+                  </div>
+                </div>
+              )}
               {moveOpen && canManage && (
                 <div className="zn-move">
                   {zones.filter((z) => z.id !== picked.zoneId).map((z) => <button key={z.id} type="button" onClick={() => moveTo(picked, z.id)}><span className="zn-sw" style={{ background: z.color }} />{z.name}</button>)}
@@ -550,6 +548,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
             <span><i className="zn-lg-dot" />{trD('zn.lgZone')}</span>
             <span><i className="zn-lg-dot none" />{trD('zn.noZone')}</span>
             <span><i className="zn-lg-dot bon" />{trD('zn.lgBon')}</span>
+            <span><i className="zn-fx zn-lg-fx" style={{ '--zc': '#065489' }}>3×</i>{trD('zn.lgFixed')}</span>
           </div>
         </div>
 

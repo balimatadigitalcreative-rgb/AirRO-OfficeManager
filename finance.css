@@ -4801,5 +4801,6 @@ button.fin-kpi:hover .fin-kpi-drill { opacity: 1; }
 .zn-fx-wrap { background: none; border: 0; }
 .zn-fx { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 18px; padding: 0 4px; border-radius: 6px; background: var(--zc); color: #fff; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(6,51,79,.4); font: 800 10.5px/1 'Inter', system-ui, sans-serif; box-sizing: border-box; }
 .zn-fx.on { box-shadow: 0 0 0 3px #06334F; }
+.zn-lg-fx { font-style: normal; height: 16px; min-width: 22px; font-size: 9.5px; }
 .zn-pop-fx { font-size: 12.5px; }
 .zn-fx-edit { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border-soft); border-radius: 10px; }
