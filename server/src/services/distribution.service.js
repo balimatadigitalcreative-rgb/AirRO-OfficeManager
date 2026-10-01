@@ -1542,10 +1542,22 @@ async function proofColumns(body, ruleKey) {
 }
 const normPayMethod = (v) => (v === 'transfer' ? 'transfer' : 'tunai');
 
+// IDEMPOTENCY: a field write retried with the same clientRef returns what was already saved. The same
+// ref for another customer is a client bug and is refused (never silently attached to the wrong row).
+async function replayByClientRef(ref, customerId) {
+  if (!ref) return null;
+  const prev = await prisma.distTransaction.findUnique({ where: { clientRef: String(ref) } });
+  if (!prev) return null;
+  if (prev.customerId !== customerId) throw ApiError.conflict('Kode transaksi ini sudah dipakai untuk pelanggan lain.');
+  return { txn: prev, gallonsHeld: await gallonBalanceOf(customerId), sisaBon: await customerBonBalance(customerId) };
+}
 async function createTransaction(body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
   if (!customer) throw ApiError.badRequest('customerId does not reference an existing customer');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');   // cross-fleet write blocked
+  const replay = await replayByClientRef(body.clientRef, customer.id);
+  if (replay) return { ...replay.txn, gallonsHeld: replay.gallonsHeld, sisaBon: replay.sisaBon, replay: true };
+  const clientRef = body.clientRef ? String(body.clientRef) : null;
   const method = METHODS.includes(body.method) ? body.method : 'lunas';
   // Deactivated customer: no new SALES (water out), but still allow pelunasan so any
   // outstanding bon can be collected. Restore the customer to sell to them again.
@@ -1569,7 +1581,7 @@ async function createTransaction(body, actor) {
     // LIVE POSTING: the pelunasan (Dr Kas / Cr Piutang) and the per-customer AR reclass post in the
     // SAME transaction as the row, so the Piutang balance always equals Σ Sisa Bon (flag-gated).
     const txn = await prisma.$transaction(async (tx) => {
-      const t = await tx.distTransaction.create({ data: {
+      const t = await tx.distTransaction.create({ data: { clientRef,
         customerId: customer.id, fleetId, qty: 0, unitPriceLocked: 0, amount: payAmount, method: 'pelunasan', note,
         payMethod: payMethodCol, ...proof,
         txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
@@ -1595,7 +1607,7 @@ async function createTransaction(body, actor) {
   // LIVE POSTING: the sale row and its journal (lunas → Dr Kas/Cr Pendapatan; bon → Dr Piutang/Cr
   // Pendapatan) post together; a bon also runs the AR reclass so Piutang == Σ Sisa Bon (flag-gated).
   const txn = await prisma.$transaction(async (tx) => {
-    const t = await tx.distTransaction.create({ data: {
+    const t = await tx.distTransaction.create({ data: { clientRef,
       customerId: customer.id, fleetId, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
       payMethod: payMethodCol, ...proof,
       txnDate: body.txnDate, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, deliveryRunId,
@@ -3688,6 +3700,8 @@ async function gallonDamageCharge(customerId, body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!customer) throw ApiError.notFound('Pelanggan tidak ditemukan.');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');
+  const replay = await replayByClientRef(body && body.clientRef, customer.id);
+  if (replay) return { transaction: replay.txn, gallonsHeld: replay.gallonsHeld, sisaBon: replay.sisaBon, replay: true };
   const qty = int(body.qty);
   if (qty <= 0) throw ApiError.badRequest('Jumlah galon harus lebih dari 0.');
   const kind = DAMAGE_KINDS.includes(body.kind) ? body.kind : 'pecah';
@@ -3706,7 +3720,7 @@ async function gallonDamageCharge(customerId, body, actor) {
   const snap = await actorSnap(actor);
   const note = `Ganti rugi ${qty} galon ${kind}${body.note ? ' · ' + String(body.note).trim().slice(0, 200) : ''}`;
   const txn = await prisma.$transaction(async (tx) => {
-    const t = await tx.distTransaction.create({ data: {
+    const t = await tx.distTransaction.create({ data: { clientRef: body && body.clientRef ? String(body.clientRef) : null,
       customerId: customer.id, fleetId, qty: 0, unitPriceLocked: price, amount, method: pay === 'bon' ? 'bon' : 'lunas',
       payMethod: pay === 'bon' ? '' : pay, kind: 'ganti_rugi', gallonQty: qty, note, txnDate,
       proofPhotoId: att.id, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,

@@ -1129,6 +1129,9 @@ model DistTransaction {
   proofTakenAt    DateTime?
   proofLat        Float?
   proofLng        Float?
+  // IDEMPOTENCY (field UI) — a random ref the phone sends with a sale / bon payment / damage charge; a
+  // retry after a lost response returns the row already saved instead of recording it twice.
+  clientRef       String?  @unique
   txnDate         String                        // txn_date (YYYY-MM-DD)
   actorId         String?                       // actor_id
   actorRole       String?                       // actor_role (at input time)
