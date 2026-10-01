@@ -108,3 +108,30 @@ describe('Transaksi (mockup Transaksi board)', () => {
     expect(shell).toMatch(/onPayBon=\{view\.stop\.sisaBon > 0 && can\.bon \? \(\) => openFor\('bon', fldCustFromStop\(view\.stop\)\) : null\}/);
   });
 });
+
+describe('Buka / Tutup rit (mockup Buka rit board) — a sheet over Pengiriman', () => {
+  const f = () => fn(day, 'FldOpenRun');
+  it('a 118 px sheet: the big ± load, presets, the SOP gauge with its marker, the route-fit bar', () => {
+    expect(fn(day, 'FldRitSheet')).toMatch(/<div className="mlap-sheet tall mid" role="dialog" aria-modal="true" aria-label=\{title\} ref=\{drag\.ref\} style=\{drag\.style\}>/);
+    expect(f()).toMatch(/<FldStepper label=\{trFl\('fld\.loadQ'\)\} value=\{g\.load\} onChange=\{setLoad\} min=\{0\} max=\{cap \|\| 9999\} cls=\{'big teal' \+ \(g\.under \? ' under' : ''\)\} \/>/);   // the board's + is teal
+    expect(f()).toMatch(/className=\{'mlap-preset' \+ \(g\.load === v \? ' on' : ''\)\}/);
+    expect(f()).toMatch(/<i style=\{\{ left: gpct\(minLoad\) \+ '%' \}\} \/>/);
+    expect(f()).toMatch(/pv\.bar\.map\(\(b, i\) => <span key=\{i\} className=\{b\.fit \? 'on' : ''\} style=\{\{ flex: b\.qty \}\} \/>\)/);
+    expect(rule('RIT', '.mlap-preset.on')).toMatch(/border-color: #1A8C87; background: #DDF4F2; color: #0F6B66;/);
+    expect(rule('RIT', '.mlap-gauge-bar > span.under')).toMatch(/background: #E8793A;/);
+    expect(rule('RIT', '.mlap-fitbar > span.on')).toMatch(/background: #1A8C87;/);
+  });
+  it('below the SOP: orange reason chips, always asked; the CTA waits for a reason', () => {
+    expect(f()).toMatch(/onChange=\{setReason\} tone="warn" \/>/);
+    expect(f()).toMatch(/disabled=\{busy \|\| !g\.canOpen \|\| \(g\.under && !reason\.trim\(\)\)\}/);
+  });
+  it('Tutup rit is the same sheet; a difference still needs what happened', () => {
+    const c = fn(day, 'FldCloseRun');
+    expect(c).toMatch(/<FldRitSheet title=\{trFl\('fld\.closeRunT', \{ n: run\.runNo \}\)\}/);
+    expect(c).toMatch(/disabled=\{busy \|\| \(diff !== 0 && !res\)\}/);
+  });
+  it('the shell opens it over the board, not as a full-screen task', () => {
+    expect(shell).toMatch(/\{ready && view && view\.name === 'run' && <FldOpenRun api=\{api\} ctx=\{ctx\} tick=\{tick\} onDone=\{done\} onBack=\{\(\) => setView\(null\)\} \/>\}/);
+    expect(shell).toMatch(/const full = view && \['sale', 'pick',/);
+  });
+});

@@ -76,7 +76,9 @@
   function loadPreview(o) {
     if (!o || typeof o.planRit !== 'function' || !o.depot || !(o.load > 0)) return null;
     var p = o.planRit({ depot: o.depot, capacity: o.load, stops: o.stops || [] });
-    return { fits: p.rit.length, used: p.used, leftoverGallons: p.leftoverGallons, estRits: p.estRits, unlocated: p.unlocated.length };
+    // the route-fit bar of the board: every stop in plan order, coloured when it rides this rit
+    var bar = p.rit.map(function (s) { return { qty: s.qty, fit: true }; }).concat(p.leftover.map(function (s) { return { qty: s.qty, fit: false }; }));
+    return { fits: p.rit.length, used: p.used, leftoverGallons: p.leftoverGallons, estRits: p.estRits, unlocated: p.unlocated.length, bar: bar, total: bar.length };
   }
 
   // TRANSAKSI — what the customer pays now and what their bon becomes.

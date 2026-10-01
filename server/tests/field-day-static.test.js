@@ -124,7 +124,7 @@ describe('final review fixes (screens)', () => {
     expect(st).toMatch(/onBlur=/);
   });
   it('the load stepper is not capped at 2×SOP when the armada has no capacity', () => {
-    expect(fn('FldOpenRun')).toMatch(/<FldStepper label=\{trFl\('fld\.loadQ'\)\} value=\{g\.load\} onChange=\{setLoad\} min=\{0\} max=\{cap \|\| 9999\} \/>/);
+    expect(fn('FldOpenRun')).toMatch(/<FldStepper label=\{trFl\('fld\.loadQ'\)\} value=\{g\.load\} onChange=\{setLoad\} min=\{0\} max=\{cap \|\| 9999\} cls=/);
   });
   it('the Leaflet map never paints over the sheets, menu or dock', () => {
     expect(read('dist-field.css')).toMatch(/\.mlap-map \{[^}]*isolation: isolate;/);

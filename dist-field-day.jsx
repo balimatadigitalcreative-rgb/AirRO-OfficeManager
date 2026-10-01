@@ -337,6 +337,23 @@ function FldSale({ api, stop: s, pending, refs, onDone, onBack, onPayBon }) {
 const FLD_SOP_REASONS = ['fld.sop_sedikit', 'fld.sop_stok', 'fld.sop_armada', 'fld.sop_terakhir'];
 const FLD_DIFF = [['kembali_besok', 'fld.d_besok', 'Tetap di armada (besok)'], ['rusak', 'fld.d_rusak', 'Rusak'], ['hilang', 'fld.d_hilang', 'Hilang'], ['salah_hitung', 'fld.d_salah', 'Salah hitung']];   // [code, label key, the Indonesian text office records keep]
 
+// Buka / Tutup rit as a sheet over Pengiriman (mockup Buka rit board): head with the close X, the body
+// scrolls, the action stays at the bottom.
+function FldRitSheet({ title, sub, onClose, cta, children }) {
+  const drag = useFldSheetDrag(onClose);
+  return (
+    <>
+      <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onClose} />
+      <div className="mlap-sheet tall mid" role="dialog" aria-modal="true" aria-label={title} ref={drag.ref} style={drag.style}>
+        <FldGrab handle={drag.handle} />
+        <FldSheetHead big title={title} sub={sub} onClose={onClose} />
+        <div className="mlap-sheet-body">{children}</div>
+        {cta ? <div className="mlap-sheet-cta">{cta}</div> : null}
+      </div>
+    </>
+  );
+}
+
 // BUKA RIT — how many gallons go on the truck. Capacity is a hard cap; below the owner's SOP the new
 // UI always asks why (the server only insists once the switch is on). The preview plans the rit from
 // the warehouse with the same planner the server uses.
@@ -354,7 +371,7 @@ function FldOpenRun({ api, ctx, tick, onDone, onBack }) {
     Promise.all([api.board(), api.runs()]).then(([board, runs]) => { if (live) setD({ board, runs }); }).catch((e) => { if (live) setErr(fldErrMsg(e)); });
     return () => { live = false; };
   }, [api, tick]);
-  if (!d) return err ? <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={err} /> : <div className="mlap-empty">{trFl('fld.loading')}</div>;
+  if (!d) return <FldRitSheet title={trFl('fld.openRunT')} onClose={onBack}>{err ? <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={err} /> : <div className="mlap-empty">{trFl('fld.loading')}</div>}</FldRitSheet>;
   const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs: d.runs });
   if (rs.open) return <FldCloseRun api={api} run={rs.open} stale={rs.stale} onDone={onDone} onBack={onBack} />;
   const g = FIELDLOGIC.runGauge({ load, capacity: cap, minLoad });
@@ -371,38 +388,39 @@ function FldOpenRun({ api, ctx, tick, onDone, onBack }) {
       .catch((e) => setErr(fldErrMsg(e)))
       .finally(() => setBusy(false));
   };
+  const gpct = (x) => Math.max(0, Math.min(100, (x / g.max) * 100));
+  const last = (d.runs || []).filter((r) => r.date === ctx.today).sort((a, b) => b.runNo - a.runNo)[0];
+  const sub = [ctx.fleet, cap ? trFl('fld.capN', { n: cap }) : trFl('fld.capNone'), last ? trFl('fld.lastRunN', { n: last.runNo, g: last.gallonsOut }) : ''].filter(Boolean).join(' · ');
   return (
-    <div className="mlap-screen">
-      <FldTop title={trFl('fld.openRunN', { n: rs.nextNo })} sub={[ctx.fleet, cap ? trFl('fld.capN', { n: cap }) : trFl('fld.capNone')].join(' · ')} onBack={onBack} />
-      <div className="mlap-body">
-        <div className="mlap-card mlap-load">
-          <span className="sb">{trFl('fld.loadQ')}</span>
-          <div className={'mlap-loadval' + (g.under ? ' under' : '')}>{g.load}</div>
-          <input type="range" className="mlap-range" min="0" max={g.max} value={g.load} onChange={(e) => setLoad(+e.target.value)} aria-label={trFl('fld.loadQ')} />
-          <div className="mlap-scale"><span>0</span><span>{trFl('fld.sopN', { n: minLoad })}</span>{cap ? <span>{trFl('fld.capN', { n: cap })}</span> : <span />}</div>
-          <FldStepper label={trFl('fld.loadQ')} value={g.load} onChange={setLoad} min={0} max={cap || 9999} />
-          <div className="mlap-chips">{presets.map((v) => <button key={v} type="button" className={'mlap-chip-b' + (g.load === v ? ' on' : '')} aria-pressed={g.load === v} onClick={() => setLoad(v)}>{v}</button>)}</div>
-          {g.atCap ? <div className="mlap-hint ok">{trFl('fld.fullLoad')}</div> : null}
+    <FldRitSheet title={trFl('fld.openRunN', { n: rs.nextNo })} sub={sub} onClose={onBack}
+      cta={<button type="button" className="mlap-btn primary" disabled={busy || !g.canOpen || (g.under && !reason.trim())} onClick={open}>{trFl('fld.openAndRoute')}</button>}>
+      <div className="mlap-card mlap-loadcard">
+        <FldStepper label={trFl('fld.loadQ')} value={g.load} onChange={setLoad} min={0} max={cap || 9999} cls={'big teal' + (g.under ? ' under' : '')} />
+        <div className="mlap-presets">{presets.map((v) => <button key={v} type="button" className={'mlap-preset' + (g.load === v ? ' on' : '')} aria-pressed={g.load === v} onClick={() => setLoad(v)}>{v}</button>)}</div>
+        <div className="mlap-gauge">
+          <div className="mlap-gauge-bar"><span className={g.under ? 'under' : ''} style={{ width: gpct(g.load) + '%' }} /><i style={{ left: gpct(minLoad) + '%' }} /></div>
+          <div className="mlap-gauge-sc"><span>0</span><b style={{ left: gpct(minLoad) + '%' }}>{trFl('fld.sopN', { n: minLoad })}</b>{cap ? <span className="r">{trFl('fld.capN', { n: cap })}</span> : null}</div>
+          {g.atCap ? <span className="mlap-gauge-full">{trFl('fld.fullLoad')}</span> : null}
         </div>
-        {g.under && (
-          <div className="mlap-card mlap-reason warn">
-            <b>{trFl('fld.underSopT', { n: g.load, min: minLoad })}</b>
-            <FldChips options={FLD_SOP_REASONS.map((k) => trFl(k)).concat([trFl('fld.r_other')])} otherLabel={trFl('fld.r_other')} value={reason} onChange={setReason} />
-            <span className="sb">{trFl('fld.underSopB')}</span>
-          </div>
-        )}
-        {pv ? (
-          <div className="mlap-card mlap-preview">
-            <b>{trFl('fld.previewT')}</b>
-            <span>{trFl('fld.previewFits', { n: pv.fits, g: pv.used })}</span>
-            {pv.leftoverGallons > 0 ? <span className="sb">{trFl('fld.previewLeft', { g: pv.leftoverGallons, r: pv.estRits })}</span> : null}
-            {pv.unlocated > 0 ? <span className="sb">{trFl('fld.previewNoPin', { n: pv.unlocated })}</span> : null}
-          </div>
-        ) : !ctx.depot ? <FldNotice tone="info" title={trFl('fld.noDepotT')} sub={trFl('fld.noDepotB')} /> : null}
-        {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !g.canOpen || (g.under && !reason.trim())} onClick={open}>{trFl('fld.openAndRoute')}</button>
       </div>
-    </div>
+      {g.under && (
+        <div className="mlap-card mlap-reason warn">
+          <div className="mlap-reason-hd"><FldSvg n="warn" s={16} sw={2.2} /><b>{trFl('fld.underSopT2', { n: minLoad - g.load })}</b></div>
+          <FldChips options={FLD_SOP_REASONS.map((k) => trFl(k)).concat([trFl('fld.r_other')])} otherLabel={trFl('fld.r_other')} value={reason} onChange={setReason} tone="warn" />
+          <span className="mlap-reason-note">{trFl('fld.underSopB')}</span>
+        </div>
+      )}
+      {pv ? (
+        <div className="mlap-card mlap-fit">
+          <div className="mlap-fit-hd"><FldSvg n="route" s={16} /><b>{trFl('fld.previewT')}</b></div>
+          <div className="mlap-fit-n"><b>{pv.fits}</b><span>{trFl('fld.fitsOf', { n: pv.total, g: pv.used })}</span></div>
+          {pv.bar.length ? <div className="mlap-fitbar" aria-hidden="true">{pv.bar.map((b, i) => <span key={i} className={b.fit ? 'on' : ''} style={{ flex: b.qty }} />)}</div> : null}
+          <span className={'mlap-after' + (pv.leftoverGallons > 0 ? '' : ' ok')}>{pv.leftoverGallons > 0 ? trFl('fld.fitLeft', { n: pv.total - pv.fits, g: pv.leftoverGallons }) : trFl('fld.fitAll', { g: g.load - pv.used })}</span>
+          {pv.unlocated > 0 ? <span className="mlap-hint">{trFl('fld.previewNoPin', { n: pv.unlocated })}</span> : null}
+        </div>
+      ) : !ctx.depot ? <FldNotice tone="info" title={trFl('fld.noDepotT')} sub={trFl('fld.noDepotB')} /> : null}
+      {err && <div className="mlap-err" role="alert">{err}</div>}
+    </FldRitSheet>
   );
 }
 
@@ -427,25 +445,22 @@ function FldCloseRun({ api, run, stale, onDone, onBack }) {
     api.closeRun(run.id, body).then(() => onDone(trFl('fld.runClosed', { n: run.runNo }))).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
   };
   return (
-    <div className="mlap-screen">
-      <FldTop title={trFl('fld.closeRunT', { n: run.runNo })} sub={trFl('fld.loadedSold', { out: run.gallonsOut, sold: run.sold || 0 })} onBack={onBack} />
-      <div className="mlap-body">
-        {stale ? <FldNotice tone="warn" title={trFl('fld.staleNote', { date: run.date })} sub={trFl('fld.staleRunB')} /> : null}
-        <div className="mlap-card">
-          <FldStepper label={trFl('fld.fullBack')} hint={trFl('fld.fullBackHint', { n: expected })} value={full} onChange={setFull} min={0} max={9999} />
-          <FldStepper label={trFl('fld.emptyBack')} value={empty} onChange={setEmpty} min={0} max={9999} />
-        </div>
-        {diff !== 0 && (
-          <div className="mlap-card mlap-reason warn">
-            <b>{trFl('fld.diffT', { d: (diff > 0 ? '+' : '') + diff })}</b>
-            <div className="mlap-chips">{allowed.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (res === k ? ' on' : '')} aria-pressed={res === k} onClick={() => setRes(k)}>{trFl(key)}</button>)}</div>
-            <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder={trFl('fld.noteOpt')} aria-label={trFl('fld.noteOpt')} />
-          </div>
-        )}
-        {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || (diff !== 0 && !res)} onClick={close}>{trFl('fld.closeRunSave')}</button>
+    <FldRitSheet title={trFl('fld.closeRunT', { n: run.runNo })} sub={trFl('fld.loadedSold', { out: run.gallonsOut, sold: run.sold || 0 })} onClose={onBack}
+      cta={<button type="button" className="mlap-btn primary" disabled={busy || (diff !== 0 && !res)} onClick={close}>{trFl('fld.closeRunSave')}</button>}>
+      {stale ? <FldNotice tone="warn" title={trFl('fld.staleNote', { date: run.date })} sub={trFl('fld.staleRunB')} /> : null}
+      <div className="mlap-card">
+        <FldStepper label={trFl('fld.fullBack')} hint={trFl('fld.fullBackHint', { n: expected })} value={full} onChange={setFull} min={0} max={9999} />
+        <FldStepper label={trFl('fld.emptyBack')} value={empty} onChange={setEmpty} min={0} max={9999} />
       </div>
-    </div>
+      {diff !== 0 && (
+        <div className="mlap-card mlap-reason warn">
+          <div className="mlap-reason-hd"><FldSvg n="warn" s={16} sw={2.2} /><b>{trFl('fld.diffT', { d: (diff > 0 ? '+' : '') + diff })}</b></div>
+          <div className="mlap-chips warn">{allowed.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (res === k ? ' on' : '')} aria-pressed={res === k} onClick={() => setRes(k)}>{trFl(key)}</button>)}</div>
+          <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder={trFl('fld.noteOpt')} aria-label={trFl('fld.noteOpt')} />
+        </div>
+      )}
+      {err && <div className="mlap-err" role="alert">{err}</div>}
+    </FldRitSheet>
   );
 }
 

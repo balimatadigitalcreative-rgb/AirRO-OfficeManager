@@ -363,3 +363,15 @@ describe('3D-2 helpers', () => {
     expect(L.loadPct(5, 0)).toBe(0);
   });
 });
+
+describe('3D-2 rit preview bar', () => {
+  it('loadPreview gives the route-fit bar: planned stops first (fit), the rest after, in plan order', () => {
+    const stops = [{ id: 'a', lat: -8.651, lng: 115.201, qty: 20 }, { id: 'b', lat: -8.66, lng: 115.21, qty: 40 }, { id: 'c', lat: -8.7, lng: 115.3, qty: 30 }];
+    const pv = L.loadPreview({ planRit, depot: { lat: -8.65, lng: 115.2 }, stops, load: 60 });
+    expect(pv.total).toBe(pv.bar.length);
+    expect(pv.bar.filter((b) => b.fit).length).toBe(pv.fits);
+    expect(pv.bar.slice(0, pv.fits).every((b) => b.fit)).toBe(true);
+    expect(pv.bar.reduce((t, b) => t + (b.fit ? b.qty : 0), 0)).toBe(pv.used);
+    expect(pv.bar.reduce((t, b) => t + (b.fit ? 0 : b.qty), 0)).toBe(pv.leftoverGallons);
+  });
+});

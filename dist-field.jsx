@@ -154,7 +154,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
     api.board().then((board) => FIELDLOGIC.saleStopFor({ board, customer: c, demand: ctx.demand })).catch(() => null)
       .then((s) => setView({ name: 'sale', stop: s || fldSaleStopFromCust(c) }));
   };
-  const full = view && ['sale', 'run', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin', 'koreksi', 'koreksiSaya'].includes(view.name);   // full-screen task: no tab header/dock
+  const full = view && ['sale', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin', 'koreksi', 'koreksiSaya'].includes(view.name);   // full-screen task: no tab header/dock
   // M6: a new tab or task screen opens at the top (the root is the one scroller of the field view); a
   // sheet over a tab (stop, customer) keeps the tab where it was.
   const rootRef = uRfl(null);
@@ -185,7 +185,6 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   return (
     <div className="mlap-root" ref={rootRef}>
       {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} onPayBon={view.stop.sisaBon > 0 && can.bon ? () => openFor('bon', fldCustFromStop(view.stop)) : null} />}
-      {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'pick' && (
         <FldPickCustomer api={api} title={trFl('fld.' + ({ sale: 'catatSale', bon: 'catatBon', adjust: 'catatAdj', damage: 'catatDmg' })[view.act])} hint={trFl('fld.pickHint')}
           accept={view.act === 'bon' ? ((c) => (c.sisaBon > 0 ? '' : 'fld.pickNoBon')) : view.act === 'damage' ? ((c) => (c.gallonsHeld > 0 ? '' : 'fld.dmgNoHeld')) : null}
@@ -235,6 +234,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
           </div>
         </>
       )}
+      {ready && view && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
       {ready && view && view.name === 'stop' && <FldStopSheet api={api} stop={view.stop} can={can} onClose={() => setView(null)} onSale={(s) => setView({ name: 'sale', stop: s })} onAction={(a, c) => openFor(a, c)} onChanged={done} />}
       {ready && view && view.name === 'cust' && <FldCustSheet cust={view.cust} can={can} onClose={() => setView(null)} onAction={(a, c) => openFor(a, c)} />}
       {menu && (
