@@ -578,3 +578,33 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-sheet-stack { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
 .mlap-facts2 b.bon { color: #7A4B00; }
 .mlap-facts2 b.ok { color: #1E6B40; }
+
+/* ── 3D-2 LENGKAPI — mockup Lengkapi + Atur titik boards ── */
+.mlap-prog { height: 24px; padding: 0 8px; border-radius: 12px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 700; flex-shrink: 0; background: #FFF1E8; color: #9A3412; }
+.mlap-prog.ok { background: #E3F3EA; color: #1E6B40; }
+.mlap-minimap { position: relative; height: 128px; background: #E4EAE6; overflow: hidden; }
+.mlap-minimap-map { position: absolute; inset: 0; height: auto; border-radius: 0; background: transparent; }
+.mlap-minipin { position: absolute; left: 50%; top: 50%; margin: -36px 0 0 -14px; z-index: 2; color: #8A9AA3; pointer-events: none; }
+.mlap-minipin.on { color: #065489; }
+.mlap-minicap { position: absolute; left: 8px; bottom: 8px; z-index: 2; height: 26px; max-width: calc(100% - 16px); padding: 0 10px; border-radius: 13px; box-sizing: border-box; display: flex; align-items: center; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mlap-secnote { font-size: 12px; color: var(--mlap-sub); flex-shrink: 0; }
+.mlap-sec .mlap-check b { font-size: 15px; font-weight: 600; }
+.mlap-twobtn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mlap-btn.soft2 { background: #E8F1F8; color: #065489; border-radius: 12px; font-size: 14px; }
+.mlap-btn.line { background: #FFFFFF; border: 1px solid #D5DDE3; color: #3E4E58; border-radius: 12px; font-size: 14px; }
+.mlap-btn.line.blue { color: #065489; }
+.mlap-pinwrap { position: fixed; inset: 0; z-index: 0; }
+.mlap-pinwrap .mlap-pinmap { position: absolute; inset: 0; height: auto; border-radius: 0; }
+.mlap-mapbar .mlap-map-locate { position: static; }
+.mlap-roundsp { width: 44px; height: 44px; flex-shrink: 0; }
+.mlap-pinhint { position: fixed; z-index: 5; top: calc(62px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); min-height: 32px; padding: 6px 14px; box-sizing: border-box; border-radius: 16px; display: flex; align-items: center; gap: 6px; text-align: center; font-size: 13px; font-weight: 600; pointer-events: none; background: rgba(255,255,255,.7); }
+.mlap-pinsheet { position: fixed; z-index: 6; left: 50%; transform: translateX(-50%); bottom: 0; width: min(560px, 100vw); box-sizing: border-box; padding: 8px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; border-radius: 28px 28px 0 0; background: rgba(248,250,252,.9); -webkit-backdrop-filter: blur(34px) saturate(1.5); backdrop-filter: blur(34px) saturate(1.5); border-top: 1px solid rgba(255,255,255,.95); box-shadow: 0 -10px 40px rgba(6,51,79,.18), inset 0 1px 0 rgba(255,255,255,.95); }
+.mlap-pinsheet .mlap-grab { margin: 0 auto; }
+.mlap-pinsheet-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.mlap-pinsheet-hd b { font-size: 19px; font-weight: 700; }
+.mlap-pinsheet-hd .sb { font-size: 12px; color: var(--mlap-sub); }
+.mlap-pinsheet .mlap-btn.primary { min-height: 50px; border-radius: 15px; font-size: 16px; }
+.mlap-kv b.far { color: #9A3412; font-weight: 700; }
+.mlap-kv b.moved { color: #065489; font-weight: 700; }
+.mlap-after.far { background: #FFF1E8; color: #9A3412; font-weight: 600; }
+.mlap-centerpin-dot { background: #065489; }

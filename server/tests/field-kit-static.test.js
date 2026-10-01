@@ -83,7 +83,7 @@ describe('Plan 3D kit', () => {
   it('task screens: glass "Batal" pill (or round back chevron), centred title, the top fade is CSS', () => {
     const f = kit.slice(kit.indexOf('function FldTop('), kit.indexOf('function FldTop(') + 900);
     expect(f).toMatch(/kind === 'back'\s*\?\s*<button type="button" className="mlap-round" aria-label=\{trFl\('fld\.back'\)\} onClick=\{onBack\}><FldSvg n="back"/);
-    expect(f).toMatch(/<button type="button" className="mlap-pill" onClick=\{onBack\}>\{trFl\('fld\.cancel'\)\}<\/button>/);
+    expect(f).toMatch(/<button type="button" className="mlap-pill" onClick=\{onBack\}>\{backLabel \|\| trFl\('fld\.cancel'\)\}<\/button>/);
     expect(css).toMatch(/\.mlap-top \{[^}]*position: sticky;[^}]*linear-gradient\(to top, rgba\(238,242,246,0\), rgba\(238,242,246,\.94\) 55%\)/);
   });
   it('a fixed bottom action bar with its fade and hint (screens adopt it in 3D-2)', () => {

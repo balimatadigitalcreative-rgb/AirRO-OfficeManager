@@ -106,6 +106,35 @@ function FldCustSheet({ cust: c0, can, onClose, onAction }) {
   );
 }
 
+const fldPt = (p) => p.lat.toFixed(5).replace('.', ',') + ', ' + p.lng.toFixed(5).replace('.', ',');
+
+// A small still map of the customer's point (mockup Lengkapi): no gestures, the OSM licence line kept;
+// a plain ground with a grey pin when there is no point yet or the map cannot load.
+function FldMiniMap({ pt, caption }) {
+  const el = uRfl(null);
+  uEfl(() => {
+    if (!pt || !el.current) return undefined;
+    let live = true; let map = null;
+    znLoadLeaflet().then((L) => {
+      if (!live || !el.current) return;
+      map = L.map(el.current, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false });
+      L.control.attribution({ position: 'topright', prefix: false }).addTo(map);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+      }).addTo(map);
+      map.setView([pt.lat, pt.lng], 17);
+    }).catch(() => { /* the plain ground stays */ });
+    return () => { live = false; if (map) map.remove(); };
+  }, [pt ? pt.lat + ',' + pt.lng : '']);
+  return (
+    <div className="mlap-minimap">
+      <div ref={el} className="mlap-map mlap-minimap-map" aria-hidden="true" />
+      <svg className={'mlap-minipin' + (pt ? ' on' : '')} width="28" height="36" viewBox="0 0 24 32" aria-hidden="true"><path d="M12 31s-10-10-10-18a10 10 0 0 1 20 0c0 8-10 18-10 18z" fill="currentColor" stroke="#FFFFFF" strokeWidth="2" /><circle cx="12" cy="12" r="4" fill="#FFFFFF" /></svg>
+      <span className="mlap-glass mlap-minicap">{caption}</span>
+    </div>
+  );
+}
+
 // LENGKAPI DATA — the three things a route needs from a customer: a location pin (from this phone's
 // GPS, or dragged on the map), a WhatsApp number, a location photo. "Simpan" saves only what changed.
 function FldComplete({ api, cust: c, onPin, onDone, onBack }) {
@@ -128,29 +157,36 @@ function FldComplete({ api, cust: c, onPin, onDone, onBack }) {
     } catch (e) { setErr(fldErrMsg(e)); }
     setBusy(false);
   };
+  const had = typeof c.lat === 'number' && typeof c.lng === 'number';
+  const pt = gps ? { lat: gps.lat, lng: gps.lng } : had ? { lat: c.lat, lng: c.lng } : null;
+  const okTitik = !g.titik || !!gps; const okWa = !g.wa || !!wa.trim(); const okFoto = !g.foto || !!photo;
+  const done = (okTitik ? 1 : 0) + (okWa ? 1 : 0) + (okFoto ? 1 : 0);
+  const cap = gps ? trFl('fld.ptGps', { p: fldPt(gps), m: Math.round(gps.accuracy || 0) }) : had ? trFl('fld.pinHave') : trFl('fld.ptNone');
+  const dot = (ok) => <span className={'mlap-dot ' + (ok ? 'ok' : 'miss')} aria-hidden="true">{ok ? '✓' : '!'}</span>;
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.completeT')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
+      <FldTop title={trFl('fld.completeT2')} onBack={onBack} backLabel={trFl('fld.later')} />
       <div className="mlap-body">
-        <div className="mlap-card mlap-sec">
-          <div className="mlap-check"><span className={'mlap-dot ' + (g.titik && !gps ? 'miss' : 'ok')} aria-hidden="true">{g.titik && !gps ? '!' : '✓'}</span><span className="mlap-grow"><b>{trFl('fld.chkTitik')}</b><span className="sb">{gps ? trFl('fld.gpsTaken', { m: Math.round(gps.accuracy || 0) }) : (g.titik ? trFl('fld.pinNeeded') : trFl('fld.pinHave'))}</span></span></div>
-          <div className="mlap-actions">
-            <button type="button" className="mlap-btn" disabled={locBusy} onClick={takeGps}>{locBusy ? trFl('fld.locating') : trFl('fld.useMyLoc')}</button>
-            <button type="button" className="mlap-btn" onClick={() => onPin(c)}>{trFl('fld.dragOnMap')}</button>
+        <FldCustHead name={c.name} sub={[c.code, c.address].filter(Boolean).join(' · ')} aside={<span className={'mlap-prog' + (done === 3 ? ' ok' : '')}>{trFl('fld.dataN', { n: done })}</span>} />
+        <div className="mlap-card">
+          <FldMiniMap pt={pt} caption={cap} />
+          <div className="mlap-sec">
+            <div className="mlap-check">{dot(okTitik)}<b className="mlap-grow">{trFl('fld.chkTitik')}</b><span className="mlap-secnote">{trFl('fld.pinNeeded')}</span></div>
+            <div className="mlap-twobtn">
+              <button type="button" className={'mlap-btn ' + (gps || had ? 'line' : 'soft2')} disabled={locBusy} onClick={takeGps}><FldSvg n="crosshair" s={16} sw={2.2} />{locBusy ? trFl('fld.locating') : gps ? trFl('fld.gpsAgain') : trFl('fld.useMyLoc2')}</button>
+              <button type="button" className="mlap-btn line blue" onClick={() => onPin(c)}><FldSvg n="pinMove" s={16} />{trFl('fld.dragOnMap')}</button>
+            </div>
+            <span className="mlap-hint">{trFl('fld.gpsDrift')}</span>
           </div>
-          <span className="sb">{trFl('fld.gpsDrift')}</span>
         </div>
         <div className="mlap-card mlap-sec">
-          <div className="mlap-check"><span className={'mlap-dot ' + (g.wa && !wa.trim() ? 'miss' : 'ok')} aria-hidden="true">{g.wa && !wa.trim() ? '!' : '✓'}</span><span className="mlap-grow"><b>{trFl('fld.chkWa')}</b><span className="sb">{trFl('fld.waFor')}</span></span></div>
-          <input className="mlap-text" type="tel" inputMode="tel" placeholder="08…" aria-label={trFl('fld.chkWa')} value={wa} onChange={(e) => setWa(e.target.value.slice(0, 20))} />
+          <div className="mlap-check">{dot(okWa)}<b className="mlap-grow">{trFl('fld.chkWa')}</b><span className="mlap-secnote">{trFl('fld.waFor')}</span></div>
+          <input className="mlap-text" type="tel" inputMode="tel" placeholder="0812 3456 7890" aria-label={trFl('fld.chkWa')} value={wa} onChange={(e) => setWa(e.target.value.slice(0, 20))} />
         </div>
-        <div className="mlap-card mlap-sec">
-          <div className="mlap-check"><span className={'mlap-dot ' + (g.foto && !photo ? 'miss' : 'ok')} aria-hidden="true">{g.foto && !photo ? '!' : '✓'}</span><span className="mlap-grow"><b>{trFl('fld.chkFoto')}</b></span></div>
-          <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.locPhotoHint" />
-        </div>
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.locPhotoHint" title={trFl('fld.chkFoto')} optional={!g.foto} w={100} h={76} />
         {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !changed} onClick={save}>{trFl('fld.saveCust')}</button>
       </div>
+      <FldCtaBar><button type="button" className="mlap-btn primary" disabled={busy || !changed} onClick={save}>{trFl('fld.saveCust')}</button></FldCtaBar>
     </div>
   );
 }
@@ -196,6 +232,7 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
       // the pin stays in the centre; the driver moves the map under it (drag anywhere, mockup)
       map.on('move', () => { const ce = map.getCenter(); setPin({ lat: ce.lat, lng: ce.lng }); });
       map.on('dragstart zoomstart', () => { userRef.current = true; setLift(true); });
+      map.on('keydown', () => { userRef.current = true; });   // M7: arrow-key panning is the driver too
       map.on('moveend', () => { setLift(false); if (userRef.current) setMoved(true); });
       setMapReady(true);
     }).catch(() => { if (live) setMapErr(true); });
@@ -222,23 +259,28 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
   };
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.pinT')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
-      <div className="mlap-body">
-        {mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} sub={trFl('fld.pinNoMap')} /> : (pin ? (
-          <div className="mlap-mapwrap">
-            <div ref={mapEl} className="mlap-map mlap-pinmap" role="application" aria-label={trFl('fld.pinT')} />
-            <span className={'mlap-centerpin' + (lift ? ' up' : '')} aria-hidden="true"><span className="mlap-centerpin-dot" /></span>
-            <span className={'mlap-centerpin-shadow' + (lift ? ' up' : '')} aria-hidden="true" />
-            {dev && mapReady ? <button type="button" className="mlap-round mlap-map-locate" aria-label={trFl('fld.useMyLoc')} onClick={() => mapRef.current.setView([dev.lat, dev.lng], 18)}><FldSvg n="locate" s={19} /></button> : null}
-          </div>
-        ) : <div className="mlap-empty">{trFl('fld.locating')}</div>)}
-        <div className="mlap-hint">{trFl('fld.pinPan')}</div>
-        <div className="mlap-card mlap-sec">
-          <div className="mlap-sumrow"><span>{trFl('fld.coords')}</span><b>{pin ? pin.lat.toFixed(6) + ', ' + pin.lng.toFixed(6) : '—'}</b></div>
-          <div className="mlap-sumrow"><span>{dev ? trFl('fld.fromDevice', { m: Math.round(dev.accuracy || 0) }) : trFl('fld.noGps')}</span><b>{mv.meters == null ? '—' : trFl('fld.metersN', { m: mv.meters })}</b></div>
-          {mv.far ? <div className="mlap-warnline">{trFl('fld.pinFar')}</div> : null}
-          {fallback && !moved ? <div className="mlap-warnline">{trFl('fld.pinNoGpsMove')}</div> : null}
+      {!mapErr && pin ? (
+        <div className="mlap-pinwrap">
+          <div ref={mapEl} className="mlap-map mlap-pinmap" role="application" aria-label={trFl('fld.pinT')} />
+          <span className={'mlap-centerpin' + (lift ? ' up' : '')} aria-hidden="true"><span className="mlap-centerpin-dot" /></span>
+          <span className={'mlap-centerpin-shadow' + (lift ? ' up' : '')} aria-hidden="true" />
         </div>
+      ) : null}
+      <div className="mlap-mapbar">
+        <button type="button" className="mlap-round" aria-label={trFl('fld.back')} onClick={onBack}><FldSvg n="back" s={18} sw={2.4} /></button>
+        <div className="mlap-glass mlap-mappill">{trFl('fld.pinT')}</div>
+        {dev && mapReady ? <button type="button" className="mlap-round mlap-map-locate" aria-label={trFl('fld.useMyLoc')} onClick={() => mapRef.current.setView([dev.lat, dev.lng], 18)}><FldSvg n="locate" s={19} /></button> : <span className="mlap-roundsp" aria-hidden="true" />}
+      </div>
+      {!mapErr && pin ? <div className="mlap-glass mlap-pinhint"><FldSvg n="hand" s={14} sw={2.2} />{trFl('fld.pinPan')}</div> : null}
+      {mapErr || !pin ? <div className="mlap-mapempty">{mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} sub={trFl('fld.pinNoMap')} /> : <div className="mlap-empty">{trFl('fld.locating')}</div>}</div> : null}
+      <div className="mlap-pinsheet">
+        <div className="mlap-grab" aria-hidden="true" />
+        <div className="mlap-pinsheet-hd"><b>{trFl('fld.pinOf', { name: c.name })}</b>{c.code ? <span className="sb">{c.code}</span> : null}</div>
+        <div className="mlap-card">
+          <div className="mlap-kv"><span>{trFl('fld.coords')}</span><b>{pin ? fldPt(pin) : '—'}</b></div>
+          <div className="mlap-kv"><span>{dev ? trFl('fld.fromDevice', { m: Math.round(dev.accuracy || 0) }) : trFl('fld.noGps')}</span><b className={mv.far ? 'far' : mv.meters != null && mv.meters >= 3 ? 'moved' : ''}>{mv.meters == null ? '—' : mv.meters < 3 ? trFl('fld.pinSame') : trFl('fld.pinMoved', { m: mv.meters })}</b></div>
+        </div>
+        <span className={'mlap-after' + (mv.far || (fallback && !moved) ? ' far' : '')}>{mv.far ? trFl('fld.pinFar') : fallback && !moved ? trFl('fld.pinNoGpsMove') : trFl('fld.pinAudit')}</span>
         {mapErr && dev ? <button type="button" className="mlap-btn mlap-wide" onClick={() => setPin({ lat: dev.lat, lng: dev.lng })}>{trFl('fld.useMyLoc')}</button> : null}
         {err && <div className="mlap-err" role="alert">{err}</div>}
         <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !pin || (fallback && !moved)} onClick={() => save(false)}>{trFl('fld.savePin')}</button>

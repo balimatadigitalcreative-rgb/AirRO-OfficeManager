@@ -55,12 +55,12 @@ function FldLinkBtn({ href, className, newTab, children }) {
 
 // Task screens (mockup): a glass "Batal" pill on the left — or a round back chevron for screens you only
 // read (kind 'back') — the title centred, and a soft fade so the content scrolls under it.
-function FldTop({ title, sub, onBack, kind }) {
+function FldTop({ title, sub, onBack, kind, backLabel }) {
   return (
     <div className="mlap-top">
       {onBack ? (kind === 'back'
         ? <button type="button" className="mlap-round" aria-label={trFl('fld.back')} onClick={onBack}><FldSvg n="back" s={18} sw={2.4} /></button>
-        : <button type="button" className="mlap-pill" onClick={onBack}>{trFl('fld.cancel')}</button>) : <span aria-hidden="true" />}
+        : <button type="button" className="mlap-pill" onClick={onBack}>{backLabel || trFl('fld.cancel')}</button>) : <span aria-hidden="true" />}
       <div className="mlap-top-t"><h1>{title}</h1>{sub && <div className="mlap-top-sub">{sub}</div>}</div>
       <span aria-hidden="true" />
     </div>

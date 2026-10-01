@@ -40,3 +40,41 @@ describe('Pelanggan (mockup Pelanggan board)', () => {
     expect(s).toMatch(/className="mlap-actrow" onClick=\{\(\) => onAction\(k, c\)\}>/);
   });
 });
+
+describe('Lengkapi (mockup Lengkapi board)', () => {
+  const f = () => fn(cust, 'FldComplete');
+  it('"Nanti saja" pill, the customer + a progress badge, a mini-map card with the pin and its caption', () => {
+    expect(f()).toMatch(/<FldTop title=\{trFl\('fld\.completeT2'\)\} onBack=\{onBack\} backLabel=\{trFl\('fld\.later'\)\} \/>/);
+    expect(f()).toMatch(/aside=\{<span className=\{'mlap-prog' \+ \(done === 3 \? ' ok' : ''\)\}>\{trFl\('fld\.dataN', \{ n: done \}\)\}<\/span>\}/);
+    expect(f()).toMatch(/<FldMiniMap pt=\{pt\} caption=\{cap\} \/>/);
+    expect(fn(cust, 'FldMiniMap')).toMatch(/dragging: false/);
+    expect(fn(cust, 'FldMiniMap')).toMatch(/OpenStreetMap<\/a>/);   // the licence attribution stays on every map
+    expect(rule('LENGKAPI', '.mlap-prog')).toMatch(/background: #FFF1E8; color: #9A3412;/);
+  });
+  it('two location buttons side by side; the photo card; save is the fixed bar', () => {
+    expect(f()).toMatch(/<div className="mlap-twobtn">/);
+    expect(f()).toMatch(/<FldPhoto api=\{api\} value=\{photo\} onChange=\{setPhoto\} hintKey="fld\.locPhotoHint"/);
+    expect(f()).toMatch(/<FldCtaBar><button type="button" className="mlap-btn primary" disabled=\{busy \|\| !changed\} onClick=\{save\}>/);
+  });
+  it('the top bar can name its way out ("Nanti saja")', () => {
+    expect(kit).toMatch(/function FldTop\(\{ title, sub, onBack, kind, backLabel \}\)/);
+    expect(kit).toMatch(/<button type="button" className="mlap-pill" onClick=\{onBack\}>\{backLabel \|\| trFl\('fld\.cancel'\)\}<\/button>/);
+  });
+});
+describe('Atur titik (mockup Atur titik board)', () => {
+  const f = () => fn(cust, 'FldPinMap');
+  it('full-bleed map with the centre pin, a glass bar (back, title, locate), a hint pill, a glass sheet with the figures', () => {
+    expect(f()).toMatch(/<div className="mlap-pinwrap">/);
+    expect(f()).toMatch(/<div className="mlap-mapbar">\s*<button type="button" className="mlap-round" aria-label=\{trFl\('fld\.back'\)\} onClick=\{onBack\}>/);
+    expect(f()).toMatch(/<div className="mlap-glass mlap-pinhint"><FldSvg n="hand"/);
+    expect(f()).toMatch(/<div className="mlap-pinsheet">/);
+    expect(f()).toMatch(/mv\.meters < 3 \? trFl\('fld\.pinSame'\) : trFl\('fld\.pinMoved', \{ m: mv\.meters \}\)/);
+    expect(rule('LENGKAPI', '.mlap-pinwrap')).toMatch(/position: fixed; inset: 0;/);
+  });
+  it('the centre pin is the board\'s blue pin', () => {
+    expect(rule('LENGKAPI', '.mlap-centerpin-dot')).toMatch(/background: #065489;/);
+  });
+  it('M7: moving the map with the keyboard counts as moved too', () => {
+    expect(f()).toMatch(/map\.on\('keydown', \(\) => \{ userRef\.current = true; \}\);/);
+  });
+});
