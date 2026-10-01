@@ -154,7 +154,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
     api.board().then((board) => FIELDLOGIC.saleStopFor({ board, customer: c, demand: ctx.demand })).catch(() => null)
       .then((s) => setView({ name: 'sale', stop: s || fldSaleStopFromCust(c) }));
   };
-  const full = view && ['sale', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin', 'koreksi', 'koreksiSaya'].includes(view.name);   // full-screen task: no tab header/dock
+  const full = view && ['sale', 'pick', 'bon', 'adjust', 'damage', 'exp', 'complete', 'pin', 'koreksi', 'koreksiSaya'].includes(view.name);   // full-screen task: no tab header/dock
   // M6: a new tab or task screen opens at the top (the root is the one scroller of the field view); a
   // sheet over a tab (stop, customer) keeps the tab where it was.
   const rootRef = uRfl(null);
@@ -194,7 +194,6 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       {ready && full && view.name === 'adjust' && <FldAdjust api={api} cust={view.cust} needsApproval={ctx.galonNeedsApproval} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'damage' && <FldDamage api={api} cust={view.cust} rules={ctx.rules || {}} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'exp' && <FldExpense api={api} refs={refs} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'addStop' && <FldAddStop api={api} preset={view.preset} can={can} onPin={(c, keep) => setView({ name: 'pin', cust: c, back: keep ? Object.assign({}, view, { preset: c }) : view })} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'complete' && <FldComplete api={api} cust={view.cust} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} depot={ctx.depot} onDone={(m, pt) => { if (view.back) { setView(pt ? FIELDLOGIC.afterPin(view.back, view.cust.id, pt) : view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
       {ready && full && view.name === 'koreksi' && <FldKoreksi api={api} target={view.target} can={can} onDone={(m) => { setView({ name: 'koreksiSaya' }); flash(m); setCtxTick((t) => t + 1); }} onBack={() => setView(null)} onSaya={() => setView({ name: 'koreksiSaya' })} />}
@@ -237,6 +236,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
         </>
       )}
       {ready && view && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
+      {ready && view && view.name === 'addStop' && <FldAddStop api={api} preset={view.preset} can={can} onPin={(c, keep) => setView({ name: 'pin', cust: c, back: keep ? Object.assign({}, view, { preset: c }) : view })} onDone={done} onBack={() => setView(null)} />}
       {ready && view && view.name === 'stop' && <FldStopSheet api={api} stop={view.stop} can={can} onClose={() => setView(null)} onSale={(s) => setView({ name: 'sale', stop: s })} onAction={(a, c) => openFor(a, c)} onChanged={done} />}
       {ready && view && view.name === 'cust' && <FldCustSheet cust={view.cust} can={can} onClose={() => setView(null)} onAction={(a, c) => openFor(a, c)} />}
       {menu && (

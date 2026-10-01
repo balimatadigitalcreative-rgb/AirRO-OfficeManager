@@ -58,7 +58,7 @@ describe('Tambah stop', () => {
     const f = fn('FldAddStop');
     expect(f).toMatch(/FIELDLOGIC\.addStopCandidates\(\{ board: d\.board, customers: d\.customers, q \}\)/);
     expect(f).toMatch(/onPin\(fldCustFromStop\(s\)\)/);
-    expect(f).toMatch(/!pickHasPin && <FldNotice tone="warn"/);
+    expect(f).toMatch(/pick && !pickHasPin \? \(\s*<div className="mlap-nopincard" role="alert">/);   // 3D-2: the board's warning card
     expect(f).toMatch(/api\.addStop\(\{ customerId: pick\.id, qty \}\)/);
   });
 });
@@ -136,7 +136,7 @@ describe('Plan 3C: 3B minors', () => {
     expect(f).toMatch(/function FldAddStop\(\{ api, preset, can, onPin, onDone, onBack \}\)/);
     expect(f).toMatch(/can\.location \? <button type="button" className="mlap-btn" onClick=\{\(\) => onPin\(fldCustFromStop\(s\)\)\}>/);
     expect(f).toMatch(/const onBoard = !!pick && d\.board\.some\(\(s\) => s\.customerId === pick\.id && s\.status !== 'batal'\);/);
-    expect(f).toMatch(/disabled=\{busy \|\| qty < 1 \|\| onBoard\}/);
+    expect(f).toMatch(/disabled=\{busy \|\| qty < 1 \|\| onBoard \|\| !pick\}/);   // 3D-2: the CTA is always there, waiting for a pick
     expect(f).toMatch(/onPin\(pick, true\)/);
   });
   it('Atur titik hands the saved point back', () => {

@@ -290,10 +290,11 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
   );
 }
 
-// TAMBAH STOP — a customer outside today's schedule (or ordered via WhatsApp) as an extra stop. Today's
-// stops that have no pin are listed first: they can't join the route until the pin is set. A customer
-// picked without a pin goes to the end of the list (not on the route) with a prompt to set it.
+// TAMBAH STOP (mockup Tambah stop board) — a sheet: search; today's stops that cannot join the route (no
+// pin — set it); other customers as radio rows tagged with whether they have a pin; what the pick means
+// (no pin → the end of the list, set the pin now; a pin → it joins the route); how many gallons; add.
 function FldAddStop({ api, preset, can, onPin, onDone, onBack }) {
+  const drag = useFldSheetDrag(onBack);
   const [d, setD] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [q, setQ] = uSfl('');
@@ -302,8 +303,19 @@ function FldAddStop({ api, preset, can, onPin, onDone, onBack }) {
   const [busy, setBusy] = uSfl(false);
   const [msg, setMsg] = uSfl('');
   uEfl(() => { let live = true; Promise.all([api.board(), api.customers()]).then(([board, customers]) => { if (live) setD({ board, customers }); }).catch((e) => { if (live) setErr(e); }); return () => { live = false; }; }, [api]);
-  if (err) return <div className="mlap-screen"><FldTop title={trFl('fld.addStopT')} onBack={onBack} /><div className="mlap-body"><FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /></div></div>;
-  if (!d) return <div className="mlap-screen"><FldTop title={trFl('fld.addStopT')} onBack={onBack} /><div className="mlap-empty">{trFl('fld.loading')}</div></div>;
+  const sheet = (body, cta) => (
+    <>
+      <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onBack} />
+      <div className="mlap-sheet tall" role="dialog" aria-modal="true" aria-label={trFl('fld.addStopT')} ref={drag.ref} style={drag.style}>
+        <FldGrab handle={drag.handle} />
+        <FldSheetHead title={trFl('fld.addStopT')} onClose={onBack} />
+        <div className="mlap-sheet-body">{body}</div>
+        {cta ? <div className="mlap-sheet-cta">{cta}</div> : null}
+      </div>
+    </>
+  );
+  if (err) return sheet(<FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />);
+  if (!d) return sheet(<div className="mlap-empty">{trFl('fld.loading')}</div>);
   const cand = FIELDLOGIC.addStopCandidates({ board: d.board, customers: d.customers, q });
   const pickHasPin = !!pick && typeof pick.lat === 'number' && typeof pick.lng === 'number';
   const onBoard = !!pick && d.board.some((s) => s.customerId === pick.id && s.status !== 'batal');   // already on today's route (also a "Tambah ke hari ini" from the customer sheet)
@@ -311,52 +323,43 @@ function FldAddStop({ api, preset, can, onPin, onDone, onBack }) {
     setBusy(true); setMsg('');
     api.addStop({ customerId: pick.id, qty }).then(() => onDone(trFl('fld.stopAdded', { name: pick.name }))).catch((e) => setMsg(fldErrMsg(e))).finally(() => setBusy(false));
   };
-  return (
-    <div className="mlap-screen">
-      <FldTop title={trFl('fld.addStopT')} onBack={onBack} />
-      <div className="mlap-body">
-        {!pick && (
-          <>
-            {cand.noPin.length > 0 && (
-              <>
-                <div className="mlap-eyebrow">{trFl('fld.noPinToday')}</div>
-                <div className="mlap-card">
-                  {cand.noPin.map((s) => (
-                    <div key={s.id} className="mlap-row">
-                      <span className="mlap-grow"><span className="nm">{s.customerName}</span><span className="sb">{s.customerCode}</span></span>
-                      {can.location ? <button type="button" className="mlap-btn" onClick={() => onPin(fldCustFromStop(s))}>{trFl('fld.setPin')}</button> : null}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            <input className="mlap-text mlap-search" type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
-            <div className="mlap-card">
-              {cand.others.length ? cand.others.slice(0, 60).map((c) => (
-                <button key={c.id} type="button" className="mlap-row mlap-rowbtn" onClick={() => setPick(c)}>
-                  <span className="mlap-grow"><span className="nm">{c.name}</span><span className="sb">{[c.code, c.address].filter(Boolean).join(' · ')}</span></span>
-                  {c.gaps.titik ? <span className="mlap-tag held">{trFl('fld.gapTitik')}</span> : null}
-                </button>
-              )) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
-            </div>
-          </>
-        )}
-        {pick && (
-          <>
-            <div className="mlap-card mlap-sec">
-              <b>{pick.name}</b>
-              <span className="sb">{[pick.code, pick.address].filter(Boolean).join(' · ')}</span>
-              <button type="button" className="mlap-btn" onClick={() => setPick(null)}>{trFl('fld.changeCust')}</button>
-            </div>
-            {!pickHasPin && <FldNotice tone="warn" title={trFl('fld.pickNoPinT', { name: pick.name })} sub={trFl('fld.pickNoPinB')} action={can.location ? trFl('fld.setPinNow') : null} onAction={() => onPin(pick, true)} />}
-            {onBoard ? <FldNotice tone="warn" title={trFl('fld.alreadyToday')} /> : null}
-            <div className="mlap-card"><FldStepper label={trFl('fld.qtyGalon')} value={qty} onChange={setQty} min={1} max={999} /></div>
-            {msg && <div className="mlap-err" role="alert">{msg}</div>}
-            <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || qty < 1 || onBoard} onClick={save}>{trFl('fld.addStopCta')}</button>
-          </>
-        )}
+  return sheet(
+    <>
+      <label className="mlap-searchbox"><FldSvg n="search" s={16} sw={2.2} /><input type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} /></label>
+      {cand.noPin.length > 0 && !q.trim() && (
+        <>
+          <div className="mlap-label">{trFl('fld.noPinToday')}</div>
+          <div className="mlap-card">
+            {cand.noPin.map((s) => (
+              <div key={s.id} className="mlap-row">
+                <span className="mlap-grow"><span className="nm">{s.customerName}</span><span className="sb">{s.customerCode}</span></span>
+                {can.location ? <button type="button" className="mlap-btn" onClick={() => onPin(fldCustFromStop(s))}>{trFl('fld.setPin')}</button> : null}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="mlap-label">{trFl('fld.otherCust')}</div>
+      <div className="mlap-card">
+        {cand.others.length ? cand.others.slice(0, 60).map((c) => (
+          <button key={c.id} type="button" className={'mlap-pickrow' + (pick && pick.id === c.id ? ' on' : '')} aria-pressed={!!(pick && pick.id === c.id)} onClick={() => setPick(c)}>
+            <span className="mlap-radio" aria-hidden="true" />
+            <span className="mlap-grow"><span className="nm">{c.name}</span><span className="sb">{[c.code, c.address].filter(Boolean).join(' · ')}</span></span>
+            <span className={'mlap-tag ' + (c.gaps.titik ? 'warnt' : 'ok')}>{trFl(c.gaps.titik ? 'fld.tagNoPin' : 'fld.tagHasPin')}</span>
+          </button>
+        )) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
       </div>
-    </div>
+      {pick && !pickHasPin ? (
+        <div className="mlap-nopincard" role="alert">
+          <div className="mlap-nopincard-hd"><FldSvg n="pinOff" s={18} sw={2.2} /><span className="mlap-grow"><b>{trFl('fld.pickNoPinT', { name: pick.name })}</b><span>{trFl('fld.pickNoPinB')}</span></span></div>
+          {can.location ? <button type="button" className="mlap-btn mlap-pinnow" onClick={() => onPin(pick, true)}><FldSvg n="crosshair" s={16} sw={2.2} />{trFl('fld.setPinNow')}</button> : null}
+        </div>
+      ) : pick ? <FldNotice tone="info" title={trFl('fld.pickPinT', { name: pick.name })} /> : null}
+      {onBoard ? <FldNotice tone="warn" title={trFl('fld.alreadyToday')} /> : null}
+      {pick ? <div className="mlap-card"><FldStepper label={trFl('fld.qtyGalon')} value={qty} onChange={setQty} min={1} max={999} /></div> : null}
+      {msg && <div className="mlap-err" role="alert">{msg}</div>}
+    </>,
+    <button type="button" className="mlap-btn primary" disabled={busy || qty < 1 || onBoard || !pick} onClick={save}>{trFl(pick ? (pickHasPin ? 'fld.addToRoute' : 'fld.addAtEnd') : 'fld.addStopCta')}</button>
   );
 }
 

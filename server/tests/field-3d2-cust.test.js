@@ -78,3 +78,19 @@ describe('Atur titik (mockup Atur titik board)', () => {
     expect(f()).toMatch(/map\.on\('keydown', \(\) => \{ userRef\.current = true; \}\);/);
   });
 });
+
+describe('Tambah stop (mockup Tambah stop board) — a sheet', () => {
+  const f = () => fn(cust, 'FldAddStop');
+  it('a tall sheet with a search box, radio rows tagged "Ada titik / Tanpa titik", the consequence card, the gallons, the CTA', () => {
+    expect(f()).toMatch(/<div className="mlap-sheet tall" role="dialog" aria-modal="true" aria-label=\{trFl\('fld\.addStopT'\)\} ref=\{drag\.ref\} style=\{drag\.style\}>/);
+    expect(f()).toMatch(/<label className="mlap-searchbox">/);
+    expect(f()).toMatch(/className=\{'mlap-pickrow' \+ \(pick && pick\.id === c\.id \? ' on' : ''\)\}/);
+    expect(f()).toMatch(/trFl\(c\.gaps\.titik \? 'fld\.tagNoPin' : 'fld\.tagHasPin'\)/);
+    expect(f()).toMatch(/pick \? \(pickHasPin \? 'fld\.addToRoute' : 'fld\.addAtEnd'\)/);
+    expect(rule('TAMBAH', '.mlap-nopincard')).toMatch(/background: #FFF1E8; border: 1px solid #F4C7A8;/);
+  });
+  it('the shell opens it over the current tab', () => {
+    expect(shell).toMatch(/\{ready && view && view\.name === 'addStop' && <FldAddStop /);
+    expect(shell).not.toMatch(/'exp', 'addStop'/);
+  });
+});
