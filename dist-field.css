@@ -528,3 +528,30 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-pin { background: #FFFFFF; color: #065489; border: 2.5px solid #065489; }
 .mlap-pin.now { width: 28px; height: 28px; background: #065489; color: #FFFFFF; border-color: #FFFFFF; box-shadow: 0 0 0 6px rgba(6,84,137,.18); }
 .mlap-pin.depot { width: 34px; height: 34px; border-radius: 50%; background: #0E1B24; border: 0; }
+
+/* ── 3D-2 SETORAN — mockup Selesai board ── */
+.mlap-kpi3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mlap-kpi3 > div { background: #FFFFFF; border-radius: 14px; padding: 8px 12px; display: flex; flex-direction: column; }
+.mlap-kpi3 b { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mlap-kpi3 b.ok { color: #1E6B40; }
+.mlap-kpi3 b.bon { color: #7A4B00; }
+.mlap-kpi3 b.neg { color: #9B2C22; }
+.mlap-kpi3 span { font-size: 12px; color: var(--mlap-sub); }
+.mlap-kv.sm { min-height: 34px; }
+.mlap-kv b.neg { color: #9B2C22; }
+.mlap-kvbtn { width: 100%; border: 0; border-bottom: 1px solid var(--mlap-line); background: #FFFFFF; font: inherit; font-size: 14px; color: inherit; text-align: left; cursor: pointer; }
+.mlap-kvbtn > span:first-child { flex: 1; }
+.mlap-kvbtn > svg { color: #8A9AA3; flex-shrink: 0; }
+.mlap-gal3 { padding: 8px 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.mlap-gal3 > div { display: flex; flex-direction: column; }
+.mlap-gal3 b { font-size: 16px; font-weight: 700; }
+.mlap-gal3 b.neg { color: #9B2C22; }
+.mlap-gal3 span { font-size: 12px; color: var(--mlap-sub); }
+.mlap-closerow2 { padding: 4px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--mlap-line); }
+.mlap-closerow2:last-child { border-bottom: 0; }
+.mlap-closenm { width: 118px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; }
+.mlap-closenm .nm { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mlap-alert.sm2 { border-radius: 12px; padding: 4px 10px; gap: 8px; }
+.mlap-alert.sm2 .t { font-size: 13px; font-weight: 700; }
+.mlap-swipe .mlap-ctabar { bottom: calc(100px + env(safe-area-inset-bottom)); }
+.mlap-swipe .mlap-ctafade { height: calc(230px + env(safe-area-inset-bottom)); background: linear-gradient(to bottom, rgba(238,242,246,0), rgba(238,242,246,.94) 30%); }

@@ -168,7 +168,7 @@ describe('Plan 3D shell', () => {
 describe('Plan 3D header', () => {
   it('eyebrow (day · armada) above the title; glass round buttons top-right (Rute on Pengiriman, ⋯ menu)', () => {
     expect(jsx).toMatch(/<span>\{fldDayLabel\(today\)\}\{fleet \? ' · ' \+ fleet : ''\}<\/span>/);
-    expect(jsx.indexOf('{fldDayLabel(today)}')).toBeLessThan(jsx.indexOf('<h1>{trFl(TAB_LABEL[tab])}</h1>'));
+    expect(jsx.indexOf('{fldDayLabel(today)}')).toBeLessThan(jsx.indexOf("<h1>{trFl(tab === 'setoran' ? 'fld.setoranT' : TAB_LABEL[tab])}</h1>"));   // 3D-2: Setoran is titled "Setoran hari ini"
     expect(jsx).toMatch(/tab === 'kirim' \? <button type="button" className="mlap-round" aria-label=\{trFl\('fld\.seeRoute'\)\} onClick=\{\(\) => setTab\('peta'\)\}><FldSvg n="route"/);
     expect(jsx).toMatch(/<FldSvg n="dots" s=\{19\} \/>/);
   });

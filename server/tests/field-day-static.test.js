@@ -166,7 +166,7 @@ describe('Plan 3C: day screens', () => {
   });
   it('Setoran opens Koreksi saya, says the day is already closed, and asks before closing again', () => {
     const f = fn('FldSetoran');
-    expect(f).toMatch(/function FldSetoran\(\{ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged \}\)/);
+    expect(f).toMatch(/function FldSetoran\(\{ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged, onExpense, onIncomplete \}\)/);
     expect(f).toMatch(/canKoreksi \?/);
     expect(f).toMatch(/sum\.closeout \?/);
     expect(f).toMatch(/onClick=\{\(\) => \(sum\.closeout \? setAskRe\(true\) : close\(\)\)\}/);

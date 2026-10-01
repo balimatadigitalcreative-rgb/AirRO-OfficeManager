@@ -177,7 +177,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   } else if (tab === 'peta') {
     body = <FldRoute api={api} ctx={ctx} tick={tick} fleet={fleet} onOpenRun={() => setView({ name: 'run' })} onMenu={() => setMenu(true)} onAddStop={can.addStop ? () => setView({ name: 'addStop' }) : null} />;
   } else if (tab === 'setoran') {
-    body = <FldSetoran api={api} ctx={ctx} tick={tick} canKoreksi={can.correct || can.void} onKoreksiSaya={() => setView({ name: 'koreksiSaya' })} onChanged={(m) => done(m)} />;
+    body = <FldSetoran api={api} ctx={ctx} tick={tick} canKoreksi={can.correct || can.void} onKoreksiSaya={() => setView({ name: 'koreksiSaya' })} onChanged={(m) => done(m)} onExpense={can.expense ? () => setView({ name: 'exp' }) : null} onIncomplete={goIncomplete} />;
   } else {
     body = <FldCustomers api={api} tick={tick} filter={custFilter} onFilter={setCustFilter} onOpen={(c) => setView({ name: 'cust', cust: c })} />;
   }
@@ -208,7 +208,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
                   <span>{fldDayLabel(today)}{fleet ? ' · ' + fleet : ''}</span>
                   {mode === 'latihan' ? <span className="mlap-chip latihan" role="note">{trFl('fld.modeLatihan')}</span> : null}
                 </span>
-                <h1>{trFl(TAB_LABEL[tab])}</h1>
+                <h1>{trFl(tab === 'setoran' ? 'fld.setoranT' : TAB_LABEL[tab])}</h1>
               </div>
               <div className="mlap-head-act">
                 {tab === 'kirim' ? <button type="button" className="mlap-round" aria-label={trFl('fld.seeRoute')} onClick={() => setTab('peta')}><FldSvg n="route" s={19} /></button> : null}

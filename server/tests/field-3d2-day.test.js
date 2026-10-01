@@ -166,3 +166,33 @@ describe('Peta (mockup Rute rit board)', () => {
     expect(shell).toMatch(/<FldRoute api=\{api\} ctx=\{ctx\} tick=\{tick\} fleet=\{fleet\} onOpenRun=\{\(\) => setView\(\{ name: 'run' \}\)\} onMenu=\{\(\) => setMenu\(true\)\} onAddStop=\{can\.addStop \? \(\) => setView\(\{ name: 'addStop' \}\) : null\} \/>/);
   });
 });
+
+describe('Setoran (mockup Selesai board)', () => {
+  const f = () => fn(day, 'FldSetoran');
+  it('three coloured KPI tiles; the deposit row highlighted; Pengeluaran opens the expense screen; a galon card', () => {
+    expect(f()).toMatch(/<div className="mlap-kpi3">/);
+    expect(f()).toMatch(/<b className="ok">\{sum\.stops\.terkirim\}<\/b>/);
+    expect(f()).toMatch(/<div className="mlap-kv total"><span>\{trFl\('fld\.s_setor'\)\}<\/span><b>\{FIELDLOGIC\.fmtRp\(sum\.wajibSetor\)\}<\/b><\/div>/);
+    expect(f()).toMatch(/onExpense \? <button type="button" className="mlap-kv mlap-kvbtn" onClick=\{onExpense\}>/);
+    expect(f()).toMatch(/<div className="mlap-card mlap-gal3">/);
+    expect(rule('SETORAN', '.mlap-kpi3 b.ok')).toMatch(/color: #1E6B40;/);
+  });
+  it('unfinished stops pick their reason in a sheet (no <select>), red until chosen', () => {
+    expect(f()).not.toMatch(/<select/);
+    expect(f()).toMatch(/className=\{'mlap-pickbtn' \+ \(r \? '' : ' miss'\)\}/);
+    expect(f()).toMatch(/<FldPickSheet title=\{trFl\('fld\.reasonFor', \{ name: pick\.customerName \}\)\} options=\{opts\}/);
+  });
+  it('"Tutup hari & setor" is the fixed bar above the dock, its hint red or green', () => {
+    expect(f()).toMatch(/<FldCtaBar hint=\{chk\.ok \? <span className="ok">\{trFl\('fld\.allStopsDone'\)\}<\/span> : trFl\('fld\.missingReasons', \{ n: chk\.missing\.length \}\)\}>/);
+    expect(f()).toMatch(/<div className="mlap-ctaspace" \/>/);
+    expect(rule('SETORAN', '.mlap-swipe .mlap-ctabar')).toMatch(/bottom: calc\(100px \+ env\(safe-area-inset-bottom\)\);/);
+  });
+  it('the Pengeluaran row keeps the 14 px of the other rows; the fade under the bar starts early so its hint reads', () => {
+    expect(rule('SETORAN', '.mlap-kvbtn')).toMatch(/font: inherit; font-size: 14px;/);
+    expect(rule('SETORAN', '.mlap-swipe .mlap-ctafade')).toMatch(/rgba\(238,242,246,\.94\) 30%/);
+  });
+  it('the tab is titled "Setoran hari ini"; the shell hands it Pengeluaran and "Lengkapi"', () => {
+    expect(shell).toMatch(/trFl\(tab === 'setoran' \? 'fld\.setoranT' : TAB_LABEL\[tab\]\)/);
+    expect(shell).toMatch(/onExpense=\{can\.expense \? \(\) => setView\(\{ name: 'exp' \}\) : null\} onIncomplete=\{goIncomplete\}/);
+  });
+});

@@ -577,10 +577,11 @@ function FldRoute({ api, ctx, tick, fleet, onOpenRun, onMenu, onAddStop }) {
   );
 }
 
-// SETORAN / SELESAI KERJA — the day's money and gallons from the server's day summary (the same figures
-// as the delivery report), then "close the day": every stop still waiting needs a reason (it moves to
-// Tunda and carries over). Pending corrections never block closing.
-function FldSetoran({ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged }) {
+// SETORAN / SELESAI KERJA (mockup Selesai board) — the day's money and gallons from the server's day
+// summary (the same figures as the delivery report), then "close the day": every stop still waiting
+// needs a reason (it moves to Tunda and carries over), picked in a sheet. Pending corrections never block
+// closing.
+function FldSetoran({ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged, onExpense, onIncomplete }) {
   const [d, setD] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [reasons, setReasons] = uSfl({});
@@ -589,6 +590,7 @@ function FldSetoran({ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged }) {
   const [msg, setMsg] = uSfl('');
   const [reload, setReload] = uSfl(0);
   const [askRe, setAskRe] = uSfl(false);
+  const [pick, setPick] = uSfl(null);   // the stop whose reason is being chosen
   uEfl(() => {
     let live = true; setErr(null);
     Promise.all([api.daySummary(), api.board()]).then(([sum, board]) => { if (live) setD({ sum, board }); }).catch((e) => { if (live) setErr(e); });
@@ -601,6 +603,7 @@ function FldSetoran({ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged }) {
   const chk = FIELDLOGIC.closeCheck(pending, reasons);
   const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs: [] });
   const opts = FLD_HOLD_REASONS.map((k) => trFl(k));
+  const gaps = d.board.filter((s) => FIELDLOGIC.gapsOf(s).count > 0).length;
   const rows = [['fld.s_tunai', sum.tunaiPenjualan], ['fld.s_pelunasan', sum.tunaiPelunasan], ['fld.s_transfer', sum.transfer], ['fld.s_bon', sum.bonBaru, 'bon'], ['fld.s_gantiRugi', sum.tunaiGantiRugi]];
   const close = () => {
     setBusy(true); setMsg('');
@@ -612,51 +615,67 @@ function FldSetoran({ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged }) {
   };
   return (
     <>
-      <div className="mlap-card mlap-kpis">
-        <span><b>{sum.stops.terkirim}</b><span className="sb">{trFl('fld.k_terkirim')}</span></span>
-        <span><b>{sum.stops.ditunda}</b><span className="sb">{trFl('fld.k_tunda')}</span></span>
-        <span><b>{sum.stops.batal}</b><span className="sb">{trFl('fld.k_batal')}</span></span>
+      <div className="mlap-kpi3">
+        <div><b className="ok">{sum.stops.terkirim}</b><span>{trFl('fld.k_terkirim')}</span></div>
+        <div><b className="bon">{sum.stops.ditunda}</b><span>{trFl('fld.k_tunda')}</span></div>
+        <div><b className="neg">{sum.stops.batal}</b><span>{trFl('fld.k_batal')}</span></div>
       </div>
-      {sum.koreksiMenunggu > 0 ? <FldNotice tone="info" title={trFl('fld.koreksiWait', { n: sum.koreksiMenunggu })} sub={trFl('fld.koreksiWaitB')} action={canKoreksi ? trFl('fld.kSaya') : null} onAction={onKoreksiSaya} /> : null}
-      {canKoreksi && !(sum.koreksiMenunggu > 0) ? <button type="button" className="mlap-btn mlap-wide" onClick={onKoreksiSaya}>{trFl('fld.kSaya')}</button> : null}
+      {canKoreksi ? (
+        <button type="button" className="mlap-alert sm2" onClick={onKoreksiSaya}>
+          <FldSvg n="pen" s={16} sw={2.2} style={{ color: '#7A4B00', flexShrink: 0 }} />
+          <span className="mlap-grow"><span className="t">{sum.koreksiMenunggu > 0 ? trFl('fld.koreksiWait', { n: sum.koreksiMenunggu }) : trFl('fld.kSaya')}</span>{sum.koreksiMenunggu > 0 ? <span className="s">{trFl('fld.koreksiWaitB')}</span> : null}</span>
+          <FldSvg n="chevron" s={12} sw={2.4} style={{ color: '#8A9AA3', flexShrink: 0 }} />
+        </button>
+      ) : sum.koreksiMenunggu > 0 ? <FldNotice tone="info" title={trFl('fld.koreksiWait', { n: sum.koreksiMenunggu })} sub={trFl('fld.koreksiWaitB')} /> : null}
       {sum.closeout ? <FldNotice tone="ok" title={trFl('fld.dayClosedT', { t: new Date(sum.closeout.closedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }), by: sum.closeout.closedByName ? ' · ' + sum.closeout.closedByName : '' })} sub={trFl('fld.dayClosedB')} /> : null}
       {rs.open ? <FldNotice tone="warn" title={trFl('fld.openRunWarn', { n: rs.open.runNo })} /> : null}
-      <div className="mlap-card mlap-sum">
-        {rows.map(([k, v, tone]) => <div key={k} className="mlap-sumrow"><span>{trFl(k)}</span><span className={tone === 'bon' ? 'mlap-bontxt' : ''}>{FIELDLOGIC.fmtRp(v)}</span></div>)}
-        <div className="mlap-sumrow"><span>{trFl('fld.s_expense')}</span><span>{FIELDLOGIC.fmtRp(-sum.pengeluaran)}</span></div>
-        <div className="mlap-sumrow total"><span>{trFl('fld.s_setor')}</span><b>{FIELDLOGIC.fmtRp(sum.wajibSetor)}</b></div>
+      <div className="mlap-card">
+        {rows.map(([k, v, tone]) => <div key={k} className="mlap-kv sm"><span>{trFl(k)}</span><b className={tone === 'bon' ? 'mlap-bontxt' : ''}>{FIELDLOGIC.fmtRp(v)}</b></div>)}
+        {onExpense ? <button type="button" className="mlap-kv mlap-kvbtn" onClick={onExpense}><span>{trFl('fld.s_expense')}</span><b className="neg">{FIELDLOGIC.fmtRp(-sum.pengeluaran)}</b><FldSvg n="chevron" s={12} sw={2.4} /></button>
+          : <div className="mlap-kv"><span>{trFl('fld.s_expense')}</span><b className="neg">{FIELDLOGIC.fmtRp(-sum.pengeluaran)}</b></div>}
+        <div className="mlap-kv total"><span>{trFl('fld.s_setor')}</span><b>{FIELDLOGIC.fmtRp(sum.wajibSetor)}</b></div>
       </div>
-      <div className="mlap-card mlap-kpis">
-        <span><b>{sum.galon.keluar}</b><span className="sb">{trFl('fld.g_out')}</span></span>
-        <span><b>{sum.galon.kembali}</b><span className="sb">{trFl('fld.g_back')}</span></span>
-        <span><b>{sum.galon.rusak}</b><span className="sb">{trFl('fld.g_rusak')}</span></span>
+      <div className="mlap-card mlap-gal3">
+        <div><b>{sum.galon.keluar}</b><span>{trFl('fld.g_out')}</span></div>
+        <div><b>{sum.galon.kembali}</b><span>{trFl('fld.g_back')}</span></div>
+        <div><b className="neg">{sum.galon.rusak}</b><span>{trFl('fld.g_rusak')}</span></div>
       </div>
       {sum.ritDiBawahSop.length > 0 && (
         <>
-          <div className="mlap-eyebrow">{trFl('fld.sopRuns')}</div>
-          <div className="mlap-card">{sum.ritDiBawahSop.map((r) => <div key={r.runNo} className="mlap-row"><span className="mlap-grow sb">{trFl('fld.sopRunRow', { n: r.runNo, g: r.gallonsOut, r: r.reason })}</span></div>)}</div>
+          <div className="mlap-label">{trFl('fld.sopRuns')}</div>
+          <div className="mlap-card">{sum.ritDiBawahSop.map((r) => <div key={r.runNo} className="mlap-kv"><span>{trFl('fld.sopRunRow', { n: r.runNo, g: r.gallonsOut, r: r.reason })}</span></div>)}</div>
         </>
       )}
       {pending.length > 0 && (
         <>
-          <div className="mlap-eyebrow">{trFl('fld.openStopsT')}</div>
+          <div className="mlap-label">{trFl('fld.openStopsT')}</div>
           <div className="mlap-card">
-            {pending.map((s) => (
-              <div key={s.id} className="mlap-row mlap-closerow">
-                <span className="mlap-grow"><span className="nm">{s.customerName}</span></span>
-                <select className={'mlap-select' + (String(reasons[s.id] || '').trim() ? '' : ' miss')} value={reasons[s.id] || ''} onChange={(e) => setReasons(Object.assign({}, reasons, { [s.id]: e.target.value }))} aria-label={trFl('fld.pickReason') + ' — ' + s.customerName}>
-                  <option value="">{trFl('fld.pickReason')}</option>
-                  {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-            ))}
+            {pending.map((s) => {
+              const r = String(reasons[s.id] || '').trim();
+              return (
+                <div key={s.id} className="mlap-closerow2">
+                  <span className="mlap-closenm"><span className="nm">{s.customerName}</span></span>
+                  <button type="button" className={'mlap-pickbtn' + (r ? '' : ' miss')} aria-label={trFl('fld.pickReason') + ' — ' + s.customerName} onClick={() => setPick(s)}><span>{r || trFl('fld.pickReason')}</span><FldSvg n="chevDown" s={12} sw={2.4} /></button>
+                </div>
+              );
+            })}
           </div>
-          {!chk.ok ? <div className="mlap-hint">{trFl('fld.missingReasons', { n: chk.missing.length })}</div> : null}
         </>
       )}
+      {gaps > 0 && onIncomplete ? (
+        <button type="button" className="mlap-alert warn sm" onClick={onIncomplete}>
+          <FldSvg n="warn" s={15} sw={2.2} style={{ flexShrink: 0 }} />
+          <span className="mlap-grow">{trFl('fld.gapsToday', { n: gaps })}</span>
+          <span className="act">{trFl('fld.lengkapi')}</span>
+        </button>
+      ) : null}
       <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 500))} placeholder={trFl('fld.generalNote')} aria-label={trFl('fld.generalNote')} />
       {msg && <div className="mlap-err" role="alert">{msg}</div>}
-      <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !chk.ok} onClick={() => (sum.closeout ? setAskRe(true) : close())}>{trFl(sum.closeout ? 'fld.reclose' : 'fld.closeDay')}</button>
+      <div className="mlap-ctaspace" />
+      <FldCtaBar hint={chk.ok ? <span className="ok">{trFl('fld.allStopsDone')}</span> : trFl('fld.missingReasons', { n: chk.missing.length })}>
+        <button type="button" className="mlap-btn primary" disabled={busy || !chk.ok} onClick={() => (sum.closeout ? setAskRe(true) : close())}>{trFl(sum.closeout ? 'fld.reclose' : 'fld.closeDay')}</button>
+      </FldCtaBar>
+      {pick && <FldPickSheet title={trFl('fld.reasonFor', { name: pick.customerName })} options={opts} value={reasons[pick.id] || ''} onPick={(o) => { setReasons(Object.assign({}, reasons, { [pick.id]: o })); setPick(null); }} onClose={() => setPick(null)} />}
       {askRe && <FldSheet title={trFl('fld.recloseT')} body={trFl('fld.recloseB')} confirmLabel={trFl('fld.reclose')} onClose={() => setAskRe(false)} onConfirm={() => { setAskRe(false); close(); }} />}
     </>
   );
