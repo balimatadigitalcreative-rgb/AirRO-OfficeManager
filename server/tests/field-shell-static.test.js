@@ -106,3 +106,18 @@ describe('final review fixes (shell)', () => {
     expect(jsx).toMatch(/api\.position\(/);
   });
 });
+
+describe('Plan 3B shell', () => {
+  it('Catat items appear only when the account may use them, and open their screens', () => {
+    expect(jsx).toMatch(/const can = fldCan\(perms\);/);
+    expect(jsx).toMatch(/\['catatSale', can\.sale\], \['catatBon', can\.bon\], \['catatExp', can\.expense\], \['catatStop', can\.addStop\], \['catatAdj', can\.adjust\], \['catatDmg', can\.damage\]\]\.filter\(\(a\) => a\[1\]\)/);
+    expect(jsx).not.toMatch(/className="mlap-tile" disabled/);
+  });
+  it('the Pelanggan tab and every new screen are wired', () => {
+    ['<FldCustomers ', '<FldCustSheet ', '<FldPickCustomer ', '<FldPayBon ', '<FldAdjust ', '<FldDamage ', '<FldExpense ', '<FldAddStop ', '<FldComplete ', '<FldPinMap '].forEach((t) => expect(jsx).toContain(t));
+  });
+  it('pickers disable customers an action cannot use (no bon → no bon payment; no gallons → no damage)', () => {
+    expect(jsx).toMatch(/view\.act === 'bon' \? \(\(c\) => \(c\.sisaBon > 0 \? '' : 'fld\.pickNoBon'\)\)/);
+    expect(jsx).toMatch(/view\.act === 'damage' \? \(\(c\) => \(c\.gallonsHeld > 0 \? '' : 'fld\.dmgNoHeld'\)\)/);
+  });
+});

@@ -8,8 +8,9 @@
 // (Plan 3) replace the foundation stub; flip to true then. Un-releasing is always allowed.
 const FLD_SCREENS_READY = false;
 
-function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, onPref, onOpenRules }) {
+function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, onExit, onPref, onOpenRules }) {
   const mode = pref.mode;
+  const can = fldCan(perms);
   const scope = Array.isArray(fleetScope) ? fleetScope : null;
   const fleets = scope || fldPlates(fleetList);
   const [fleet, setFleet] = uSfl(fleets[0] || '');
@@ -109,8 +110,11 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
 
   const TABS = [['kirim', 'IconTruck'], ['peta', 'IconPin'], null, ['pelanggan', 'IconCustomers'], ['setoran', 'IconWallet']];
   const TAB_LABEL = { kirim: 'fld.tabKirim', peta: 'fld.tabPeta', pelanggan: 'fld.tabPelanggan', setoran: 'fld.tabSetoran' };
-  const ACTIONS = ['catatSale', 'catatBon', 'catatExp', 'catatStop', 'catatAdj', 'catatDmg'];
-  const full = view && (view.name === 'sale' || view.name === 'run');   // full-screen task: no tab header/dock
+  const ACTIONS = [['catatSale', can.sale], ['catatBon', can.bon], ['catatExp', can.expense], ['catatStop', can.addStop], ['catatAdj', can.adjust], ['catatDmg', can.damage]].filter((a) => a[1]).map((a) => a[0]);
+  const ACTION_VIEW = { catatSale: { name: 'pick', act: 'sale' }, catatBon: { name: 'pick', act: 'bon' }, catatExp: { name: 'exp' }, catatStop: { name: 'addStop' }, catatAdj: { name: 'pick', act: 'adjust' }, catatDmg: { name: 'pick', act: 'damage' } };
+  // a customer chosen for an action → the action's screen
+  const openFor = (act, c) => setView(act === 'sale' ? { name: 'sale', stop: fldSaleStopFromCust(c) } : act === 'addStop' ? { name: 'addStop', preset: c } : { name: act, cust: c });
+  const full = view && ['sale', 'run', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin'].includes(view.name);   // full-screen task: no tab header/dock
 
   let body = null;
   if (err) {
@@ -124,13 +128,13 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   } else if (!ready) {
     body = <div className="mlap-empty">{trFl('fld.loading')}</div>;
   } else if (tab === 'kirim') {
-    body = <FldBoardScreen api={api} ctx={ctx} tick={tick} onStop={(s) => setView({ name: 'stop', stop: s })} onSale={(s) => setView({ name: 'sale', stop: s })} onOpenRun={() => setView({ name: 'run' })} onRoute={() => setTab('peta')} />;
+    body = <FldBoardScreen api={api} ctx={ctx} tick={tick} can={can} onStop={(s) => setView({ name: 'stop', stop: s })} onSale={(s) => setView({ name: 'sale', stop: s })} onOpenRun={() => setView({ name: 'run' })} onRoute={() => setTab('peta')} />;
   } else if (tab === 'peta') {
     body = <FldRoute api={api} ctx={ctx} tick={tick} onOpenRun={() => setView({ name: 'run' })} />;
   } else if (tab === 'setoran') {
     body = <FldSetoran api={api} ctx={ctx} tick={tick} onChanged={(m) => done(m)} />;
   } else {
-    body = <div className="mlap-card"><div className="mlap-empty">{trFl('fld.soon')}</div></div>;
+    body = <FldCustomers api={api} tick={tick} onOpen={(c) => setView({ name: 'cust', cust: c })} />;
   }
 
   return (
@@ -138,6 +142,18 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
       {mode === 'latihan' && <div className="mlap-ribbon" role="status">{trFl('fld.bannerLatihan')}</div>}
       {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'pick' && (
+        <FldPickCustomer api={api} title={trFl('fld.' + ({ sale: 'catatSale', bon: 'catatBon', adjust: 'catatAdj', damage: 'catatDmg' })[view.act])} hint={trFl('fld.pickHint')}
+          accept={view.act === 'bon' ? ((c) => (c.sisaBon > 0 ? '' : 'fld.pickNoBon')) : view.act === 'damage' ? ((c) => (c.gallonsHeld > 0 ? '' : 'fld.dmgNoHeld')) : null}
+          onPick={(c) => openFor(view.act, c)} onBack={() => setView(null)} />
+      )}
+      {ready && full && view.name === 'bon' && <FldPayBon api={api} cust={view.cust} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'adjust' && <FldAdjust api={api} cust={view.cust} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'damage' && <FldDamage api={api} cust={view.cust} rules={ctx.rules || {}} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'exp' && <FldExpense api={api} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'addStop' && <FldAddStop api={api} preset={view.preset} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'complete' && <FldComplete api={api} cust={view.cust} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} onDone={(m) => { if (view.back) { setView(view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
       {!full && (
         <>
           <div className="mlap-head">
@@ -175,12 +191,14 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
           <div className="mlap-catat-menu" role="menu" aria-label={trFl('fld.catatTitle')}>
             <div className="mlap-eyebrow" style={{ padding: '2px 6px 8px' }}>{trFl('fld.catatTitle')}</div>
             <div className="mlap-catat-grid">
-              {ACTIONS.map((a, i) => <button key={a} type="button" role="menuitem" className="mlap-tile" disabled style={{ animationDelay: (70 + i * 40) + 'ms' }} title={trFl('fld.soon')}>{trFl('fld.' + a)}</button>)}
+              {ACTIONS.map((a, i) => <button key={a} type="button" role="menuitem" className="mlap-tile" style={{ animationDelay: (70 + i * 40) + 'ms' }} onClick={() => { setCatat(false); setView(ACTION_VIEW[a]); }}>{trFl('fld.' + a)}</button>)}
+              {!ACTIONS.length ? <div className="mlap-empty">{trFl('fld.noActions')}</div> : null}
             </div>
           </div>
         </>
       )}
-      {ready && view && view.name === 'stop' && <FldStopSheet api={api} stop={view.stop} onClose={() => setView(null)} onSale={(s) => setView({ name: 'sale', stop: s })} onChanged={done} />}
+      {ready && view && view.name === 'stop' && <FldStopSheet api={api} stop={view.stop} can={can} onClose={() => setView(null)} onSale={(s) => setView({ name: 'sale', stop: s })} onAction={(a, c) => openFor(a, c)} onChanged={done} />}
+      {ready && view && view.name === 'cust' && <FldCustSheet cust={view.cust} can={can} onClose={() => setView(null)} onAction={(a, c) => openFor(a, c)} />}
       {menu && (
         <>
           <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={() => setMenu(false)} />

@@ -39,7 +39,7 @@ function FldStopRow({ s, n, onClick }) {
   );
 }
 
-function FldNextCard({ s, onSale, onOpen }) {
+function FldNextCard({ s, canSale, onSale, onOpen }) {
   const links = fldLinks(s);
   const chips = [trFl('fld.nGalon', { n: s.planQty })];
   if (s.sisaBon > 0) chips.push(trFl('fld.bonTag', { v: FIELDLOGIC.fmtRp(s.sisaBon) }));
@@ -55,13 +55,13 @@ function FldNextCard({ s, onSale, onOpen }) {
       <div className="mlap-chips">{chips.map((c) => <span key={c} className="mlap-chip-s">{c}</span>)}</div>
       <div className="mlap-actions">
         <a className={'mlap-btn' + (links.nav ? '' : ' off')} href={links.nav || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!links.nav}>{trFl('fld.navigate')}</a>
-        <button type="button" className="mlap-btn primary" onClick={onSale}>{trFl('fld.deliverRecord')}</button>
+        {canSale ? <button type="button" className="mlap-btn primary" onClick={onSale}>{trFl('fld.deliverRecord')}</button> : null}
       </div>
     </div>
   );
 }
 
-function FldBoardScreen({ api, ctx, tick, onStop, onSale, onOpenRun, onRoute }) {
+function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onRoute }) {
   const [d, setD] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [seg, setSeg] = uSfl('pending');
@@ -95,7 +95,7 @@ function FldBoardScreen({ api, ctx, tick, onStop, onSale, onOpenRun, onRoute }) 
       </div>
       {v.incomplete > 0 && <FldNotice tone="warn" title={trFl('fld.incompleteT', { n: v.incomplete })} sub={trFl('fld.incompleteB')} />}
       {v.outsideRoute > 0 && <FldNotice tone="info" title={trFl('fld.outsideT', { n: v.outsideRoute })} sub={trFl('fld.outsideB')} />}
-      {v.next && <FldNextCard s={v.next} onSale={() => onSale(v.next)} onOpen={() => onStop(v.next)} />}
+      {v.next && <FldNextCard s={v.next} canSale={!!(can && can.sale)} onSale={() => onSale(v.next)} onOpen={() => onStop(v.next)} />}
       <FldSeg label={trFl('fld.filter')} value={seg} onChange={setSeg} options={[['pending', trFl('fld.segPending', { n: v.counts.pending })], ['done', trFl('fld.segDone', { n: v.counts.done })], ['held', trFl('fld.segHeld', { n: v.counts.held })]]} />
       <div className="mlap-card">
         {list.length ? list.map((s, i) => <FldStopRow key={s.id} s={s} n={i + 1} onClick={() => onStop(s)} />) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
@@ -118,7 +118,7 @@ function FldBoardScreen({ api, ctx, tick, onStop, onSale, onOpenRun, onRoute }) 
   );
 }
 
-function FldStopSheet({ api, stop: s, onClose, onSale, onChanged }) {
+function FldStopSheet({ api, stop: s, can, onClose, onSale, onAction, onChanged }) {
   const [mode, setMode] = uSfl('');   // '' | 'tunda' | 'batal'
   const [reason, setReason] = uSfl('');
   const [busy, setBusy] = uSfl(false);
@@ -152,7 +152,6 @@ function FldStopSheet({ api, stop: s, onClose, onSale, onChanged }) {
               <div key={k} className="mlap-check">
                 <span className={'mlap-dot ' + (s.gaps[k] ? 'miss' : 'ok')} aria-hidden="true">{s.gaps[k] ? '!' : '✓'}</span>
                 <span className="mlap-grow">{trFl(key)}</span>
-                {s.gaps[k] ? <span className="sb">{trFl('fld.fillLater')}</span> : null}
               </div>
             ))}
           </div>
@@ -167,6 +166,12 @@ function FldStopSheet({ api, stop: s, onClose, onSale, onChanged }) {
           <div><span className="sb">{trFl('fld.heldAt')}</span><b>{s.gallonsHeld == null ? '—' : s.gallonsHeld}</b></div>
           <div><span className="sb">{trFl('fld.bonNow')}</span><b>{FIELDLOGIC.fmtRp(s.sisaBon || 0)}</b></div>
         </div>
+        <div className="mlap-actlist">
+          {can.bon && s.sisaBon > 0 ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('bon', fldCustFromStop(s))}>{trFl('fld.catatBon')} · {FIELDLOGIC.fmtRp(s.sisaBon)}</button> : null}
+          {can.location && s.gaps.count > 0 ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('complete', fldCustFromStop(s))}>{trFl('fld.completeData')}</button> : null}
+          {can.adjust ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('adjust', fldCustFromStop(s))}>{trFl('fld.catatAdj')}</button> : null}
+          {can.damage && s.gallonsHeld > 0 ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('damage', fldCustFromStop(s))}>{trFl('fld.catatDmg')}</button> : null}
+        </div>
         {s.note ? <div className="mlap-note">{s.note}</div> : null}
         {err && <div className="mlap-err" role="alert">{err}</div>}
         {s.status === 'pending' && !mode && (
@@ -175,7 +180,7 @@ function FldStopSheet({ api, stop: s, onClose, onSale, onChanged }) {
               <button type="button" className="mlap-btn" onClick={() => { setMode('tunda'); setReason(''); }}>{trFl('fld.hold')}</button>
               <button type="button" className="mlap-btn danger" onClick={() => { setMode('batal'); setReason(''); }}>{trFl('fld.cancelStop')}</button>
             </div>
-            <button type="button" className="mlap-btn primary mlap-wide" onClick={() => onSale(s)}>{trFl('fld.deliverRecord')}</button>
+            {can.sale ? <button type="button" className="mlap-btn primary mlap-wide" onClick={() => onSale(s)}>{trFl('fld.deliverRecord')}</button> : null}
           </>
         )}
         {mode && (
