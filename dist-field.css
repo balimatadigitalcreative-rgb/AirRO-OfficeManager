@@ -198,6 +198,11 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-ava { width: 36px; height: 36px; border-radius: 12px; flex-shrink: 0; display: grid; place-items: center; background: var(--mlap-accent-soft); color: var(--mlap-accent); font-size: 13px; font-weight: 800; }
 .mlap-gapline { font-size: 12px; font-weight: 600; color: var(--mlap-warn); }
 .mlap-actlist { display: flex; flex-direction: column; gap: 8px; }
+/* ── LENGKAPI + ATUR TITIK ── */
+.mlap-sec { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.mlap-sec .mlap-check { padding: 0; }
+.mlap-pinmap { height: 340px; }
+.mlap-pin.drag { width: 30px; height: 30px; background: #C2410C; font-size: 14px; }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

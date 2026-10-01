@@ -72,3 +72,126 @@ function FldCustSheet({ cust: c0, can, onClose, onAction }) {
     </>
   );
 }
+
+// LENGKAPI DATA — the three things a route needs from a customer: a location pin (from this phone's
+// GPS, or dragged on the map), a WhatsApp number, a location photo. "Simpan" saves only what changed.
+function FldComplete({ api, cust: c, onPin, onDone, onBack }) {
+  const g = FIELDLOGIC.gapsOf(c);
+  const [gps, setGps] = uSfl(null);
+  const [locBusy, setLocBusy] = uSfl(false);
+  const [wa, setWa] = uSfl(c.phone || '');
+  const [photo, setPhoto] = uSfl(null);
+  const [busy, setBusy] = uSfl(false);
+  const [err, setErr] = uSfl('');
+  const takeGps = () => { setLocBusy(true); setErr(''); fldGeo(12000).then((p) => { setLocBusy(false); if (p) setGps(p); else setErr(trFl('fld.noGps')); }); };
+  const changed = !!gps || (wa.trim() !== String(c.phone || '').trim() && wa.trim() !== '') || !!photo;
+  const save = async () => {
+    setBusy(true); setErr('');
+    try {
+      if (gps) await api.setLocation(c.id, { lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy, method: 'gps' });
+      if (wa.trim() && wa.trim() !== String(c.phone || '').trim()) await api.setPhone(c.id, wa);
+      if (photo) await api.setLocationPhoto(c.id, photo.id);
+      onDone(trFl('fld.dataSaved', { name: c.name }));
+    } catch (e) { setErr(fldErrMsg(e)); }
+    setBusy(false);
+  };
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.completeT')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
+      <div className="mlap-body">
+        <div className="mlap-card mlap-sec">
+          <div className="mlap-check"><span className={'mlap-dot ' + (g.titik && !gps ? 'miss' : 'ok')} aria-hidden="true">{g.titik && !gps ? '!' : '✓'}</span><span className="mlap-grow"><b>{trFl('fld.chkTitik')}</b><span className="sb">{gps ? trFl('fld.gpsTaken', { m: Math.round(gps.accuracy || 0) }) : (g.titik ? trFl('fld.pinNeeded') : trFl('fld.pinHave'))}</span></span></div>
+          <div className="mlap-actions">
+            <button type="button" className="mlap-btn" disabled={locBusy} onClick={takeGps}>{locBusy ? trFl('fld.locating') : trFl('fld.useMyLoc')}</button>
+            <button type="button" className="mlap-btn" onClick={() => onPin(c)}>{trFl('fld.dragOnMap')}</button>
+          </div>
+          <span className="sb">{trFl('fld.gpsDrift')}</span>
+        </div>
+        <div className="mlap-card mlap-sec">
+          <div className="mlap-check"><span className={'mlap-dot ' + (g.wa && !wa.trim() ? 'miss' : 'ok')} aria-hidden="true">{g.wa && !wa.trim() ? '!' : '✓'}</span><span className="mlap-grow"><b>{trFl('fld.chkWa')}</b><span className="sb">{trFl('fld.waFor')}</span></span></div>
+          <input className="mlap-text" type="tel" inputMode="tel" placeholder="08…" aria-label={trFl('fld.chkWa')} value={wa} onChange={(e) => setWa(e.target.value.slice(0, 20))} />
+        </div>
+        <div className="mlap-card mlap-sec">
+          <div className="mlap-check"><span className={'mlap-dot ' + (g.foto && !photo ? 'miss' : 'ok')} aria-hidden="true">{g.foto && !photo ? '!' : '✓'}</span><span className="mlap-grow"><b>{trFl('fld.chkFoto')}</b></span></div>
+          <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.locPhotoHint" />
+        </div>
+        {err && <div className="mlap-err" role="alert">{err}</div>}
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !changed} onClick={save}>{trFl('fld.saveCust')}</button>
+      </div>
+    </div>
+  );
+}
+
+// ATUR TITIK LOKASI — a draggable pin over the map. The phone's own GPS fix (with its accuracy circle)
+// and the old pin are shown; a pin moved > 150 m from the phone asks to confirm. Saved as a "geser" with
+// the device fix, so the history says how far it was moved from the phone's GPS.
+function FldPinMap({ api, cust: c, onDone, onBack }) {
+  const had = typeof c.lat === 'number' && typeof c.lng === 'number';
+  const [dev, setDev] = uSfl(null);
+  const [pin, setPin] = uSfl(had ? { lat: c.lat, lng: c.lng } : null);
+  const [mapErr, setMapErr] = uSfl(false);
+  const [askFar, setAskFar] = uSfl(false);
+  const [busy, setBusy] = uSfl(false);
+  const [err, setErr] = uSfl('');
+  const [mapReady, setMapReady] = uSfl(false);   // the phone's fix may arrive before or after the map
+  const mapEl = uRfl(null);
+  const mapRef = uRfl(null);
+  const markRef = uRfl(null);
+  uEfl(() => { let live = true; fldGeo(12000).then((p) => { if (!live) return; setDev(p); if (p) setPin((cur) => cur || { lat: p.lat, lng: p.lng }); }); return () => { live = false; }; }, []);
+  uEfl(() => {
+    if (!pin || !mapEl.current || mapRef.current) return undefined;
+    let live = true;
+    znLoadLeaflet().then((L) => {
+      if (!live || !mapEl.current) return;
+      const map = L.map(mapEl.current, { zoomControl: false, attributionControl: true });
+      mapRef.current = map;
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+      }).addTo(map);
+      if (had) L.circleMarker([c.lat, c.lng], { radius: 7, color: '#5B6B75', weight: 2, fillOpacity: 0.15, interactive: false }).addTo(map);
+      const m = L.marker([pin.lat, pin.lng], { draggable: true, keyboard: true, icon: L.divIcon({ className: 'mlap-pin-wrap', iconSize: [30, 30], html: '<span class="mlap-pin drag">●</span>' }) }).addTo(map);
+      m.on('dragend', () => { const ll = m.getLatLng(); setPin({ lat: ll.lat, lng: ll.lng }); });
+      markRef.current = m;
+      map.setView([pin.lat, pin.lng], 18);
+      setMapReady(true);
+    }).catch(() => { if (live) setMapErr(true); });
+    return () => { live = false; };
+  }, [!!pin]);
+  // the phone's fix + its accuracy circle, whichever of (fix, map) comes last
+  uEfl(() => {
+    if (!dev || !mapReady || !mapRef.current || !window.L) return undefined;
+    const L = window.L;
+    const circle = L.circle([dev.lat, dev.lng], { radius: Math.max(5, dev.accuracy || 0), color: '#065489', weight: 1, fillOpacity: 0.08, interactive: false }).addTo(mapRef.current);
+    const dot = L.circleMarker([dev.lat, dev.lng], { radius: 5, color: '#fff', weight: 2, fillColor: '#065489', fillOpacity: 1, interactive: false }).addTo(mapRef.current);
+    return () => { circle.remove(); dot.remove(); };
+  }, [dev, mapReady]);
+  uEfl(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } }, []);
+  const mv = FIELDLOGIC.pinMove({ device: dev, pin });
+  const save = (confirmFar) => {
+    if (!pin) return;
+    if (mv.far && !confirmFar) { setAskFar(true); return; }
+    setBusy(true); setErr('');
+    api.setLocation(c.id, { lat: pin.lat, lng: pin.lng, accuracy: dev ? dev.accuracy : null, method: 'geser', deviceLat: dev ? dev.lat : undefined, deviceLng: dev ? dev.lng : undefined, deviceAccuracy: dev ? dev.accuracy : undefined })
+      .then(() => onDone(trFl('fld.pinSaved', { name: c.name })))
+      .catch((e) => setErr(fldErrMsg(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.pinT')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
+      <div className="mlap-body">
+        {mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} sub={trFl('fld.pinNoMap')} /> : (pin ? <div ref={mapEl} className="mlap-map mlap-pinmap" role="application" aria-label={trFl('fld.pinT')} /> : <div className="mlap-empty">{trFl('fld.locating')}</div>)}
+        <div className="mlap-hint">{trFl('fld.pinDrag')}</div>
+        <div className="mlap-card mlap-sec">
+          <div className="mlap-sumrow"><span>{trFl('fld.coords')}</span><b>{pin ? pin.lat.toFixed(6) + ', ' + pin.lng.toFixed(6) : '—'}</b></div>
+          <div className="mlap-sumrow"><span>{dev ? trFl('fld.fromDevice', { m: Math.round(dev.accuracy || 0) }) : trFl('fld.noGps')}</span><b>{mv.meters == null ? '—' : trFl('fld.metersN', { m: mv.meters })}</b></div>
+          {mv.far ? <div className="mlap-warnline">{trFl('fld.pinFar')}</div> : null}
+        </div>
+        {mapErr && dev ? <button type="button" className="mlap-btn mlap-wide" onClick={() => setPin({ lat: dev.lat, lng: dev.lng })}>{trFl('fld.useMyLoc')}</button> : null}
+        {err && <div className="mlap-err" role="alert">{err}</div>}
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !pin} onClick={() => save(false)}>{trFl('fld.savePin')}</button>
+      </div>
+      {askFar && <FldSheet title={trFl('fld.pinFarT', { m: mv.meters })} body={trFl('fld.pinFarB')} confirmLabel={trFl('fld.savePin')} onClose={() => setAskFar(false)} onConfirm={() => { setAskFar(false); save(true); }} />}
+    </div>
+  );
+}

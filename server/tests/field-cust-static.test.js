@@ -32,3 +32,22 @@ describe('Pelanggan', () => {
     expect(f).toMatch(/can\.addStop/);
   });
 });
+
+describe('Lengkapi + Atur titik', () => {
+  it('Lengkapi saves only what changed: GPS pin (method gps), WhatsApp, location photo', () => {
+    const f = fn('FldComplete');
+    expect(f).toMatch(/api\.setLocation\(c\.id, \{ lat: gps\.lat, lng: gps\.lng, accuracy: gps\.accuracy, method: 'gps' \}\)/);
+    expect(f).toMatch(/api\.setPhone\(c\.id, wa\)/);
+    expect(f).toMatch(/api\.setLocationPhoto\(c\.id, photo\.id\)/);
+    expect(f).toMatch(/onPin\(c\)/);
+  });
+  it('Atur titik: draggable pin, device fix + accuracy circle, >150 m asks to confirm, saved as a drag with the device fix', () => {
+    const f = fn('FldPinMap');
+    expect(f).toMatch(/draggable: true/);
+    expect(f).toMatch(/L\.circle\(/);
+    expect(f).toMatch(/FIELDLOGIC\.pinMove\(\{ device: dev, pin \}\)/);
+    expect(f).toMatch(/if \(mv\.far && !confirmFar\) \{ setAskFar\(true\); return; \}/);
+    expect(f).toMatch(/method: 'geser', deviceLat: dev \? dev\.lat : undefined/);
+    expect(f).toMatch(/\.catch\(\(\) => \{ if \(live\) setMapErr\(true\); \}\)/);
+  });
+});
