@@ -100,7 +100,12 @@
 
     var api = {
       mode: 'latihan',
-      context: run(function () { return { today: s.date, fleet: s.fleet, fleets: s.fleets, rules: s.rules, depot: s.depot, demand: s.demand }; }),
+      // Like the server's field context: the armada's open rit (any date) with what it has sold so far.
+      context: run(function () {
+        var ru = openRunOf();
+        var openRun = ru ? Object.assign({}, ru, { expectedRemaining: ru.gallonsOut - ru.sold }) : null;
+        return { today: s.date, fleet: s.fleet, fleets: s.fleets, rules: s.rules, depot: s.depot, demand: s.demand, openRun: openRun };
+      }),
       board: run(function () { return s.stops.filter(function (st) { return st.date === s.date; }).sort(function (a, b) { return a.seq - b.seq; }).map(stopView); }),
       customers: run(function () { return Object.keys(s.customers).map(function (k) { return custView(s.customers[k]); }); }),
       runs: run(function () { return s.runs.filter(function (r) { return r.date === s.date && r.fleetId === s.fleet; }); }),

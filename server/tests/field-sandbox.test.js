@@ -216,3 +216,16 @@ describe('closer to the server', () => {
     expect(SB.VERSION).toBe(2);
   });
 });
+
+describe('practice context reports the open rit like the server', () => {
+  it('context().openRun follows opening, selling and closing a rit', async () => {
+    const { api } = make();
+    expect((await api.context()).openRun).toBeNull();
+    const run = await api.openRun({ gallonsOut: 80 });
+    const ph = await api.uploadPhoto({ data: 'x' });
+    await api.createSale({ customerId: 'c2', qty: 2, method: 'lunas', proofPhotoId: ph.id });
+    expect((await api.context()).openRun).toMatchObject({ id: run.id, runNo: 1, gallonsOut: 80, sold: 2, expectedRemaining: 78, status: 'open', date: '2026-10-01' });
+    await api.closeRun(run.id, { gallonsFullReturned: 78, gallonsEmptyReturned: 0 });
+    expect((await api.context()).openRun).toBeNull();
+  });
+});
