@@ -347,3 +347,19 @@ it('Plan 3D: a clear sideways swipe moves one tab; scrolling, slow drags and the
   expect(L.swipeTab({ dx: -90, dy: 80, ms: 250, tab: 'kirim', order })).toBeNull();        // mostly a scroll
   expect(L.swipeTab({ dx: -90, dy: 0, ms: 900, tab: 'kirim', order })).toBeNull();         // a slow drag, not a swipe
 });
+
+describe('3D-2 helpers', () => {
+  it('swipeStart: a start within 20 px of either edge belongs to the phone\'s back gesture (M8)', () => {
+    expect(L.swipeStart({ x: 10, width: 390 })).toBe(false);
+    expect(L.swipeStart({ x: 375, width: 390 })).toBe(false);
+    expect(L.swipeStart({ x: 20, width: 390 })).toBe(true);
+    expect(L.swipeStart({ x: 200, width: 390 })).toBe(true);
+    expect(L.swipeStart({ x: 200 })).toBe(true);   // width unknown: only the left edge is checked
+  });
+  it('loadPct: share of the rit load still on the truck, 0–100, safe with an empty load', () => {
+    expect(L.loadPct(74, 80)).toBe(93);
+    expect(L.loadPct(0, 80)).toBe(0);
+    expect(L.loadPct(90, 80)).toBe(100);
+    expect(L.loadPct(5, 0)).toBe(0);
+  });
+});

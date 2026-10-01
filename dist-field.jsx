@@ -26,10 +26,13 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const TAB_ORDER = ['kirim', 'peta', 'pelanggan', 'setoran'];
   const swipeRef = uRfl(null);
   const swipeDown = (e) => {
+    swipeRef.current = null;   // a start that is ignored never pairs with a later release (M8)
     if (e.pointerType === 'mouse') return;
+    if (!FIELDLOGIC.swipeStart({ x: e.clientX, width: window.innerWidth })) return;   // the edge is the phone's back gesture
     if (e.target.closest('.mlap-map, input, textarea, select, .mlap-hscroll, .mlap-sheet, .leaflet-container')) return;
     swipeRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
   };
+
   const swipeUp = (e) => {
     const s = swipeRef.current; swipeRef.current = null; if (!s) return;
     const next = FIELDLOGIC.swipeTab({ dx: e.clientX - s.x, dy: e.clientY - s.y, ms: Date.now() - s.t, tab, order: TAB_ORDER });
@@ -150,6 +153,11 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       .then((s) => setView({ name: 'sale', stop: s || fldSaleStopFromCust(c) }));
   };
   const full = view && ['sale', 'run', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin', 'koreksi', 'koreksiSaya'].includes(view.name);   // full-screen task: no tab header/dock
+  // M6: a new tab or task screen opens at the top (the root is the one scroller of the field view); a
+  // sheet over a tab (stop, customer) keeps the tab where it was.
+  const rootRef = uRfl(null);
+  const scrollKey = full ? 'v:' + view.name : 't:' + tab;
+  uEfl(() => { if (rootRef.current) rootRef.current.scrollTop = 0; }, [scrollKey]);
 
   let body = null;
   if (err) {
@@ -173,7 +181,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   }
 
   return (
-    <div className="mlap-root">
+    <div className="mlap-root" ref={rootRef}>
       {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'pick' && (
@@ -196,7 +204,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
             <div className="mlap-head-t">
               <span className="mlap-eyebrow mlap-meta">
                 <span>{fldDayLabel(today)}{fleet ? ' · ' + fleet : ''}</span>
-                {mode === 'latihan' ? <span className="mlap-chip latihan" role="status">{trFl('fld.modeLatihan')}</span> : null}
+                {mode === 'latihan' ? <span className="mlap-chip latihan" role="note">{trFl('fld.modeLatihan')}</span> : null}
               </span>
               <h1>{trFl(TAB_LABEL[tab])}</h1>
             </div>

@@ -358,6 +358,11 @@
     var j = num(o.dx) < 0 ? i + 1 : i - 1;
     return j >= 0 && j < order.length ? order[j] : null;
   }
+  // TABS (3D-2, M8): a swipe that starts within 20 px of the screen edge belongs to the phone (its own
+  // back gesture) — never to the tab switch.
+  function swipeStart(o) { var x = num((o || {}).x); var w = num((o || {}).width); return x >= 20 && (!(w > 0) || x <= w - 20); }
+  // PENGIRIMAN (3D-2): share of the rit's load still on the truck, 0–100.
+  function loadPct(remaining, out) { var o = num(out); if (!(o > 0)) return 0; return Math.max(0, Math.min(100, Math.round(100 * num(remaining) / o))); }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, swipeTab: swipeTab };
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, swipeTab: swipeTab, swipeStart: swipeStart, loadPct: loadPct };
 });

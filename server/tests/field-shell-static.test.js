@@ -29,7 +29,7 @@ it('top-level names in every field file are unique across the whole bundle (one 
 });
 it('latihan is a chip in the header (always shown in practice) + confirmed mode switch + reset', () => {
   expect(jsx).not.toMatch(/mlap-ribbon/);
-  expect(jsx).toMatch(/\{mode === 'latihan' \? <span className="mlap-chip latihan" role="status">\{trFl\('fld\.modeLatihan'\)\}<\/span> : null\}/);
+  expect(jsx).toMatch(/\{mode === 'latihan' \? <span className="mlap-chip latihan" role="note">\{trFl\('fld\.modeLatihan'\)\}<\/span> : null\}/);
   expect(jsx).toMatch(/askSwitch\(/);
   expect(jsx).toMatch(/trFl\('fld\.switchToAsliB'\)/);
   expect(jsx).toMatch(/trFl\('fld\.resetLatihanB'\)/);

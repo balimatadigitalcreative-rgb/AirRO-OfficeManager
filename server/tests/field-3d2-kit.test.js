@@ -133,3 +133,20 @@ describe('3D-1 deferred minors (chrome)', () => {
     expect(rt).toMatch(/\.mlap-scrim\.menu \{[^}]*backdrop-filter: none !important;/);
   });
 });
+
+describe('3D-1 deferred minors (field shell)', () => {
+  const shell = read('dist-field.jsx');
+  it('M6: a new tab or task screen opens at the top', () => {
+    expect(shell).toMatch(/const scrollKey = full \? 'v:' \+ view\.name : 't:' \+ tab;/);
+    expect(shell).toMatch(/uEfl\(\(\) => \{ if \(rootRef\.current\) rootRef\.current\.scrollTop = 0; \}, \[scrollKey\]\);/);
+    expect(shell).toMatch(/<div className="mlap-root" ref=\{rootRef\}>/);
+  });
+  it('M8: an edge start never switches tabs, and an ignored start never pairs with a later release', () => {
+    const f = shell.slice(shell.indexOf('const swipeDown = (e) => {'), shell.indexOf('const swipeUp = (e) => {'));
+    expect(f).toMatch(/^const swipeDown = \(e\) => \{\s*swipeRef\.current = null;/);
+    expect(f).toMatch(/if \(!FIELDLOGIC\.swipeStart\(\{ x: e\.clientX, width: window\.innerWidth \}\)\) return;/);
+  });
+  it('M11: the latihan chip is a quiet note, not a live status', () => {
+    expect(shell).toMatch(/<span className="mlap-chip latihan" role="note">\{trFl\('fld\.modeLatihan'\)\}<\/span>/);
+  });
+});
