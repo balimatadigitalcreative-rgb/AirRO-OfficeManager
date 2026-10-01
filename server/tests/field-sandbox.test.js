@@ -174,3 +174,45 @@ describe('corrections + day', () => {
     expect((await api.board())[0].status).toBe('pending');
   });
 });
+describe('closer to the server', () => {
+  it('markStop accepts the four statuses with the server\'s reason rules', async () => {
+    const { api } = make();
+    expect(await code(api.markStop('s1', { status: 'ditunda' }))).toBe('REASON_REQUIRED');
+    expect(await code(api.markStop('s1', { status: 'batal' }))).toBe('REASON_REQUIRED');   // wajibAlasanBatal on in SNAP
+    expect(await code(api.markStop('s1', { status: 'hilang' }))).toBe(400);
+    expect((await api.markStop('s1', { status: 'ditunda', reason: 'Toko tutup' })).pendingReason).toBe('Toko tutup');
+    expect((await api.markStop('s1', { status: 'pending' })).pendingReason).toBe('');
+  });
+  it('closeDay returns the closeout like the server', async () => {
+    const { api } = make();
+    const co = await api.closeDay({ reasons: { s1: 'tutup', s2: 'tutup' }, generalNote: 'hujan' });
+    expect(co).toMatchObject({ date: '2026-10-01', fleetId: 'DK 1', pending: 2, delivered: 0, generalNote: 'hujan' });
+  });
+  it('an open rit from yesterday blocks a new one and is not today\'s route', async () => {
+    const snap = SNAP(); snap.context.openRun = { id: 'r-old', date: '2026-09-30', fleetId: 'DK 1', runNo: 2, gallonsOut: 80, sold: 10, status: 'open' };
+    const api = SB.createSandbox(SB.fromSnapshot(snap), { planRit });
+    expect(await code(api.openRun({ gallonsOut: 90 }))).toBe(400);
+    expect(await code(api.ritRoute())).toBe(400);
+    expect((await api.closeRun('r-old', { gallonsFullReturned: 70, gallonsEmptyReturned: 0 })).status).toBe('closed');
+    expect((await api.openRun({ gallonsOut: 90 })).runNo).toBe(1);
+  });
+  it('a customer\'s unknown sisa bon falls back to the board\'s', async () => {
+    const snap = SNAP(); snap.customers[0].sisaBon = null; snap.board[0].sisaBon = 45000;
+    const api = SB.createSandbox(SB.fromSnapshot(snap), { planRit });
+    expect((await api.customers()).find((c) => c.id === 'c1').sisaBon).toBe(45000);
+  });
+  it('outstanding comes from the copy', async () => {
+    const snap = SNAP(); snap.outstanding = [{ id: 'o1', date: '2026-09-29', customerName: 'Lama', umur: 2 }];
+    const api = SB.createSandbox(SB.fromSnapshot(snap), { planRit });
+    expect((await api.outstanding())[0].id).toBe('o1');
+  });
+  it('photos go to the photo store; the state keeps only a marker', async () => {
+    const box = {};
+    const api = SB.createSandbox(SB.fromSnapshot(SNAP()), { planRit, photoStore: { put: (id, d) => { box[id] = d; return Promise.resolve(); }, get: (id) => Promise.resolve(box[id] || null) } });
+    const ph = await api.uploadPhoto({ data: 'data:image/jpeg;base64,AAA' });
+    expect(api.exportState().photos[ph.id]).toBe(true);
+    expect(box[ph.id]).toBe('data:image/jpeg;base64,AAA');
+    expect(await api.photo(ph.id)).toBe('data:image/jpeg;base64,AAA');
+    expect(SB.VERSION).toBe(2);
+  });
+});

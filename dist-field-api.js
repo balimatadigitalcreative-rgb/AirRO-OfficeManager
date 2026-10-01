@@ -11,7 +11,7 @@
   if (root) root.FIELDAPI = api;                                               // browser (global)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this), function (root) {
   'use strict';
-  var METHODS = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo'];
+  var METHODS = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'outstanding', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo'];
   var unwrap = function (r) { return r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, 'data') ? r.data : r; };
   var U = function (p) { return Promise.resolve(p).then(unwrap); };
   var A = function (base, extra) { return Object.assign({}, base || {}, extra || {}); };
@@ -29,6 +29,8 @@
       ritRoute: function () { return U(F.ritRoute(c.date, c.fleet)); },
       daySummary: function () { return U(F.daySummary(c.date, c.fleet)); },
       myChangeRequests: function () { return U(F.myChangeRequests()); },
+      // "Belum terkirim" needs distribusiBelumTerkirim, which drivers do not hold → empty, not an error.
+      outstanding: function () { return U(F.outstanding(c.fleet)).catch(function (e) { if (e && e.status === 403) return []; throw e; }); },
       markStop: function (id, b) { return U(F.mark(id, b)); },
       holdStop: function (id, reason) { return U(F.mark(id, { status: 'ditunda', reason: reason })); },
       cancelStop: function (id, reason) { return U(F.mark(id, { status: 'batal', reason: reason })); },
@@ -56,9 +58,9 @@
   // One read of everything Mode latihan copies (reads only — the demo fence lets them through).
   // "Koreksi saya" needs its own cap: a driver without it simply starts with an empty list.
   function snapshot(realAdapter) {
-    var mine = realAdapter.myChangeRequests().catch(function (e) { if (e && e.status === 403) return []; throw e; });
-    return Promise.all([realAdapter.context(), realAdapter.board(), realAdapter.customers(), realAdapter.runs(), mine])
-      .then(function (r) { return { context: r[0], board: r[1] || [], customers: r[2] || [], runs: r[3] || [], myRequests: r[4] || [] }; });
+    var ok403 = function (p) { return p.catch(function (e) { if (e && e.status === 403) return []; throw e; }); };
+    return Promise.all([realAdapter.context(), realAdapter.board(), realAdapter.customers(), realAdapter.runs(), ok403(realAdapter.myChangeRequests()), ok403(realAdapter.outstanding())])
+      .then(function (r) { return { context: r[0], board: r[1] || [], customers: r[2] || [], runs: r[3] || [], myRequests: r[4] || [], outstanding: r[5] || [] }; });
   }
 
   function memoryStorage() {
@@ -115,23 +117,41 @@
   function openLatihan(opts) {
     var o = opts || {}; var SB = o.sandbox || root.FIELDSANDBOX; var planRit = o.planRit || (root.RITPLAN && root.RITPLAN.planRit);
     var ms = o.storageTimeoutMs || 3000;
-    var store = o.storage; var persisted = true;
+    var store = o.storage; var persisted = true; var a = null;
+    var photosKey = o.key + ':photos';
+    var chain = Promise.resolve();   // every save happens in order
+    var lost = function () {         // a save failed or never answered: the practice is not being kept
+      if (!persisted) return;
+      persisted = false; if (a) a.persisted = false;
+      if (o.onPersist) { try { o.onPersist(false); } catch (e) { /* screen gone */ } }
+    };
+    var save = function (k, v) { chain = chain.then(function () { return timed(store.set(k, v), ms); }).catch(lost); return chain; };
     var toMemory = function () { persisted = false; store = memoryStorage(); };
+    var photoCache = null;
+    var photoMap = function () {
+      if (photoCache) return Promise.resolve(photoCache);
+      return timed(store.get(photosKey), ms).catch(function () { return undefined; }).then(function (v) { photoCache = v || {}; return photoCache; });
+    };
+    var photoStore = {
+      put: function (id, data) { return photoMap().then(function (m) { m[id] = data; return save(photosKey, Object.assign({}, m)); }); },
+      get: function (id) { return photoMap().then(function (m) { return m[id] || null; }); },
+    };
     return timed(store.get(o.key), ms).catch(function () { toMemory(); return undefined; }).then(function (saved) {
-      // Reuse only today's copy: a practice board from yesterday under today's date would teach nothing.
+      // Reuse only today's copy of this version: an older one would teach on a stale board.
       if (saved && saved.v === SB.VERSION && (!o.today || saved.date === o.today)) return saved;
       return snapshot(o.real).then(function (snap) {
         var st = SB.fromSnapshot(snap, { key: o.key });
-        return timed(store.set(o.key, st), ms).catch(function () { toMemory(); }).then(function () { return st; });
+        photoCache = {};
+        return timed(store.set(o.key, st), ms).then(function () { return timed(store.del(photosKey), ms).catch(function () {}); }).catch(function () { toMemory(); }).then(function () { return st; });
       });
     }).then(function (state) {
-      var chain = Promise.resolve();   // saves happen in order, each with the latest state
-      var a = SB.createSandbox(state, { planRit: planRit, onChange: function (st) {
-        var copy = JSON.parse(JSON.stringify(st));
-        chain = chain.then(function () { return timed(store.set(o.key, copy), ms); }).catch(function () {});
-      } });
+      a = SB.createSandbox(state, { planRit: planRit, photoStore: photoStore, onChange: function (st) { save(o.key, JSON.parse(JSON.stringify(st))); } });
       a.persisted = persisted;
-      a.reset = function () { return chain.then(function () { return timed(store.del(o.key), ms); }).catch(function () {}); };
+      // Restart practice: wait for pending saves, then delete the copy and its photos. A failed delete
+      // REJECTS — the screen must not say "restarted" while the old copy is still there.
+      a.reset = function () {
+        return chain.then(function () { return Promise.all([timed(store.del(o.key), ms), timed(store.del(photosKey), ms)]); }).then(function () { photoCache = {}; });
+      };
       return a;
     });
   }

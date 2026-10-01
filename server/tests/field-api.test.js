@@ -7,14 +7,14 @@ const SB = require(path.join(root, 'dist-field-sandbox.js'));
 const FA = require(path.join(root, 'dist-field-api.js'));
 afterAll(() => { delete global.RITPLAN; });
 
-const FIELD_NAMES = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo'];
+const FIELD_NAMES = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo', 'outstanding'];
 const fakeApi = (over) => {
   const ok = (v) => () => Promise.resolve({ data: v });
   const F = {
     context: ok({ today: '2026-10-01', fleet: 'DK 1', fleets: ['DK 1'], rules: { ritSop: { enabled: false, minLoad: 80 }, fleetCapacity: {}, hargaGantiRugiGalon: 0 }, depot: null, demand: {} }),
     board: ok([{ id: 's1', date: '2026-10-01', fleetId: 'DK 1', customerId: 'c1', status: 'pending', seq: 0 }]),
     customers: ok([{ id: 'c1', name: 'A', armada: 'DK 1', masterPrice: 6000, sisaBon: 0, gallonsHeld: 2 }]),
-    runs: ok([]), myChangeRequests: ok([]),
+    runs: ok([]), myChangeRequests: ok([]), outstanding: ok([]),
     ...(over || {}),
   };
   FIELD_NAMES.forEach((m) => { if (!F[m]) F[m] = ok({}); });
@@ -25,7 +25,7 @@ const REAL = (over) => FA.real(fakeApi(over).API, { date: '2026-10-01', fleet: '
 it('both adaptors expose exactly the same methods', () => {
   const real = REAL();
   const lat = SB.createSandbox(SB.fromSnapshot({ context: {}, board: [], customers: [], runs: [], myRequests: [] }), {});
-  expect(FA.METHODS.length).toBe(28);
+  expect(FA.METHODS.length).toBe(29);
   FA.METHODS.forEach((m) => { expect(typeof real[m]).toBe('function'); expect(typeof lat[m]).toBe('function'); });
   expect(real.mode).toBe('asli'); expect(lat.mode).toBe('latihan');
 });
@@ -122,4 +122,55 @@ it('preferences survive a blocked localStorage', () => {
   expect(FA.loadPrefs()).toEqual({});
   expect(() => FA.savePrefs({ ui: 'new' })).not.toThrow();
   global.localStorage = saved;
+});
+describe('Plan 3A adaptor hardening', () => {
+  it('29 methods incl. outstanding; real outstanding 403 → []', async () => {
+    expect(FA.METHODS).toContain('outstanding');
+    expect(FA.METHODS.length).toBe(29);
+    const denied = () => Promise.reject(Object.assign(new Error('Forbidden'), { status: 403 }));
+    expect(await REAL({ outstanding: denied }).outstanding()).toEqual([]);
+    expect(await REAL({ outstanding: () => Promise.resolve({ data: [{ id: 'o1' }], count: 1 }) }).outstanding()).toEqual([{ id: 'o1' }]);
+  });
+  it('the practice copy includes outstanding (403 → empty)', async () => {
+    const denied = () => Promise.reject(Object.assign(new Error('Forbidden'), { status: 403 }));
+    const a = await FA.openLatihan({ key: 'p1', real: REAL({ outstanding: denied }), storage: FA.memoryStorage(), sandbox: SB });
+    expect(await a.outstanding()).toEqual([]);
+  });
+  it('practice photos live under their own key, saved only when a photo is added, and survive a reopen', async () => {
+    const storage = FA.memoryStorage();
+    const a = await FA.openLatihan({ key: 'p2', real: REAL(), storage, sandbox: SB });
+    const ph = await a.uploadPhoto({ data: 'data:image/jpeg;base64,BBB' });
+    await a.holdStop('s1', 'tutup');
+    await new Promise((r) => setTimeout(r, 0));
+    expect((await storage.get('p2')).photos[ph.id]).toBe(true);
+    expect((await storage.get('p2:photos'))[ph.id]).toBe('data:image/jpeg;base64,BBB');
+    const b = await FA.openLatihan({ key: 'p2', real: REAL({ board: () => Promise.reject(new Error('no re-copy')) }), storage, sandbox: SB });
+    expect(await b.photo(ph.id)).toBe('data:image/jpeg;base64,BBB');
+    await b.reset();
+    expect(await storage.get('p2')).toBeUndefined();
+    expect(await storage.get('p2:photos')).toBeUndefined();
+  });
+  it('a save failing mid-session flips persisted and tells the screen', async () => {
+    const mem = FA.memoryStorage(); let fail = false; const seen = [];
+    const storage = { get: mem.get, del: mem.del, set: (k, v) => (fail ? Promise.reject(new Error('QuotaExceeded')) : mem.set(k, v)) };
+    const a = await FA.openLatihan({ key: 'p3', real: REAL(), storage, sandbox: SB, onPersist: (ok) => seen.push(ok) });
+    expect(a.persisted).toBe(true);
+    fail = true;
+    await a.holdStop('s1', 'tutup');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(a.persisted).toBe(false);
+    expect(seen).toEqual([false]);
+  });
+  it('reset reports a failed delete instead of pretending', async () => {
+    const mem = FA.memoryStorage();
+    const storage = { get: mem.get, set: mem.set, del: () => Promise.reject(new Error('locked')) };
+    const a = await FA.openLatihan({ key: 'p4', real: REAL(), storage, sandbox: SB });
+    await expect(a.reset()).rejects.toThrow();
+  });
+  it('a version-1 copy (Plan 2) is re-copied', async () => {
+    const storage = FA.memoryStorage();
+    await storage.set('p5', { v: 1, date: '2026-10-01', stops: [], runs: [] });
+    const a = await FA.openLatihan({ key: 'p5', real: REAL(), storage, sandbox: SB, today: '2026-10-01' });
+    expect((await a.board())[0].id).toBe('s1');
+  });
 });

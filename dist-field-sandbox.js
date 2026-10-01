@@ -12,7 +12,7 @@
   if (root) root.FIELDSANDBOX = api;                                           // browser (global)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this), function (root) {
   'use strict';
-  var VERSION = 1;
+  var VERSION = 2;   // 2: photos kept apart from the state (Plan 3A)
   var clone = function (x) { return x == null ? x : JSON.parse(JSON.stringify(x)); };
   var int = function (v) { var n = Math.round(Number(v)); return isFinite(n) ? n : 0; };
   // Errors look like the server's: e.status + e.body.error.{message, details.code}.
@@ -26,13 +26,14 @@
 
   function fromSnapshot(snap, meta) {
     var s = snap || {}; var ctx = s.context || {};
+    var boardBon = {}; (s.board || []).forEach(function (st) { if (st.sisaBon != null) boardBon[st.customerId] = st.sisaBon; });
     var customers = {};
     (s.customers || []).forEach(function (c) {
       customers[c.id] = {
         id: c.id, name: c.name || '', code: c.code || '', phone: c.phone || '', address: c.address || '', armada: c.armada || '',
         masterPrice: int(c.masterPrice), lat: c.lat != null ? c.lat : null, lng: c.lng != null ? c.lng : null,
         locationPhotoId: c.locationPhotoId || null, deliveryDays: c.deliveryDays || [], fixedDays: !!c.fixedDays,
-        active: c.active !== false, sisaBon: int(c.sisaBon), gallonsHeld: int(c.gallonsHeld),
+        active: c.active !== false, sisaBon: c.sisaBon != null ? int(c.sisaBon) : int(boardBon[c.id]), gallonsHeld: int(c.gallonsHeld),   // null = outside the read window → the board's
       };
     });
     (s.board || []).forEach(function (st) {   // a board stop whose customer was not in the list still works
@@ -43,7 +44,9 @@
       date: ctx.today, fleet: ctx.fleet || '', fleets: ctx.fleets || [], rules: clone(ctx.rules) || {}, depot: ctx.depot || null, demand: clone(ctx.demand) || {},
       customers: customers,
       stops: (s.board || []).map(function (st) { return { id: st.id, date: st.date, fleetId: st.fleetId, customerId: st.customerId, source: st.source || 'jadwal', seq: int(st.seq), pinned: !!st.pinned, status: st.status || 'pending', qty: st.qty != null ? st.qty : null, note: st.note || '', pendingReason: st.pendingReason || '', transactionId: st.transactionId || null }; }),
-      runs: (s.runs || []).map(function (r) { return { id: r.id, date: r.date, fleetId: r.fleetId, runNo: int(r.runNo), gallonsOut: int(r.gallonsOut), gallonsFullReturned: int(r.gallonsFullReturned), gallonsEmptyReturned: int(r.gallonsEmptyReturned), status: r.status || 'open', underSopReason: r.underSopReason || '', diffReason: r.diffReason || '', sold: int(r.sold) }; }),
+      // The armada's open rit from an earlier day (field context) comes along: it blocks a new rit, as on the server.
+      outstanding: clone(s.outstanding) || [],
+      runs: (s.runs || []).concat(ctx.openRun && !(s.runs || []).some(function (r) { return r.id === ctx.openRun.id; }) ? [ctx.openRun] : []).map(function (r) { return { id: r.id, date: r.date, fleetId: r.fleetId, runNo: int(r.runNo), gallonsOut: int(r.gallonsOut), gallonsFullReturned: int(r.gallonsFullReturned), gallonsEmptyReturned: int(r.gallonsEmptyReturned), status: r.status || 'open', underSopReason: r.underSopReason || '', diffReason: r.diffReason || '', sold: int(r.sold) }; }),
       txns: [], expenses: [], requests: clone(s.myRequests) || [], adjustments: [], photos: {}, closeouts: [], seq: 1,
     };
   }
@@ -53,6 +56,7 @@
     var planRit = o.planRit || (root && root.RITPLAN && root.RITPLAN.planRit);
     var now = o.now || function () { return new Date(); };
     var changed = o.onChange || function () {};
+    var photoStore = o.photoStore || null;
     var WROTE = {};   // sentinel: a method that changed the state returns { w: WROTE, v: result }
     var W = function (v) { return { w: WROTE, v: v }; };
     function run(fn) {
@@ -94,7 +98,7 @@
     }
     var txnOf = function (id) { var t = s.txns.find(function (x) { return x.id === id; }); if (!t) throw fail(404, 'Transaction not found'); if (t.status === 'void') throw fail(400, 'Transaksi ini sudah dibatalkan.'); return t; };
 
-    return {
+    var api = {
       mode: 'latihan',
       context: run(function () { return { today: s.date, fleet: s.fleet, fleets: s.fleets, rules: s.rules, depot: s.depot, demand: s.demand }; }),
       board: run(function () { return s.stops.filter(function (st) { return st.date === s.date; }).sort(function (a, b) { return a.seq - b.seq; }).map(stopView); }),
@@ -102,23 +106,24 @@
       runs: run(function () { return s.runs.filter(function (r) { return r.date === s.date && r.fleetId === s.fleet; }); }),
       myChangeRequests: run(function () { return s.requests.slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); }); }),
 
+      // Same rules as the server's markDelivery: four statuses; a hold always needs a reason, a
+      // cancel needs one when the owner's switch is on; back to pending clears it.
       markStop: run(function (id, body) {
-        var st = stopOf(id);
-        var status = ['pending', 'terkirim'].indexOf(body && body.status) >= 0 ? body.status : st.status;
-        st.status = status; if (status === 'pending') st.pendingReason = '';
-        if (body && body.transactionId) st.transactionId = body.transactionId;
+        var st = stopOf(id); var b = body || {};
+        var status = ['pending', 'terkirim', 'ditunda', 'batal'].indexOf(b.status) >= 0 ? b.status : '';
+        if (!status) throw fail(400, 'Status pengiriman tidak dikenal.');
+        var reason = String(b.reason || '').trim().slice(0, 300);
+        if (status === 'ditunda' && !reason) throw fail(400, 'Alasan tunda wajib diisi.', 'REASON_REQUIRED');
+        if (status === 'batal' && !reason && rules().wajibAlasanBatal) throw fail(400, 'Alasan batal wajib diisi.', 'REASON_REQUIRED');
+        st.status = status;
+        if (status === 'pending') st.pendingReason = '';
+        if (status === 'ditunda' || status === 'batal') st.pendingReason = reason;
+        if (b.transactionId) st.transactionId = b.transactionId;
         return W(stopView(st));
       }),
-      holdStop: run(function (id, reason) {
-        var st = stopOf(id);
-        var r = String(reason || '').trim(); if (!r) throw fail(400, 'Alasan tunda wajib diisi.', 'REASON_REQUIRED');
-        st.status = 'ditunda'; st.pendingReason = r.slice(0, 300); return W(stopView(st));
-      }),
-      cancelStop: run(function (id, reason) {
-        var st = stopOf(id);
-        var r = String(reason || '').trim(); if (!r && rules().wajibAlasanBatal) throw fail(400, 'Alasan batal wajib diisi.', 'REASON_REQUIRED');
-        st.status = 'batal'; st.pendingReason = r.slice(0, 300); return W(stopView(st));
-      }),
+      holdStop: function (id, reason) { return api.markStop(id, { status: 'ditunda', reason: reason }); },
+      cancelStop: function (id, reason) { return api.markStop(id, { status: 'batal', reason: reason }); },
+      outstanding: run(function () { return s.outstanding || []; }),
 
       createSale: run(function (body) {
         var b = body || {}; var c = cust(b.customerId);
@@ -172,7 +177,9 @@
       }),
       // Same plan + same response shape as GET /deliveries/rit-route, computed on the phone.
       ritRoute: run(function () {
-        var ru = openRunOf(); if (!ru) throw fail(400, 'Buka rit dulu (isi galon yang dimuat) — rute rit dihitung dari muatan rit itu.');
+        // Like the server: the route belongs to TODAY's open rit; an older open rit must be closed first.
+        var ru = s.runs.find(function (r) { return r.fleetId === s.fleet && r.status === 'open' && r.date === s.date; });
+        if (!ru) throw fail(400, 'Buka rit dulu (isi galon yang dimuat) — rute rit dihitung dari muatan rit itu.');
         if (!s.depot) throw fail(400, 'Lokasi gudang belum diatur. Atur di Peta Zona → "Atur lokasi gudang".');
         if (typeof planRit !== 'function') throw fail(500, 'Perencana rute tidak tersedia.');
         var pend = s.stops.filter(function (st) { return st.date === s.date && st.fleetId === s.fleet && st.status === 'pending'; }).sort(function (a, b) { return a.seq - b.seq; });
@@ -264,9 +271,10 @@
         var pend = s.stops.filter(function (st) { return st.date === s.date && st.fleetId === s.fleet && st.status === 'pending'; });
         if (pend.some(function (st) { return !String(reasons[st.id] || '').trim(); })) throw fail(400, 'Isi alasan untuk setiap pengiriman yang belum tuntas.');
         pend.forEach(function (st) { st.status = 'ditunda'; st.pendingReason = String(reasons[st.id]).slice(0, 300); });
-        var co = { id: nid('close'), date: s.date, fleetId: s.fleet, generalNote: String(b.generalNote || ''), pending: pend.length, closedAt: now().getTime() };
+        var delivered = s.stops.filter(function (st) { return st.date === s.date && st.fleetId === s.fleet && st.status === 'terkirim'; }).length;
+        var co = { id: nid('close'), date: s.date, fleetId: s.fleet, closedByName: null, closedAt: now().getTime(), generalNote: String(b.generalNote || '').slice(0, 500), delivered: delivered, pending: pend.length };
         s.closeouts.push(co);
-        return W({ closeout: co, fleetId: s.fleet, pending: pend.length });
+        return W(co);   // the server's response, unwrapped, is the closeout itself
       }),
       // Same buckets as GET /deliveries/day-summary.
       daySummary: run(function () {
@@ -284,15 +292,21 @@
         out.ritDiBawahSop = s.runs.filter(function (r) { return r.date === s.date && r.fleetId === s.fleet && r.underSopReason; }).map(function (r) { return { runNo: r.runNo, gallonsOut: r.gallonsOut, reason: r.underSopReason }; });
         return out;
       }),
-      // Practice photos stay on the phone (inside the state), never uploaded.
+      // Practice photos stay on the phone. With a photo store (the phone's IndexedDB) the bytes live
+      // apart from the state — the state only marks the id — so every practice write stays small.
       uploadPhoto: run(function (body) {
         var d = body && body.data; if (!d) throw fail(400, 'Foto kosong.');
-        var id = nid('photo'); s.photos[id] = String(d);
+        var id = nid('photo');
+        if (photoStore) { s.photos[id] = true; photoStore.put(id, String(d)); } else s.photos[id] = String(d);
         return W({ id: id, name: (body && body.name) || 'foto.jpg', isImg: true, mime: (body && body.mime) || 'image/jpeg' });
       }),
-      photo: run(function (id) { return s.photos[id] || null; }),
+      photo: function (id) {
+        if (!s.photos[id]) return Promise.resolve(null);
+        return Promise.resolve(photoStore ? photoStore.get(id) : s.photos[id]);
+      },
       exportState: function () { return clone(s); },
     };
+    return api;
   }
 
   return { VERSION: VERSION, fromSnapshot: fromSnapshot, createSandbox: createSandbox };
