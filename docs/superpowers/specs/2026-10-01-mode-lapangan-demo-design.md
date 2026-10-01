@@ -362,6 +362,13 @@ yang disetujui: tampilan, animasi, dan gesture, bukan hanya fungsi.
 - Nilai material dan animasi disalin persis dari papan mockup. Pekerjaan dibagi dua:
   - 3D-1: fondasi;
   - 3D-2: tata ulang setiap layar sesuai papannya.
+- **Sesuai yang dibangun (3D-1):**
+  - shell mengembalikan `FIELD.App` layar penuh (`fieldFull`); `theme-color` = #EEF2F6 saat terbuka;
+  - `dist-field-icons.jsx` memuat 45 ikon mockup sebagai elemen React;
+  - `FldDock` dengan indikator tab cair;
+  - `FldTop` berupa pil "Batal" kaca dengan judul di tengah;
+  - `FldCtaBar` sebagai CTA tetap (dipakai layar di 3D-2);
+  - `useFldSheetDrag`, `swipeTab`, dan Atur titik dengan pin tengah.
 
 ### 5. Rilis
 
