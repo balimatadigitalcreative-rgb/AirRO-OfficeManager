@@ -277,6 +277,24 @@ Tambah stop, Penyesuaian galon, dan Ganti rugi galon.
 
 Semua teks memakai `finance-i18n.js` (EN + ID), dengan prefix kunci `fld.*`.
 
+**Sesuai yang dibangun (Rencana 3A, 2026-10-01): layar alur kerja harian.**
+- File:
+  - `dist-field-logic.js` (`FIELDLOGIC`): logika layar sebagai fungsi murni yang dites di Node;
+  - `dist-field-kit.jsx`: komponen bersama, termasuk foto bukti dari kamera belakang, diperkecil, dan
+    distempel jam + GPS;
+  - `dist-field-day.jsx`: Pengiriman, Detail stop, Transaksi, Buka/Tutup rit, Rute/Peta, Setoran.
+- Pengiriman menampilkan "Belum terkirim dari hari sebelumnya" hanya untuk dibaca. Penyelesaiannya
+  tetap di tampilan lama, dan sopir tanpa `distribusiBelumTerkirim` melihat daftar kosong.
+- `GET /field-context` kini menyertakan `openRun`: rit terbuka armada itu, tanggal berapa pun. Rit
+  kemarin yang masih terbuka diarahkan untuk ditutup dulu.
+- Transaksi disimpan sekali saja. Kalau penandaan "terkirim" gagal (sinyal hilang, atau server meminta
+  lokasi), yang diulang hanya penandaannya.
+- Foto latihan disimpan di kunci IndexedDB terpisah. Simpanan yang gagal dan "Ulang latihan" yang gagal
+  ditampilkan di layar.
+- Tampilan lapangan terang saja, mengikuti aplikasi yang belum punya tema gelap.
+- Di HP, navigasi bawah aplikasi disembunyikan selama tampilan lapangan terbuka. Menu lengkap tetap bisa
+  dibuka lewat tombol ☰.
+
 ### 5. Rilis
 
 1. **Demo:** deploy dengan semua saklar aturan mati. Hanya akun berizin yang melihat tampilan baru.
