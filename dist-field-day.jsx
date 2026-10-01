@@ -119,6 +119,7 @@ function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onRout
 }
 
 function FldStopSheet({ api, stop: s, can, onClose, onSale, onAction, onChanged }) {
+  const drag = useFldSheetDrag(onClose);
   const [mode, setMode] = uSfl('');   // '' | 'tunda' | 'batal'
   const [reason, setReason] = uSfl('');
   const [busy, setBusy] = uSfl(false);
@@ -141,8 +142,8 @@ function FldStopSheet({ api, stop: s, can, onClose, onSale, onAction, onChanged 
   return (
     <>
       <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onClose} />
-      <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={s.customerName}>
-        <div className="mlap-grab" />
+      <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={s.customerName} ref={drag.ref} style={drag.style}>
+        <FldGrab handle={drag.handle} />
         <h2>{s.customerName}</h2>
         {sub ? <p>{sub}</p> : null}
         {s.gaps.count > 0 && (

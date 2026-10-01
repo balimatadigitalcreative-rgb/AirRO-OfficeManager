@@ -328,3 +328,11 @@ describe('Plan 3C: koreksi logic', () => {
     expect(L.openBons([{ id: 'a', method: 'bon', amount: 1000, txnDate: '2026-09-01', bonCounted: false }, { id: 'b', method: 'bon', amount: 2000, txnDate: '2026-09-02' }]).map((b) => b.id)).toEqual(['b']);
   });
 });
+
+it('Plan 3D: a sheet closes when pulled far enough or flicked; a small pull springs back', () => {
+  expect(L.dragRelease({ dy: 40, ms: 400, height: 600 })).toBe('stay');
+  expect(L.dragRelease({ dy: 130, ms: 600, height: 600 })).toBe('close');            // past 120 px
+  expect(L.dragRelease({ dy: 70, ms: 600, height: 240 })).toBe('close');             // a short sheet: a quarter of its height
+  expect(L.dragRelease({ dy: 50, ms: 80, height: 600 })).toBe('close');              // a flick (>0.5 px/ms)
+  expect(L.dragRelease({ dy: 20, ms: 20, height: 600 })).toBe('stay');               // a tap-sized move is never a flick
+});

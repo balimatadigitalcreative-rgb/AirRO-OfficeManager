@@ -39,6 +39,7 @@ function FldCustomers({ api, tick, onOpen }) {
 }
 
 function FldCustSheet({ cust: c0, can, onClose, onAction }) {
+  const drag = useFldSheetDrag(onClose);
   const c = Object.assign({}, c0, { gaps: c0.gaps || FIELDLOGIC.gapsOf(c0) });
   const links = fldLinks(c);
   const acts = [];
@@ -51,8 +52,8 @@ function FldCustSheet({ cust: c0, can, onClose, onAction }) {
   return (
     <>
       <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onClose} />
-      <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={c.name}>
-        <div className="mlap-grab" />
+      <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={c.name} ref={drag.ref} style={drag.style}>
+        <FldGrab handle={drag.handle} />
         <h2>{c.name}</h2>
         <p>{[c.code, c.address].filter(Boolean).join(' · ')}</p>
         <div className="mlap-links">

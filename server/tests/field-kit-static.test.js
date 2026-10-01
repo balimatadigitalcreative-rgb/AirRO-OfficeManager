@@ -149,3 +149,24 @@ describe('Plan 3D motion (mockup Dock board)', () => {
     expect(shell).toMatch(/<FldDock tabs=\{TABS\} tab=\{tab\} onTab=\{\(k\) => \{ setTab\(k\); setView\(null\); \}\}/);
   });
 });
+
+describe('Plan 3D gestures: sheets', () => {
+  it('a drag hook on the grabber: follows the finger, decides with dragRelease, slides away or springs back', () => {
+    const f = kit.slice(kit.indexOf('function useFldSheetDrag('));
+    expect(f).toMatch(/e\.currentTarget\.setPointerCapture\(e\.pointerId\)/);
+    expect(f).toMatch(/FIELDLOGIC\.dragRelease\(\{ dy: d, ms: Date\.now\(\) - s\.t, height: ref\.current \? ref\.current\.offsetHeight : 600 \}\)/);
+    expect(f).toMatch(/if \(r === 'close'\) \{ setLeaving\(true\); setTimeout\(onClose, 220\); \} else setDy\(0\);/);
+    expect(css).toMatch(/\.mlap-grabzone \{[^}]*touch-action: none;/);
+  });
+  it('every sheet uses it', () => {
+    const day = fs.readFileSync(path.join(root, 'dist-field-day.jsx'), 'utf8');
+    const cust = fs.readFileSync(path.join(root, 'dist-field-cust.jsx'), 'utf8');
+    const shell = fs.readFileSync(path.join(root, 'dist-field.jsx'), 'utf8');
+    [kit.slice(kit.indexOf('function FldSheet(')), day.slice(day.indexOf('function FldStopSheet(')), cust.slice(cust.indexOf('function FldCustSheet('))].forEach((src) => {
+      expect(src).toMatch(/const drag = useFldSheetDrag\(/);
+      expect(src).toMatch(/<FldGrab handle=\{drag\.handle\} \/>/);
+      expect(src).toMatch(/ref=\{drag\.ref\} style=\{drag\.style\}/);
+    });
+    expect(shell).toMatch(/const menuDrag = useFldSheetDrag\(\(\) => setMenu\(false\)\);/);
+  });
+});

@@ -21,6 +21,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const [tab, setTab] = uSfl('kirim');
   const [view, setView] = uSfl(null);   // { name: 'stop'|'sale'|'run', stop? }
   const [menu, setMenu] = uSfl(false);
+  const menuDrag = useFldSheetDrag(() => setMenu(false));
   const [catat, setCatat] = uSfl(false);
   const [ask, setAsk] = uSfl(null);
   const [toast, setToast] = uSfl('');
@@ -216,8 +217,8 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       {menu && (
         <>
           <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={() => setMenu(false)} />
-          <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={trFl('fld.menu')}>
-            <div className="mlap-grab" />
+          <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={trFl('fld.menu')} ref={menuDrag.ref} style={menuDrag.style}>
+            <FldGrab handle={menuDrag.handle} />
             <h2>{trFl('fld.menu')}</h2>
             {fleets.length > 1 && (
               <label className="mlap-menu-item mlap-menu-fleet">
