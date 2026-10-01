@@ -68,3 +68,20 @@ it('Final fix: a field expense sent twice with the same clientRef is saved once;
   const other = await request(app).post(`${D}/expenses`).set(auth(gm)).send({ ...body, fleet: 'DK 2' });
   expect(other.status).toBe(409);
 });
+
+describe('Final 3C: replay shape + simultaneous requests', () => {
+  const svc = require('../src/services/distribution.service');
+  it('a replayed sale reports its gallons like a fresh one', async () => {
+    const body = { customerId: cA, qty: 3, gallonOut: 3, gallonIn: 1, method: 'lunas', txnDate: today, clientRef: 'ref-gal-0001' };
+    const r1 = await request(app).post(`${D}/transactions`).set(auth(gm)).send(body);
+    const r2 = await request(app).post(`${D}/transactions`).set(auth(gm)).send(body);
+    expect(r2.body.data).toMatchObject({ id: r1.body.data.id, replay: true, gallonOut: 3, gallonIn: 1 });
+  });
+  it('a unique clash on clientRef (two requests at once) answers with the saved row', async () => {
+    const clash = Object.assign(new Error('Unique constraint'), { code: 'P2002', meta: { target: ['clientRef'] } });
+    await expect(svc.onClientRefClash(clash, async () => ({ id: 'saved', replay: true }))).resolves.toEqual({ id: 'saved', replay: true });
+    await expect(svc.onClientRefClash(clash, async () => null)).rejects.toBe(clash);
+    const other = Object.assign(new Error('x'), { code: 'P2002', meta: { target: ['code'] } });
+    await expect(svc.onClientRefClash(other, async () => ({ id: 'x' }))).rejects.toBe(other);
+  });
+});

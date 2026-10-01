@@ -1551,12 +1551,29 @@ async function replayByClientRef(ref, customerId) {
   if (prev.customerId !== customerId) throw ApiError.conflict('Kode transaksi ini sudah dipakai untuk pelanggan lain.');
   return { txn: prev, gallonsHeld: await gallonBalanceOf(customerId), sisaBon: await customerBonBalance(customerId) };
 }
+// The answer to a retried sale / bon payment: the saved row with its gallons, exactly like a fresh one.
+async function saleReplay(ref, customerId) {
+  const rp = await replayByClientRef(ref, customerId);
+  if (!rp) return null;
+  const g = isGallonSale(rp.txn) ? await currentGallonsOf(rp.txn.id) : { gallonOut: 0, gallonIn: 0 };
+  return { ...rp.txn, ...g, gallonsHeld: rp.gallonsHeld, sisaBon: rp.sisaBon, replay: true, ...(rp.txn.method === 'pelunasan' ? { isPayment: true } : {}) };
+}
+// Two requests with the same clientRef at once: both pass the replay check, the second create hits the
+// unique index. Answer it with the row the first one saved (never a generic 409).
+async function onClientRefClash(err, again) {
+  const target = JSON.stringify((err && err.meta && err.meta.target) || '');
+  if (err && err.code === 'P2002' && target.includes('clientRef')) {
+    const row = await again();
+    if (row) return row;
+  }
+  throw err;
+}
 async function createTransaction(body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
   if (!customer) throw ApiError.badRequest('customerId does not reference an existing customer');
   if (!fleetAllows(actor, customer.armada)) throw ApiError.forbidden('Pelanggan di luar akses armada Anda.');   // cross-fleet write blocked
-  const replay = await replayByClientRef(body.clientRef, customer.id);
-  if (replay) return { ...replay.txn, gallonsHeld: replay.gallonsHeld, sisaBon: replay.sisaBon, replay: true };
+  const replay = await saleReplay(body.clientRef, customer.id);
+  if (replay) return replay;
   const clientRef = body.clientRef ? String(body.clientRef) : null;
   const method = METHODS.includes(body.method) ? body.method : 'lunas';
   // Deactivated customer: no new SALES (water out), but still allow pelunasan so any
@@ -1580,6 +1597,7 @@ async function createTransaction(body, actor) {
     const note = [(body.note || '').trim(), payMethod].filter(Boolean).join(' · ');
     // LIVE POSTING: the pelunasan (Dr Kas / Cr Piutang) and the per-customer AR reclass post in the
     // SAME transaction as the row, so the Piutang balance always equals Σ Sisa Bon (flag-gated).
+    let clash = null;
     const txn = await prisma.$transaction(async (tx) => {
       const t = await tx.distTransaction.create({ data: { clientRef,
         customerId: customer.id, fleetId, qty: 0, unitPriceLocked: 0, amount: payAmount, method: 'pelunasan', note,
@@ -1588,7 +1606,8 @@ async function createTransaction(body, actor) {
       } });
       if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); await acc.postReceivablesReclass(customer.id, actor, tx); }
       return t;
-    });
+    }).catch(async (err) => { clash = await onClientRefClash(err, () => saleReplay(clientRef, customer.id)); return null; });
+    if (clash) return clash;
     await logAudit('input', `Pelunasan bon: ${customer.name}`, `bayar ${payAmount} (${payMethod}) · sisa bon ${Math.max(0, sisaBon - payAmount)}`, snap, fleetId);
     return { ...txn, gallonOut: 0, gallonIn: 0, gallonsHeld: await gallonBalanceOf(customer.id), sisaBon: Math.max(0, sisaBon - payAmount), isPayment: true };
   }
@@ -1606,6 +1625,7 @@ async function createTransaction(body, actor) {
   const payMethodCol = method === 'bon' ? '' : normPayMethod(body.payMethod);
   // LIVE POSTING: the sale row and its journal (lunas → Dr Kas/Cr Pendapatan; bon → Dr Piutang/Cr
   // Pendapatan) post together; a bon also runs the AR reclass so Piutang == Σ Sisa Bon (flag-gated).
+  let clash = null;
   const txn = await prisma.$transaction(async (tx) => {
     const t = await tx.distTransaction.create({ data: { clientRef,
       customerId: customer.id, fleetId, qty, unitPriceLocked, amount, method, note: (body.note || '').trim(),
@@ -1614,7 +1634,8 @@ async function createTransaction(body, actor) {
     } });
     if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); if (method === 'bon') await acc.postReceivablesReclass(customer.id, actor, tx); }
     return t;
-  });
+  }).catch(async (err) => { clash = await onClientRefClash(err, () => saleReplay(clientRef, customer.id)); return null; });
+  if (clash) return clash;
   // Gallon flow (loan/exchange): out = full gallons delivered (default = qty sold),
   // in = empty gallons returned. Recorded as append-only movements → customer balance.
   const gOut = body.gallonOut != null ? Math.max(0, int(body.gallonOut)) : qty;
@@ -3742,6 +3763,7 @@ async function gallonDamageCharge(customerId, body, actor) {
   const fleetId = customer.armada || '';
   const snap = await actorSnap(actor);
   const note = `Ganti rugi ${qty} galon ${kind}${body.note ? ' · ' + String(body.note).trim().slice(0, 200) : ''}`;
+  let clash = null;
   const txn = await prisma.$transaction(async (tx) => {
     const t = await tx.distTransaction.create({ data: { clientRef: body && body.clientRef ? String(body.clientRef) : null,
       customerId: customer.id, fleetId, qty: 0, unitPriceLocked: price, amount, method: pay === 'bon' ? 'bon' : 'lunas',
@@ -3754,7 +3776,8 @@ async function gallonDamageCharge(customerId, body, actor) {
     } });
     if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); if (pay === 'bon') await acc.postReceivablesReclass(customer.id, actor, tx); }
     return t;
-  });
+  }).catch(async (err) => { clash = await onClientRefClash(err, async () => { const rp = await replayByClientRef(body.clientRef, customer.id); return rp && { transaction: rp.txn, gallonsHeld: rp.gallonsHeld, sisaBon: rp.sisaBon, replay: true }; }); return null; });
+  if (clash) return clash;
   await logAudit('input', `Ganti rugi galon: ${customer.name}`, `${qty} galon ${kind} × ${price} = ${amount} (${pay})`, snap, fleetId);
   return { transaction: txn, gallonsHeld: await gallonBalanceOf(customer.id), sisaBon: await customerBonBalance(customer.id) };
 }
@@ -4168,7 +4191,7 @@ async function closeDay(user, body) {
   const pendingCount = pending.length;   // now 'ditunda'
   const co = await prisma.deliveryCloseout.upsert({
     where: { date_fleetId: { date, fleetId } },
-    update: { closedById: snap.actorId, closedByName: snap.actorName, closedAt: new Date(), generalNote: String(body.generalNote || '').slice(0, 500), delivered, pending: pendingCount, cancelled },
+    update: { closedById: snap.actorId, closedByName: snap.actorName, closedAt: new Date(), ...(String(body.generalNote || '').trim() ? { generalNote: String(body.generalNote).slice(0, 500) } : {}), delivered, pending: pendingCount, cancelled },
     create: { date, fleetId, closedById: snap.actorId, closedByName: snap.actorName, generalNote: String(body.generalNote || '').slice(0, 500), delivered, pending: pendingCount, cancelled },
   });
   const reasonList = pending.map((s) => ({ customerId: s.customerId, reason: String(reasons[s.id]).slice(0, 300) }));
@@ -5119,19 +5142,22 @@ async function createExpense(body, actor) {
   const fleetId = resolveWriteFleet(actor, body.fleet);
   if (!fleetId) throw ApiError.badRequest('Pilih armada.');
   // A retry after a lost response (same clientRef) returns the expense already saved.
-  if (body.clientRef) {
+  const expenseReplay = async () => {
+    if (!body.clientRef) return null;
     const prev = await prisma.distExpense.findUnique({ where: { clientRef: String(body.clientRef) } });
-    if (prev) {
-      if (prev.fleetId !== fleetId) throw ApiError.conflict('Kode pengeluaran ini sudah dipakai untuk armada lain.');
-      return { ...expenseClient(prev), replay: true };
-    }
-  }
+    if (!prev) return null;
+    if (prev.fleetId !== fleetId) throw ApiError.conflict('Kode pengeluaran ini sudah dipakai untuk armada lain.');
+    return { ...expenseClient(prev), replay: true };
+  };
+  const again = await expenseReplay();
+  if (again) return again;
   const category = String(body.category || 'lainnya').trim().slice(0, 40) || 'lainnya';
   const businessUnitId = await resolveUnitId(body.businessUnitId);
   const snap = await actorSnap(actor);
   const method = body.method === 'transfer' ? 'transfer' : 'tunai';
   if (!body.photoId && (await require('./fieldRules.service').getRules()).wajibFotoPengeluaran) throw ApiError.badRequest('Foto nota wajib dilampirkan.', { code: 'PROOF_REQUIRED' });
   // LIVE POSTING: the field expense and its journal (Dr Beban / Cr Kas) post in one transaction.
+  let clash = null;
   const e = await prisma.$transaction(async (tx) => {
     const row = await tx.distExpense.create({ data: {
       date, fleetId, amount, category, note: String(body.note || '').slice(0, 300),
@@ -5142,7 +5168,8 @@ async function createExpense(body, actor) {
     } });
     if (config.accountingV2) await acc.postDistExpense(row, actor, tx);
     return row;
-  });
+  }).catch(async (err) => { clash = await onClientRefClash(err, expenseReplay); return null; });
+  if (clash) return clash;
   await logAudit('input', `Pengeluaran lapangan: ${fleetId}`, `${category} ${amount}${e.note ? ' · ' + e.note : ''} · ${date}`, snap, fleetId);
   return expenseClient(e);
 }
@@ -5328,6 +5355,9 @@ async function daySummary(user, query) {
   const stops = await prisma.delivery.findMany({ where: { ...where, date }, select: { status: true } });
   stops.forEach((s) => { if (out.stops[s.status] != null) out.stops[s.status] += 1; });
   out.koreksiMenunggu = await prisma.distChangeRequest.count({ where: { fleetId, status: 'pending' } });
+  // Already closed today? The phone says so (and asks before closing again).
+  const co = await prisma.deliveryCloseout.findUnique({ where: { date_fleetId: { date, fleetId } } });
+  out.closeout = co ? closeoutClient(co) : null;
   const runs = await prisma.deliveryRun.findMany({ where: { ...where, date, NOT: { underSopReason: '' } }, orderBy: { runNo: 'asc' }, select: { runNo: true, gallonsOut: true, underSopReason: true } });
   out.ritDiBawahSop = runs.map((r) => ({ runNo: r.runNo, gallonsOut: r.gallonsOut, reason: r.underSopReason }));
   return out;
@@ -5343,7 +5373,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
-  requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, withdrawWhere, decideChangeRequest, previewReassign, requestReassign,
+  requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, withdrawWhere, onClientRefClash, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport, daySummary,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, ritRoute, setDepot, depotOrigin, fieldContext, setCustomerPhone, pinDelivery, closeDay, listCloseouts,
