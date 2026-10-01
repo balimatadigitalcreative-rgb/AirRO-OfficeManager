@@ -206,6 +206,8 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 /* ── BAYAR BON ── */
 .mlap-bigrp { font-size: 26px; font-variant-numeric: tabular-nums; color: var(--mlap-bon); }
 .mlap-pad { padding: 4px 12px 12px; }
+/* KOREKSI (3C) */
+.mlap-rowbtn.on { background: var(--mlap-accent-soft); box-shadow: inset 3px 0 0 var(--mlap-accent); }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

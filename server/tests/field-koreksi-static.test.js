@@ -51,3 +51,19 @@ describe('FldKoreksi', () => {
     expect(f()).toContain("'fld.kVoidNote'");
   });
 });
+
+describe('Pelanggan salah', () => {
+  it('suggests the customers nearest to where the photo was taken, then a search — only the armada\'s own list', () => {
+    const f = fn('FldKoreksiCust');
+    expect(f).toMatch(/api\.customers\(\)/);
+    expect(f).toMatch(/FIELDLOGIC\.nearCustomers\(list, pt, fromId, 5\)/);
+    expect(f).toMatch(/FIELDLOGIC\.customerList\(list, \{ q, filter: 'all' \}\)\.rows\.filter\(\(c\) => c\.id !== fromId\)/);
+  });
+  it('previews both customers and sends a move request with the reason as its note', () => {
+    const f = fn('FldKoreksi');
+    expect(f).toMatch(/<FldKoreksiCust api=\{api\} t=\{t\} fromId=\{target\.customerId\} value=\{toCust\} onChange=\{setToCust\} \/>/);
+    expect(f).toMatch(/\[pv\.fromCustomer, pv\.toCustomer\]\.map/);
+    expect(f).toMatch(/api\.requestReassign\(\{ fromCustomerId: target\.customerId, toCustomerId: toCust\.id, transactionIds: \[t\.id\], priceMode: 'keep', note: text, reason: text \}\)/);
+    expect(f).not.toContain('KOREKSI-PELANGGAN');
+  });
+});

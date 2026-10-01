@@ -98,7 +98,12 @@ function FldKoreksi({ api, target, can, onDone, onBack, onSaya }) {
             )}
             {kind === 'nominal' && <div className="mlap-card"><FldMoney label={trFl('fld.ko_nominal')} value={amount} onChange={setAmount} /></div>}
             {kind === 'batal' && <FldNotice tone="warn" title={trFl('fld.kVoidNote')} />}
-            {/* KOREKSI-PELANGGAN */}
+            {kind === 'pelanggan' && <FldKoreksiCust api={api} t={t} fromId={target.customerId} value={toCust} onChange={setToCust} />}
+            {pv && kind === 'pelanggan' && (
+              <div className="mlap-card mlap-sum">
+                {[pv.fromCustomer, pv.toCustomer].map((c) => <div key={c.id} className="mlap-sumrow"><span>{trFl('fld.kMoveLine', { name: c.name, a: rp(c.sisaBonBefore), b: rp(c.sisaBonAfter), g: c.gallonsBefore, h: c.gallonsAfter })}</span></div>)}
+              </div>
+            )}
             {pv && kind !== 'pelanggan' && (
               <div className="mlap-card mlap-sum">
                 <div className="mlap-sumrow"><span>{trFl('fld.kAmountLine', { a: rp(pv.oldAmount), b: rp(pv.newAmount) })}</span></div>
@@ -121,5 +126,35 @@ function FldKoreksi({ api, target, can, onDone, onBack, onSaya }) {
         )}
       </div>
     </div>
+  );
+}
+
+// The right customer: those nearest to where this transaction's photo was taken first (that is where the
+// delivery happened), then a search over the armada's own customers.
+function FldKoreksiCust({ api, t, fromId, value, onChange }) {
+  const [list, setList] = uSfl(null);
+  const [q, setQ] = uSfl('');
+  uEfl(() => { let live = true; api.customers().then((r) => { if (live) setList(r || []); }).catch(() => { if (live) setList([]); }); return () => { live = false; }; }, [api]);
+  if (!list) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
+  const pt = typeof t.proofLat === 'number' && typeof t.proofLng === 'number' ? { lat: t.proofLat, lng: t.proofLng } : null;
+  const near = q.trim() || !pt ? [] : FIELDLOGIC.nearCustomers(list, pt, fromId, 5);
+  const rows = q.trim() ? FIELDLOGIC.customerList(list, { q, filter: 'all' }).rows.filter((c) => c.id !== fromId).slice(0, 40) : [];
+  const row = (c, sub) => (
+    <button key={c.id} type="button" className={'mlap-row mlap-rowbtn' + (value && value.id === c.id ? ' on' : '')} aria-pressed={!!(value && value.id === c.id)} onClick={() => onChange(c)}>
+      <span className="mlap-grow"><span className="nm">{c.name}</span><span className="sb">{sub}</span></span>
+    </button>
+  );
+  return (
+    <>
+      {value ? <div className="mlap-card mlap-sec"><span className="sb">{trFl('fld.kMoveTo')}</span><b>{value.name}</b></div> : null}
+      {near.length > 0 && (
+        <>
+          <div className="mlap-eyebrow">{trFl('fld.kNear')}</div>
+          <div className="mlap-card">{near.map((c) => row(c, trFl('fld.kNearM', { m: c.meters })))}</div>
+        </>
+      )}
+      <input className="mlap-text mlap-search" type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
+      {rows.length > 0 && <div className="mlap-card">{rows.map((c) => row(c, c.code || ''))}</div>}
+    </>
   );
 }
