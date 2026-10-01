@@ -122,7 +122,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
     },
   });
 
-  const TABS = [['kirim', 'IconTruck'], ['peta', 'IconPin'], null, ['pelanggan', 'IconCustomers'], ['setoran', 'IconWallet']];
+  const TABS = [['kirim', 'truck'], ['peta', 'map'], null, ['pelanggan', 'users'], ['setoran', 'clipboard']];
   const TAB_LABEL = { kirim: 'fld.tabKirim', peta: 'fld.tabPeta', pelanggan: 'fld.tabPelanggan', setoran: 'fld.tabSetoran' };
   const ACTIONS = [['catatSale', can.sale], ['catatBon', can.bon], ['catatExp', can.expense], ['catatStop', can.addStop], ['catatAdj', can.adjust], ['catatDmg', can.damage]].filter((a) => a[1]).map((a) => a[0]);
   const ACTION_ICON = { catatSale: 'receipt', catatBon: 'cash', catatExp: 'fuel', catatStop: 'pinPlus', catatAdj: 'adjust', catatDmg: 'bottleBroken' };
@@ -196,14 +196,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
             {body}
           </div>
           <div className="mlap-dockfade" aria-hidden="true" />
-          <nav className="mlap-dock" aria-label={trFl('fld.nav')}>
-            {TABS.map((t, i) => (t ? (
-              <button key={t[0]} type="button" className={'mlap-tab' + (tab === t[0] ? ' on' : '')} aria-current={tab === t[0] ? 'page' : undefined} onClick={() => { setTab(t[0]); setView(null); }}>
-                {FldIco(t[1], 20)}<span>{trFl(TAB_LABEL[t[0]])}</span>
-              </button>
-            ) : <span key={'gap' + i} aria-hidden="true" />))}
-          </nav>
-          <button type="button" className={'mlap-catat' + (catat ? ' open' : '')} aria-label={trFl('fld.tabCatat')} aria-expanded={catat} onClick={() => setCatat(!catat)}>{FldIco('IconPlus', 24)}</button>
+          <FldDock tabs={TABS} tab={tab} onTab={(k) => { setTab(k); setView(null); }} labelOf={(k) => trFl(TAB_LABEL[k])} catat={catat} onCatat={() => setCatat(!catat)} />
         </>
       )}
       {catat && !full && (

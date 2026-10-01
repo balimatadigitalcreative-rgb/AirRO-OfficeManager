@@ -244,3 +244,44 @@ function FldPickCustomer({ api, title, hint, accept, onPick, onBack }) {
     </div>
   );
 }
+
+// THE DOCK (mockup "Dock bar + animasi"): glass tabs with a liquid selection that springs to the tab and
+// stretches 1.4× / squashes .82 while it travels (300 ms), a one-shot sheen across the dock, and the
+// centre Catat button — the one tinted glass control — with its periodic sheen and its +→× turn.
+function FldDock({ tabs, tab, onTab, labelOf, catat, onCatat }) {
+  const navRef = uRfl(null);
+  const [geo, setGeo] = uSfl(null);
+  const [moving, setMoving] = uSfl(false);
+  const prev = uRfl(tab);
+  const measure = () => {
+    const n = navRef.current; if (!n) return;
+    setGeo([].slice.call(n.querySelectorAll('.mlap-tab')).map((b) => ({ left: b.offsetLeft, width: b.offsetWidth })));
+  };
+  uEfl(() => { measure(); window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure); }, []);
+  uEfl(() => {
+    if (prev.current === tab) return undefined;
+    prev.current = tab;
+    setMoving(true); const t = setTimeout(() => setMoving(false), 300);
+    return () => clearTimeout(t);
+  }, [tab]);
+  const idx = tabs.filter(Boolean).findIndex((t) => t[0] === tab);
+  const g = geo && idx >= 0 ? geo[idx] : null;
+  const w = g ? g.width * (moving ? 1.4 : 1) : 0;
+  return (
+    <>
+      <nav ref={navRef} className="mlap-dock" aria-label={trFl('fld.nav')}>
+        {g ? <span aria-hidden="true" className="mlap-blob" style={{ left: g.left - (w - g.width) / 2, width: w, transform: 'scaleY(' + (moving ? 0.82 : 1) + ')' }} /> : null}
+        {moving ? <span aria-hidden="true" className="mlap-dock-sheen" /> : null}
+        {tabs.map((t, i) => (t ? (
+          <button key={t[0]} type="button" className={'mlap-tab' + (tab === t[0] ? ' on' : '')} aria-current={tab === t[0] ? 'page' : undefined} onClick={() => onTab(t[0])}>
+            <FldSvg n={t[1]} s={20} sw={tab === t[0] ? 2.3 : 1.9} /><span>{labelOf(t[0])}</span>
+          </button>
+        ) : <span key={'gap' + i} aria-hidden="true" />))}
+      </nav>
+      <button type="button" className={'mlap-catat' + (catat ? ' open' : '')} aria-label={trFl('fld.tabCatat')} aria-expanded={catat} onClick={onCatat}>
+        <span aria-hidden="true" className="mlap-sheen" />
+        <FldSvg n="plus" s={24} sw={2.6} />
+      </button>
+    </>
+  );
+}

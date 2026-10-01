@@ -121,3 +121,31 @@ describe('Plan 3D materials (values copied from the mockup)', () => {
     expect(rule('.mlap-closex')).toMatch(/background: rgba\(255,255,255,\.7\);/);
   });
 });
+
+describe('Plan 3D motion (mockup Dock board)', () => {
+  const f = () => kit.slice(kit.indexOf('function FldDock('));
+  it('a liquid selection springs to the tab, stretching 1.4× and squashing .82 for 300 ms, with a one-shot sheen', () => {
+    expect(f()).toMatch(/setMoving\(true\); const t = setTimeout\(\(\) => setMoving\(false\), 300\);/);
+    expect(f()).toMatch(/const w = g \? g\.width \* \(moving \? 1\.4 : 1\) : 0;/);
+    expect(f()).toMatch(/transform: 'scaleY\(' \+ \(moving \? 0\.82 : 1\) \+ '\)'/);
+    expect(f()).toMatch(/moving \? <span aria-hidden="true" className="mlap-dock-sheen" \/> : null/);
+    expect(css).toMatch(/\.mlap-blob \{[^}]*transition: left \.55s cubic-bezier\(\.3,1\.5,\.6,1\), width \.3s ease, transform \.3s ease;/);
+  });
+  it('the Catat button keeps a periodic sheen; tabs show the mockup icons (2.3 active / 1.9 idle)', () => {
+    expect(f()).toMatch(/<span aria-hidden="true" className="mlap-sheen" \/>/);
+    expect(f()).toMatch(/sw=\{tab === t\[0\] \? 2\.3 : 1\.9\}/);
+    expect(css).toMatch(/@keyframes mlapSheen \{ 0%, 72% \{ transform: translateX\(-160%\) rotate\(20deg\); \} 100% \{ transform: translateX\(260%\) rotate\(20deg\); \} \}/);
+    expect(css).toMatch(/\.mlap-sheen \{[^}]*animation: mlapSheen 4\.5s ease-in-out infinite;/);
+  });
+  it('every pressable control springs (scale .9 on press)', () => {
+    expect(css).toMatch(/\.mlap-tab, \.mlap-tile, \.mlap-catat, \.mlap-step, \.mlap-chip-b, \.mlap-round, \.mlap-pill, \.mlap-closex, \.mlap-seg-b \{ transition: transform \.35s cubic-bezier\(\.34,1\.56,\.64,1\)/);
+    expect(css).toMatch(/:active \{ transform: scale\(\.9\); \}/);
+  });
+  it('sheets grow out of the bottom like the menu (lgPop .45s)', () => {
+    expect(css).toMatch(/\.mlap-sheet \{ animation: mlapSheetPop \.45s cubic-bezier\(\.34,1\.3,\.64,1\) both; transform-origin: 50% 100%; \}/);
+  });
+  it('the shell uses the dock component', () => {
+    const shell = fs.readFileSync(path.join(root, 'dist-field.jsx'), 'utf8');
+    expect(shell).toMatch(/<FldDock tabs=\{TABS\} tab=\{tab\} onTab=\{\(k\) => \{ setTab\(k\); setView\(null\); \}\}/);
+  });
+});
