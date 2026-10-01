@@ -130,7 +130,7 @@ function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onInco
           <FldSvg n="chevron" s={14} sw={2.4} style={{ color: '#8A9AA3', flexShrink: 0 }} />
         </button>
       )}
-      {v.next && <FldNextCard s={v.next} n={v.counts.done + 1} canSale={!!(can && can.sale)} onSale={() => onSale(v.next)} onOpen={() => onStop(Object.assign({}, v.next, { boardNo: v.counts.done + 1 }))} />}
+      {v.next && <FldNextCard s={v.next} n={v.counts.done + 1} canSale={!!(can && can.sale)} onSale={() => onSale(Object.assign({}, v.next, { boardNo: v.counts.done + 1 }))} onOpen={() => onStop(Object.assign({}, v.next, { boardNo: v.counts.done + 1 }))} />}
       <FldSeg size="sm" label={trFl('fld.filter')} value={seg} onChange={setSeg} options={[['pending', trFl('fld.segPending', { n: v.counts.pending })], ['done', trFl('fld.segDone', { n: v.counts.done })], ['held', trFl('fld.segHeld', { n: v.counts.held })]]} />
       <div className="mlap-card mlap-list">
         {list.length ? list.map((s, i) => {
@@ -265,7 +265,7 @@ const fldSaleStopFromCust = (c) => ({ id: null, customerId: c.id, customerName: 
 // ONCE: if marking fails (no signal, or the server asks for a position), only the marking is retried —
 // also after leaving this screen and coming back (the shell remembers the saved sale per stop), and the
 // inputs lock once the sale is saved (they could no longer change it).
-function FldSale({ api, stop: s, pending, refs, onDone, onBack }) {
+function FldSale({ api, stop: s, pending, refs, onDone, onBack, onPayBon }) {
   const held = s.gallonsHeld == null ? null : s.gallonsHeld;
   const [qty, setQty] = uSfl(Math.max(1, s.planQty || 1));
   const [back, setBack] = uSfl(held == null ? 0 : Math.min(held, 999));
@@ -294,26 +294,29 @@ function FldSale({ api, stop: s, pending, refs, onDone, onBack }) {
       .catch((e) => { if (e && e.txnId) keep(e.txnId); setErr(fldErrMsg(e) || trFl('fld.loadErr')); })
       .finally(() => setBusy(false));
   };
+  const reqKey = method === 'transfer' ? 'fld.reqTf' : method === 'bon' ? 'fld.reqBon' : 'fld.reqCash';
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.saleTitle')} sub={[s.customerName, s.customerCode].filter(Boolean).join(' · ')} onBack={onBack} />
+      <FldTop title={trFl('fld.saleTitle')} onBack={onBack} />
       <div className="mlap-body">
+        <FldCustHead name={s.customerName} aside={<span className="mlap-custhead-sb">{[s.boardNo != null && s.boardNo !== '!' ? trFl('fld.stopN', { n: s.boardNo }) : '', s.customerCode].filter(Boolean).join(' · ')}</span>} />
         {txnId ? <FldNotice tone="warn" title={trFl('fld.savedNotMarkedT')} sub={trFl('fld.savedNotMarkedB')} /> : null}
         <fieldset className="mlap-fs" disabled={!!txnId}>
           <div className="mlap-card">
             <FldStepper label={trFl('fld.galOut')} hint={trFl('fld.galOutHint', { n: s.planQty })} value={qty} onChange={setQty} min={1} max={999} />
             <FldStepper label={trFl('fld.galBack')} hint={held == null ? '' : trFl('fld.galBackHint', { n: held })} value={back} onChange={setBack} min={0} max={999} />
           </div>
-          <div className="mlap-eyebrow">{trFl('fld.payment')}</div>
+          <div className="mlap-label">{trFl('fld.payment')}</div>
           <FldSeg label={trFl('fld.payment')} value={method} onChange={setMethod} options={[['lunas', trFl('fld.m_lunas')], ['bon', trFl('fld.m_bon')], ['transfer', trFl('fld.m_transfer')]]} />
-          <div className="mlap-card mlap-sum">
-            <div className="mlap-sumrow"><span>{trFl('fld.qtyLine', { n: qty, p: FIELDLOGIC.fmtRp(s.masterPrice) })}</span><b>{FIELDLOGIC.fmtRp(pv.subtotal)}</b></div>
-            {s.sisaBon > 0 ? <div className="mlap-sumrow"><span>{trFl('fld.oldBon')}</span><span>{FIELDLOGIC.fmtRp(s.sisaBon)}</span></div> : null}
-            <div className="mlap-sumrow total"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.paidNow)}</b></div>
+          <div className="mlap-card mlap-sum2">
+            <div className="mlap-sumline"><span>{trFl('fld.qtyLine', { n: qty, p: FIELDLOGIC.fmtRp(s.masterPrice) })}</span><span>{FIELDLOGIC.fmtRp(pv.subtotal)}</span></div>
+            {s.sisaBon > 0 ? <div className="mlap-sumline"><span>{trFl('fld.oldBon')}</span><span className="mlap-bontxt">{FIELDLOGIC.fmtRp(s.sisaBon)}</span></div> : null}
+            <div className="mlap-sumdiv" />
+            <div className="mlap-sumtot"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.paidNow)}</b></div>
             <div className={'mlap-after' + (method === 'bon' ? ' bon' : '')}>{method === 'bon' ? trFl('fld.bonAfter', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) }) : trFl('fld.bonStays', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) })}</div>
+            {onPayBon ? <button type="button" className="mlap-linkrow" onClick={onPayBon}><FldSvg n="cash" s={15} sw={2.2} />{trFl('fld.payOldBon')}</button> : null}
           </div>
-          <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.required')}</div>
-          <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintSale" />
+          <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintSale" req={trFl(reqKey)} />
         </fieldset>
         {needReason && (
           <div className="mlap-card mlap-reason warn">
@@ -323,9 +326,10 @@ function FldSale({ api, stop: s, pending, refs, onDone, onBack }) {
           </div>
         )}
         {err && <div className="mlap-err" role="alert">{err}</div>}
-        {why ? <div className="mlap-hint">{trFl(why)}</div> : null}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !!why || (needReason && !noLoc.trim())} onClick={save}>{trFl(txnId ? 'fld.retryMark' : 'fld.saveDeliver')}</button>
       </div>
+      <FldCtaBar hint={why ? trFl(why) : ''}>
+        <button type="button" className="mlap-btn primary" disabled={busy || !!why || (needReason && !noLoc.trim())} onClick={save}><FldSvg n="check" s={18} sw={2.6} />{trFl(txnId ? 'fld.retryMark' : 'fld.saveDeliver')}</button>
+      </FldCtaBar>
     </div>
   );
 }

@@ -446,3 +446,15 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-btn.cancel { color: #9B2C22; }
 .mlap-reason.neg { background: #FDECEA; border: 1px solid #F2B8B1; }
 .mlap-sheet-body .mlap-reason { margin-bottom: 0; }
+
+/* ── 3D-2 TRANSAKSI — mockup Transaksi board ── */
+.mlap-sum2 { padding: 12px; display: flex; flex-direction: column; gap: 7px; }
+.mlap-sumline { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.mlap-sumline > span:first-child { color: var(--mlap-sub); }
+.mlap-sumdiv { height: 1px; background: #EDF1F4; }
+.mlap-sumtot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.mlap-sumtot > span { font-size: 15px; font-weight: 600; }
+.mlap-sumtot b { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mlap-after { font-size: 12px; line-height: 16px; font-weight: 400; padding: 6px 8px; border-radius: 8px; background: #EEF2F6; color: #3E4E58; }
+.mlap-after.bon { background: #FCF1D6; color: #7A4B00; }
+.mlap-linkrow { min-height: 44px; display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: #065489; cursor: pointer; text-align: left; }

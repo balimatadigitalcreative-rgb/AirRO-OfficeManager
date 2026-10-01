@@ -184,7 +184,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
 
   return (
     <div className="mlap-root" ref={rootRef}>
-      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} onPayBon={view.stop.sisaBon > 0 && can.bon ? () => openFor('bon', fldCustFromStop(view.stop)) : null} />}
       {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'pick' && (
         <FldPickCustomer api={api} title={trFl('fld.' + ({ sale: 'catatSale', bon: 'catatBon', adjust: 'catatAdj', damage: 'catatDmg' })[view.act])} hint={trFl('fld.pickHint')}

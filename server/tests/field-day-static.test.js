@@ -151,7 +151,7 @@ it('Plan 3B: the stop sheet offers bon / adjustment / damage / complete for the 
 
 it('Final fix: the sale keeps ONE clientRef per stop/customer until saved, and says when it was already saved', () => {
   const f = fn('FldSale');
-  expect(f).toMatch(/function FldSale\(\{ api, stop: s, pending, refs, onDone, onBack \}\)/);
+  expect(f).toMatch(/function FldSale\(\{ api, stop: s, pending, refs, onDone, onBack, onPayBon \}\)/);   // 3D-2: + the old-bon link
   expect(f).toMatch(/const slot = 'sale:' \+ \(s\.id \|\| 'c:' \+ s\.customerId\);\s*const \[ref\] = uSfl\(\(\) => refs\.take\(slot\)\);/);
   expect(f).toMatch(/clientRef: ref/);
   expect(f).toMatch(/refs\.done\(slot\);/);

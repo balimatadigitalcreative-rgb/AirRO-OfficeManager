@@ -81,3 +81,30 @@ describe('Detail stop (mockup Stop board)', () => {
     expect(rule('STOP', '.mlap-facts2 b.blue')).toMatch(/color: #065489;/);
   });
 });
+
+describe('Transaksi (mockup Transaksi board)', () => {
+  const f = () => fn(day, 'FldSale');
+  it('the next card hands the sale its stop number (board: "Stop 3 · C-0511")', () => {
+    expect(fn(day, 'FldBoardScreen')).toMatch(/onSale=\{\(\) => onSale\(Object\.assign\(\{\}, v\.next, \{ boardNo: v\.counts\.done \+ 1 \}\)\)\}/);
+  });
+  it('a plain "Transaksi" top bar, the customer at 22 px with "Stop n · code"', () => {
+    expect(f()).toMatch(/<FldTop title=\{trFl\('fld\.saleTitle'\)\} onBack=\{onBack\} \/>/);
+    expect(f()).toMatch(/<FldCustHead name=\{s\.customerName\}/);
+  });
+  it('totals: a divider, the 22 px total, the coloured "after" pill; a link to collect the old bon', () => {
+    expect(f()).toMatch(/<div className="mlap-sumdiv" \/>/);
+    expect(f()).toMatch(/<div className="mlap-sumtot"><span>\{trFl\(pv\.totalKey\)\}<\/span><b>/);
+    expect(f()).toMatch(/onPayBon \? <button type="button" className="mlap-linkrow" onClick=\{onPayBon\}><FldSvg n="cash"/);
+    expect(rule('TRANSAKSI', '.mlap-sumtot b')).toMatch(/font-size: 22px; font-weight: 700;/);
+    expect(rule('TRANSAKSI', '.mlap-after.bon')).toMatch(/background: #FCF1D6; color: #7A4B00;/);
+  });
+  it('the photo label follows the payment (cash / transfer / gallons received); always required', () => {
+    expect(f()).toMatch(/const reqKey = method === 'transfer' \? 'fld\.reqTf' : method === 'bon' \? 'fld\.reqBon' : 'fld\.reqCash';/);
+    expect(f()).toMatch(/<FldPhoto api=\{api\} value=\{photo\} onChange=\{setPhoto\} hintKey="fld\.proofHintSale" req=\{trFl\(reqKey\)\} \/>/);
+  });
+  it('save is the fixed bottom bar with its reason above it', () => {
+    expect(f()).toMatch(/<FldCtaBar hint=\{why \? trFl\(why\) : ''\}>/);
+    expect(f()).toMatch(/disabled=\{busy \|\| !!why \|\| \(needReason && !noLoc\.trim\(\)\)\} onClick=\{save\}><FldSvg n="check"/);
+    expect(shell).toMatch(/onPayBon=\{view\.stop\.sisaBon > 0 && can\.bon \? \(\) => openFor\('bon', fldCustFromStop\(view\.stop\)\) : null\}/);
+  });
+});
