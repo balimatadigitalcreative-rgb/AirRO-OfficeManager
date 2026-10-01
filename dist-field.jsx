@@ -162,9 +162,9 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       {ready && full && view.name === 'adjust' && <FldAdjust api={api} cust={view.cust} needsApproval={ctx.galonNeedsApproval} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'damage' && <FldDamage api={api} cust={view.cust} rules={ctx.rules || {}} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'exp' && <FldExpense api={api} refs={refs} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'addStop' && <FldAddStop api={api} preset={view.preset} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'addStop' && <FldAddStop api={api} preset={view.preset} can={can} onPin={(c, keep) => setView({ name: 'pin', cust: c, back: keep ? Object.assign({}, view, { preset: c }) : view })} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'complete' && <FldComplete api={api} cust={view.cust} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} depot={ctx.depot} onDone={(m) => { if (view.back) { setView(view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
+      {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} depot={ctx.depot} onDone={(m, pt) => { if (view.back) { setView(pt ? FIELDLOGIC.afterPin(view.back, view.cust.id, pt) : view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
       {ready && full && view.name === 'koreksi' && <FldKoreksi api={api} target={view.target} can={can} onDone={(m) => { setView({ name: 'koreksiSaya' }); flash(m); setCtxTick((t) => t + 1); }} onBack={() => setView(null)} onSaya={() => setView({ name: 'koreksiSaya' })} />}
       {ready && full && view.name === 'koreksiSaya' && <FldKoreksiSaya api={api} tick={tick} onResubmit={(tg) => setView({ name: 'koreksi', target: tg })} onBack={() => setView(null)} onChanged={(m) => { flash(m); setCtxTick((t) => t + 1); }} />}
       {!full && (

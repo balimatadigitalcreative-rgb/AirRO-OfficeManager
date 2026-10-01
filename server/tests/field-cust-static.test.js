@@ -129,3 +129,17 @@ describe('Final review fixes (customer screens)', () => {
     expect(f).toMatch(/needsApproval === false \? 'fld\.adjNoWait' : 'fld\.adjWaits'/);
   });
 });
+
+describe('Plan 3C: 3B minors', () => {
+  it('Tambah stop: pin buttons only with the location right; a customer already on today\'s route cannot be added twice', () => {
+    const f = fn('FldAddStop');
+    expect(f).toMatch(/function FldAddStop\(\{ api, preset, can, onPin, onDone, onBack \}\)/);
+    expect(f).toMatch(/can\.location \? <button type="button" className="mlap-btn" onClick=\{\(\) => onPin\(fldCustFromStop\(s\)\)\}>/);
+    expect(f).toMatch(/const onBoard = !!pick && d\.board\.some\(\(s\) => s\.customerId === pick\.id && s\.status !== 'batal'\);/);
+    expect(f).toMatch(/disabled=\{busy \|\| qty < 1 \|\| onBoard\}/);
+    expect(f).toMatch(/onPin\(pick, true\)/);
+  });
+  it('Atur titik hands the saved point back', () => {
+    expect(fn('FldPinMap')).toMatch(/onDone\(trFl\('fld\.pinSaved', \{ name: c\.name \}\), \{ lat: pin\.lat, lng: pin\.lng \}\)/);
+  });
+});

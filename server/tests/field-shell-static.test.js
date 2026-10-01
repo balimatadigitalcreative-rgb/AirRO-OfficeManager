@@ -147,3 +147,8 @@ describe('Plan 3C shell', () => {
     expect(jsx).toMatch(/\(can\.correct \|\| can\.void\) && <button type="button" className="mlap-menu-item" onClick=\{\(\) => \{ setMenu\(false\); setView\(\{ name: 'koreksiSaya' \}\); \}\}>/);
   });
 });
+
+it('Plan 3C: after a pin is saved the screen we return to has it (no stale "pin needed")', () => {
+  expect(jsx).toMatch(/<FldAddStop api=\{api\} preset=\{view\.preset\} can=\{can\} onPin=\{\(c, keep\) => setView\(\{ name: 'pin', cust: c, back: keep \? Object\.assign\(\{\}, view, \{ preset: c \}\) : view \}\)\}/);
+  expect(jsx).toMatch(/onDone=\{\(m, pt\) => \{ if \(view\.back\) \{ setView\(pt \? FIELDLOGIC\.afterPin\(view\.back, view\.cust\.id, pt\) : view\.back\);/);
+});

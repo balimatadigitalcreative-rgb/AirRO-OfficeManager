@@ -181,7 +181,7 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
     if (mv.far && !confirmFar) { setAskFar(true); return; }
     setBusy(true); setErr('');
     api.setLocation(c.id, { lat: pin.lat, lng: pin.lng, accuracy: dev ? dev.accuracy : null, method: 'geser', deviceLat: dev ? dev.lat : undefined, deviceLng: dev ? dev.lng : undefined, deviceAccuracy: dev ? dev.accuracy : undefined })
-      .then(() => onDone(trFl('fld.pinSaved', { name: c.name })))
+      .then(() => onDone(trFl('fld.pinSaved', { name: c.name }), { lat: pin.lat, lng: pin.lng }))
       .catch((e) => setErr(fldErrMsg(e)))
       .finally(() => setBusy(false));
   };
@@ -209,7 +209,7 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
 // TAMBAH STOP — a customer outside today's schedule (or ordered via WhatsApp) as an extra stop. Today's
 // stops that have no pin are listed first: they can't join the route until the pin is set. A customer
 // picked without a pin goes to the end of the list (not on the route) with a prompt to set it.
-function FldAddStop({ api, preset, onPin, onDone, onBack }) {
+function FldAddStop({ api, preset, can, onPin, onDone, onBack }) {
   const [d, setD] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [q, setQ] = uSfl('');
@@ -222,6 +222,7 @@ function FldAddStop({ api, preset, onPin, onDone, onBack }) {
   if (!d) return <div className="mlap-screen"><FldTop title={trFl('fld.addStopT')} onBack={onBack} /><div className="mlap-empty">{trFl('fld.loading')}</div></div>;
   const cand = FIELDLOGIC.addStopCandidates({ board: d.board, customers: d.customers, q });
   const pickHasPin = !!pick && typeof pick.lat === 'number' && typeof pick.lng === 'number';
+  const onBoard = !!pick && d.board.some((s) => s.customerId === pick.id && s.status !== 'batal');   // already on today's route (also a "Tambah ke hari ini" from the customer sheet)
   const save = () => {
     setBusy(true); setMsg('');
     api.addStop({ customerId: pick.id, qty }).then(() => onDone(trFl('fld.stopAdded', { name: pick.name }))).catch((e) => setMsg(fldErrMsg(e))).finally(() => setBusy(false));
@@ -239,7 +240,7 @@ function FldAddStop({ api, preset, onPin, onDone, onBack }) {
                   {cand.noPin.map((s) => (
                     <div key={s.id} className="mlap-row">
                       <span className="mlap-grow"><span className="nm">{s.customerName}</span><span className="sb">{s.customerCode}</span></span>
-                      <button type="button" className="mlap-btn" onClick={() => onPin(fldCustFromStop(s))}>{trFl('fld.setPin')}</button>
+                      {can.location ? <button type="button" className="mlap-btn" onClick={() => onPin(fldCustFromStop(s))}>{trFl('fld.setPin')}</button> : null}
                     </div>
                   ))}
                 </div>
@@ -263,10 +264,11 @@ function FldAddStop({ api, preset, onPin, onDone, onBack }) {
               <span className="sb">{[pick.code, pick.address].filter(Boolean).join(' · ')}</span>
               <button type="button" className="mlap-btn" onClick={() => setPick(null)}>{trFl('fld.changeCust')}</button>
             </div>
-            {!pickHasPin && <FldNotice tone="warn" title={trFl('fld.pickNoPinT', { name: pick.name })} sub={trFl('fld.pickNoPinB')} action={trFl('fld.setPinNow')} onAction={() => onPin(pick)} />}
+            {!pickHasPin && <FldNotice tone="warn" title={trFl('fld.pickNoPinT', { name: pick.name })} sub={trFl('fld.pickNoPinB')} action={can.location ? trFl('fld.setPinNow') : null} onAction={() => onPin(pick, true)} />}
+            {onBoard ? <FldNotice tone="warn" title={trFl('fld.alreadyToday')} /> : null}
             <div className="mlap-card"><FldStepper label={trFl('fld.qtyGalon')} value={qty} onChange={setQty} min={1} max={999} /></div>
             {msg && <div className="mlap-err" role="alert">{msg}</div>}
-            <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || qty < 1} onClick={save}>{trFl('fld.addStopCta')}</button>
+            <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || qty < 1 || onBoard} onClick={save}>{trFl('fld.addStopCta')}</button>
           </>
         )}
       </div>
