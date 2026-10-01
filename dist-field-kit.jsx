@@ -67,6 +67,18 @@ function FldTop({ title, sub, onBack, kind, backLabel }) {
   );
 }
 
+
+// A read-only page (mockup Koreksi saya / Armada & SOP): the round back chevron on top, then the big
+// title (eyebrow above, an optional badge at its right).
+function FldBackHead({ onBack, eyebrow, title, aside }) {
+  return (
+    <>
+      <div className="mlap-top"><button type="button" className="mlap-round" aria-label={trFl('fld.back')} onClick={onBack}><FldSvg n="back" s={18} sw={2.4} /></button><span aria-hidden="true" /><span aria-hidden="true" /></div>
+      <div className="mlap-bighd"><span className="mlap-grow">{eyebrow ? <span className="mlap-eyebrow">{eyebrow}</span> : null}<h1>{title}</h1></span>{aside || null}</div>
+    </>
+  );
+}
+
 // The fixed bottom action of a task screen (mockup): its hint above it, a fade under the content.
 function FldCtaBar({ hint, children }) {
   return (

@@ -358,10 +358,21 @@
       if (cur.method && cur.method !== 'pelunasan' && pa !== pb) lines.push(['fld.rl_pay', { a: pa, b: pb }]);
       if (req.amount != null && cur.amount != null && num(req.amount) !== num(cur.amount) && cur.method === 'pelunasan') lines.push(['fld.rl_amount', { a: num(cur.amount), b: num(req.amount) }]);
     }
-    return { statusKey: st[0], tone: st[1], kindKey: RQ_KIND[x.kind] || RQ_KIND.correction, lines: lines,
+    // the board's "from → to" box (3D-2): one row per change, raw values
+    var changes = [];
+    if (x.kind === 'reassign') changes.push({ key: 'fld.rc_cust', a: x.fromCustomerName || x.customerName || '—', b: x.toCustomerName || '—', type: 'text' });
+    else if (x.kind === 'void') changes.push({ key: 'fld.rc_status', a: 'aktif', b: 'batal', type: 'status' });
+    lines.forEach(function (l) {
+      if (l[0] === 'fld.rl_qty') changes.push({ key: 'fld.rc_qty', a: l[1].a, b: l[1].b, type: 'n' });
+      else if (l[0] === 'fld.rl_pay') changes.push({ key: 'fld.rc_pay', a: l[1].a, b: l[1].b, type: 'pay' });
+      else if (l[0] === 'fld.rl_amount') changes.push({ key: 'fld.rc_amount', a: l[1].a, b: l[1].b, type: 'rp' });
+    });
+    return { statusKey: st[0], tone: st[1], kindKey: RQ_KIND[x.kind] || RQ_KIND.correction, lines: lines, changes: changes,
       canWithdraw: x.status === 'pending', canResubmit: x.status === 'rejected' || x.status === 'withdrawn',
       target: { transactionId: x.transactionId || (x.transactionIds || [])[0] || null, customerId: x.customerId || x.fromCustomerId || null } };
   }
+  // KOREKSI SAYA (3D-2): the board's two segments.
+  function koreksiTabs(list) { var l = list || []; return { wait: l.filter(function (r) { return r.status === 'pending'; }), done: l.filter(function (r) { return r.status !== 'pending'; }) }; }
   // After "Atur titik" was opened from another screen, that screen gets the customer's new point.
   function afterPin(back, custId, pt) {
     if (!back) return null;
@@ -395,5 +406,5 @@
   // PENGIRIMAN (3D-2): share of the rit's load still on the truck, 0–100.
   function loadPct(remaining, out) { var o = num(out); if (!(o > 0)) return 0; return Math.max(0, Math.min(100, Math.round(100 * num(remaining) / o))); }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, settleBons: settleBons, koreksiImpact: koreksiImpact, swipeTab: swipeTab, swipeStart: swipeStart, loadPct: loadPct };
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, settleBons: settleBons, koreksiImpact: koreksiImpact, koreksiTabs: koreksiTabs, swipeTab: swipeTab, swipeStart: swipeStart, loadPct: loadPct };
 });

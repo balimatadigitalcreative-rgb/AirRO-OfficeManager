@@ -682,3 +682,29 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-kcust-sub { padding: 6px 12px 2px; font-size: 12px; font-weight: 600; color: var(--mlap-sub); }
 .mlap-searchbox.gray { margin: 0 12px 6px; background: #F1F4F7; min-height: 44px; }
 .mlap-kcust .mlap-pickrow { border-bottom: 0; border-top: 1px solid var(--mlap-line); }
+
+/* ── 3D-2 KSAYA — mockup KoreksiList board + the read-only page head ── */
+.mlap-bighd { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 0 16px 4px; }
+.mlap-root > .mlap-screen > .mlap-bighd { max-width: 528px; }
+.mlap-bighd .mlap-eyebrow { padding: 0; }
+.mlap-bighd h1 { margin: 0; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.02em; }
+.mlap-kcard { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.mlap-kcard-hd { display: flex; align-items: center; gap: 8px; }
+.mlap-kcard-hd .nm { font-size: 15px; font-weight: 700; }
+.mlap-kcard-hd .sb { font-size: 12px; color: var(--mlap-sub); }
+.mlap-kcard .mlap-tag.info { background: #FCF1D6; color: #7A4B00; }
+.mlap-kcard .mlap-tag.neg { background: #FDECEA; color: #8C2A20; }
+.mlap-fromto { border-radius: 10px; background: #F4F7F9; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.mlap-fromto .k { font-size: 12px; font-weight: 600; color: var(--mlap-sub); }
+.mlap-fromto .v { display: flex; align-items: center; gap: 6px; font-size: 14px; flex-wrap: wrap; }
+.mlap-fromto s { color: var(--mlap-sub); }
+.mlap-fromto svg { color: #8A9AA3; }
+.mlap-fromto b { font-weight: 700; }
+.mlap-decision { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 10px; background: #E3F3EA; color: #1E6B40; }
+.mlap-decision.neg { background: #FDECEA; color: #8C2A20; }
+.mlap-decision.held { background: #F4F7F9; color: #3E4E58; }
+.mlap-decision b { font-size: 12px; font-weight: 700; }
+.mlap-decision span { font-size: 13px; line-height: 17px; }
+.mlap-kreason { font-size: 13px; color: #3E4E58; }
+.mlap-btn.soft { border-radius: 11px; background: #F1F4F7; color: #3E4E58; font-size: 14px; }
+.mlap-kcard .mlap-btn.primary { border-radius: 11px; font-size: 14px; box-shadow: none; }

@@ -407,3 +407,15 @@ describe('3D-2 koreksi impact', () => {
     expect(L.koreksiImpact({ kind: 'pelanggan', t, change: {}, pv: null })).toEqual([]);
   });
 });
+
+describe('3D-2 Koreksi saya', () => {
+  it('requestView gives the board\'s from → to rows; koreksiTabs splits waiting from done', () => {
+    expect(L.requestView({ kind: 'correction', status: 'pending', current: { qty: 6, method: 'bon' }, requested: { qty: 5 } }).changes).toEqual([{ key: 'fld.rc_qty', a: 6, b: 5, type: 'n' }]);
+    expect(L.requestView({ kind: 'reassign', status: 'approved', customerName: 'A', toCustomerName: 'B' }).changes).toEqual([{ key: 'fld.rc_cust', a: 'A', b: 'B', type: 'text' }]);
+    expect(L.requestView({ kind: 'void', status: 'rejected' }).changes).toEqual([{ key: 'fld.rc_status', a: 'aktif', b: 'batal', type: 'status' }]);
+    const tabs = L.koreksiTabs([{ id: 1, status: 'pending' }, { id: 2, status: 'approved' }, { id: 3, status: 'withdrawn' }]);
+    expect(tabs.wait.map((r) => r.id)).toEqual([1]);
+    expect(tabs.done.map((r) => r.id)).toEqual([2, 3]);
+    expect(L.koreksiTabs(null)).toEqual({ wait: [], done: [] });
+  });
+});

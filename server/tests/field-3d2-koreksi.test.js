@@ -38,3 +38,23 @@ describe('Koreksi (mockup Koreksi boards)', () => {
     expect(c).toMatch(/<label className="mlap-searchbox gray">/);
   });
 });
+
+describe('Koreksi saya (mockup KoreksiList board)', () => {
+  const f = () => fn(kor, 'FldKoreksiSaya');
+  it('a read-only page: round back chevron + big title; two segments (waiting / done)', () => {
+    expect(fn(kit, 'FldBackHead')).toMatch(/<button type="button" className="mlap-round" aria-label=\{trFl\('fld\.back'\)\} onClick=\{onBack\}><FldSvg n="back"/);
+    expect(f()).toMatch(/<FldBackHead onBack=\{onBack\} title=\{trFl\('fld\.kSaya'\)\} \/>/);
+    expect(f()).toMatch(/const tabs = list \? FIELDLOGIC\.koreksiTabs\(list\) : \{ wait: \[\], done: \[\] \};/);
+    expect(f()).toMatch(/<FldSeg size="sm" label=\{trFl\('fld\.kSaya'\)\} value=\{seg\} onChange=\{setSeg\}/);
+  });
+  it('each card: status tag, the from → to box, the office decision box, withdraw / resubmit', () => {
+    expect(f()).toMatch(/<div className="mlap-fromto">/);
+    expect(f()).toMatch(/<div className=\{'mlap-decision ' \+ v\.tone\}>/);
+    expect(rule('KSAYA', '.mlap-fromto')).toMatch(/background: #F4F7F9;/);
+    expect(rule('KSAYA', '.mlap-kcard .mlap-tag.info')).toMatch(/background: #FCF1D6; color: #7A4B00;/);   // waiting = amber on this board
+  });
+  it('3C minor: a failed withdraw is said in place — the list stays', () => {
+    expect(f()).toMatch(/\.catch\(\(e\) => \{ setAsk\(null\); setMsg\(fldErrMsg\(e\) \|\| trFl\('fld\.kWithdrawErr'\)\); \}\)/);
+    expect(f()).not.toMatch(/setAsk\(null\); setErr\(e\);/);
+  });
+});

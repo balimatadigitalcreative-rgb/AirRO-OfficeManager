@@ -166,47 +166,63 @@ function FldKoreksiCust({ api, t, fromId, value, onChange }) {
   );
 }
 
-// KOREKSI SAYA — the driver's own requests (newest first): what was asked, its status, the office's
-// note. A waiting one can be withdrawn (after a confirm); a rejected or withdrawn one can be sent again.
+// KOREKSI SAYA (mockup KoreksiList board) — the driver's own requests in two segments (waiting / done):
+// what was asked as "from → to", the status, the office's decision. A waiting one can be withdrawn (after
+// a confirm); a rejected or withdrawn one can be sent again. A failed withdraw is said here; the list stays.
 function FldKoreksiSaya({ api, tick, onResubmit, onBack, onChanged }) {
   const [list, setList] = uSfl(null);
   const [err, setErr] = uSfl(null);
+  const [msg, setMsg] = uSfl('');
   const [ask, setAsk] = uSfl(null);
   const [busy, setBusy] = uSfl(false);
   const [reload, setReload] = uSfl(0);
+  const [seg, setSeg] = uSfl('wait');
   uEfl(() => {
     let live = true; setErr(null);
     api.myChangeRequests().then((r) => { if (live) setList(r || []); }).catch((e) => { if (live) setErr(e); });
     return () => { live = false; };
   }, [api, tick, reload]);
   const withdraw = () => {
-    setBusy(true);
+    setBusy(true); setMsg('');
     api.withdrawRequest(ask.id).then(() => { setAsk(null); setReload((x) => x + 1); onChanged(trFl('fld.kWithdrawn')); })
-      .catch((e) => { setAsk(null); setErr(e); }).finally(() => setBusy(false));
+      .catch((e) => { setAsk(null); setMsg(fldErrMsg(e) || trFl('fld.kWithdrawErr')); }).finally(() => setBusy(false));
   };
-  const line = ([k, v]) => trFl(k, k === 'fld.rl_pay' ? { a: trFl('fld.m_' + v.a), b: trFl('fld.m_' + v.b) } : k === 'fld.rl_amount' ? { a: FIELDLOGIC.fmtRp(v.a), b: FIELDLOGIC.fmtRp(v.b) } : v);
+  const tabs = list ? FIELDLOGIC.koreksiTabs(list) : { wait: [], done: [] };
+  const shown = seg === 'wait' ? tabs.wait : tabs.done;
+  const by = (r) => (r.decidedBy && r.decidedBy.name ? r.decidedBy.name : trFl('fld.kOffice'));
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.kSaya')} onBack={onBack} />
+      <FldBackHead onBack={onBack} title={trFl('fld.kSaya')} />
       <div className="mlap-body">
         {err ? <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /> : null}
+        {msg ? <div className="mlap-err" role="alert">{msg}</div> : null}
         {!list && !err ? <div className="mlap-empty">{trFl('fld.loading')}</div> : null}
-        {list && !list.length ? <div className="mlap-empty">{trFl('fld.kSayaEmpty')}</div> : null}
-        {list && list.map((r) => {
+        {list ? <FldSeg size="sm" label={trFl('fld.kSaya')} value={seg} onChange={setSeg} options={[['wait', trFl('fld.kTabWait', { n: tabs.wait.length })], ['done', trFl('fld.kTabDone', { n: tabs.done.length })]]} /> : null}
+        {list && !shown.length ? <div className="mlap-empty">{trFl('fld.kSayaEmpty')}</div> : null}
+        {shown.map((r) => {
           const v = FIELDLOGIC.requestView(r);
           return (
-            <div key={r.id} className="mlap-card mlap-sec">
-              <div className="mlap-row">
+            <div key={r.id} className="mlap-card mlap-kcard">
+              <div className="mlap-kcard-hd">
                 <span className="mlap-grow"><span className="nm">{r.customerName || r.fromCustomerName || '—'}</span><span className="sb">{[trFl(v.kindKey), r.txnRef, r.txnDate].filter(Boolean).join(' · ')}</span></span>
                 <span className={'mlap-tag ' + v.tone}>{trFl(v.statusKey)}</span>
               </div>
-              {v.lines.map((l) => <span key={l[0]} className="sb">{line(l)}</span>)}
-              {r.reason ? <span className="sb">{r.reason}</span> : null}
-              {r.decisionNote ? <span className="sb"><b>{trFl('fld.kOfficeNote', { note: r.decisionNote })}</b></span> : null}
-              <div className="mlap-actions">
-                {v.canWithdraw ? <button type="button" className="mlap-btn" disabled={busy} onClick={() => setAsk(r)}>{trFl('fld.kWithdraw')}</button> : null}
-                {v.canResubmit && v.target.transactionId ? <button type="button" className="mlap-btn primary" onClick={() => onResubmit(v.target)}>{trFl('fld.kResubmit')}</button> : null}
-              </div>
+              {v.changes.length ? (
+                <div className="mlap-fromto">
+                  {v.changes.map((ch) => (
+                    <React.Fragment key={ch.key}>
+                      <span className="k">{trFl(ch.key)}</span>
+                      <span className="v"><s>{fldValText(ch.type, ch.a)}</s><FldSvg n="arrowRight" s={12} sw={2.4} /><b>{fldValText(ch.type, ch.b)}</b></span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              ) : null}
+              {r.reason ? <span className="mlap-kreason">{r.reason}</span> : null}
+              {r.decisionNote ? (
+                <div className={'mlap-decision ' + v.tone}><b>{trFl(r.status === 'rejected' ? 'fld.kRejectedBy' : r.status === 'approved' ? 'fld.kApprovedBy' : 'fld.kWithdrawnBy', { name: by(r) })}</b><span>{r.decisionNote}</span></div>
+              ) : null}
+              {v.canWithdraw ? <button type="button" className="mlap-btn soft" disabled={busy} onClick={() => setAsk(r)}>{trFl('fld.kWithdrawFull')}</button> : null}
+              {v.canResubmit && v.target.transactionId ? <button type="button" className="mlap-btn primary" onClick={() => onResubmit(v.target)}>{trFl('fld.kResubmit')}</button> : null}
             </div>
           );
         })}
