@@ -327,6 +327,26 @@ Semua teks memakai `finance-i18n.js` (EN + ID), dengan prefix kunci `fld.*`.
 - Daftar bon tertua di Pembayaran bon hanya untuk tampilan. Di Mode latihan, hanya transaksi latihan
   yang terlihat.
 
+**Sesuai yang dibangun (Rencana 3C, 2026-10-01): koreksi, Koreksi saya, rilis.**
+- `dist-field-koreksi.jsx`:
+  - **Koreksi transaksi** dari stop Terkirim, dengan pilihan:
+    - Pelanggan salah: saran pelanggan terdekat dari lokasi foto, lalu cari;
+    - Jumlah galon;
+    - Cara bayar Lunas/Bon/Transfer;
+    - Nominal pelunasan;
+    - Batalkan.
+  - **Koreksi saya** (dari Setoran dan menu): Tarik saat Menunggu, Ajukan ulang saat Ditolak/Ditarik.
+- Semua lewat mesin persetujuan yang ada. Transaksi asli tetap berlaku sampai disetujui. Ganti rugi
+  hanya bisa dibatalkan.
+- **Koreksi cara bayar di server:** `payMethod` tunai↔transfer, dengan foto bukti transfer (`PROOF_REQUIRED`).
+  Saat disetujui, uang pindah Kas → Bank. Pratinjau tidak meminta foto. Alasan untuk kantor menyebut
+  perubahan cara bayar dalam bahasa Indonesia, karena kotak persetujuan lama tidak menampilkannya.
+- **Koreksi saya** terbuka untuk `distribusiKoreksi` atau `distribusiVoid`. Tarik dilakukan dengan satu
+  tulis bersyarat, sehingga tidak pernah menimpa keputusan.
+- Setoran memberi tahu kalau hari sudah ditutup dan meminta konfirmasi sebelum menutup lagi. Catatan
+  lama tetap ada kecuali diganti.
+- **Rilis:** `FLD_SCREENS_READY = true`. Tombol "Jadikan tampilan utama" (khusus Owner) kini aktif.
+
 ### 5. Rilis
 
 1. **Demo:** deploy dengan semua saklar aturan mati. Hanya akun berizin yang melihat tampilan baru.
