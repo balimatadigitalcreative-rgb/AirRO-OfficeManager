@@ -283,3 +283,37 @@ describe('Final review fixes (practice)', () => {
     expect((await api.context()).galonNeedsApproval).toBe(true);
   });
 });
+
+describe('Plan 3C: corrections in practice follow the server', () => {
+  const sale = async (api, cid, method, extra) => { const ph = await api.uploadPhoto({ data: 'x' }); return api.createSale(Object.assign({ customerId: cid, qty: 2, gallonOut: 2, method, payMethod: 'tunai', proofPhotoId: ph.id, proofLat: -8.6, proofLng: 115.2 }, extra || {})); };
+  it('preview + transfer needs a photo + the request has the server shape + it shows as pending on the transaction', async () => {
+    const { api } = make();
+    const t = await sale(api, 'c2', 'lunas');
+    const body = { qty: 2, unitPrice: 18000, gallonOut: 2, gallonIn: 0, method: 'lunas', payMethod: 'transfer' };
+    expect(await api.previewCorrection(t.id, body)).toMatchObject({ oldAmount: 36000, newAmount: 36000, payMethod: 'tunai', requestedPayMethod: 'transfer' });
+    expect(await code(api.requestCorrection(t.id, Object.assign({ reason: 'transfer' }, body)))).toBe('PROOF_REQUIRED');
+    const ph = await api.uploadPhoto({ data: 'y' });
+    await api.requestCorrection(t.id, Object.assign({ reason: 'transfer', proofPhotoId: ph.id }, body));
+    const r = (await api.myChangeRequests())[0];
+    expect(r).toMatchObject({ kind: 'correction', status: 'pending', customerId: 'c2', customerName: 'Bu Ketut', transactionId: t.id, current: { method: 'lunas', payMethod: 'tunai' }, requested: { payMethod: 'transfer' } });
+    const d = await api.customerDetail('c2');
+    expect(d.transactions[0]).toMatchObject({ id: t.id, unitPriceLocked: 18000, gallonOut: 2, gallonIn: 0, proofLat: -8.6, pendingRequest: { id: r.id } });
+    expect((await api.withdrawRequest(r.id)).status).toBe('withdrawn');
+  });
+  it('moving a bon sale to another customer previews both customers\' bon and gallons', async () => {
+    const { api } = make();
+    const t = await sale(api, 'c1', 'bon', { qty: 1, gallonOut: 1 });
+    const p = await api.previewReassign({ fromCustomerId: 'c1', toCustomerId: 'c2', transactionIds: [t.id] });
+    expect(p.fromCustomer).toMatchObject({ id: 'c1', sisaBonBefore: 63000, sisaBonAfter: 45000, gallonsBefore: 7, gallonsAfter: 6 });
+    expect(p.toCustomer).toMatchObject({ id: 'c2', sisaBonBefore: 0, sisaBonAfter: 18000, gallonsBefore: 3, gallonsAfter: 4 });
+  });
+  it('the day summary knows the day is closed; closing again keeps one closeout and the earlier note', async () => {
+    const { api } = make();
+    expect((await api.daySummary()).closeout).toBeNull();
+    await api.closeDay({ reasons: { s1: 'tutup', s2: 'tutup' }, generalNote: 'n1' });
+    expect((await api.daySummary()).closeout).toMatchObject({ generalNote: 'n1' });
+    await api.closeDay({ reasons: {}, generalNote: '' });
+    expect((await api.daySummary()).closeout.generalNote).toBe('n1');
+    expect(api.exportState().closeouts.length).toBe(1);
+  });
+});

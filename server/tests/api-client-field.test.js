@@ -39,7 +39,7 @@ it('the owner rules screen is never tagged', async () => {
 });
 it('the field namespace covers every adaptor method', () => {
   const { API } = loadApi();
-  ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo', 'outstanding', 'position', 'customer']
+  ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo', 'outstanding', 'position', 'customer', 'previewCorrect', 'previewReassign']
     .forEach((m) => expect(typeof API.distribusi.field[m]).toBe('function'));
 });
 it('outstanding is a tagged read scoped to the armada', async () => {
@@ -61,4 +61,13 @@ it('customer detail is a tagged read', async () => {
   await API.distribusi.field.customer('c 1');
   expect(calls[0]).toMatchObject({ method: 'GET', url: 'http://x/api/v1/distribusi/customers/c%201' });
   expect(calls[0].headers['X-Airro-Ui']).toBe('field');
+});
+
+it('Plan 3C: the correction previews are field calls (tagged)', async () => {
+  const { API, calls } = loadApi();
+  await API.distribusi.field.previewCorrect('t1', { qty: 1 });
+  await API.distribusi.field.previewReassign({ fromCustomerId: 'a' });
+  expect(calls[0].url).toBe('http://x/api/v1/distribusi/transactions/t1/corrections/preview');
+  expect(calls[1].url).toBe('http://x/api/v1/distribusi/change-requests/reassign/preview');
+  calls.forEach((c) => { expect(c.method).toBe('POST'); expect(c.headers['X-Airro-Ui']).toBe('field'); });
 });

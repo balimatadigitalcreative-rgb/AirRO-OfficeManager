@@ -289,6 +289,8 @@
         gallonDamage: (id, body) => freq('POST', '/distribusi/customers/' + id + '/gallon-damage', body),
         expense: (body) => freq('POST', '/distribusi/expenses', body),
         correct: (id, body) => freq('POST', '/distribusi/transactions/' + id + '/corrections', body),
+        previewCorrect: (id, body) => freq('POST', '/distribusi/transactions/' + id + '/corrections/preview', body),
+        previewReassign: (body) => freq('POST', '/distribusi/change-requests/reassign/preview', body),
         void: (id, body) => freq('POST', '/distribusi/transactions/' + id + '/void', body),
         reassign: (body) => freq('POST', '/distribusi/change-requests/reassign', body),
         withdraw: (id) => freq('POST', '/distribusi/change-requests/' + id + '/withdraw', {}),

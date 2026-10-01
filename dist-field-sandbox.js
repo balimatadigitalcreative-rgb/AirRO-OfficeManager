@@ -90,13 +90,38 @@
       return { proofPhotoId: id, proofTakenAt: body.proofTakenAt || null, proofLat: body.proofLat != null ? +body.proofLat : null, proofLng: body.proofLng != null ? +body.proofLng : null };
     }
     function pushTxn(t) { t.id = nid('txn'); t.status = 'active'; t.createdAt = now().getTime(); t.txnDate = t.txnDate || s.date; t.fleetId = t.fleetId || s.fleet; s.txns.push(t); return t; }
+    function refOf(id) { return String(id || '').slice(-6).toUpperCase(); }
     function pushRequest(t, kind, body) {
       var b = body || {};
       if (!String(b.reason || '').trim()) throw fail(400, 'Alasan wajib diisi.');
       if (s.requests.some(function (r) { return r.transactionId === t.id && r.status === 'pending'; })) throw fail(400, 'Sudah ada pengajuan menunggu persetujuan untuk transaksi ini.');
       var payload = Object.assign({}, b); delete payload.reason;
-      var r = { id: nid('req'), transactionId: t.id, kind: kind, status: 'pending', reason: String(b.reason), payload: payload, createdAt: now().getTime(), decisionNote: '' };
+      var c = s.customers[t.customerId] || {};
+      var r = { id: nid('req'), transactionId: t.id, customerId: t.customerId, customerName: c.name || '', customerCode: c.code || '', txnRef: refOf(t.id), txnDate: t.txnDate,
+        kind: kind, status: 'pending', reason: String(b.reason), payload: payload, createdAt: now().getTime(), decisionNote: '',
+        current: { qty: t.qty, amount: t.amount, method: t.method, payMethod: t.payMethod || '' },
+        requested: kind === 'correction' ? { qty: payload.qty, amount: payload.amount, method: payload.method || t.method, payMethod: payload.payMethod } : null };
+      if (kind === 'reassign') { var to = s.customers[payload.toCustomerId] || {}; r.fromCustomerId = t.customerId; r.toCustomerId = payload.toCustomerId; r.toCustomerName = to.name || ''; r.transactionIds = payload.transactionIds || [t.id]; }
       s.requests.push(r); return r;
+    }
+    function pendingOf(txnId) { var r = s.requests.find(function (x) { return x.status === 'pending' && (x.transactionId === txnId || (x.transactionIds || []).indexOf(txnId) >= 0); }); return r ? { id: r.id, kind: r.kind } : null; }
+    // Same rules as the server's normalizeCorrection (preview skips the transfer photo).
+    function correctionPlan(t, b, preview) {
+      if (t.kind === 'ganti_rugi') throw fail(400, 'Ganti rugi galon tidak bisa dikoreksi — ajukan pembatalan lalu catat ulang.');
+      var c = s.customers[t.customerId] || {};
+      if (t.method === 'pelunasan') {
+        var amt = int(b.amount); if (amt <= 0) throw fail(400, 'Jumlah harus lebih dari 0.');
+        return { newAmount: amt, method: 'pelunasan', payMethod: t.payMethod || '', bonDelta: t.amount - amt, sisaBon: c.sisaBon };
+      }
+      var qty = int(b.qty); if (qty <= 0) throw fail(400, 'Jumlah galon harus lebih dari 0.');
+      var method = b.method === 'bon' || b.method === 'lunas' ? b.method : t.method;
+      var payMethod = method === 'bon' ? '' : (b.payMethod === 'transfer' ? 'transfer' : b.payMethod === 'tunai' ? 'tunai' : (t.payMethod || 'tunai'));
+      if (payMethod === 'transfer' && !(t.method === 'lunas' && t.payMethod === 'transfer') && !preview) {
+        if (!b.proofPhotoId) throw fail(400, 'Foto bukti transfer wajib dilampirkan.', 'PROOF_REQUIRED');
+        if (!photoOk(b.proofPhotoId)) throw fail(400, 'Foto bukti transfer tidak ditemukan — unggah ulang fotonya.', 'PROOF_MISSING');
+      }
+      var newAmount = qty * t.unitPriceLocked;
+      return { newAmount: newAmount, method: method, payMethod: payMethod, bonDelta: (method === 'bon' ? newAmount : 0) - (t.method === 'bon' ? t.amount : 0), sisaBon: c.sisaBon };
     }
     // IDEMPOTENCY (like the server): a write retried with the same clientRef returns the saved row.
     function replay(ref, customerId) {
@@ -123,7 +148,7 @@
         var c = cust(id);
         // newest first by RECORDING order (two writes in the same millisecond must not swap)
         var txns = s.txns.filter(function (t) { return t.customerId === id; }).slice().reverse()
-          .map(function (t) { return { id: t.id, txnDate: t.txnDate, method: t.method, kind: t.kind, qty: t.qty, amount: t.amount, effectiveAmount: t.amount, status: t.status, payMethod: t.payMethod, createdAt: t.createdAt }; });
+          .map(function (t) { return { id: t.id, txnDate: t.txnDate, method: t.method, kind: t.kind, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, effectiveAmount: t.amount, status: t.status, payMethod: t.payMethod || '', gallonOut: t.gallonOut || 0, gallonIn: t.gallonIn || 0, proofPhotoId: t.proofPhotoId || null, proofLat: t.proofLat != null ? t.proofLat : null, proofLng: t.proofLng != null ? t.proofLng : null, createdAt: t.createdAt, pendingRequest: pendingOf(t.id) }; });
         return Object.assign(custView(c), { transactions: txns });
       }),
       runs: run(function () { return s.runs.filter(function (r) { return r.date === s.date && r.fleetId === s.fleet; }); }),
@@ -276,9 +301,23 @@
         s.expenses.push(x); return W(x);
       }),
 
+      previewCorrection: run(function (txnId, body) {
+        var t = txnOf(txnId); var p = correctionPlan(t, body || {}, true);
+        return { oldAmount: t.amount, newAmount: p.newAmount, delta: p.newAmount - t.amount, method: t.method, requestedMethod: p.method, methodChanged: p.method !== t.method,
+          payMethod: t.payMethod || '', requestedPayMethod: p.payMethod, oldSisaBon: p.sisaBon, newSisaBon: Math.max(0, p.sisaBon + p.bonDelta), bonDelta: p.bonDelta, wouldGoNegative: p.sisaBon + p.bonDelta < 0 };
+      }),
+      previewReassign: run(function (body) {
+        var b = body || {}; var ids = b.transactionIds || [];
+        if (!ids.length) throw fail(400, 'Pilih transaksi yang dipindahkan.');
+        var from = cust(b.fromCustomerId); var to = cust(b.toCustomerId);
+        if (from.id === to.id) throw fail(400, 'Pelanggan tujuan harus berbeda dari pelanggan asal.');
+        var bon = 0; var gal = 0;
+        ids.forEach(function (i) { var t = txnOf(i); if (t.kind === 'ganti_rugi') throw fail(400, 'Ganti rugi galon tidak bisa dipindahkan ke pelanggan lain — ajukan pembatalan lalu catat ulang.'); if (t.method === 'bon') bon += t.amount; gal += (t.gallonOut || 0) - (t.gallonIn || 0); });
+        return { fromCustomer: { id: from.id, name: from.name, code: from.code || '', sisaBonBefore: from.sisaBon, sisaBonAfter: Math.max(0, from.sisaBon - bon), gallonsBefore: from.gallonsHeld, gallonsAfter: from.gallonsHeld - gal },
+          toCustomer: { id: to.id, name: to.name, code: to.code || '', sisaBonBefore: to.sisaBon, sisaBonAfter: to.sisaBon + bon, gallonsBefore: to.gallonsHeld, gallonsAfter: to.gallonsHeld + gal }, count: ids.length, blocks: [] };
+      }),
       requestCorrection: run(function (txnId, body) {
-        var t = txnOf(txnId);
-        if (t.kind === 'ganti_rugi') throw fail(400, 'Ganti rugi galon tidak bisa dikoreksi — ajukan pembatalan lalu catat ulang.');
+        var t = txnOf(txnId); correctionPlan(t, body || {}, false);
         return W(pushRequest(t, 'correction', body));
       }),
       requestVoid: run(function (txnId, body) { return W(pushRequest(txnOf(txnId), 'void', body)); }),
@@ -302,8 +341,10 @@
         if (pend.some(function (st) { return !String(reasons[st.id] || '').trim(); })) throw fail(400, 'Isi alasan untuk setiap pengiriman yang belum tuntas.');
         pend.forEach(function (st) { st.status = 'ditunda'; st.pendingReason = String(reasons[st.id]).slice(0, 300); });
         var delivered = s.stops.filter(function (st) { return st.date === s.date && st.fleetId === s.fleet && st.status === 'terkirim'; }).length;
-        var co = { id: nid('close'), date: s.date, fleetId: s.fleet, closedByName: null, closedAt: now().getTime(), generalNote: String(b.generalNote || '').slice(0, 500), delivered: delivered, pending: pend.length };
-        s.closeouts.push(co);
+        var prev = s.closeouts.filter(function (x) { return x.date === s.date && x.fleetId === s.fleet; })[0];
+        var note = String(b.generalNote || '').trim() ? String(b.generalNote).slice(0, 500) : (prev ? prev.generalNote : '');
+        var co = { id: prev ? prev.id : nid('close'), date: s.date, fleetId: s.fleet, closedByName: null, closedAt: now().getTime(), generalNote: note, delivered: delivered, pending: pend.length };
+        s.closeouts = s.closeouts.filter(function (x) { return x !== prev; }).concat([co]);
         return W(co);   // the server's response, unwrapped, is the closeout itself
       }),
       // Same buckets as GET /deliveries/day-summary.
@@ -320,6 +361,8 @@
         s.stops.filter(function (st) { return st.date === s.date && st.fleetId === s.fleet; }).forEach(function (st) { if (out.stops[st.status] != null) out.stops[st.status] += 1; });
         out.koreksiMenunggu = s.requests.filter(function (r) { return r.status === 'pending'; }).length;
         out.ritDiBawahSop = s.runs.filter(function (r) { return r.date === s.date && r.fleetId === s.fleet && r.underSopReason; }).map(function (r) { return { runNo: r.runNo, gallonsOut: r.gallonsOut, reason: r.underSopReason }; });
+        var co = s.closeouts.filter(function (x) { return x.date === s.date && x.fleetId === s.fleet; })[0];
+        out.closeout = co ? { closedAt: co.closedAt, closedByName: co.closedByName, generalNote: co.generalNote } : null;
         return out;
       }),
       // Practice photos stay on the phone. With a photo store (the phone's IndexedDB) the bytes live

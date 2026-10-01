@@ -11,7 +11,7 @@
   if (root) root.FIELDAPI = api;                                               // browser (global)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this), function (root) {
   'use strict';
-  var METHODS = ['context', 'board', 'customers', 'customerDetail', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'outstanding', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo', 'position'];
+  var METHODS = ['context', 'board', 'customers', 'customerDetail', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'outstanding', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'previewCorrection', 'previewReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo', 'position'];
   var unwrap = function (r) { return r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, 'data') ? r.data : r; };
   var U = function (p) { return Promise.resolve(p).then(unwrap); };
   var A = function (base, extra) { return Object.assign({}, base || {}, extra || {}); };
@@ -29,7 +29,8 @@
       runs: function () { return U(F.runs(c.date, c.fleet)); },
       ritRoute: function () { return U(F.ritRoute(c.date, c.fleet)); },
       daySummary: function () { return U(F.daySummary(c.date, c.fleet)); },
-      myChangeRequests: function () { return U(F.myChangeRequests()); },
+      // Koreksi saya needs distribusiKoreksi or distribusiVoid — without either it is an empty list.
+      myChangeRequests: function () { return U(F.myChangeRequests()).catch(function (e) { if (e && e.status === 403) return []; throw e; }); },
       // "Belum terkirim" needs distribusiBelumTerkirim, which drivers do not hold → empty, not an error.
       outstanding: function () { return U(F.outstanding(c.fleet)).catch(function (e) { if (e && e.status === 403) return []; throw e; }); },
       markStop: function (id, b) { return U(F.mark(id, b)); },
@@ -50,6 +51,8 @@
       requestCorrection: function (id, b) { return U(F.correct(id, b)); },
       requestVoid: function (id, b) { return U(F.void(id, b)); },
       requestReassign: function (b) { return U(F.reassign(b)); },
+      previewCorrection: function (id, b) { return U(F.previewCorrect(id, b)); },
+      previewReassign: function (b) { return U(F.previewReassign(b)); },
       withdrawRequest: function (id) { return U(F.withdraw(id)); },
       closeDay: function (b) { return U(F.closeDay(A({ date: c.date, fleet: c.fleet }, b))); },
       uploadPhoto: function (b) { return U(F.upload(b)); },
