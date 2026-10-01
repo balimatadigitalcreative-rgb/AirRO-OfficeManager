@@ -5,7 +5,7 @@
 const fs = require('fs'); const path = require('path'); const { parse } = require('@babel/parser');
 const root = path.join(__dirname, '..', '..');
 const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
-const jsx = read('dist-field.jsx'); const allJsx = ['dist-field-kit.jsx', 'dist-field-day.jsx', 'dist-field.jsx'].filter((f) => fs.existsSync(path.join(root, f))).map(read).join('\n'); const css = read('dist-field.css'); const i18n = read('finance-i18n.js'); const build = read('build.mjs'); const html = read('index.html');
+const jsx = read('dist-field.jsx'); const allJsx = ['dist-field-kit.jsx', 'dist-field-day.jsx', 'dist-field-cust.jsx', 'dist-field.jsx'].filter((f) => fs.existsSync(path.join(root, f))).map(read).join('\n'); const css = read('dist-field.css'); const i18n = read('finance-i18n.js'); const build = read('build.mjs'); const html = read('index.html');
 
 it('parses and ships', () => {
   expect(() => parse(jsx, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow();
@@ -15,7 +15,7 @@ it('parses and ships', () => {
   expect(jsx).toMatch(/window\.FIELD = \{ App: FldApp, RulesScreen: FldRules \}/);
 });
 it('top-level names in every field file are unique across the whole bundle (one shared scope)', () => {
-  const fieldFiles = ['dist-field-kit.jsx', 'dist-field-day.jsx', 'dist-field.jsx'].filter((f) => fs.existsSync(path.join(root, f)));
+  const fieldFiles = ['dist-field-kit.jsx', 'dist-field-day.jsx', 'dist-field-cust.jsx', 'dist-field.jsx'].filter((f) => fs.existsSync(path.join(root, f)));
   const namesOf = (src) => [...src.matchAll(/^(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1])
     .concat([...src.matchAll(/^const \{([^}]*)\} = React;/gm)].flatMap((m) => m[1].split(',').map((x) => x.split(':').pop().trim())));
   const bundled = [...build.matchAll(/'([\w.-]+\.jsx?)'/g)].map((m) => m[1]).filter((f) => fs.existsSync(path.join(root, f)));

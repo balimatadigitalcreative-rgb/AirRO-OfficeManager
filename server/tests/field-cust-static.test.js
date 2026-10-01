@@ -1,0 +1,34 @@
+'use strict';
+// FIELD CUSTOMER SCREENS (static): parse, ship after the day screens, use only the adaptor, keep the
+// owner's rules, and every fld.* key literal exists in EN + ID.
+const fs = require('fs'); const path = require('path'); const { parse } = require('@babel/parser');
+const root = path.join(__dirname, '..', '..');
+const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+const cust = read('dist-field-cust.jsx'); const build = read('build.mjs');
+const fn = (name) => { const i = cust.indexOf('function ' + name + '('); expect(i).toBeGreaterThan(-1); const j = cust.indexOf('\nfunction ', i + 10); return cust.slice(i, j < 0 ? undefined : j); };
+
+it('parses, ships after the day screens, never calls the server directly', () => {
+  expect(() => parse(cust, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow();
+  expect(build).toMatch(/'dist-field-day\.jsx',\s*'dist-field-cust\.jsx',\s*'dist-field\.jsx',/);
+  expect(cust).not.toMatch(/window\.API|fetch\(/);
+});
+it('every fld.* key written literally exists in EN and ID', () => {
+  const i18n = read('finance-i18n.js');
+  const keys = [...new Set([...cust.matchAll(/["'](fld\.[A-Za-z0-9_]+)["']/g)].map((m) => m[1]))];
+  expect(keys.length).toBeGreaterThan(5);
+  keys.forEach((k) => expect({ k, n: (i18n.match(new RegExp("'" + k.replace('.', '\\.') + "':", 'g')) || []).length }).toEqual({ k, n: 2 }));
+});
+describe('Pelanggan', () => {
+  it('search + the four filters from the shared list logic', () => {
+    const f = fn('FldCustomers');
+    expect(f).toMatch(/FIELDLOGIC\.customerList\(list, \{ q, filter \}\)/);
+    ['fld.f_all', 'fld.f_warn', 'fld.f_bon', 'fld.f_fixed'].forEach((k) => expect(f).toContain("'" + k + "'"));
+  });
+  it('the sheet only offers actions the account may use and that make sense', () => {
+    const f = fn('FldCustSheet');
+    expect(f).toMatch(/can\.bon && c\.sisaBon > 0/);
+    expect(f).toMatch(/can\.damage && c\.gallonsHeld > 0/);
+    expect(f).toMatch(/can\.location && c\.gaps\.count > 0/);
+    expect(f).toMatch(/can\.addStop/);
+  });
+});

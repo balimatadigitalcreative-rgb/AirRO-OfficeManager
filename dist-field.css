@@ -194,6 +194,10 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-search { min-height: 48px; }
 .mlap-rowbtn:disabled { opacity: .55; cursor: not-allowed; }
 .mlap-step, .mlap-chip-b, .mlap-seg-b { min-height: 44px; }
+/* ── PELANGGAN ── */
+.mlap-ava { width: 36px; height: 36px; border-radius: 12px; flex-shrink: 0; display: grid; place-items: center; background: var(--mlap-accent-soft); color: var(--mlap-accent); font-size: 13px; font-weight: 800; }
+.mlap-gapline { font-size: 12px; font-weight: 600; color: var(--mlap-warn); }
+.mlap-actlist { display: flex; flex-direction: column; gap: 8px; }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }
