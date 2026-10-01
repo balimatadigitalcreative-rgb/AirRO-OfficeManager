@@ -114,6 +114,41 @@ input.mlap-stepval { border: 0; background: transparent; color: var(--mlap-ink);
 .mlap-photo-btn { width: 100%; min-height: 96px; border: 1.5px dashed #9FB3C2; border-radius: 14px; background: var(--mlap-accent-soft); color: var(--mlap-accent); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit; cursor: pointer; padding: 10px; text-align: center; }
 .mlap-photo-has { display: flex; align-items: center; gap: 10px; }
 .mlap-photo-has img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; }
+/* ── PENGIRIMAN + DETAIL STOP ── */
+.mlap-rowbtn { width: 100%; border: 0; border-bottom: 1px solid var(--mlap-line); background: transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.mlap-row .nm { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.mlap-warn-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--mlap-warn-soft); color: var(--mlap-warn); font-size: 11px; font-weight: 800; display: inline-grid; place-items: center; border: 1px solid var(--mlap-warn-line); }
+.mlap-tag.ok { background: var(--mlap-ok-soft); color: var(--mlap-ok); }
+.mlap-tag.held { background: var(--mlap-bon-soft); color: var(--mlap-bon); }
+.mlap-tag.neg { background: var(--mlap-neg-soft); color: var(--mlap-neg); }
+.mlap-tag.pin { background: #EEE9F8; color: #4B3A8C; }
+.mlap-tag.info { background: var(--mlap-accent-soft); color: var(--mlap-accent); }
+.mlap-tag.bon { background: var(--mlap-bon-soft); color: var(--mlap-bon); }
+.mlap-run { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.mlap-run-l { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 15px; }
+.mlap-run-big { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--mlap-accent); }
+.mlap-next { padding: 12px; display: flex; flex-direction: column; gap: 10px; border: 1.5px solid #BFD6E8; }
+.mlap-next-hd { border: 0; background: transparent; text-align: left; padding: 0; font: inherit; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.mlap-next-hd .mlap-eyebrow { padding: 0; color: var(--mlap-accent); }
+.mlap-next-nm { font-size: 20px; font-weight: 700; }
+.mlap-chip-s { height: 26px; display: inline-flex; align-items: center; padding: 0 10px; border-radius: 13px; background: var(--mlap-bg); font-size: 12px; font-weight: 600; }
+.mlap-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+a.mlap-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.mlap-btn.off { opacity: .45; pointer-events: none; }
+.mlap-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 10px; }
+.mlap-facts > div { padding: 9px 12px; display: flex; flex-direction: column; gap: 1px; border-right: 1px solid var(--mlap-line); }
+.mlap-facts > div:last-child { border-right: 0; }
+.mlap-facts b { font-size: 16px; }
+.mlap-checks { margin-bottom: 10px; }
+.mlap-check-hd { padding: 10px 12px 4px; font-size: 13px; font-weight: 700; color: var(--mlap-warn); }
+.mlap-check { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; }
+.mlap-dot { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 12px; font-weight: 800; }
+.mlap-dot.ok { background: var(--mlap-ok-soft); color: var(--mlap-ok); }
+.mlap-dot.miss { background: var(--mlap-surface); color: var(--mlap-warn); border: 1.5px solid #E8A07A; box-sizing: border-box; }
+.mlap-reason { padding: 12px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.mlap-reason.warn { background: var(--mlap-warn-soft); border: 1px solid var(--mlap-warn-line); }
+.mlap-sheet .mlap-note { margin-bottom: 10px; }
+.mlap-sheet .mlap-actions { margin-bottom: 8px; }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

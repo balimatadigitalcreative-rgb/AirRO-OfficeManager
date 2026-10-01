@@ -77,6 +77,7 @@ const FILES = [
   'distribution.jsx',
   'dist-zones.jsx',
   'dist-field-kit.jsx',
+  'dist-field-day.jsx',
   'dist-field.jsx',
   'gudang.jsx',
   'finance-shell.jsx',
