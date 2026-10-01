@@ -2063,6 +2063,13 @@ async function listMyChangeRequests(user) {
 // Withdraw a request the caller submitted, while it is still pending. ONE conditional write (own +
 // pending), so an approval landing between the read and the write can never be turned into 'withdrawn'.
 const withdrawWhere = (id, actorId) => ({ id, requestedById: actorId, status: 'pending' });
+// A decision lands only on a request that is STILL pending — one conditional write, so a withdraw (or
+// another approver) that got there first wins; inside an approval's transaction it rolls the apply back.
+async function claimPending(db, id, data) {
+  const r = await db.distChangeRequest.updateMany({ where: { id, status: 'pending' }, data });
+  if (!r.count) throw ApiError.badRequest('Pengajuan ini sudah diputuskan atau ditarik.');
+  return db.distChangeRequest.findUnique({ where: { id } });
+}
 async function withdrawChangeRequest(id, actor) {
   const req = await prisma.distChangeRequest.findUnique({ where: { id } });
   if (!req || !actor || req.requestedById !== actor.id) throw ApiError.notFound('Pengajuan tidak ditemukan.');
@@ -2090,12 +2097,13 @@ async function decideChangeRequest(id, decision, body, actor) {
     if (decision === 'reject') {
       const note = String(body.note || '').trim();
       if (!note) throw ApiError.badRequest('Alasan penolakan wajib diisi.');
-      const updated = await prisma.distChangeRequest.update({ where: { id }, data: { status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date() } });
+      const updated = await claimPending(prisma, id, { status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date() });
       await logAudit('koreksi', 'Tolak aktivasi standar biaya', note, snap, '');
       return changeRequestClient(updated);
     }
-    await require('./costing.service').activateStandard(payload.standardId || req.transactionId, req.id, snap);
-    const updated = await prisma.distChangeRequest.update({ where: { id }, data: { status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelfStd } });
+    const updated = await claimPending(prisma, id, { status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelfStd });
+    try { await require('./costing.service').activateStandard(payload.standardId || req.transactionId, req.id, snap); }
+    catch (err) { await prisma.distChangeRequest.updateMany({ where: { id, status: 'approved' }, data: { status: 'pending', decidedById: null, decidedByName: null, decidedByRole: null, decidedAt: null, selfApproved: false } }); throw err; }
     await logAudit('koreksi', `Setujui aktivasi standar biaya${isSelfStd ? ' [MANDIRI]' : ''}`, `standar ${payload.standardId || req.transactionId} v${payload.version || '?'}`, snap, '', isSelfStd);
     return changeRequestClient(updated);
   }
@@ -2114,9 +2122,9 @@ async function decideChangeRequest(id, decision, body, actor) {
   if (decision === 'reject') {
     const note = String(body.note || '').trim();
     if (!note) throw ApiError.badRequest('Alasan penolakan wajib diisi.');
-    const updated = await prisma.distChangeRequest.update({ where: { id }, data: {
+    const updated = await claimPending(prisma, id, {
       status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date(),
-    } });
+    });
     await logAudit('koreksi', `Tolak ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${note}`, snap, req.fleetId);
     return changeRequestClient(updated, txn);   // nothing on the txn changed
   }
@@ -2152,6 +2160,9 @@ async function decideChangeRequest(id, decision, body, actor) {
     }
   }
   await prisma.$transaction(async (db) => {
+    await claimPending(db, id, {
+      status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelf,
+    });
     if (req.kind === 'void') {
       await db.gallonMovement.updateMany({ where: { transactionId: txn.id, active: true }, data: { active: false } });
       await db.distTransaction.update({ where: { id: txn.id }, data: {
@@ -2188,9 +2199,6 @@ async function decideChangeRequest(id, decision, body, actor) {
         oldValue: JSON.stringify(oldVals), newValue: JSON.stringify(newVals),
         actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName, byStaff: false } });
     }
-    await db.distChangeRequest.update({ where: { id }, data: {
-      status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelf,
-    } });
     // LIVE POSTING: an approved correction/void APPENDS an adjusting journal that moves this txn's
     // journals to its new effective figure (a void → fully reversed) — the original entry is never
     // edited — plus the customer's AR reclass, all in this same transaction (flag-gated).
@@ -2236,6 +2244,7 @@ async function computeReassign(body, actor) {
   if (!fromC) throw ApiError.notFound('Pelanggan asal tidak ditemukan.');
   if (!toC) throw ApiError.notFound('Pelanggan tujuan tidak ditemukan.');
   if (toC.active === false) throw ApiError.badRequest('Pelanggan tujuan non-aktif — pilih pelanggan yang aktif.');
+  if (!fleetAllows(actor, toC.armada)) throw ApiError.notFound('Pelanggan tujuan tidak ditemukan.');   // the target too must be in the requester's armada scope
   if (!fleetAllows(actor, fromC.armada)) throw ApiError.notFound('Pelanggan asal tidak ditemukan.');   // out of fleet scope
   const txns = await prisma.distTransaction.findMany({ where: { id: { in: txnIds } }, include: { corrections: true, customer: { select: { name: true, code: true } } } });
   if (txns.some((t) => t.kind === 'ganti_rugi')) throw ApiError.badRequest('Ganti rugi galon tidak bisa dipindahkan ke pelanggan lain — ajukan pembatalan lalu catat ulang.');
@@ -2321,7 +2330,7 @@ async function decideReassign(req, decision, body, actor, snap) {
   if (decision === 'reject') {
     const note = String(body.note || '').trim();
     if (!note) throw ApiError.badRequest('Alasan penolakan wajib diisi.');
-    const updated = await prisma.distChangeRequest.update({ where: { id: req.id }, data: { status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date() } });
+    const updated = await claimPending(prisma, req.id, { status: 'rejected', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: note, decidedAt: new Date() });
     await logAudit('koreksi', 'Tolak pindah pelanggan', note, snap, req.fleetId);
     return changeRequestClient(updated);
   }
@@ -2335,6 +2344,7 @@ async function decideReassign(req, decision, body, actor, snap) {
   if (isSelf) assertSelfApprovalAllowed(snap, impact.movedOldTotal, 'pemindahan');
   const fromId = impact.fromCustomer.id, toId = impact.toCustomer.id, priceMode = impact.priceMode;
   await prisma.$transaction(async (db) => {
+    await claimPending(db, req.id, { status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelf });
     for (const r of impact.rows) {
       const data = { customerId: toId };
       if (r.sale && priceMode === 'recalc' && r.recalcAmount !== r.oldAmount) { data.unitPriceLocked = r.destPrice; data.amount = r.recalcAmount; }
@@ -2349,7 +2359,6 @@ async function decideReassign(req, decision, body, actor, snap) {
         await acc.reconcileDistTxn(updated, `reassign:${req.id}`, actor, db);   // recalc amount → adjusting journal (never edits the original)
       }
     }
-    await db.distChangeRequest.update({ where: { id: req.id }, data: { status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelf } });
     if (config.accountingV2) { await acc.postReceivablesReclass(fromId, actor, db); await acc.postReceivablesReclass(toId, actor, db); }   // Piutang == Σ Sisa Bon on BOTH sides
   });
   await logAudit('koreksi', `Setujui pindah pelanggan${isSelf ? ' [MANDIRI]' : ''}: ${impact.fromCustomer.name} → ${impact.toCustomer.name}`,
@@ -5373,7 +5382,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
-  requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, withdrawWhere, onClientRefClash, decideChangeRequest, previewReassign, requestReassign,
+  requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, withdrawWhere, onClientRefClash, claimPending, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport, daySummary,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, ritRoute, setDepot, depotOrigin, fieldContext, setCustomerPhone, pinDelivery, closeDay, listCloseouts,
