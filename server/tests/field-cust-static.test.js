@@ -51,3 +51,13 @@ describe('Lengkapi + Atur titik', () => {
     expect(f).toMatch(/\.catch\(\(\) => \{ if \(live\) setMapErr\(true\); \}\)/);
   });
 });
+
+describe('Tambah stop', () => {
+  it('lists today\'s stops without a pin and other customers; a customer without a pin is prompted to set it', () => {
+    const f = fn('FldAddStop');
+    expect(f).toMatch(/FIELDLOGIC\.addStopCandidates\(\{ board: d\.board, customers: d\.customers, q \}\)/);
+    expect(f).toMatch(/onPin\(fldCustFromStop\(s\)\)/);
+    expect(f).toMatch(/!pickHasPin && <FldNotice tone="warn"/);
+    expect(f).toMatch(/api\.addStop\(\{ customerId: pick\.id, qty \}\)/);
+  });
+});
