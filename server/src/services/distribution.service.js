@@ -4768,7 +4768,9 @@ async function fieldContext(user, query) {
       openRun = runClient(run, sold, corrs);
     }
   }
-  return { today, fleet, fleets, rules, depot, demand, openRun };
+  // whether a gallon adjustment waits for the office (owner setting) — the phone tells the driver which
+  const galonNeedsApproval = await galonAdjustmentNeedsApproval();
+  return { today, fleet, fleets, rules, depot, demand, openRun, galonNeedsApproval };
 }
 // A driver fixing a customer's WhatsApp number in the field (Lengkapi data) — the same cap that lets
 // them save the location; audited. '' clears it.
@@ -5093,6 +5095,14 @@ async function createExpense(body, actor) {
   if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
   const fleetId = resolveWriteFleet(actor, body.fleet);
   if (!fleetId) throw ApiError.badRequest('Pilih armada.');
+  // A retry after a lost response (same clientRef) returns the expense already saved.
+  if (body.clientRef) {
+    const prev = await prisma.distExpense.findUnique({ where: { clientRef: String(body.clientRef) } });
+    if (prev) {
+      if (prev.fleetId !== fleetId) throw ApiError.conflict('Kode pengeluaran ini sudah dipakai untuk armada lain.');
+      return { ...expenseClient(prev), replay: true };
+    }
+  }
   const category = String(body.category || 'lainnya').trim().slice(0, 40) || 'lainnya';
   const businessUnitId = await resolveUnitId(body.businessUnitId);
   const snap = await actorSnap(actor);
@@ -5105,6 +5115,7 @@ async function createExpense(body, actor) {
       method, recipient: String(body.recipient || '').slice(0, 120),
       photoId: body.photoId ? String(body.photoId).slice(0, 60) : null, businessUnitId,
       createdById: snap.actorId, createdByName: snap.actorName,
+      clientRef: body.clientRef ? String(body.clientRef) : null,
     } });
     if (config.accountingV2) await acc.postDistExpense(row, actor, tx);
     return row;

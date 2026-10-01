@@ -299,9 +299,20 @@ Semua teks memakai `finance-i18n.js` (EN + ID), dengan prefix kunci `fld.*`.
 - `dist-field-cust.jsx` berisi tab Pelanggan (cari, filter Semua / Belum lengkap / Ada bon / Hari tetap),
   sheet pelanggan, Lengkapi data, Atur titik, Tambah stop, Pembayaran bon, Penyesuaian galon, Ganti rugi
   galon, dan Pengeluaran. Menu Catat kini aktif.
-- **Kunci idempotensi:** kolom unik `DistTransaction.clientRef`. Penjualan, pelunasan, atau ganti rugi
-  yang dikirim ulang dengan kode yang sama mengembalikan baris yang sudah ada, termasuk saat respons
-  hilang di jaringan. Kode yang sama untuk pelanggan lain ditolak (409).
+- **Kunci idempotensi:** kolom unik `clientRef` di `DistTransaction` dan `DistExpense`.
+  - Penjualan, pelunasan, ganti rugi, atau pengeluaran yang dikirim ulang dengan kode yang sama
+    mengembalikan baris yang sudah ada, termasuk saat respons hilang di jaringan.
+  - Kode yang sama untuk pelanggan atau armada lain ditolak (409).
+  - HP menyimpan kode itu per aksi dan per stop/pelanggan sampai tersimpan (localStorage, per mode,
+    akun, armada, dan hari). Jadi keluar dari layar atau memuat ulang aplikasi lalu menyimpan lagi
+    tidak mencatat dua kali. Layar memberi tahu "Sudah tersimpan sebelumnya".
+- Transaksi manual untuk pelanggan yang masih punya stop "Menunggu" hari ini dicatat lewat stop itu,
+  sehingga stopnya ikut ditandai terkirim.
+- Atur titik tanpa GPS dan tanpa titik lama dimulai dari gudang. Pin wajib digeser dulu sebelum
+  disimpan.
+- Penyesuaian galon mengikuti saklar persetujuan galon milik pemilik (`adjustmentApproval`). Layar
+  menyebutkan apakah penyesuaian menunggu kantor atau langsung berlaku. Di Mode latihan, penyesuaian
+  selalu menunggu.
 - **Aksi disaring berdasarkan izin**, sama dengan pengecekan di server:
   - `distribusiInput`: transaksi, bayar bon, ganti rugi;
   - `distribusiPenyesuaianGalon`: penyesuaian;

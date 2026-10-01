@@ -125,7 +125,7 @@ function FldComplete({ api, cust: c, onPin, onDone, onBack }) {
 // ATUR TITIK LOKASI — a draggable pin over the map. The phone's own GPS fix (with its accuracy circle)
 // and the old pin are shown; a pin moved > 150 m from the phone asks to confirm. Saved as a "geser" with
 // the device fix, so the history says how far it was moved from the phone's GPS.
-function FldPinMap({ api, cust: c, onDone, onBack }) {
+function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
   const had = typeof c.lat === 'number' && typeof c.lng === 'number';
   const [dev, setDev] = uSfl(null);
   const [pin, setPin] = uSfl(had ? { lat: c.lat, lng: c.lng } : null);
@@ -134,10 +134,19 @@ function FldPinMap({ api, cust: c, onDone, onBack }) {
   const [busy, setBusy] = uSfl(false);
   const [err, setErr] = uSfl('');
   const [mapReady, setMapReady] = uSfl(false);   // the phone's fix may arrive before or after the map
+  const [fallback, setFallback] = uSfl(false);   // no old pin + no GPS: started at the warehouse — must be moved
+  const [moved, setMoved] = uSfl(false);
   const mapEl = uRfl(null);
   const mapRef = uRfl(null);
   const markRef = uRfl(null);
-  uEfl(() => { let live = true; fldGeo(12000).then((p) => { if (!live) return; setDev(p); if (p) setPin((cur) => cur || { lat: p.lat, lng: p.lng }); }); return () => { live = false; }; }, []);
+  uEfl(() => {
+    let live = true;
+    fldGeo(12000).then((p) => {
+      if (!live) return; setDev(p);
+      if (!had) { const st = FIELDLOGIC.pinStart({ cust: c, device: p, depot }); setPin((cur) => cur || st.pin); setFallback(st.fallback); }
+    });
+    return () => { live = false; };
+  }, []);
   uEfl(() => {
     if (!pin || !mapEl.current || mapRef.current) return undefined;
     let live = true;
@@ -150,7 +159,7 @@ function FldPinMap({ api, cust: c, onDone, onBack }) {
       }).addTo(map);
       if (had) L.circleMarker([c.lat, c.lng], { radius: 7, color: '#5B6B75', weight: 2, fillOpacity: 0.15, interactive: false }).addTo(map);
       const m = L.marker([pin.lat, pin.lng], { draggable: true, keyboard: true, icon: L.divIcon({ className: 'mlap-pin-wrap', iconSize: [30, 30], html: '<span class="mlap-pin drag">●</span>' }) }).addTo(map);
-      m.on('dragend', () => { const ll = m.getLatLng(); setPin({ lat: ll.lat, lng: ll.lng }); });
+      m.on('dragend', () => { const ll = m.getLatLng(); setPin({ lat: ll.lat, lng: ll.lng }); setMoved(true); });
       markRef.current = m;
       map.setView([pin.lat, pin.lng], 18);
       setMapReady(true);
@@ -186,10 +195,11 @@ function FldPinMap({ api, cust: c, onDone, onBack }) {
           <div className="mlap-sumrow"><span>{trFl('fld.coords')}</span><b>{pin ? pin.lat.toFixed(6) + ', ' + pin.lng.toFixed(6) : '—'}</b></div>
           <div className="mlap-sumrow"><span>{dev ? trFl('fld.fromDevice', { m: Math.round(dev.accuracy || 0) }) : trFl('fld.noGps')}</span><b>{mv.meters == null ? '—' : trFl('fld.metersN', { m: mv.meters })}</b></div>
           {mv.far ? <div className="mlap-warnline">{trFl('fld.pinFar')}</div> : null}
+          {fallback && !moved ? <div className="mlap-warnline">{trFl('fld.pinNoGpsMove')}</div> : null}
         </div>
         {mapErr && dev ? <button type="button" className="mlap-btn mlap-wide" onClick={() => setPin({ lat: dev.lat, lng: dev.lng })}>{trFl('fld.useMyLoc')}</button> : null}
         {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !pin} onClick={() => save(false)}>{trFl('fld.savePin')}</button>
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !pin || (fallback && !moved)} onClick={() => save(false)}>{trFl('fld.savePin')}</button>
       </div>
       {askFar && <FldSheet title={trFl('fld.pinFarT', { m: mv.meters })} body={trFl('fld.pinFarB')} confirmLabel={trFl('fld.savePin')} onClose={() => setAskFar(false)} onConfirm={() => { setAskFar(false); save(true); }} />}
     </div>
@@ -266,23 +276,24 @@ function FldAddStop({ api, preset, onPin, onDone, onBack }) {
 
 // PEMBAYARAN BON — collect a customer's bon (cash or transfer) with a proof photo. The open bons are
 // listed oldest first, as the payment settles them (view only — the server keeps the real balance).
-function FldPayBon({ api, cust: c, onDone, onBack }) {
+function FldPayBon({ api, cust: c, refs, onDone, onBack }) {
   const [detail, setDetail] = uSfl(null);
   const [pay, setPay] = uSfl(null);
   const [via, setVia] = uSfl('tunai');
   const [photo, setPhoto] = uSfl(null);
   const [busy, setBusy] = uSfl(false);
   const [err, setErr] = uSfl('');
-  const refRef = uRfl(FIELDLOGIC.newRef());
+  const slot = 'bon:' + c.id;
+  const [ref] = uSfl(() => refs.take(slot));   // kept until saved (a retry after leaving is not a second payment)
   uEfl(() => { let live = true; api.customerDetail(c.id).then((x) => { if (live) setDetail(x); }).catch(() => { if (live) setDetail({ transactions: [] }); }); return () => { live = false; }; }, [api, c.id]);
   const bon = detail && detail.sisaBon != null ? detail.sisaBon : (c.sisaBon || 0);
   const pv = FIELDLOGIC.payPreview({ sisaBon: bon, pay });
   const open = detail ? FIELDLOGIC.openBons(detail.transactions || []) : [];
   const save = () => {
     setBusy(true); setErr('');
-    const body = { customerId: c.id, payAmount: pay, payMethod: via, clientRef: refRef.current, proofPhotoId: photo.id, proofTakenAt: photo.takenAt };
+    const body = { customerId: c.id, payAmount: pay, payMethod: via, clientRef: ref, proofPhotoId: photo.id, proofTakenAt: photo.takenAt };
     if (typeof photo.lat === 'number' && typeof photo.lng === 'number') { body.proofLat = photo.lat; body.proofLng = photo.lng; }
-    api.payBon(body).then(() => onDone(trFl('fld.paidDone', { name: c.name, v: FIELDLOGIC.fmtRp(pay) }))).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
+    api.payBon(body).then((r) => { refs.done(slot); onDone(r && r.replay ? trFl('fld.replayed') : trFl('fld.paidDone', { name: c.name, v: FIELDLOGIC.fmtRp(pay) })); }).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
   };
   return (
     <div className="mlap-screen">
@@ -315,8 +326,9 @@ function FldPayBon({ api, cust: c, onDone, onBack }) {
 }
 
 // PENYESUAIAN GALON — the gallons counted at the customer vs the record. Sent to the office: the count
-// changes only after approval (owner rule).
-function FldAdjust({ api, cust: c, onDone, onBack }) {
+// changes only after approval — unless the owner turned gallon approval off (then it applies at once,
+// and the screen says so).
+function FldAdjust({ api, cust: c, needsApproval, onDone, onBack }) {
   const rec = c.gallonsHeld == null ? 0 : c.gallonsHeld;
   const [counted, setCounted] = uSfl(rec);
   const [reasonKey, setReasonKey] = uSfl('');
@@ -328,7 +340,7 @@ function FldAdjust({ api, cust: c, onDone, onBack }) {
   const send = () => {
     setBusy(true); setErr('');
     api.adjustGallon(c.id, FIELDLOGIC.adjustBody({ counted, reasonKey, reasonLabel: trFl(reasonKey), note, photo }))
-      .then(() => onDone(trFl('fld.adjSent', { name: c.name })))
+      .then((r) => onDone(trFl(r && r.status === 'approved' ? 'fld.adjApplied' : 'fld.adjSent', { name: c.name })))
       .catch((e) => setErr(fldErrMsg(e)))
       .finally(() => setBusy(false));
   };
@@ -346,7 +358,7 @@ function FldAdjust({ api, cust: c, onDone, onBack }) {
         <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder={trFl('fld.noteOpt')} aria-label={trFl('fld.noteOpt')} />
         <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.optional')}</div>
         <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.adjPhotoHint" />
-        <FldNotice tone="info" title={trFl('fld.adjWaits')} />
+        <FldNotice tone="info" title={trFl(needsApproval === false ? 'fld.adjNoWait' : 'fld.adjWaits')} />
         {err && <div className="mlap-err" role="alert">{err}</div>}
         <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !reasonKey || diff === 0} onClick={send}>{trFl('fld.adjCta')}</button>
       </div>
@@ -357,7 +369,7 @@ function FldAdjust({ api, cust: c, onDone, onBack }) {
 const FLD_DMG_KINDS = [['pecah', 'fld.k_pecah'], ['bocor', 'fld.k_bocor'], ['retak', 'fld.k_retak'], ['hilang', 'fld.k_hilang']];
 // GANTI RUGI GALON — a borrowed gallon broken or lost at the customer: recorded straight away (no
 // approval — owner rule), priced by the owner's setting, paid cash / on bon / by transfer, photo required.
-function FldDamage({ api, cust: c, rules, onDone, onBack }) {
+function FldDamage({ api, cust: c, rules, refs, onDone, onBack }) {
   const held = c.gallonsHeld == null ? 0 : c.gallonsHeld;
   const [qty, setQty] = uSfl(1);
   const [kind, setKind] = uSfl('');
@@ -365,12 +377,13 @@ function FldDamage({ api, cust: c, rules, onDone, onBack }) {
   const [photo, setPhoto] = uSfl(null);
   const [busy, setBusy] = uSfl(false);
   const [err, setErr] = uSfl('');
-  const refRef = uRfl(FIELDLOGIC.newRef());
+  const slot = 'dmg:' + c.id;
+  const [ref] = uSfl(() => refs.take(slot));   // kept until saved (a retry after leaving is not a second charge)
   const pv = FIELDLOGIC.damagePreview({ qty, price: rules.hargaGantiRugiGalon, held, payMethod: pay });
   const save = () => {
     setBusy(true); setErr('');
-    api.gallonDamage(c.id, { qty, kind, payMethod: pay, photoId: photo.id, clientRef: refRef.current })
-      .then(() => onDone(trFl('fld.dmgDone', { name: c.name, n: qty })))
+    api.gallonDamage(c.id, { qty, kind, payMethod: pay, photoId: photo.id, clientRef: ref })
+      .then((r) => { refs.done(slot); onDone(r && r.replay ? trFl('fld.replayed') : trFl('fld.dmgDone', { name: c.name, n: qty })); })
       .catch((e) => setErr(fldErrMsg(e)))
       .finally(() => setBusy(false));
   };
@@ -402,7 +415,7 @@ function FldDamage({ api, cust: c, rules, onDone, onBack }) {
 const FLD_EXP_CATS = [['bensin', 'fld.c_bensin'], ['parkir', 'fld.c_parkir'], ['servis', 'fld.c_servis'], ['makan', 'fld.c_makan'], ['lainnya', 'fld.c_lainnya']];
 // PENGELUARAN — paid from the day's deposit, always in cash (owner rule: never "uang pribadi"), with a
 // photo of the receipt. Fuel asks litres + odometer (kept in the note).
-function FldExpense({ api, onDone, onBack }) {
+function FldExpense({ api, refs, onDone, onBack }) {
   const [cat, setCat] = uSfl('');
   const [amount, setAmount] = uSfl(null);
   const [liters, setLiters] = uSfl('');
@@ -412,11 +425,13 @@ function FldExpense({ api, onDone, onBack }) {
   const [today, setToday] = uSfl(null);
   const [busy, setBusy] = uSfl(false);
   const [err, setErr] = uSfl('');
+  const slot = 'exp';
+  const [ref] = uSfl(() => refs.take(slot));   // kept until saved (a retry after leaving is not a second expense)
   uEfl(() => { let live = true; api.daySummary().then((s) => { if (live) setToday(s && s.pengeluaran != null ? s.pengeluaran : null); }).catch(() => {}); return () => { live = false; }; }, [api]);
   const save = () => {
     setBusy(true); setErr('');
-    api.addExpense(FIELDLOGIC.expenseBody({ category: cat, amount, liters, odometer: odo, note, photo }))
-      .then(() => onDone(trFl('fld.expDone', { v: FIELDLOGIC.fmtRp(amount) })))
+    api.addExpense(Object.assign(FIELDLOGIC.expenseBody({ category: cat, amount, liters, odometer: odo, note, photo }), { clientRef: ref }))
+      .then((r) => { refs.done(slot); onDone(r && r.replay ? trFl('fld.replayed') : trFl('fld.expDone', { v: FIELDLOGIC.fmtRp(amount) })); })
       .catch((e) => setErr(fldErrMsg(e)))
       .finally(() => setBusy(false));
   };

@@ -76,3 +76,12 @@ it('an open rit from an earlier day is reported (it blocks opening a new one)', 
   const none = (await request(app).get(`${D}/field-context?fleet=DK%202`).set(auth(gm))).body.data;
   expect(none.openRun).toBeNull();
 });
+
+it('Final fix: the context says whether a gallon adjustment waits for the office (owner setting)', async () => {
+  const a = await request(app).get(`${D}/field-context?date=${today}`).set(auth(driver));
+  expect(a.body.data.galonNeedsApproval).toBe(true);
+  expect((await request(app).put('/api/v1/settings/adjustmentApproval').set(auth(gm)).send({ value: { galon: false } })).status).toBe(200);
+  const b = await request(app).get(`${D}/field-context?date=${today}`).set(auth(driver));
+  expect(b.body.data.galonNeedsApproval).toBe(false);
+  await request(app).put('/api/v1/settings/adjustmentApproval').set(auth(gm)).send({ value: { galon: true } });
+});

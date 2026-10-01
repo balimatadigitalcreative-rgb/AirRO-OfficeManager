@@ -134,8 +134,8 @@ describe('final review fixes (screens)', () => {
 describe('Plan 3B: sale screen', () => {
   it('every visit carries one clientRef (a retry after a lost response is never a second sale); a manual sale has no stop', () => {
     const f = fn('FldSale');
-    expect(f).toMatch(/const refRef = uRfl\(FIELDLOGIC\.newRef\(\)\);/);
-    expect(f).toMatch(/clientRef: refRef\.current/);
+    expect(f).toMatch(/const \[ref\] = uSfl\(\(\) => refs\.take\(slot\)\);/);   // kept until saved (final review fix)
+    expect(f).toMatch(/clientRef: ref \}/);
     expect(f).toMatch(/s\.id \? pending\.get\(s\.id\) : null/);
     expect(day).toMatch(/const fldSaleStopFromCust = \(c\) => \(\{ id: null, customerId: c\.id,/);
   });
@@ -147,4 +147,13 @@ it('Plan 3B: the stop sheet offers bon / adjustment / damage / complete for the 
   expect(f).toMatch(/onAction\('adjust', fldCustFromStop\(s\)\)/);
   expect(f).toMatch(/can\.damage && s\.gallonsHeld > 0/);
   expect(f).toMatch(/can\.location && s\.gaps\.count > 0/);
+});
+
+it('Final fix: the sale keeps ONE clientRef per stop/customer until saved, and says when it was already saved', () => {
+  const f = fn('FldSale');
+  expect(f).toMatch(/function FldSale\(\{ api, stop: s, pending, refs, onDone, onBack \}\)/);
+  expect(f).toMatch(/const slot = 'sale:' \+ \(s\.id \|\| 'c:' \+ s\.customerId\);\s*const \[ref\] = uSfl\(\(\) => refs\.take\(slot\)\);/);
+  expect(f).toMatch(/clientRef: ref/);
+  expect(f).toMatch(/refs\.done\(slot\);/);
+  expect(f).toMatch(/r\.replay \? 'fld\.replayed' : 'fld\.saleDone'/);
 });

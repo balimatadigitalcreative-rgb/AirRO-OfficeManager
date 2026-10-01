@@ -226,3 +226,40 @@ describe('Plan 3B logic', () => {
     expect(L.saleBody({ customerId: 'c', qty: 1, gallonIn: 0, method: 'lunas', photo: null, clientRef: 'r-123456789' }).clientRef).toBe('r-123456789');
   });
 });
+
+describe('Final review fixes (logic)', () => {
+  const mem = () => { const m = {}; return { getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; }, m }; };
+  it('refStore: the same slot keeps ONE ref across screen visits until the save succeeds', () => {
+    const st = mem();
+    const r1 = L.refStore(st, 'k').take('bon:c1');
+    expect(r1).toMatch(/^f[0-9a-z]{8,}$/);
+    expect(L.refStore(st, 'k').take('bon:c1')).toBe(r1);          // left the screen and came back: same ref
+    expect(L.refStore(st, 'k').take('bon:c2')).not.toBe(r1);      // another customer: its own ref
+    L.refStore(st, 'k').done('bon:c1');
+    expect(L.refStore(st, 'k').take('bon:c1')).not.toBe(r1);      // after success a new payment gets a new ref
+    const blocked = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); }, removeItem: () => { throw new Error('x'); } };
+    const b = L.refStore(blocked, 'k'); const x = b.take('exp'); expect(b.take('exp')).toBe(x);   // blocked storage → memory
+  });
+  it('pinStart: old pin, else the phone, else the warehouse — a fallback start must be moved before saving', () => {
+    expect(L.pinStart({ cust: { lat: 1, lng: 2 }, device: { lat: 3, lng: 4 }, depot: { lat: 5, lng: 6 } })).toEqual({ pin: { lat: 1, lng: 2 }, fallback: false });
+    expect(L.pinStart({ cust: {}, device: { lat: 3, lng: 4 }, depot: { lat: 5, lng: 6 } })).toEqual({ pin: { lat: 3, lng: 4 }, fallback: false });
+    expect(L.pinStart({ cust: {}, device: null, depot: { lat: 5, lng: 6 } })).toEqual({ pin: { lat: 5, lng: 6 }, fallback: true });
+    const none = L.pinStart({ cust: {}, device: null, depot: null });
+    expect(none.fallback).toBe(true); expect(typeof none.pin.lat).toBe('number');   // Bali, never a dead end
+  });
+  it('saleStopFor: a customer with a pending stop today is sold THROUGH that stop (marked delivered)', () => {
+    const board = [stop({ id: 's1', customerId: 'c1', status: 'terkirim' }), stop({ id: 's2', customerId: 'c1', status: 'pending', qty: 3 }), stop({ id: 's3', customerId: 'c2' })];
+    const s = L.saleStopFor({ board, customer: { id: 'c1', gallonsHeld: 4 }, demand: {} });
+    expect(s).toMatchObject({ id: 's2', customerId: 'c1', planQty: 3, gallonsHeld: 4 });
+    expect(L.saleStopFor({ board, customer: { id: 'c9' }, demand: {} })).toBeNull();
+    expect(L.saleStopFor({ board: [stop({ id: 's1', customerId: 'c1', status: 'terkirim' })], customer: { id: 'c1' } })).toBeNull();
+  });
+});
+
+it('Final fix: recordSale reports a replay (the server returned a sale already saved), with or without a stop', async () => {
+  const api = { createSale: () => Promise.resolve({ id: 't1', replay: true }), markStop: () => Promise.resolve({}) };
+  expect(await L.recordSale(api, { body: {} })).toEqual({ txnId: 't1', done: true, replay: true });
+  expect(await L.recordSale(api, { stopId: 's1', body: {} })).toEqual({ txnId: 't1', done: true, replay: true });
+  const fresh = { createSale: () => Promise.resolve({ id: 't2' }), markStop: () => Promise.resolve({}) };
+  expect(await L.recordSale(fresh, { stopId: 's1', body: {} })).toEqual({ txnId: 't2', done: true });
+});

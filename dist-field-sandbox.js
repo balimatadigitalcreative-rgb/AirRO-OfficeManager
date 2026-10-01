@@ -115,7 +115,7 @@
       context: run(function () {
         var ru = openRunOf();
         var openRun = ru ? Object.assign({}, ru, { expectedRemaining: ru.gallonsOut - ru.sold }) : null;
-        return { today: s.date, fleet: s.fleet, fleets: s.fleets, rules: s.rules, depot: s.depot, demand: s.demand, openRun: openRun };
+        return { today: s.date, fleet: s.fleet, fleets: s.fleets, rules: s.rules, depot: s.depot, demand: s.demand, openRun: openRun, galonNeedsApproval: true };   // practice adjustments always wait
       }),
       board: run(function () { return s.stops.filter(function (st) { return st.date === s.date; }).sort(function (a, b) { return a.seq - b.seq; }).map(stopView); }),
       customers: run(function () { return Object.keys(s.customers).map(function (k) { return custView(s.customers[k]); }); }),
@@ -266,11 +266,13 @@
       // Expenses are always paid from the day's cash (never "uang pribadi").
       addExpense: run(function (body) {
         var b = body || {}; var amt = int(b.amount);
+        var prev = b.clientRef ? s.expenses.find(function (x) { return x.clientRef === b.clientRef; }) : null;
+        if (prev) return Object.assign({}, prev, { replay: true });   // a retry after a lost response
         if (amt <= 0) throw fail(400, 'Nominal pengeluaran harus lebih dari 0.');
         if (!String(b.category || '').trim()) throw fail(400, 'Pilih kategori pengeluaran.');
         if (!b.photoId && rules().wajibFotoPengeluaran) throw fail(400, 'Foto nota wajib dilampirkan.', 'PROOF_REQUIRED');
         if (b.photoId && !photoOk(b.photoId)) throw fail(400, 'Foto nota tidak ditemukan — unggah ulang fotonya.', 'PROOF_MISSING');
-        var x = { id: nid('exp'), date: s.date, fleetId: s.fleet, amount: amt, category: String(b.category), method: 'tunai', note: String(b.note || ''), photoId: b.photoId || null, status: 'active', createdAt: now().getTime() };
+        var x = { id: nid('exp'), clientRef: b.clientRef || null, date: s.date, fleetId: s.fleet, amount: amt, category: String(b.category), method: 'tunai', note: String(b.note || ''), photoId: b.photoId || null, status: 'active', createdAt: now().getTime() };
         s.expenses.push(x); return W(x);
       }),
 

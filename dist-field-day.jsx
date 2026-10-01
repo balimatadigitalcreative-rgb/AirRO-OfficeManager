@@ -208,7 +208,7 @@ const fldSaleStopFromCust = (c) => ({ id: null, customerId: c.id, customerName: 
 // ONCE: if marking fails (no signal, or the server asks for a position), only the marking is retried —
 // also after leaving this screen and coming back (the shell remembers the saved sale per stop), and the
 // inputs lock once the sale is saved (they could no longer change it).
-function FldSale({ api, stop: s, pending, onDone, onBack }) {
+function FldSale({ api, stop: s, pending, refs, onDone, onBack }) {
   const held = s.gallonsHeld == null ? null : s.gallonsHeld;
   const [qty, setQty] = uSfl(Math.max(1, s.planQty || 1));
   const [back, setBack] = uSfl(held == null ? 0 : Math.min(held, 999));
@@ -219,16 +219,19 @@ function FldSale({ api, stop: s, pending, onDone, onBack }) {
   const [needReason, setNeedReason] = uSfl(false);
   const [noLoc, setNoLoc] = uSfl('');
   const [txnId, setTxnId] = uSfl(() => (s.id ? pending.get(s.id) : null));
-  const refRef = uRfl(FIELDLOGIC.newRef());   // one per visit: a retry after a lost response returns the saved sale
+  // one ref per stop (or customer) until saved: a retry after a lost response — even after leaving this
+  // screen or reloading — returns the sale already saved instead of a second one
+  const slot = 'sale:' + (s.id || 'c:' + s.customerId);
+  const [ref] = uSfl(() => refs.take(slot));
   const keep = (id) => { setTxnId(id); if (s.id) pending.set(s.id, id); };
   const pv = FIELDLOGIC.salePreview({ qty, price: s.masterPrice, method, sisaBon: s.sisaBon || 0 });
   const why = txnId ? '' : FIELDLOGIC.canSaveSale({ qty, photo });
   const save = () => {
     setBusy(true); setErr('');
-    const body = FIELDLOGIC.saleBody({ customerId: s.customerId, qty, gallonIn: back, method, photo, clientRef: refRef.current });
+    const body = FIELDLOGIC.saleBody({ customerId: s.customerId, qty, gallonIn: back, method, photo, clientRef: ref });
     FIELDLOGIC.recordSale(api, { stopId: s.id, body, txnId, noLocationReason: needReason ? noLoc.trim() : '' })
       .then((r) => {
-        if (r.done) { if (s.id) pending.clear(s.id); onDone(trFl('fld.saleDone', { name: s.customerName })); return; }
+        if (r.done) { if (s.id) pending.clear(s.id); refs.done(slot); onDone(trFl(r.replay ? 'fld.replayed' : 'fld.saleDone', { name: s.customerName })); return; }
         keep(r.txnId); setNeedReason(true);
       })
       .catch((e) => { if (e && e.txnId) keep(e.txnId); setErr(fldErrMsg(e) || trFl('fld.loadErr')); })

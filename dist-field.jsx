@@ -35,6 +35,11 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const pendRef = uRfl({});
   if (!pendRef.current[pendKey]) pendRef.current[pendKey] = FIELDLOGIC.pendingSales((() => { try { return window.sessionStorage; } catch (e) { return null; } })(), pendKey);
   const pending = pendRef.current[pendKey];
+  // Each write's clientRef, per action + target, kept until it is saved — in localStorage (per mode + user
+  // + armada + day) so it outlives leaving the screen and a reload: a retry is never a second write.
+  const refKey = 'airro.fld.ref:' + mode + ':' + ((user && user.id) || 'anon') + ':' + fleet + ':' + today;
+  if (!pendRef.current[refKey]) pendRef.current[refKey] = FIELDLOGIC.refStore((() => { try { return window.localStorage; } catch (e) { return null; } })(), refKey);
+  const refs = pendRef.current[refKey];
   const key = 'latihan:' + ((user && user.id) || 'anon') + ':' + (fleet || '');
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
   // The glass dock IS the navigation here: the app's own phone bottom nav steps aside while this is
@@ -113,7 +118,12 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const ACTIONS = [['catatSale', can.sale], ['catatBon', can.bon], ['catatExp', can.expense], ['catatStop', can.addStop], ['catatAdj', can.adjust], ['catatDmg', can.damage]].filter((a) => a[1]).map((a) => a[0]);
   const ACTION_VIEW = { catatSale: { name: 'pick', act: 'sale' }, catatBon: { name: 'pick', act: 'bon' }, catatExp: { name: 'exp' }, catatStop: { name: 'addStop' }, catatAdj: { name: 'pick', act: 'adjust' }, catatDmg: { name: 'pick', act: 'damage' } };
   // a customer chosen for an action → the action's screen
-  const openFor = (act, c) => setView(act === 'sale' ? { name: 'sale', stop: fldSaleStopFromCust(c) } : act === 'addStop' ? { name: 'addStop', preset: c } : { name: act, cust: c });
+  const openFor = (act, c) => {
+    if (act !== 'sale') { setView(act === 'addStop' ? { name: 'addStop', preset: c } : { name: act, cust: c }); return; }
+    // a customer with a pending stop today is sold THROUGH that stop (marked delivered, never sold twice)
+    api.board().then((board) => FIELDLOGIC.saleStopFor({ board, customer: c, demand: ctx.demand })).catch(() => null)
+      .then((s) => setView({ name: 'sale', stop: s || fldSaleStopFromCust(c) }));
+  };
   const full = view && ['sale', 'run', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin'].includes(view.name);   // full-screen task: no tab header/dock
 
   let body = null;
@@ -140,20 +150,20 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   return (
     <div className="mlap-root">
       {mode === 'latihan' && <div className="mlap-ribbon" role="status">{trFl('fld.bannerLatihan')}</div>}
-      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'pick' && (
         <FldPickCustomer api={api} title={trFl('fld.' + ({ sale: 'catatSale', bon: 'catatBon', adjust: 'catatAdj', damage: 'catatDmg' })[view.act])} hint={trFl('fld.pickHint')}
           accept={view.act === 'bon' ? ((c) => (c.sisaBon > 0 ? '' : 'fld.pickNoBon')) : view.act === 'damage' ? ((c) => (c.gallonsHeld > 0 ? '' : 'fld.dmgNoHeld')) : null}
           onPick={(c) => openFor(view.act, c)} onBack={() => setView(null)} />
       )}
-      {ready && full && view.name === 'bon' && <FldPayBon api={api} cust={view.cust} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'adjust' && <FldAdjust api={api} cust={view.cust} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'damage' && <FldDamage api={api} cust={view.cust} rules={ctx.rules || {}} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'exp' && <FldExpense api={api} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'bon' && <FldPayBon api={api} cust={view.cust} refs={refs} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'adjust' && <FldAdjust api={api} cust={view.cust} needsApproval={ctx.galonNeedsApproval} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'damage' && <FldDamage api={api} cust={view.cust} rules={ctx.rules || {}} refs={refs} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'exp' && <FldExpense api={api} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'addStop' && <FldAddStop api={api} preset={view.preset} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'complete' && <FldComplete api={api} cust={view.cust} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} onDone={(m) => { if (view.back) { setView(view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
+      {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} depot={ctx.depot} onDone={(m) => { if (view.back) { setView(view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
       {!full && (
         <>
           <div className="mlap-head">

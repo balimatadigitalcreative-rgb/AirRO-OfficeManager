@@ -68,7 +68,7 @@ describe('Pembayaran bon', () => {
     expect(f).toMatch(/FIELDLOGIC\.openBons\(/);
     expect(f).toMatch(/const pv = FIELDLOGIC\.payPreview\(\{ sisaBon: bon, pay \}\);/);
     expect(f).toMatch(/disabled=\{busy \|\| !pv\.ok \|\| !photo\}/);
-    expect(f).toMatch(/clientRef: refRef\.current/);
+    expect(f).toMatch(/clientRef: ref,/);
     expect(f).toMatch(/\['tunai', trFl\('fld\.m_tunai'\)\], \['transfer', trFl\('fld\.m_transfer'\)\]/);
   });
 });
@@ -86,7 +86,7 @@ describe('Penyesuaian + Ganti rugi', () => {
     expect(f).toMatch(/const pv = FIELDLOGIC\.damagePreview\(\{ qty, price: rules\.hargaGantiRugiGalon, held, payMethod: pay \}\);/);
     expect(f).toMatch(/pv\.blocked \? <FldNotice tone="warn" title=\{trFl\(pv\.blocked\)\}/);
     expect(f).toMatch(/disabled=\{busy \|\| !!pv\.blocked \|\| !kind \|\| !photo\}/);
-    expect(f).toMatch(/clientRef: refRef\.current/);
+    expect(f).toMatch(/clientRef: ref \}/);
     expect(f).toContain("'fld.dmgNoApproval'");
   });
 });
@@ -94,10 +94,37 @@ describe('Penyesuaian + Ganti rugi', () => {
 describe('Pengeluaran', () => {
   it('always cash from the deposit, receipt photo required, fuel asks litres + odometer', () => {
     const f = fn('FldExpense');
-    expect(f).toMatch(/api\.addExpense\(FIELDLOGIC\.expenseBody\(/);
+    expect(f).toMatch(/api\.addExpense\(Object\.assign\(FIELDLOGIC\.expenseBody\(/);
     expect(f).not.toMatch(/method:/);
     expect(f).toMatch(/disabled=\{busy \|\| !cat \|\| !\(amount > 0\) \|\| !photo\}/);
     expect(f).toMatch(/cat === 'bensin' &&/);
     expect(f).toContain("'fld.expFromDeposit'");
+  });
+});
+
+describe('Final review fixes (customer screens)', () => {
+  it('bon payment, damage and expense keep ONE clientRef per customer/day until saved (a retry after leaving is not a second write)', () => {
+    expect(cust).not.toMatch(/FIELDLOGIC\.newRef\(\)/);
+    expect(fn('FldPayBon')).toMatch(/const slot = 'bon:' \+ c\.id;\s*const \[ref\] = uSfl\(\(\) => refs\.take\(slot\)\);/);
+    expect(fn('FldDamage')).toMatch(/const slot = 'dmg:' \+ c\.id;\s*const \[ref\] = uSfl\(\(\) => refs\.take\(slot\)\);/);
+    expect(fn('FldExpense')).toMatch(/const slot = 'exp';\s*const \[ref\] = uSfl\(\(\) => refs\.take\(slot\)\);/);
+    ['FldPayBon', 'FldDamage', 'FldExpense'].forEach((n) => {
+      expect(fn(n)).toMatch(/clientRef: ref/);
+      expect(fn(n)).toMatch(/refs\.done\(slot\);/);
+      expect(fn(n)).toMatch(/r && r\.replay \? trFl\('fld\.replayed'\)/);   // tells the driver it was already saved
+    });
+  });
+  it('Atur titik never dead-ends without GPS: starts at the warehouse and must be moved before saving', () => {
+    const f = fn('FldPinMap');
+    expect(f).toMatch(/function FldPinMap\(\{ api, cust: c, depot, onDone, onBack \}\)/);
+    expect(f).toMatch(/FIELDLOGIC\.pinStart\(\{ cust: c, device: p, depot \}\)/);
+    expect(f).toMatch(/disabled=\{busy \|\| !pin \|\| \(fallback && !moved\)\}/);
+    expect(f).toMatch(/'fld\.pinNoGpsMove'/);
+  });
+  it('Penyesuaian says what really happened: waits for the office, or applied (owner turned approval off)', () => {
+    const f = fn('FldAdjust');
+    expect(f).toMatch(/function FldAdjust\(\{ api, cust: c, needsApproval, onDone, onBack \}\)/);
+    expect(f).toMatch(/r && r\.status === 'approved' \? 'fld\.adjApplied' : 'fld\.adjSent'/);
+    expect(f).toMatch(/needsApproval === false \? 'fld\.adjNoWait' : 'fld\.adjWaits'/);
   });
 });

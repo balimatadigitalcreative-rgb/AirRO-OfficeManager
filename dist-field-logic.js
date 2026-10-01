@@ -109,11 +109,11 @@
   function recordSale(api, o) {
     var txnP = o.txnId ? Promise.resolve({ id: o.txnId }) : api.createSale(o.body);
     // A manual sale (from Catat, no stop): just create it — nothing to mark.
-    if (!o.stopId) return txnP.then(function (t) { return { txnId: t.id, done: true }; });
+    if (!o.stopId) return txnP.then(function (t) { return Object.assign({ txnId: t.id, done: true }, t.replay ? { replay: true } : {}); });
     return txnP.then(function (t) {
       var mark = { status: 'terkirim', transactionId: t.id };
       if (o.noLocationReason) mark.noLocationReason = o.noLocationReason;
-      return api.markStop(o.stopId, mark).then(function () { return { txnId: t.id, done: true }; }, function (e) {
+      return api.markStop(o.stopId, mark).then(function () { return Object.assign({ txnId: t.id, done: true }, t.replay ? { replay: true } : {}); }, function (e) {
         var code = e && e.body && e.body.error && e.body.error.details && e.body.error.details.code;
         if (code === 'POSITION_REQUIRED') return { txnId: t.id, done: false, needReason: true };
         if (e && typeof e === 'object') e.txnId = t.id;
@@ -149,6 +149,32 @@
     var rnd = '';
     try { var a = new Uint32Array(2); (root && root.crypto ? root.crypto : globalThis.crypto).getRandomValues(a); rnd = a[0].toString(36) + a[1].toString(36); } catch (e) { rnd = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2); }
     return 'f' + Date.now().toString(36) + rnd;
+  }
+  // A write's clientRef, kept per action + target (stop / customer) until the save succeeds: leaving the
+  // screen after a lost response (or reloading) and saving again sends the SAME ref, so the server
+  // returns the row already saved instead of recording it twice. Same storage pattern as pendingSales.
+  function refStore(storage, key) {
+    var p = pendingSales(storage, key);
+    return {
+      take: function (slot) { var r = p.get(slot); if (!r) { r = newRef(); p.set(slot, r); } return r; },
+      done: function (slot) { p.clear(slot); },
+    };
+  }
+  // ATUR TITIK start: the old pin, else the phone's fix, else the warehouse (else central Bali) — a
+  // fallback start is never a customer's place, so the screen asks for it to be moved before saving.
+  function pinStart(o) {
+    var x = o || {}; var c = x.cust || {}; var d = x.depot;
+    if (typeof c.lat === 'number' && typeof c.lng === 'number') return { pin: { lat: c.lat, lng: c.lng }, fallback: false };
+    if (x.device) return { pin: { lat: x.device.lat, lng: x.device.lng }, fallback: false };
+    if (d && typeof d.lat === 'number' && typeof d.lng === 'number') return { pin: { lat: d.lat, lng: d.lng }, fallback: true };
+    return { pin: { lat: -8.65, lng: 115.216 }, fallback: true };
+  }
+  // A sale for a customer who still has a pending stop today goes THROUGH that stop (so it is marked
+  // delivered and not sold twice); null → a manual sale with no stop.
+  function saleStopFor(o) {
+    var x = o || {}; var c = x.customer || {};
+    var v = boardView({ board: x.board, customers: [c], demand: x.demand });
+    return v.pending.find(function (s) { return s.customerId === c.id; }) || null;
   }
   // PELANGGAN — search (name, code, phone digits) + filter; counts for the filter chips.
   function customerList(customers, opt) {
@@ -234,5 +260,5 @@
     return { missing: missing, ok: missing.length === 0 };
   }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput };
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor };
 });

@@ -268,3 +268,18 @@ describe('Plan 3B: practice follows the server on field inputs', () => {
     expect(await code(api.addExpense({ amount: 1000, photoId: ph.id }))).toBe(400);
   });
 });
+
+describe('Final review fixes (practice)', () => {
+  it('clientRef: a retried expense returns the saved row (no second expense)', async () => {
+    const { api } = make();
+    const ph = await api.uploadPhoto({ data: 'x' });
+    const a = await api.addExpense({ amount: 15000, category: 'bensin', photoId: ph.id, clientRef: 'ref-e-0001' });
+    const b = await api.addExpense({ amount: 15000, category: 'bensin', photoId: ph.id, clientRef: 'ref-e-0001' });
+    expect(b).toMatchObject({ id: a.id, replay: true });
+    expect(api.exportState().expenses.length).toBe(1);
+  });
+  it('practice adjustments always wait (the count never moves), and the context says so', async () => {
+    const { api } = make();
+    expect((await api.context()).galonNeedsApproval).toBe(true);
+  });
+});

@@ -57,3 +57,14 @@ it('the same clientRef for another customer is refused; no ref keeps the old beh
   const b = await request(app).post(`${D}/transactions`).set(auth(gm)).send({ customerId: cB, qty: 1, method: 'lunas', txnDate: today });
   expect(a.body.data.id).not.toBe(b.body.data.id);
 });
+it('Final fix: a field expense sent twice with the same clientRef is saved once; another armada is refused', async () => {
+  const body = { date: today, fleet: 'DK 1', amount: 15000, category: 'bensin', method: 'tunai', clientRef: 'ref-exp-0001' };
+  const r1 = await request(app).post(`${D}/expenses`).set(auth(gm)).send(body);
+  const r2 = await request(app).post(`${D}/expenses`).set(auth(gm)).send(body);
+  expect(r1.status).toBe(201);
+  expect(r2.body.data.id).toBe(r1.body.data.id);
+  expect(r2.body.data.replay).toBe(true);
+  expect(await prisma.distExpense.count({ where: { clientRef: 'ref-exp-0001' } })).toBe(1);
+  const other = await request(app).post(`${D}/expenses`).set(auth(gm)).send({ ...body, fleet: 'DK 2' });
+  expect(other.status).toBe(409);
+});

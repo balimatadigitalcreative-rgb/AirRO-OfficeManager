@@ -1265,6 +1265,7 @@ model DistExpense {
   createdById    String?
   createdByName  String?
   createdAt      DateTime @default(now())
+  clientRef      String?  @unique                // phone-generated ref (Mode Lapangan): a retry after a lost response returns this row
 
   @@index([date, fleetId])
   @@index([fleetId, status])

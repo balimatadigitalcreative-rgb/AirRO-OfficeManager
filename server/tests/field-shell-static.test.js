@@ -121,3 +121,18 @@ describe('Plan 3B shell', () => {
     expect(jsx).toMatch(/view\.act === 'damage' \? \(\(c\) => \(c\.gallonsHeld > 0 \? '' : 'fld\.dmgNoHeld'\)\)/);
   });
 });
+
+describe('Final review fixes (shell)', () => {
+  it('clientRefs live in localStorage per mode + user + armada + day (they survive leaving the screen and a reload)', () => {
+    expect(jsx).toMatch(/const refKey = 'airro\.fld\.ref:' \+ mode \+ ':' \+ \(\(user && user\.id\) \|\| 'anon'\) \+ ':' \+ fleet \+ ':' \+ today;/);
+    expect(jsx).toMatch(/FIELDLOGIC\.refStore\(\(\(\) => \{ try \{ return window\.localStorage; \} catch \(e\) \{ return null; \} \}\)\(\), refKey\)/);
+    ['FldSale', 'FldPayBon', 'FldDamage', 'FldExpense'].forEach((n) => expect(jsx).toMatch(new RegExp('<' + n + ' [^>]*refs=\{refs\}')));
+  });
+  it('a sale for a customer with a pending stop today goes through that stop (marked, not sold twice)', () => {
+    expect(jsx).toMatch(/FIELDLOGIC\.saleStopFor\(\{ board, customer: c, demand: ctx\.demand \}\)/);
+  });
+  it('Atur titik gets the warehouse; Penyesuaian gets the owner\'s approval setting', () => {
+    expect(jsx).toMatch(/<FldPinMap api=\{api\} cust=\{view\.cust\} depot=\{ctx\.depot\}/);
+    expect(jsx).toMatch(/<FldAdjust api=\{api\} cust=\{view\.cust\} needsApproval=\{ctx\.galonNeedsApproval\}/);
+  });
+});
