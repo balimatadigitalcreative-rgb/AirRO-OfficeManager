@@ -555,3 +555,26 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-alert.sm2 .t { font-size: 13px; font-weight: 700; }
 .mlap-swipe .mlap-ctabar { bottom: calc(100px + env(safe-area-inset-bottom)); }
 .mlap-swipe .mlap-ctafade { height: calc(230px + env(safe-area-inset-bottom)); background: linear-gradient(to bottom, rgba(238,242,246,0), rgba(238,242,246,.94) 30%); }
+
+/* ── 3D-2 PELANGGAN — mockup Pelanggan board ── */
+.mlap-hscroll { padding-top: 4px; padding-bottom: 4px; }
+.mlap-fchip { position: relative; flex-shrink: 0; min-height: 36px; padding: 0 12px; border-radius: 18px; border: 0; background: #FFFFFF; font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; color: var(--mlap-ink); cursor: pointer; }
+.mlap-fchip::before { content: ''; position: absolute; inset: -4px 0; }
+.mlap-fchip.warn { border: 1px solid #F4C7A8; background: #FFF1E8; color: #9A3412; }
+.mlap-fchip.on { border: 0; background: #0E1B24; color: #FFFFFF; }
+.mlap-custrow { min-height: 56px; }
+.mlap-ava { border-radius: 50%; font-weight: 700; }
+.mlap-ava.lg { width: 38px; height: 38px; font-size: 14px; }
+.mlap-gtags { display: flex; flex-wrap: wrap; gap: 4px; }
+.mlap-gtag { height: 18px; display: inline-flex; align-items: center; padding: 0 6px; border-radius: 5px; background: #FFF1E8; color: #9A3412; font-size: 11px; font-weight: 700; }
+.mlap-custside { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0; }
+.mlap-custside b { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mlap-custside b.bon { color: #7A4B00; }
+.mlap-custside b.ok { color: #1E6B40; }
+.mlap-custside .sb { font-size: 11px; color: var(--mlap-sub); }
+.mlap-searchpill { position: fixed; z-index: 38; left: 20px; right: 20px; max-width: 520px; margin: 0 auto; bottom: calc(104px + env(safe-area-inset-bottom)); height: 46px; border-radius: 23px; display: flex; align-items: center; gap: 8px; padding: 0 16px; box-sizing: border-box; color: #3E4E58; background: rgba(255,255,255,.66); -webkit-backdrop-filter: blur(28px) saturate(1.6); backdrop-filter: blur(28px) saturate(1.6); border: 1px solid rgba(255,255,255,.85); box-shadow: 0 8px 28px rgba(6,51,79,.16), inset 0 1px 0 rgba(255,255,255,.95); }
+.mlap-searchpill:focus-within { box-shadow: 0 0 0 2px #065489, 0 8px 28px rgba(6,51,79,.16); }
+.mlap-searchpill input { flex: 1; min-width: 0; height: 44px; border: 0; background: transparent; font: inherit; font-size: 16px; color: var(--mlap-ink); outline: none; }
+.mlap-sheet-stack { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.mlap-facts2 b.bon { color: #7A4B00; }
+.mlap-facts2 b.ok { color: #1E6B40; }

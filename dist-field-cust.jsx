@@ -5,6 +5,14 @@
    expense; expenses always cash from the deposit; gallon adjustments wait for the office; a pin moved
    more than 150 m from the phone asks to confirm. */
 
+// Avatar tints of the board, steady per customer (not per row, so a filter never recolours a person).
+const FLD_AVA_TINTS = [['#E8F1F8', '#065489'], ['#DDF4F2', '#0F6B66'], ['#EEE9F8', '#4B3A8C'], ['#FCF1D6', '#7A4B00']];
+const fldTint = (id) => FLD_AVA_TINTS[String(id || '').split('').reduce((t, ch) => t + ch.charCodeAt(0), 0) % FLD_AVA_TINTS.length];
+const fldInitials = (name) => String(name || '?').split(/\s+/).map((w) => w.charAt(0)).slice(0, 2).join('').toUpperCase();
+
+// PELANGGAN (mockup Pelanggan board): filter chips that scroll sideways, round tinted avatars, the
+// missing-data tags, the bon (or a green "Lunas") with the gallons held, and the glass search pill
+// floating above the dock.
 function FldCustomers({ api, tick, filter, onFilter, onOpen }) {
   const [list, setList] = uSfl(null);
   const [err, setErr] = uSfl(null);
@@ -13,60 +21,85 @@ function FldCustomers({ api, tick, filter, onFilter, onOpen }) {
   if (err) return <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!list) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const v = FIELDLOGIC.customerList(list, { q, filter });
+  const chips = [['all', trFl('fld.f_all', { n: v.counts.all })], ['warn', trFl('fld.f_warn', { n: v.counts.warn })], ['bon', trFl('fld.f_bon', { n: v.counts.bon })], ['fixed', trFl('fld.f_fixed', { n: v.counts.fixed })]];
   return (
     <>
-      <input className="mlap-text mlap-search" type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
-      <FldSeg label={trFl('fld.filter')} value={filter} onChange={onFilter} options={[['all', trFl('fld.f_all', { n: v.counts.all })], ['warn', trFl('fld.f_warn', { n: v.counts.warn })], ['bon', trFl('fld.f_bon', { n: v.counts.bon })], ['fixed', trFl('fld.f_fixed', { n: v.counts.fixed })]]} />
-      <div className="mlap-card">
-        {v.rows.length ? v.rows.map((c) => (
-          <button key={c.id} type="button" className="mlap-row mlap-rowbtn" onClick={() => onOpen(c)}>
-            <span className="mlap-ava" aria-hidden="true">{String(c.name || '?').split(/\s+/).map((w) => w.charAt(0)).slice(0, 2).join('').toUpperCase()}</span>
-            <span className="mlap-grow">
-              <span className="nm">{c.name}</span>
-              <span className="sb">{[c.code, (c.deliveryDays || []).join(' · ')].filter(Boolean).join(' · ')}</span>
-              {c.gaps.count > 0 ? <span className="mlap-gapline">{[c.gaps.titik ? trFl('fld.gapTitik') : '', c.gaps.wa ? trFl('fld.gapWa') : '', c.gaps.foto ? trFl('fld.gapFoto') : ''].filter(Boolean).join(' · ')}</span> : null}
-            </span>
-            <span className="mlap-legleft">
-              {c.sisaBon > 0 ? <b className="mlap-bontxt">{FIELDLOGIC.fmtRp(c.sisaBon)}</b> : <span className="sb">{trFl('fld.noBon')}</span>}
-              <span className="sb">{trFl('fld.nGalon', { n: c.gallonsHeld || 0 })}</span>
-            </span>
-          </button>
-        )) : <div className="mlap-empty">{trFl('fld.noCustFilter')}</div>}
+      <div className="mlap-hscroll" role="group" aria-label={trFl('fld.filter')}>
+        {chips.map(([k, text]) => <button key={k} type="button" className={'mlap-fchip' + (k === 'warn' ? ' warn' : '') + (filter === k ? ' on' : '')} aria-pressed={filter === k} onClick={() => onFilter(k)}>{text}</button>)}
       </div>
+      <div className="mlap-card mlap-list">
+        {v.rows.length ? v.rows.map((c) => {
+          const t = fldTint(c.id);
+          const warns = [c.gaps.titik ? 'fld.tagNoPin' : '', c.gaps.wa ? 'fld.noWa' : '', c.gaps.foto ? 'fld.tagNoFoto' : ''].filter(Boolean);
+          return (
+            <button key={c.id} type="button" className="mlap-row mlap-rowbtn mlap-custrow" onClick={() => onOpen(c)}>
+              <span className="mlap-ava" aria-hidden="true" style={{ background: t[0], color: t[1] }}>{fldInitials(c.name)}</span>
+              <span className="mlap-grow">
+                <span className="nm">{c.name}</span>
+                <span className="sb">{[c.code, (c.deliveryDays || []).join(' · '), c.fixedDays ? trFl('fld.fixedLow') : ''].filter(Boolean).join(' · ')}</span>
+                {warns.length ? <span className="mlap-gtags">{warns.map((k) => <span key={k} className="mlap-gtag">{trFl(k)}</span>)}</span> : null}
+              </span>
+              <span className="mlap-custside">
+                {c.sisaBon > 0 ? <b className="bon">{FIELDLOGIC.fmtRp(c.sisaBon)}</b> : <b className="ok">{trFl('fld.lunas')}</b>}
+                <span className="sb">{trFl('fld.nGalon', { n: c.gallonsHeld || 0 })}</span>
+              </span>
+            </button>
+          );
+        }) : <div className="mlap-empty">{trFl('fld.noCustFilter')}</div>}
+      </div>
+      <div className="mlap-ctaspace" />
+      <label className="mlap-glass mlap-searchpill">
+        <FldSvg n="search" s={16} sw={2.2} />
+        <input type="search" placeholder={trFl('fld.searchCust2')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
+      </label>
     </>
   );
 }
 
+// The customer's sheet (same look as Detail stop): avatar + name + close X, Navigasi / Telepon / WhatsApp,
+// bon and gallons held, the missing data, then the actions this account may use.
 function FldCustSheet({ cust: c0, can, onClose, onAction }) {
   const drag = useFldSheetDrag(onClose);
   const c = Object.assign({}, c0, { gaps: c0.gaps || FIELDLOGIC.gapsOf(c0) });
   const links = fldLinks(c);
+  const t = fldTint(c.id);
   const acts = [];
-  if (can.sale) acts.push(['sale', 'fld.catatSale', 'primary']);
-  if (can.bon && c.sisaBon > 0) acts.push(['bon', 'fld.catatBon', '']);
-  if (can.location && c.gaps.count > 0) acts.push(['complete', 'fld.completeData', '']);
-  if (can.addStop) acts.push(['addStop', 'fld.addToday', '']);
-  if (can.adjust) acts.push(['adjust', 'fld.catatAdj', '']);
-  if (can.damage && c.gallonsHeld > 0) acts.push(['damage', 'fld.catatDmg', '']);
+  if (can.sale) acts.push(['sale', 'receipt', 'fld.catatSale']);
+  if (can.bon && c.sisaBon > 0) acts.push(['bon', 'cash', 'fld.terimaBon']);
+  if (can.location && c.gaps.count > 0) acts.push(['complete', 'pinMove', 'fld.completeData']);
+  if (can.addStop) acts.push(['addStop', 'pinPlus', 'fld.addToday']);
+  if (can.adjust) acts.push(['adjust', 'adjust', 'fld.adjRow']);
+  if (can.damage && c.gallonsHeld > 0) acts.push(['damage', 'bottleBroken', 'fld.dmgRow']);
+  const fix = can.location && c.gaps.count > 0 ? () => onAction('complete', c) : null;
+  const warns = [c.gaps.titik ? 'fld.tagNoPin' : '', c.gaps.wa ? 'fld.noWa' : '', c.gaps.foto ? 'fld.tagNoFoto' : ''].filter(Boolean);
   return (
     <>
       <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onClose} />
       <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={c.name} ref={drag.ref} style={drag.style}>
         <FldGrab handle={drag.handle} />
-        <h2>{c.name}</h2>
-        <p>{[c.code, c.address].filter(Boolean).join(' · ')}</p>
-        <div className="mlap-links">
-          <FldLinkBtn href={links.nav} className="mlap-btn" newTab>{trFl('fld.navigate')}</FldLinkBtn>
-          <FldLinkBtn href={links.tel} className="mlap-btn">{trFl('fld.call')}</FldLinkBtn>
-          <FldLinkBtn href={links.wa} className="mlap-btn" newTab>{trFl('fld.wa')}</FldLinkBtn>
-        </div>
-        <div className="mlap-card mlap-facts">
-          <div><span className="sb">{trFl('fld.bonNow')}</span><b>{FIELDLOGIC.fmtRp(c.sisaBon || 0)}</b></div>
-          <div><span className="sb">{trFl('fld.heldAt')}</span><b>{c.gallonsHeld == null ? '—' : c.gallonsHeld}</b></div>
-          <div><span className="sb">{trFl('fld.dataLabel')}</span><b>{trFl('fld.dataN', { n: 3 - c.gaps.count })}</b></div>
-        </div>
-        <div className="mlap-actlist">
-          {acts.map(([k, key, tone]) => <button key={k} type="button" className={'mlap-btn mlap-wide ' + tone} onClick={() => onAction(k, c)}>{trFl(key)}</button>)}
+        <FldSheetHead title={c.name} sub={[c.code, c.address].filter(Boolean).join(' · ')} lead={<span className="mlap-ava lg" aria-hidden="true" style={{ background: t[0], color: t[1] }}>{fldInitials(c.name)}</span>} onClose={onClose} />
+        <div className="mlap-sheet-stack">
+          <div className="mlap-contacts">
+            <FldLinkBtn href={links.nav} className="mlap-ctile" newTab><FldSvg n="navigate" s={18} />{trFl('fld.navigate')}</FldLinkBtn>
+            <FldLinkBtn href={links.tel} className="mlap-ctile"><FldSvg n="phone" s={18} />{trFl('fld.call')}</FldLinkBtn>
+            {links.wa ? <FldLinkBtn href={links.wa} className="mlap-ctile" newTab><FldSvg n="wa" s={18} />{trFl('fld.wa')}</FldLinkBtn>
+              : fix ? <button type="button" className="mlap-ctile miss" onClick={fix}><FldSvg n="wa" s={18} />{trFl('fld.fillWaTile')}</button>
+                : <FldLinkBtn href="" className="mlap-ctile"><FldSvg n="wa" s={18} />{trFl('fld.wa')}</FldLinkBtn>}
+          </div>
+          <div className="mlap-card mlap-facts2">
+            <div><span className="sb">{trFl('fld.bonNow')}</span>{c.sisaBon > 0 ? <b className="bon">{FIELDLOGIC.fmtRp(c.sisaBon)}</b> : <b className="ok">{trFl('fld.lunas')}</b>}</div>
+            <div><span className="sb">{trFl('fld.heldAt')}</span><b>{c.gallonsHeld == null ? '—' : c.gallonsHeld}</b></div>
+          </div>
+          {warns.length ? <span className="mlap-gtags">{warns.map((k) => <span key={k} className="mlap-gtag">{trFl(k)}</span>)}</span> : null}
+          {acts.length ? (
+            <div className="mlap-card">
+              {acts.map(([k, ico, key]) => (
+                <button key={k} type="button" className="mlap-actrow" onClick={() => onAction(k, c)}>
+                  <FldSvg n={ico} s={17} /><span className="mlap-grow">{trFl(key)}</span><FldSvg n="chevron" s={13} sw={2.4} />
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </>
