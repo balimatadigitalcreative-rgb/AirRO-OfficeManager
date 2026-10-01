@@ -149,6 +149,12 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-reason.warn { background: var(--mlap-warn-soft); border: 1px solid var(--mlap-warn-line); }
 .mlap-sheet .mlap-note { margin-bottom: 10px; }
 .mlap-sheet .mlap-actions { margin-bottom: 8px; }
+/* ── TRANSAKSI ── */
+.mlap-sum { padding: 4px 12px 10px; }
+.mlap-sumrow { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; font-size: 14px; border-bottom: 1px solid var(--mlap-line); font-variant-numeric: tabular-nums; }
+.mlap-sumrow.total { font-size: 17px; border-bottom: 0; }
+.mlap-after { font-size: 13px; font-weight: 600; color: var(--mlap-sub); }
+.mlap-after.bon { color: var(--mlap-bon); }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

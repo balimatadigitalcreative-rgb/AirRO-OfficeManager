@@ -40,3 +40,20 @@ describe('Detail stop', () => {
     expect(f).toMatch(/fldLinks\(s\)/);
   });
 });
+
+describe('Transaksi', () => {
+  const f = () => fn('FldSale');
+  it('a proof photo is always required; save is locked until then', () => {
+    expect(f()).toMatch(/const why = FIELDLOGIC\.canSaveSale\(\{ qty, photo \}\);/);
+    expect(f()).toMatch(/disabled=\{busy \|\| !!why \|\| \(needReason && !noLoc\.trim\(\)\)\}/);
+    expect(f()).toMatch(/<FldPhoto api=\{api\} value=\{photo\} onChange=\{setPhoto\}/);
+  });
+  it('a saved sale is never created twice — only the marking is retried (also after a network error)', () => {
+    expect(f()).toMatch(/const txnRef = uRfl\(null\);/);
+    expect(f()).toMatch(/FIELDLOGIC\.recordSale\(api, \{ stopId: s\.id, body, txnId: txnRef\.current,/);
+    expect(f()).toMatch(/if \(e && e\.txnId\) txnRef\.current = e\.txnId;/);
+  });
+  it('Lunas / Bon / Transfer', () => {
+    expect(f()).toMatch(/\['lunas', trFl\('fld\.m_lunas'\)\], \['bon', trFl\('fld\.m_bon'\)\], \['transfer', trFl\('fld\.m_transfer'\)\]/);
+  });
+});

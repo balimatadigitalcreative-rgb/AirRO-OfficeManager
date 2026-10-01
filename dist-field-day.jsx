@@ -194,3 +194,60 @@ function FldStopSheet({ api, stop: s, onClose, onSale, onChanged }) {
     </>
   );
 }
+
+// TRANSAKSI — gallons out/back, Lunas/Bon/Transfer, what the customer pays now and what their bon
+// becomes, a proof photo (always required here), then "save & mark delivered". The sale is created
+// ONCE: if marking fails (no signal, or the server asks for a position), only the marking is retried.
+function FldSale({ api, stop: s, onDone, onBack }) {
+  const held = s.gallonsHeld == null ? null : s.gallonsHeld;
+  const [qty, setQty] = uSfl(Math.max(1, s.planQty || 1));
+  const [back, setBack] = uSfl(held == null ? 0 : Math.min(held, 999));
+  const [method, setMethod] = uSfl('lunas');
+  const [photo, setPhoto] = uSfl(null);
+  const [busy, setBusy] = uSfl(false);
+  const [err, setErr] = uSfl('');
+  const [needReason, setNeedReason] = uSfl(false);
+  const [noLoc, setNoLoc] = uSfl('');
+  const txnRef = uRfl(null);
+  const pv = FIELDLOGIC.salePreview({ qty, price: s.masterPrice, method, sisaBon: s.sisaBon || 0 });
+  const why = FIELDLOGIC.canSaveSale({ qty, photo });
+  const save = () => {
+    setBusy(true); setErr('');
+    const body = FIELDLOGIC.saleBody({ customerId: s.customerId, qty, gallonIn: back, method, photo });
+    FIELDLOGIC.recordSale(api, { stopId: s.id, body, txnId: txnRef.current, noLocationReason: needReason ? noLoc.trim() : '' })
+      .then((r) => { txnRef.current = r.txnId; if (r.done) onDone(trFl('fld.saleDone', { name: s.customerName })); else setNeedReason(true); })
+      .catch((e) => { if (e && e.txnId) txnRef.current = e.txnId; setErr(fldErrMsg(e) || trFl('fld.loadErr')); })
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.saleTitle')} sub={[s.customerName, s.customerCode].filter(Boolean).join(' · ')} onBack={onBack} />
+      <div className="mlap-body">
+        <div className="mlap-card">
+          <FldStepper label={trFl('fld.galOut')} hint={trFl('fld.galOutHint', { n: s.planQty })} value={qty} onChange={setQty} min={1} max={999} />
+          <FldStepper label={trFl('fld.galBack')} hint={held == null ? '' : trFl('fld.galBackHint', { n: held })} value={back} onChange={setBack} min={0} max={999} />
+        </div>
+        <div className="mlap-eyebrow">{trFl('fld.payment')}</div>
+        <FldSeg label={trFl('fld.payment')} value={method} onChange={setMethod} options={[['lunas', trFl('fld.m_lunas')], ['bon', trFl('fld.m_bon')], ['transfer', trFl('fld.m_transfer')]]} />
+        <div className="mlap-card mlap-sum">
+          <div className="mlap-sumrow"><span>{trFl('fld.qtyLine', { n: qty, p: FIELDLOGIC.fmtRp(s.masterPrice) })}</span><b>{FIELDLOGIC.fmtRp(pv.subtotal)}</b></div>
+          {s.sisaBon > 0 ? <div className="mlap-sumrow"><span>{trFl('fld.oldBon')}</span><span>{FIELDLOGIC.fmtRp(s.sisaBon)}</span></div> : null}
+          <div className="mlap-sumrow total"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.paidNow)}</b></div>
+          <div className={'mlap-after' + (method === 'bon' ? ' bon' : '')}>{method === 'bon' ? trFl('fld.bonAfter', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) }) : trFl('fld.bonStays', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) })}</div>
+        </div>
+        <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.required')}</div>
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintSale" />
+        {needReason && (
+          <div className="mlap-card mlap-reason warn">
+            <b>{trFl('fld.noLocT')}</b>
+            <span className="sb">{trFl('fld.noLocB')}</span>
+            <input className="mlap-text" value={noLoc} onChange={(e) => setNoLoc(e.target.value.slice(0, 300))} placeholder={trFl('fld.writeReason')} aria-label={trFl('fld.noLocT')} />
+          </div>
+        )}
+        {err && <div className="mlap-err" role="alert">{err}</div>}
+        {why ? <div className="mlap-hint">{trFl(why)}</div> : null}
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !!why || (needReason && !noLoc.trim())} onClick={save}>{trFl(txnRef.current ? 'fld.retryMark' : 'fld.saveDeliver')}</button>
+      </div>
+    </div>
+  );
+}
