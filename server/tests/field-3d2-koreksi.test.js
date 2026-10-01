@@ -58,3 +58,24 @@ describe('Koreksi saya (mockup KoreksiList board)', () => {
     expect(f()).not.toMatch(/setAsk\(null\); setErr\(e\);/);
   });
 });
+
+describe('Armada & SOP (mockup Armada board)', () => {
+  const f = () => fn(shellSrc, 'FldRules');
+  it('back chevron + big title + Owner/GM badge; the SOP stepper; each armada with ± (teal +), its bar and the SOP marker', () => {
+    expect(f()).toMatch(/<FldBackHead onBack=\{onBack\} title=\{trFl\('fld\.armadaT'\)\} aside=\{<span className="mlap-ownbadge"><FldSvg n="lock"/);
+    expect(f()).toMatch(/<div className="mlap-capbar"><span className=\{low \? 'low' : ''\} style=\{\{ width: pct\(c\) \+ '%' \}\} \/><i style=\{\{ left: pct\(r\.ritSop\.minLoad\) \+ '%' \}\} \/><\/div>/);
+    expect(f()).toMatch(/className="mlap-step plus teal"/);
+    expect(rule('ARMADA', '.mlap-capbar > span.low')).toMatch(/background: #E8793A;/);
+    expect(rule('ARMADA', '.mlap-ownbadge')).toMatch(/background: #0E1B24; color: #FFFFFF;/);
+  });
+  it('save is the fixed bottom bar; the release card stays as it was', () => {
+    expect(f()).toMatch(/<FldCtaBar><button type="button" className="mlap-btn primary" disabled=\{busy\} onClick=\{\(\) => save\(\)\}>\{trFl\('fld\.saveRules'\)\}<\/button><\/FldCtaBar>/);
+    expect(f()).toMatch(/className="mlap-btn danger" disabled=\{busy \|\| !FLD_SCREENS_READY\}/);
+  });
+  it('the below-SOP line sits flush under its bar', () => {
+    expect(rule('ARMADA', '.mlap-caprow .mlap-warnline')).toMatch(/padding: 0;/);
+  });
+  it('the finance shell gives it a way back', () => {
+    expect(read('finance-shell.jsx')).toMatch(/<window\.FIELD\.RulesScreen fleetList=\{fleet\} canRelease=\{!!user && user\.role === 'owner'\} onSaved=\{\(r\) => setFieldRules\(r\)\} onBack=\{\(\) => go\('dist-dashboard'\)\} \/>/);
+  });
+});

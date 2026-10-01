@@ -273,7 +273,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
 // ATURAN LAPANGAN & ARMADA (owner/GM). ALWAYS the real rules — never the practice copy — and through
 // the untagged owner API, so an owner without Demo penuh can still save them. Capacity is a merge on
 // the server (0 = no limit), so every armada shown or previously limited is sent explicitly.
-function FldRules({ fleetList, canRelease, onSaved }) {
+function FldRules({ fleetList, canRelease, onSaved, onBack }) {
   const [r, setR] = uSfl(null);
   const [err, setErr] = uSfl('');
   const [busy, setBusy] = uSfl(false);
@@ -318,52 +318,63 @@ function FldRules({ fleetList, canRelease, onSaved }) {
     <label className="mlap-field"><span className="lb">{label}</span>
       <input type="checkbox" checked={!!r[k]} onChange={(e) => set({ [k]: e.target.checked })} /></label>
   );
+  const scale = Math.max(160, r.ritSop.minLoad, ...plates.map((p) => cap(p)));
+  const pct = (v) => Math.max(0, Math.min(100, (v / scale) * 100));
   return (
     <div className="mlap-root">
-      <div className="mlap-head"><h1>{trFl('fld.rulesTitle')}</h1></div>
-      <div className="mlap-eyebrow">{trFl('fld.rulesSub')}</div>
-      <div className="mlap-body">
-        <div className="mlap-note">{trFl('fld.rulesAsliNote')}</div>
-        <div className="mlap-card">
-          <label className="mlap-field"><span className="lb">{trFl('fld.sopEnabled')}</span><input type="checkbox" checked={!!r.ritSop.enabled} onChange={(e) => setSop({ enabled: e.target.checked })} /></label>
-          <div className="mlap-field"><span className="lb">{trFl('fld.sopMin')}</span>
-            <button type="button" className="mlap-step" aria-label={trFl('fld.less')} onClick={() => setSop({ minLoad: Math.max(1, r.ritSop.minLoad - 5) })}>−</button>
-            <span className="mlap-stepval">{r.ritSop.minLoad}</span>
-            <button type="button" className="mlap-step" aria-label={trFl('fld.more')} onClick={() => setSop({ minLoad: r.ritSop.minLoad + 5 })}>+</button></div>
-        </div>
-        <div className="mlap-eyebrow" style={{ padding: '4px 4px 0' }}>{trFl('fld.capTitle')}</div>
-        <div className="mlap-card">
-          {plates.map((p) => (
-            <div key={p}>
-              <div className="mlap-field"><span className="lb">{p}<span className="ht">{cap(p) ? cap(p) + ' ' + trFl('fld.galon') : trFl('fld.capNone')}</span></span>
-                <button type="button" className="mlap-step" aria-label={trFl('fld.less') + ' ' + p} onClick={() => setCap(p, cap(p) - 5)}>−</button>
-                <span className="mlap-stepval">{cap(p) || '—'}</span>
-                <button type="button" className="mlap-step" aria-label={trFl('fld.more') + ' ' + p} onClick={() => setCap(p, (cap(p) || r.ritSop.minLoad) + 5)}>+</button></div>
-              {cap(p) > 0 && cap(p) < r.ritSop.minLoad && <div className="mlap-warnline">{trFl('fld.capBelowSop')}</div>}
-            </div>
-          ))}
-          {!plates.length && <div className="mlap-empty">{trFl('fld.noFleet')}</div>}
-        </div>
-        <div className="mlap-card">
-          {toggle('wajibFotoTransaksi', trFl('fld.fotoTxn'))}
-          {toggle('wajibFotoPengeluaran', trFl('fld.fotoExp'))}
-          {toggle('wajibAlasanBatal', trFl('fld.alasanBatal'))}
-          <label className="mlap-field"><span className="lb">{trFl('fld.hargaGR')}</span>
-            <input className="mlap-input" inputMode="numeric" value={r.hargaGantiRugiGalon || ''} onChange={(e) => set({ hargaGantiRugiGalon: +String(e.target.value).replace(/[^0-9]/g, '') || 0 })} /></label>
-        </div>
-        {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary" disabled={busy} onClick={() => save()}>{trFl('fld.save')}</button>
-        {canRelease && (
-          <div className="mlap-card mlap-release">
-            <b>{trFl('fld.releaseTitle')}</b>
-            <small>{r.fieldUiDefault === 'new' ? trFl('fld.released') : trFl('fld.releaseSub')}</small>
-            {r.fieldUiDefault === 'new'
-              ? <button type="button" className="mlap-btn" disabled={busy} onClick={() => setAsk('old')}>{trFl('fld.unreleaseBtn')}</button>
-              : <button type="button" className="mlap-btn danger" disabled={busy || !FLD_SCREENS_READY} onClick={() => setAsk('new')}>{trFl('fld.releaseBtn')}</button>}
-            {r.fieldUiDefault !== 'new' && !FLD_SCREENS_READY && <small>{trFl('fld.releaseLater')}</small>}
+      <div className="mlap-screen">
+        <FldBackHead onBack={onBack} title={trFl('fld.armadaT')} aside={<span className="mlap-ownbadge"><FldSvg n="lock" s={12} sw={2.4} />{trFl('fld.ownerGm')}</span>} />
+        <div className="mlap-body">
+          <div className="mlap-note">{trFl('fld.rulesAsliNote')}</div>
+          <div className="mlap-card mlap-soprow">
+            <span className="lb"><b>{trFl('fld.sopMinT')}</b><span>{trFl('fld.sopMinB')}</span></span>
+            <button type="button" className="mlap-step minus" aria-label={trFl('fld.less') + ' — ' + trFl('fld.sopMinT')} onClick={() => setSop({ minLoad: Math.max(1, r.ritSop.minLoad - 5) })}><FldSvg n="minus" s={16} sw={2.6} /></button>
+            <span className="val">{r.ritSop.minLoad}</span>
+            <button type="button" className="mlap-step plus" aria-label={trFl('fld.more') + ' — ' + trFl('fld.sopMinT')} onClick={() => setSop({ minLoad: r.ritSop.minLoad + 5 })}><FldSvg n="plus" s={16} sw={2.6} /></button>
           </div>
-        )}
+          <div className="mlap-label">{trFl('fld.capTitle')}</div>
+          <div className="mlap-card">
+            {plates.map((p) => {
+              const c = cap(p); const low = c > 0 && c < r.ritSop.minLoad;
+              return (
+                <div key={p} className="mlap-caprow">
+                  <div className="mlap-caprow-top">
+                    <span className="lb"><b>{p}</b><span>{c ? c + ' ' + trFl('fld.galon') : trFl('fld.capNone')}</span></span>
+                    <button type="button" className="mlap-step minus" aria-label={trFl('fld.less') + ' ' + p} onClick={() => setCap(p, c - 5)}><FldSvg n="minus" s={16} sw={2.6} /></button>
+                    <span className={'val' + (low ? ' low' : '')}>{c || '—'}</span>
+                    <button type="button" className="mlap-step plus teal" aria-label={trFl('fld.more') + ' ' + p} onClick={() => setCap(p, (c || r.ritSop.minLoad) + 5)}><FldSvg n="plus" s={16} sw={2.6} /></button>
+                  </div>
+                  <div className="mlap-capbar"><span className={low ? 'low' : ''} style={{ width: pct(c) + '%' }} /><i style={{ left: pct(r.ritSop.minLoad) + '%' }} /></div>
+                  {low ? <div className="mlap-warnline">{trFl('fld.capBelowSop')}</div> : null}
+                </div>
+              );
+            })}
+            {!plates.length && <div className="mlap-empty">{trFl('fld.noFleet')}</div>}
+          </div>
+          <div className="mlap-foot">{trFl('fld.capFoot')}</div>
+          <div className="mlap-card">
+            <label className="mlap-field"><span className="lb">{trFl('fld.sopEnabled')}</span><input type="checkbox" checked={!!r.ritSop.enabled} onChange={(e) => setSop({ enabled: e.target.checked })} /></label>
+            {toggle('wajibFotoTransaksi', trFl('fld.fotoTxn'))}
+            {toggle('wajibFotoPengeluaran', trFl('fld.fotoExp'))}
+            {toggle('wajibAlasanBatal', trFl('fld.alasanBatal'))}
+            <label className="mlap-field"><span className="lb">{trFl('fld.hargaGR')}</span>
+              <input className="mlap-input" inputMode="numeric" value={r.hargaGantiRugiGalon || ''} onChange={(e) => set({ hargaGantiRugiGalon: +String(e.target.value).replace(/[^0-9]/g, '') || 0 })} /></label>
+          </div>
+          {err && <div className="mlap-err" role="alert">{err}</div>}
+          {canRelease && (
+            <div className="mlap-card mlap-release">
+              <b>{trFl('fld.releaseTitle')}</b>
+              <small>{r.fieldUiDefault === 'new' ? trFl('fld.released') : trFl('fld.releaseSub')}</small>
+              {r.fieldUiDefault === 'new'
+                ? <button type="button" className="mlap-btn" disabled={busy} onClick={() => setAsk('old')}>{trFl('fld.unreleaseBtn')}</button>
+                : <button type="button" className="mlap-btn danger" disabled={busy || !FLD_SCREENS_READY} onClick={() => setAsk('new')}>{trFl('fld.releaseBtn')}</button>}
+              {r.fieldUiDefault !== 'new' && !FLD_SCREENS_READY && <small>{trFl('fld.releaseLater')}</small>}
+            </div>
+          )}
+          <div className="mlap-ctaspace" />
+        </div>
       </div>
+      <FldCtaBar><button type="button" className="mlap-btn primary" disabled={busy} onClick={() => save()}>{trFl('fld.saveRules')}</button></FldCtaBar>
       {ask && <FldSheet title={ask === 'new' ? trFl('fld.releaseT') : trFl('fld.unreleaseT')} body={ask === 'new' ? trFl('fld.releaseB') : trFl('fld.unreleaseB')} danger={ask === 'new'} onClose={() => setAsk(null)} onConfirm={() => { const v = ask; setAsk(null); save({ fieldUiDefault: v }); }} />}
       {done && <div className="mlap-toast" role="status">{done}</div>}
     </div>

@@ -1900,7 +1900,7 @@ function FApp() {
                 onChanged={() => setDistTick((t) => t + 1)} />
             </>
           )}
-          {screen === 'dist-field-rules' && p.distribusiAturanLapangan && window.FIELD && <window.FIELD.RulesScreen fleetList={fleet} canRelease={!!user && user.role === 'owner'} onSaved={(r) => setFieldRules(r)} />}
+          {screen === 'dist-field-rules' && p.distribusiAturanLapangan && window.FIELD && <window.FIELD.RulesScreen fleetList={fleet} canRelease={!!user && user.role === 'owner'} onSaved={(r) => setFieldRules(r)} onBack={() => go('dist-dashboard')} />}
           {/* Pengeluaran (field expenses) moved into the Transaksi screen — no standalone route. */}
           {screen === 'dist-delivery-report' && p.distribusiPengirimanReport && (
             <DIST.DeliveryReport refreshKey={distTick} today={FIN.TODAY}
