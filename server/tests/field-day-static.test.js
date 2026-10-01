@@ -15,7 +15,8 @@ it('every fld.* key written literally in the kit and day screens exists in EN an
 });
 it('parses, ships after the kit and before the shell, never calls the server directly', () => {
   expect(() => parse(day, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow();
-  expect(build).toMatch(/'dist-field-kit\.jsx',\s*'dist-field-day\.jsx',\s*'dist-field\.jsx',/);
+  expect(build).toMatch(/'dist-field-kit\.jsx',\s*'dist-field-day\.jsx',/);
+  expect(build.indexOf("'dist-field-day.jsx'")).toBeLessThan(build.indexOf("'dist-field.jsx'"));   // customer screens may sit between
   expect(day).not.toMatch(/window\.API|fetch\(/);
 });
 
