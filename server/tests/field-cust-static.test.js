@@ -44,7 +44,7 @@ describe('Lengkapi + Atur titik', () => {
   });
   it('Atur titik: draggable pin, device fix + accuracy circle, >150 m asks to confirm, saved as a drag with the device fix', () => {
     const f = fn('FldPinMap');
-    expect(f).toMatch(/draggable: true/);
+    expect(f).toMatch(/className=\{'mlap-centerpin' \+ \(lift \? ' up' : ''\)\}/);
     expect(f).toMatch(/L\.circle\(/);
     expect(f).toMatch(/FIELDLOGIC\.pinMove\(\{ device: dev, pin \}\)/);
     expect(f).toMatch(/if \(mv\.far && !confirmFar\) \{ setAskFar\(true\); return; \}/);
@@ -142,4 +142,24 @@ describe('Plan 3C: 3B minors', () => {
   it('Atur titik hands the saved point back', () => {
     expect(fn('FldPinMap')).toMatch(/onDone\(trFl\('fld\.pinSaved', \{ name: c\.name \}\), \{ lat: pin\.lat, lng: pin\.lng \}\)/);
   });
+});
+
+describe('Plan 3D: Atur titik — move the map under the centre pin (drag anywhere)', () => {
+  const f = () => fn('FldPinMap');
+  it('the pin is the map centre; it lifts while the map moves; only a user drag or zoom counts as moved', () => {
+    expect(f()).toMatch(/map\.on\('move', \(\) => \{ const ce = map\.getCenter\(\); setPin\(\{ lat: ce\.lat, lng: ce\.lng \}\); \}\);/);
+    expect(f()).toMatch(/map\.on\('dragstart zoomstart', \(\) => \{ userRef\.current = true; setLift\(true\); \}\);/);
+    expect(f()).toMatch(/map\.on\('moveend', \(\) => \{ setLift\(false\); if \(userRef\.current\) setMoved\(true\); \}\);/);
+    expect(f()).not.toMatch(/L\.marker\(\[pin\.lat, pin\.lng\], \{ draggable: true/);
+  });
+  it('a glass locate button recentres on the phone; the hint says to move the map', () => {
+    expect(f()).toMatch(/<button type="button" className="mlap-round mlap-map-locate" aria-label=\{trFl\('fld\.useMyLoc'\)\} onClick=\{\(\) => mapRef\.current\.setView\(\[dev\.lat, dev\.lng\], 18\)\}><FldSvg n="locate"/);
+    expect(f()).toContain("'fld.pinPan'");
+  });
+});
+
+it('Plan 3D: the first centring happens BEFORE the gesture handlers (Leaflet fires zoomstart on the first setView)', () => {
+  const f = fn('FldPinMap');
+  expect(f.indexOf('map.setView([pin.lat, pin.lng], 18);')).toBeGreaterThan(-1);
+  expect(f.indexOf('map.setView([pin.lat, pin.lng], 18);')).toBeLessThan(f.indexOf("map.on('dragstart zoomstart'"));
 });

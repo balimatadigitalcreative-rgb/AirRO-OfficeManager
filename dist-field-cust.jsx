@@ -139,7 +139,8 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
   const [moved, setMoved] = uSfl(false);
   const mapEl = uRfl(null);
   const mapRef = uRfl(null);
-  const markRef = uRfl(null);
+  const userRef = uRfl(false);   // a drag or zoom by the user (the first centring is not "moved")
+  const [lift, setLift] = uSfl(false);
   uEfl(() => {
     let live = true;
     fldGeo(12000).then((p) => {
@@ -159,10 +160,11 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
         maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
       }).addTo(map);
       if (had) L.circleMarker([c.lat, c.lng], { radius: 7, color: '#5B6B75', weight: 2, fillOpacity: 0.15, interactive: false }).addTo(map);
-      const m = L.marker([pin.lat, pin.lng], { draggable: true, keyboard: true, icon: L.divIcon({ className: 'mlap-pin-wrap', iconSize: [30, 30], html: '<span class="mlap-pin drag">●</span>' }) }).addTo(map);
-      m.on('dragend', () => { const ll = m.getLatLng(); setPin({ lat: ll.lat, lng: ll.lng }); setMoved(true); });
-      markRef.current = m;
-      map.setView([pin.lat, pin.lng], 18);
+      map.setView([pin.lat, pin.lng], 18);   // first: Leaflet fires zoomstart on the first view, which is not the driver
+      // the pin stays in the centre; the driver moves the map under it (drag anywhere, mockup)
+      map.on('move', () => { const ce = map.getCenter(); setPin({ lat: ce.lat, lng: ce.lng }); });
+      map.on('dragstart zoomstart', () => { userRef.current = true; setLift(true); });
+      map.on('moveend', () => { setLift(false); if (userRef.current) setMoved(true); });
       setMapReady(true);
     }).catch(() => { if (live) setMapErr(true); });
     return () => { live = false; };
@@ -190,8 +192,15 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
     <div className="mlap-screen">
       <FldTop title={trFl('fld.pinT')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
       <div className="mlap-body">
-        {mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} sub={trFl('fld.pinNoMap')} /> : (pin ? <div ref={mapEl} className="mlap-map mlap-pinmap" role="application" aria-label={trFl('fld.pinT')} /> : <div className="mlap-empty">{trFl('fld.locating')}</div>)}
-        <div className="mlap-hint">{trFl('fld.pinDrag')}</div>
+        {mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} sub={trFl('fld.pinNoMap')} /> : (pin ? (
+          <div className="mlap-mapwrap">
+            <div ref={mapEl} className="mlap-map mlap-pinmap" role="application" aria-label={trFl('fld.pinT')} />
+            <span className={'mlap-centerpin' + (lift ? ' up' : '')} aria-hidden="true"><span className="mlap-centerpin-dot" /></span>
+            <span className={'mlap-centerpin-shadow' + (lift ? ' up' : '')} aria-hidden="true" />
+            {dev && mapReady ? <button type="button" className="mlap-round mlap-map-locate" aria-label={trFl('fld.useMyLoc')} onClick={() => mapRef.current.setView([dev.lat, dev.lng], 18)}><FldSvg n="locate" s={19} /></button> : null}
+          </div>
+        ) : <div className="mlap-empty">{trFl('fld.locating')}</div>)}
+        <div className="mlap-hint">{trFl('fld.pinPan')}</div>
         <div className="mlap-card mlap-sec">
           <div className="mlap-sumrow"><span>{trFl('fld.coords')}</span><b>{pin ? pin.lat.toFixed(6) + ', ' + pin.lng.toFixed(6) : '—'}</b></div>
           <div className="mlap-sumrow"><span>{dev ? trFl('fld.fromDevice', { m: Math.round(dev.accuracy || 0) }) : trFl('fld.noGps')}</span><b>{mv.meters == null ? '—' : trFl('fld.metersN', { m: mv.meters })}</b></div>
