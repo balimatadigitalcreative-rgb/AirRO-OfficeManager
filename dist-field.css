@@ -231,6 +231,18 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-ctabar { position: fixed; left: 50%; transform: translateX(-50%); width: min(528px, calc(100vw - 32px)); bottom: calc(28px + env(safe-area-inset-bottom)); z-index: 37; display: flex; flex-direction: column; gap: 6px; }
 .mlap-ctabar .mlap-btn { min-height: 50px; border-radius: 15px; width: 100%; }
 .mlap-ctahint { text-align: center; font-size: 13px; font-weight: 600; color: var(--mlap-warn); }
+/* ── LIQUID GLASS (3D) — values copied from the approved mockup boards ── */
+.mlap-round { background: rgba(255,255,255,.62); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); border: 1px solid rgba(255,255,255,.85); box-shadow: 0 6px 20px rgba(6,51,79,.14), inset 0 1px 0 rgba(255,255,255,.9); }
+.mlap-dock { background: rgba(255,255,255,.66); -webkit-backdrop-filter: blur(28px) saturate(1.6); backdrop-filter: blur(28px) saturate(1.6); border: 1px solid rgba(255,255,255,.85); box-shadow: 0 10px 34px rgba(6,51,79,.18), inset 0 1px 0 rgba(255,255,255,.95); overflow: hidden; }
+.mlap-catat { overflow: hidden; box-shadow: 0 10px 26px rgba(6,84,137,.42), inset 0 1px 0 rgba(255,255,255,.45), inset 0 -6px 12px rgba(0,30,60,.25); }
+.mlap-catat-menu { background: rgba(255,255,255,.66); border: 1px solid rgba(255,255,255,.9); box-shadow: 0 18px 50px rgba(6,51,79,.26), inset 0 1px 0 rgba(255,255,255,.95); }
+.mlap-tile { background: rgba(255,255,255,.72); box-shadow: inset 0 1px 0 rgba(255,255,255,.9); }
+.mlap-sheet { background: rgba(248,250,252,.88); -webkit-backdrop-filter: blur(34px) saturate(1.5); backdrop-filter: blur(34px) saturate(1.5); border-top: 1px solid rgba(255,255,255,.9); box-shadow: 0 -10px 40px rgba(6,51,79,.2), inset 0 1px 0 rgba(255,255,255,.95); }
+.mlap-scrim { background: rgba(14,27,36,.32); }
+.mlap-scrim.menu { background: rgba(14,27,36,.18); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.mlap-btn.primary { box-shadow: 0 8px 24px rgba(6,84,137,.3), inset 0 1px 0 rgba(255,255,255,.25); }
+.mlap-closex { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; cursor: pointer; color: #3E4E58; background: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.9); box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 8px rgba(6,51,79,.1); }
+.mlap-tile-ico { width: 36px; height: 36px; border-radius: 50%; background: #E8F1F8; color: #065489; display: grid; place-items: center; }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

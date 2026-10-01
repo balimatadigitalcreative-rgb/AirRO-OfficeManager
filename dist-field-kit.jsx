@@ -79,6 +79,11 @@ function FldCtaBar({ hint, children }) {
   );
 }
 
+// The glass round close button of a sheet (mockup).
+function FldCloseX({ onClick, label }) {
+  return <button type="button" className="mlap-closex" aria-label={label || trFl('fld.close')} onClick={onClick}><FldSvg n="close" s={14} sw={2.6} /></button>;
+}
+
 // "Selasa, 30 Sep" in the screen's language (the eyebrow upper-cases it).
 const fldDayLabel = (iso) => { try { return new Date(iso + 'T00:00').toLocaleDateString(trFl('fld.locale'), { weekday: 'long', day: 'numeric', month: 'short' }); } catch (e) { return iso; } };
 // The number can be cleared and retyped (a typed "4" never becomes "14"); it clamps when the field

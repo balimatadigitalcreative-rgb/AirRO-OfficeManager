@@ -125,6 +125,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const TABS = [['kirim', 'IconTruck'], ['peta', 'IconPin'], null, ['pelanggan', 'IconCustomers'], ['setoran', 'IconWallet']];
   const TAB_LABEL = { kirim: 'fld.tabKirim', peta: 'fld.tabPeta', pelanggan: 'fld.tabPelanggan', setoran: 'fld.tabSetoran' };
   const ACTIONS = [['catatSale', can.sale], ['catatBon', can.bon], ['catatExp', can.expense], ['catatStop', can.addStop], ['catatAdj', can.adjust], ['catatDmg', can.damage]].filter((a) => a[1]).map((a) => a[0]);
+  const ACTION_ICON = { catatSale: 'receipt', catatBon: 'cash', catatExp: 'fuel', catatStop: 'pinPlus', catatAdj: 'adjust', catatDmg: 'bottleBroken' };
   const ACTION_VIEW = { catatSale: { name: 'pick', act: 'sale' }, catatBon: { name: 'pick', act: 'bon' }, catatExp: { name: 'exp' }, catatStop: { name: 'addStop' }, catatAdj: { name: 'pick', act: 'adjust' }, catatDmg: { name: 'pick', act: 'damage' } };
   // a customer chosen for an action → the action's screen
   const openFor = (act, c) => {
@@ -207,11 +208,11 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       )}
       {catat && !full && (
         <>
-          <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={() => setCatat(false)} />
+          <button type="button" className="mlap-scrim menu" aria-label={trFl('fld.cancel')} onClick={() => setCatat(false)} />
           <div className="mlap-catat-menu" role="menu" aria-label={trFl('fld.catatTitle')}>
             <div className="mlap-eyebrow" style={{ padding: '2px 6px 8px' }}>{trFl('fld.catatTitle')}</div>
             <div className="mlap-catat-grid">
-              {ACTIONS.map((a, i) => <button key={a} type="button" role="menuitem" className="mlap-tile" style={{ animationDelay: (70 + i * 40) + 'ms' }} onClick={() => { setCatat(false); setView(ACTION_VIEW[a]); }}>{trFl('fld.' + a)}</button>)}
+              {ACTIONS.map((a, i) => <button key={a} type="button" role="menuitem" className="mlap-tile" style={{ animationDelay: (70 + i * 40) + 'ms' }} onClick={() => { setCatat(false); setView(ACTION_VIEW[a]); }}><span className="mlap-tile-ico"><FldSvg n={ACTION_ICON[a]} s={19} /></span>{trFl('fld.' + a)}</button>)}
               {!ACTIONS.length ? <div className="mlap-empty">{trFl('fld.noActions')}</div> : null}
             </div>
           </div>

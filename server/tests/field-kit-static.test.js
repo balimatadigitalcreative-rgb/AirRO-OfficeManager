@@ -97,3 +97,27 @@ describe('Plan 3D kit', () => {
     expect(kit).toMatch(/toLocaleDateString\(trFl\('fld\.locale'\), \{ weekday: 'long', day: 'numeric', month: 'short' \}\)/);
   });
 });
+
+describe('Plan 3D materials (values copied from the mockup)', () => {
+  const glass = css.slice(css.indexOf('/* ── LIQUID GLASS (3D)'));   // the 3D block (the reduced-transparency fallback comes later)
+  const rule = (sel) => { const i = glass.indexOf('\n' + sel + ' {'); expect(i).toBeGreaterThan(-1); return glass.slice(i, glass.indexOf('}', i)); };
+  it('round buttons, dock, menu: glass fill, blur, border, top highlight', () => {
+    expect(rule('.mlap-round')).toMatch(/background: rgba\(255,255,255,\.62\);.*blur\(24px\) saturate\(1\.6\).*inset 0 1px 0 rgba\(255,255,255,\.9\)/s);
+    expect(rule('.mlap-dock')).toMatch(/background: rgba\(255,255,255,\.66\);.*inset 0 1px 0 rgba\(255,255,255,\.95\)/s);
+    expect(rule('.mlap-catat-menu')).toMatch(/border: 1px solid rgba\(255,255,255,\.9\);.*inset 0 1px 0 rgba\(255,255,255,\.95\)/s);
+  });
+  it('sheets are frosted (.88) with a bright top edge; the menu scrim is light and blurred', () => {
+    expect(rule('.mlap-sheet')).toMatch(/background: rgba\(248,250,252,\.88\);.*border-top: 1px solid rgba\(255,255,255,\.9\);.*inset 0 1px 0 rgba\(255,255,255,\.95\)/s);
+    expect(rule('.mlap-scrim.menu')).toMatch(/background: rgba\(14,27,36,\.18\);.*blur\(2px\)/s);
+    expect(rule('.mlap-scrim')).toMatch(/background: rgba\(14,27,36,\.32\)/);
+  });
+  it('Catat is the one tinted glass control (depth shadow, clipped for its sheen); menu tiles are translucent', () => {
+    expect(rule('.mlap-catat')).toMatch(/overflow: hidden;.*inset 0 -6px 12px rgba\(0,30,60,\.25\)/s);
+    expect(rule('.mlap-tile')).toMatch(/background: rgba\(255,255,255,\.72\);.*inset 0 1px 0 rgba\(255,255,255,\.9\)/s);
+    expect(rule('.mlap-btn.primary')).toMatch(/inset 0 1px 0 rgba\(255,255,255,\.25\)/);
+  });
+  it('a glass close button for sheets', () => {
+    expect(kit).toMatch(/function FldCloseX\(\{ onClick, label \}\) \{\s*return <button type="button" className="mlap-closex"/);
+    expect(rule('.mlap-closex')).toMatch(/background: rgba\(255,255,255,\.7\);/);
+  });
+});
