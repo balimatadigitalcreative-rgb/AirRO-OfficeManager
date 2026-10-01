@@ -494,7 +494,7 @@ async function getCustomer(id, user) {
       else if (st === 'kerugian' && deduction) { disputeSummary.kerugian.n++; disputeSummary.kerugian.amount += deduction; kerugianTotal += deduction; }
     }
     const g = galBy[t.id] || { gallonOut: 0, gallonIn: 0 };
-    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, kind: t.kind || 'jual', gallonQty: t.gallonQty || 0, payMethod: t.payMethod || '', proofPhotoId: t.proofPhotoId || null, txnDate: t.txnDate, note: t.note, actorName: t.actorName, actorId: t.actorId || null, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
+    return { id: t.id, qty: t.qty, unitPriceLocked: t.unitPriceLocked, amount: t.amount, adjustAmount: adj, effectiveAmount: eff, method: t.method, kind: t.kind || 'jual', gallonQty: t.gallonQty || 0, payMethod: t.payMethod || '', proofPhotoId: t.proofPhotoId || null, proofLat: t.proofLat != null ? t.proofLat : null, proofLng: t.proofLng != null ? t.proofLng : null, txnDate: t.txnDate, note: t.note, actorName: t.actorName, actorId: t.actorId || null, createdAt: t.createdAt ? new Date(t.createdAt).getTime() : null, corrected: hasManualCorrection(t.corrections), adjusted: adj !== 0, legacy: !!t.legacy, bonCounted: !!t.bonCounted, openingBon: !!t.openingBon, importBatchId: t.importBatchId || null,
       gallonOut: g.gallonOut, gallonIn: g.gallonIn, pendingRequest: pendBy[t.id] || null,
       status: t.status || 'active', voided, voidReason: t.voidReason || null, voidedByName: t.voidedByName || null, voidedAt: t.voidedAt ? new Date(t.voidedAt).getTime() : null,
       dispute: ed ? { ...ed.latest, deducts: ed.deducts, trail: ed.trail } : null };
@@ -1798,7 +1798,24 @@ async function normalizeCorrection(txn, payload, opts) {
       if (m !== 'lunas' && m !== 'bon') throw ApiError.badRequest("Metode hanya bisa 'lunas' atau 'bon'.");
       method = m;
     }
-    return { fields: { qty, unitPrice, gallonOut, gallonIn, method, ...meta }, newAmount };
+    // PAY METHOD (tunai ↔ transfer) — written only when asked for or when the method itself changes, so
+    // an untouched legacy '' row keeps its note-based meaning. A bon carries none. A switch TO transfer
+    // needs the transfer receipt photo (not for a preview); it becomes the row's proof on approval (the
+    // old photo id stays in the correction trail).
+    const pm = {};
+    if (p.payMethod != null || method !== txn.method) {
+      pm.payMethod = method === 'bon' ? '' : (p.payMethod === 'transfer' ? 'transfer' : p.payMethod === 'tunai' ? 'tunai' : (txn.method === 'lunas' && txn.payMethod ? txn.payMethod : 'tunai'));
+      if (pm.payMethod === 'transfer' && !(txn.method === 'lunas' && txn.payMethod === 'transfer')) {
+        const pid = p.proofPhotoId ? String(p.proofPhotoId) : '';
+        if (!pid && !(opts && opts.preview)) throw ApiError.badRequest('Foto bukti transfer wajib dilampirkan.', { code: 'PROOF_REQUIRED' });
+        if (pid) {
+          const att = await prisma.attachment.findUnique({ where: { id: pid }, select: { id: true } });
+          if (!att) throw ApiError.badRequest('Foto bukti transfer tidak ditemukan — unggah ulang fotonya.', { code: 'PROOF_MISSING' });
+          pm.proofPhotoId = pid;
+        }
+      }
+    }
+    return { fields: { qty, unitPrice, gallonOut, gallonIn, method, ...pm, ...meta }, newAmount };
   }
   // Amount-only: a pelunasan (payment) or an opening/carry-over bon (lump receivable typed directly).
   // Method is NOT changeable here — reject a request that tries to (per the guard).
@@ -1855,12 +1872,12 @@ async function changeRequestClient(req, txnMaybe) {
   let payload = {}; try { payload = JSON.parse(req.payload || '{}'); } catch (e) {}
   const sale = txn && isGallonSale(txn);
   const curG = (txn && sale) ? await currentGallonsOf(txn.id) : { gallonOut: 0, gallonIn: 0 };
-  const current = txn ? { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, ...curG } : null;
+  const current = txn ? { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, method: txn.method, payMethod: txn.payMethod || '', ...curG } : null;
   let requested = null, newAmount = null, requestedMethod = txn ? txn.method : null;
   if (req.kind === 'correction' && txn) {
     if (sale) {
       requestedMethod = (payload.method === 'lunas' || payload.method === 'bon') ? payload.method : txn.method;
-      requested = { qty: payload.qty, unitPrice: payload.unitPrice, gallonOut: payload.gallonOut, gallonIn: payload.gallonIn, method: requestedMethod };
+      requested = { qty: payload.qty, unitPrice: payload.unitPrice, gallonOut: payload.gallonOut, gallonIn: payload.gallonIn, method: requestedMethod, payMethod: payload.payMethod };
       newAmount = (payload.qty || 0) * (payload.unitPrice || 0);
     } else { requested = { amount: payload.amount }; newAmount = payload.amount; }
   }
@@ -1880,7 +1897,7 @@ async function changeRequestClient(req, txnMaybe) {
     }
   }
   return {
-    id: req.id, transactionId: req.transactionId, fleetId: req.fleetId, kind: req.kind, status: req.status,
+    id: req.id, transactionId: req.transactionId, customerId: txn ? txn.customerId : null, fleetId: req.fleetId, kind: req.kind, status: req.status,
     method: txn ? txn.method : null, requestedMethod, methodChanged, bonImpact, wouldGoNegative, reason: req.reason,
     customerName: txn && txn.customer ? txn.customer.name : '', customerCode: txn && txn.customer ? txn.customer.code : '',
     txnRef: shortRefServer(req.transactionId), txnDate: txn ? txn.txnDate : null,
@@ -1935,7 +1952,7 @@ async function previewCorrection(txnId, body, actor) {
   // (requestChange/decideChangeRequest) is what actually refuses an invoiced row.
   const invoice = await invoiceOf(txnId);
   const snap = await actorSnap(actor);
-  const norm = await normalizeCorrection(txn, body.payload || body, { canPrice: snap.canPrice });   // SAME fn apply uses
+  const norm = await normalizeCorrection(txn, body.payload || body, { canPrice: snap.canPrice, preview: true });   // SAME fn apply uses
   const sale = isGallonSale(txn);
   const oldSisaBon = await customerBonBalance(txn.customerId);
   // Δ sisa bon, computed exactly as decideChangeRequest applies it:
@@ -1966,6 +1983,7 @@ async function previewCorrection(txnId, body, actor) {
   return {
     oldAmount: txn.amount, newAmount: norm.newAmount, delta: norm.newAmount - txn.amount,
     method: txn.method, requestedMethod: norm.fields.method || txn.method, methodChanged: !!(sale && norm.fields.method !== txn.method),
+    payMethod: txn.payMethod || '', requestedPayMethod: norm.fields.payMethod !== undefined ? norm.fields.payMethod : (txn.payMethod || ''),
     oldSisaBon, newSisaBon, bonDelta, wouldGoNegative, laterRowsCount, legacy: !!txn.legacy, invoice,
     customerName: txn.customer ? txn.customer.name : '', customerCode: txn.customer ? txn.customer.code : '',
     fields: norm.fields,
@@ -2097,7 +2115,7 @@ async function decideChangeRequest(id, decision, body, actor) {
   if (req.kind === 'correction') {
     norm = await normalizeCorrection(txn, payload, { canPrice: snap.canPrice });   // re-validate against the CURRENT txn state
     const oldG = isGallonSale(txn) ? await currentGallonsOf(txn.id) : {};
-    oldVals = { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, method: txn.method, ...oldG };
+    oldVals = { qty: txn.qty, unitPrice: txn.unitPriceLocked, amount: txn.amount, method: txn.method, payMethod: txn.payMethod || '', proofPhotoId: txn.proofPhotoId || null, ...oldG };
     newVals = { ...norm.fields, amount: norm.newAmount };
     // NEGATIVE-BALANCE GUARD: a method/amount change that would push the customer's raw sisa bon
     // below zero (a bon that was covering existing payments removed) must be CONFIRMED by the
@@ -2132,6 +2150,7 @@ async function decideChangeRequest(id, decision, body, actor) {
       await db.distTransaction.update({ where: { id: txn.id }, data: {
         qty: norm.fields.qty, unitPriceLocked: norm.fields.unitPrice, amount: norm.newAmount,
         method: norm.fields.method, bonCounted: norm.fields.method === 'bon',
+        ...(norm.fields.payMethod !== undefined ? { payMethod: norm.fields.payMethod } : {}), ...(norm.fields.proofPhotoId ? { proofPhotoId: norm.fields.proofPhotoId } : {}),
         ...(norm.fields.txnDate ? { txnDate: norm.fields.txnDate } : {}), ...(norm.fields.note !== undefined ? { note: norm.fields.note } : {}),
       } });
     } else {
@@ -2164,8 +2183,10 @@ async function decideChangeRequest(id, decision, body, actor) {
   // …and a method flip likewise, with its sisa-bon direction, so the trail is reconstructable.
   const methodLine = (req.kind === 'correction' && oldVals && newVals && newVals.method && oldVals.method !== newVals.method)
     ? ` · METODE ${oldVals.method} → ${newVals.method} (sisa bon ${newVals.method === 'bon' ? '+' : '−'}${Math.abs(newVals.method === 'bon' ? newVals.amount : oldVals.amount)})` : '';
+  const payLine = (req.kind === 'correction' && oldVals && newVals && newVals.payMethod !== undefined && oldVals.payMethod !== newVals.payMethod)
+    ? ` · CARA BAYAR ${oldVals.payMethod || 'tunai'} → ${newVals.payMethod || 'bon'}` : '';
   const arsip = txn.legacy ? ' (ARSIP)' : '';   // archive corrections change historical figures — flag them
-  const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}${priceLine}${methodLine}`;
+  const detail = req.kind === 'void' ? `pembatalan diterapkan` : `koreksi diterapkan → ${JSON.stringify(newVals)}${priceLine}${methodLine}${payLine}`;
   await logAudit(req.kind === 'void' ? 'batal' : 'koreksi', `Setujui ${req.kind === 'void' ? 'pembatalan' : 'koreksi'}${arsip}${isSelf ? ' [MANDIRI]' : ''}: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)}${arsip} · ${detail} · ${req.reason} · oleh ${snap.actorName}${isSelf ? ' · PERSETUJUAN MANDIRI' : ''}`, snap, req.fleetId, isSelf);
   const fresh = await prisma.distChangeRequest.findUnique({ where: { id } });
   const out = await changeRequestClient(fresh);

@@ -127,6 +127,10 @@ const correctionSchema = z.object({
   // become a payment; the service also rejects it on a pelunasan/opening-bon row. Method-only changes
   // need no price cap; a price change in the SAME request still requires distribusiHargaMaster.
   method: z.enum(['lunas', 'bon']).optional(),
+  // PAY METHOD of a lunas sale (tunai ↔ transfer) — the field screens' "Cara bayar". A switch to
+  // transfer carries the transfer receipt photo.
+  payMethod: z.enum(['tunai', 'transfer', '']).optional(),
+  proofPhotoId: z.string().min(1).max(60).optional(),
   // Metadata edits allowed on any row (incl. archive): tanggal (reorders the running balance) + catatan.
   txnDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'txnDate must be YYYY-MM-DD').optional(),
   note: z.string().max(300).optional(),
