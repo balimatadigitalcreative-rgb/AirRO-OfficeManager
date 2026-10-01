@@ -295,6 +295,27 @@ Semua teks memakai `finance-i18n.js` (EN + ID), dengan prefix kunci `fld.*`.
 - Di HP, navigasi bawah aplikasi disembunyikan selama tampilan lapangan terbuka. Menu lengkap tetap bisa
   dibuka lewat tombol ☰.
 
+**Sesuai yang dibangun (Rencana 3B, 2026-10-01): data pelanggan dan input manual.**
+- `dist-field-cust.jsx` berisi tab Pelanggan (cari, filter Semua / Belum lengkap / Ada bon / Hari tetap),
+  sheet pelanggan, Lengkapi data, Atur titik, Tambah stop, Pembayaran bon, Penyesuaian galon, Ganti rugi
+  galon, dan Pengeluaran. Menu Catat kini aktif.
+- **Kunci idempotensi:** kolom unik `DistTransaction.clientRef`. Penjualan, pelunasan, atau ganti rugi
+  yang dikirim ulang dengan kode yang sama mengembalikan baris yang sudah ada, termasuk saat respons
+  hilang di jaringan. Kode yang sama untuk pelanggan lain ditolak (409).
+- **Aksi disaring berdasarkan izin**, sama dengan pengecekan di server:
+  - `distribusiInput`: transaksi, bayar bon, ganti rugi;
+  - `distribusiPenyesuaianGalon`: penyesuaian;
+  - `distribusiExpense`: pengeluaran;
+  - `distribusiOrder`: tambah stop;
+  - `distribusiLokasiSimpan`: lengkapi data dan titik.
+- Foto lokasi pelanggan hanya satu, karena kolom di server hanya satu.
+- Liter dan odometer bensin disimpan di catatan pengeluaran.
+- Pengeluaran dari tampilan baru selalu tunai; adaptor memaksanya.
+- Alasan penyesuaian yang dipilih sopir dipetakan ke enum server. Kata-kata pilihan sopir tetap
+  tersimpan di catatan.
+- Daftar bon tertua di Pembayaran bon hanya untuk tampilan. Di Mode latihan, hanya transaksi latihan
+  yang terlihat.
+
 ### 5. Rilis
 
 1. **Demo:** deploy dengan semua saklar aturan mati. Hanya akun berizin yang melihat tampilan baru.
