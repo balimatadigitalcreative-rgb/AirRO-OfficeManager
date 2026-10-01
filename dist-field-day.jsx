@@ -314,7 +314,7 @@ function FldSale({ api, stop: s, pending, refs, onDone, onBack, onPayBon }) {
             <div className="mlap-sumdiv" />
             <div className="mlap-sumtot"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.paidNow)}</b></div>
             <div className={'mlap-after' + (method === 'bon' ? ' bon' : '')}>{method === 'bon' ? trFl('fld.bonAfter', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) }) : trFl('fld.bonStays', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) })}</div>
-            {onPayBon ? <button type="button" className="mlap-linkrow" onClick={onPayBon}><FldSvg n="cash" s={15} sw={2.2} />{trFl('fld.payOldBon')}</button> : null}
+            {onPayBon && !photo ? <button type="button" className="mlap-linkrow" onClick={onPayBon}><FldSvg n="cash" s={15} sw={2.2} />{trFl('fld.payOldBon')}</button> : null}
           </div>
           <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintSale" req={trFl(reqKey)} />
         </fieldset>
@@ -468,7 +468,7 @@ function FldCloseRun({ api, run, stale, onDone, onBack }) {
 // planner, or the phone's copy of it in practice): a full-bleed map under a glass bar, and a sheet that
 // opens from 470 to 700 px with the figures and the legs. The map is a bonus: when Leaflet or the tiles
 // can't load (offline), the sheet still works.
-function FldRoute({ api, ctx, tick, fleet, onOpenRun, onMenu, onAddStop }) {
+function FldRoute({ api, ctx, tick, fleet, mode, onOpenRun, onMenu, onAddStop }) {
   const [runs, setRuns] = uSfl([]);
   uEfl(() => { let live = true; api.runs().then((r) => { if (live) setRuns(r || []); }).catch(() => {}); return () => { live = false; }; }, [api, tick]);
   const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs });
@@ -514,7 +514,7 @@ function FldRoute({ api, ctx, tick, fleet, onOpenRun, onMenu, onAddStop }) {
   const locate = () => { fldGeo(8000).then((p) => { if (p && mapRef.current) mapRef.current.setView([p.lat, p.lng], 16); }); };
   const bar = (title) => (
     <div className="mlap-mapbar">
-      <div className="mlap-glass mlap-mappill">{routeOk ? <span className="mlap-rit-dot" aria-hidden="true" /> : null}{title}</div>
+      <div className="mlap-glass mlap-mappill">{routeOk ? <span className="mlap-rit-dot" aria-hidden="true" /> : null}<span className="mlap-mappill-t">{title}</span>{mode === 'latihan' ? <span className="mlap-chip latihan" role="note">{trFl('fld.modeLatihan')}</span> : null}</div>
       {route && !mapErr ? <button type="button" className="mlap-round" aria-label={trFl('fld.myPos')} onClick={locate}><FldSvg n="locate" s={18} /></button> : null}
       <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={onMenu}><FldSvg n="dots" s={19} /></button>
     </div>

@@ -175,7 +175,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   } else if (tab === 'kirim') {
     body = <FldBoardScreen api={api} ctx={ctx} tick={tick} can={can} onStop={(s) => setView({ name: 'stop', stop: s })} onSale={(s) => setView({ name: 'sale', stop: s })} onOpenRun={() => setView({ name: 'run' })} onIncomplete={goIncomplete} onOutside={() => (can.addStop ? setView({ name: 'addStop' }) : setTab('peta'))} />;
   } else if (tab === 'peta') {
-    body = <FldRoute api={api} ctx={ctx} tick={tick} fleet={fleet} onOpenRun={() => setView({ name: 'run' })} onMenu={() => setMenu(true)} onAddStop={can.addStop ? () => setView({ name: 'addStop' }) : null} />;
+    body = <FldRoute api={api} ctx={ctx} tick={tick} fleet={fleet} mode={mode} onOpenRun={() => setView({ name: 'run' })} onMenu={() => setMenu(true)} onAddStop={can.addStop ? () => setView({ name: 'addStop' }) : null} />;
   } else if (tab === 'setoran') {
     body = <FldSetoran api={api} ctx={ctx} tick={tick} canKoreksi={can.correct || can.void} onKoreksiSaya={() => setView({ name: 'koreksiSaya' })} onChanged={(m) => done(m)} onExpense={can.expense ? () => setView({ name: 'exp' }) : null} onIncomplete={goIncomplete} />;
   } else {
@@ -184,13 +184,13 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
 
   return (
     <div className="mlap-root" ref={rootRef}>
-      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} onPayBon={view.stop.sisaBon > 0 && can.bon ? () => openFor('bon', fldCustFromStop(view.stop)) : null} />}
+      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} onPayBon={view.stop.sisaBon > 0 && can.bon ? () => setView({ name: 'bon', cust: fldCustFromStop(view.stop), back: view }) : null} />}
       {ready && full && view.name === 'pick' && (
         <FldPickCustomer api={api} title={trFl('fld.' + ({ sale: 'catatSale', bon: 'catatBon', adjust: 'catatAdj', damage: 'catatDmg' })[view.act])} hint={trFl('fld.pickHint')}
           accept={view.act === 'bon' ? ((c) => (c.sisaBon > 0 ? '' : 'fld.pickNoBon')) : view.act === 'damage' ? ((c) => (c.gallonsHeld > 0 ? '' : 'fld.dmgNoHeld')) : null}
           onPick={(c) => openFor(view.act, c)} onBack={() => setView(null)} />
       )}
-      {ready && full && view.name === 'bon' && <FldPayBon api={api} cust={view.cust} refs={refs} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'bon' && <FldPayBon api={api} cust={view.cust} refs={refs} onDone={done} onBack={() => setView(view.back || null)} />}
       {ready && full && view.name === 'adjust' && <FldAdjust api={api} cust={view.cust} needsApproval={ctx.galonNeedsApproval} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'damage' && <FldDamage api={api} cust={view.cust} rules={ctx.rules || {}} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'exp' && <FldExpense api={api} refs={refs} onDone={done} onBack={() => setView(null)} />}

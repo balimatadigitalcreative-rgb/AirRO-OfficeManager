@@ -94,7 +94,7 @@ describe('Transaksi (mockup Transaksi board)', () => {
   it('totals: a divider, the 22 px total, the coloured "after" pill; a link to collect the old bon', () => {
     expect(f()).toMatch(/<div className="mlap-sumdiv" \/>/);
     expect(f()).toMatch(/<div className="mlap-sumtot"><span>\{trFl\(pv\.totalKey\)\}<\/span><b>/);
-    expect(f()).toMatch(/onPayBon \? <button type="button" className="mlap-linkrow" onClick=\{onPayBon\}><FldSvg n="cash"/);
+    expect(f()).toMatch(/onPayBon && !photo \? <button type="button" className="mlap-linkrow" onClick=\{onPayBon\}><FldSvg n="cash"/);
     expect(rule('TRANSAKSI', '.mlap-sumtot b')).toMatch(/font-size: 22px; font-weight: 700;/);
     expect(rule('TRANSAKSI', '.mlap-after.bon')).toMatch(/background: #FCF1D6; color: #7A4B00;/);
   });
@@ -105,7 +105,7 @@ describe('Transaksi (mockup Transaksi board)', () => {
   it('save is the fixed bottom bar with its reason above it', () => {
     expect(f()).toMatch(/<FldCtaBar hint=\{why \? trFl\(why\) : ''\}>/);
     expect(f()).toMatch(/disabled=\{busy \|\| !!why \|\| \(needReason && !noLoc\.trim\(\)\)\} onClick=\{save\}><FldSvg n="check"/);
-    expect(shell).toMatch(/onPayBon=\{view\.stop\.sisaBon > 0 && can\.bon \? \(\) => openFor\('bon', fldCustFromStop\(view\.stop\)\) : null\}/);
+    expect(shell).toMatch(/onPayBon=\{view\.stop\.sisaBon > 0 && can\.bon \? \(\) => setView\(\{ name: 'bon', cust: fldCustFromStop\(view\.stop\), back: view \}\) : null\}/);   // final review: Batal returns to the sale
   });
 });
 
@@ -163,7 +163,7 @@ describe('Peta (mockup Rute rit board)', () => {
   });
   it('the shell drops its header on Peta (the glass bar replaces it) and hands it the menu', () => {
     expect(shell).toMatch(/\{tab !== 'peta' \? \(\s*<div className="mlap-head">/);
-    expect(shell).toMatch(/<FldRoute api=\{api\} ctx=\{ctx\} tick=\{tick\} fleet=\{fleet\} onOpenRun=\{\(\) => setView\(\{ name: 'run' \}\)\} onMenu=\{\(\) => setMenu\(true\)\} onAddStop=\{can\.addStop \? \(\) => setView\(\{ name: 'addStop' \}\) : null\} \/>/);
+    expect(shell).toMatch(/<FldRoute api=\{api\} ctx=\{ctx\} tick=\{tick\} fleet=\{fleet\} mode=\{mode\} onOpenRun=\{\(\) => setView\(\{ name: 'run' \}\)\} onMenu=\{\(\) => setMenu\(true\)\} onAddStop=\{can\.addStop \? \(\) => setView\(\{ name: 'addStop' \}\) : null\} \/>/);
   });
 });
 
@@ -194,5 +194,18 @@ describe('Setoran (mockup Selesai board)', () => {
   it('the tab is titled "Setoran hari ini"; the shell hands it Pengeluaran and "Lengkapi"', () => {
     expect(shell).toMatch(/trFl\(tab === 'setoran' \? 'fld\.setoranT' : TAB_LABEL\[tab\]\)/);
     expect(shell).toMatch(/onExpense=\{can\.expense \? \(\) => setView\(\{ name: 'exp' \}\) : null\} onIncomplete=\{goIncomplete\}/);
+  });
+});
+
+describe('Final review fixes', () => {
+  it('Batal on "Bayar bon lama" returns to the sale; the link only shows before the proof photo (nothing to lose)', () => {
+    expect(shell).toMatch(/onPayBon=\{view\.stop\.sisaBon > 0 && can\.bon \? \(\) => setView\(\{ name: 'bon', cust: fldCustFromStop\(view\.stop\), back: view \}\) : null\}/);
+    expect(shell).toMatch(/<FldPayBon api=\{api\} cust=\{view\.cust\} refs=\{refs\} onDone=\{done\} onBack=\{\(\) => setView\(view\.back \|\| null\)\} \/>/);
+    expect(fn(day, 'FldSale')).toMatch(/\{onPayBon && !photo \? <button type="button" className="mlap-linkrow" onClick=\{onPayBon\}>/);
+  });
+  it('Peta keeps the practice-mode chip (spec: always visible in practice)', () => {
+    expect(fn(day, 'FldRoute')).toMatch(/function FldRoute\(\{ api, ctx, tick, fleet, mode, onOpenRun, onMenu, onAddStop \}\)/);
+    expect(fn(day, 'FldRoute')).toMatch(/\{mode === 'latihan' \? <span className="mlap-chip latihan" role="note">\{trFl\('fld\.modeLatihan'\)\}<\/span> : null\}/);
+    expect(shell).toMatch(/<FldRoute api=\{api\} ctx=\{ctx\} tick=\{tick\} fleet=\{fleet\} mode=\{mode\} /);
   });
 });
