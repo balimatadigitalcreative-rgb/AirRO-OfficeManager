@@ -158,6 +158,7 @@ const fldCan = (perms) => {
     sale: !!p.distribusiInput, bon: !!p.distribusiInput, damage: !!p.distribusiInput,
     adjust: !!p.distribusiPenyesuaianGalon, expense: !!p.distribusiExpense,
     addStop: !!p.distribusiOrder, location: !!p.distribusiLokasiSimpan,
+    correct: !!p.distribusiKoreksi, void: !!p.distribusiVoid,
   };
 };
 // The customer behind a board stop, in the shape the customer screens use.

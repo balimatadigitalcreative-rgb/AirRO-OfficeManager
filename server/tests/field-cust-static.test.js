@@ -9,7 +9,8 @@ const fn = (name) => { const i = cust.indexOf('function ' + name + '('); expect(
 
 it('parses, ships after the day screens, never calls the server directly', () => {
   expect(() => parse(cust, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow();
-  expect(build).toMatch(/'dist-field-day\.jsx',\s*'dist-field-cust\.jsx',\s*'dist-field\.jsx',/);
+  expect(build).toMatch(/'dist-field-day\.jsx',\s*'dist-field-cust\.jsx',/);
+  expect(build.indexOf("'dist-field-cust.jsx'")).toBeLessThan(build.indexOf("'dist-field.jsx'"));   // koreksi may sit between
   expect(cust).not.toMatch(/window\.API|fetch\(/);
 });
 it('every fld.* key written literally exists in EN and ID', () => {
