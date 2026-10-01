@@ -104,6 +104,65 @@ function ZnConfirm({ title, changes, applied, busy, onCancel, onConfirm, confirm
   );
 }
 
+// ── Kembalikan armada sebelum zona ─────────────────────────────────────────────────────────────
+// The armada each zoned customer had before the first zone, read by the server from their own history
+// (transactions keep the armada they were input under, delivery stops the armada they ran on). Every
+// row starts ticked; the owner unticks any, then applies. Zones then stop setting an armada (days stay).
+function ZnArmadaRestore({ onClose, onApplied }) {
+  const [d, setD] = uSz(null);
+  const [err, setErr] = uSz('');
+  const [off, setOff] = uSz({});   // unticked customer ids
+  const [busy, setBusy] = uSz(false);
+  const msg = (e) => (e && e.body && e.body.error && e.body.error.message) || trD('dist.loadErr');
+  uEz(() => { const o = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', o); return () => window.removeEventListener('keydown', o); }, []);
+  uEz(() => { window.API.distribusi.zones.armadaRestore().then((r) => setD(r.data)).catch((e) => setErr(msg(e))); }, []);
+  const rows = (d && d.rows) || [];
+  const picked = rows.filter((r) => !off[r.id]);
+  const apply = () => {
+    setBusy(true); setErr('');
+    window.API.distribusi.zones.armadaRestoreApply(picked.map((r) => r.id)).then((r) => onApplied(r.data)).catch((e) => { setErr(msg(e)); setBusy(false); });
+  };
+  const since = d && d.since ? new Date(d.since).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  const toggleAll = (on) => { const o = {}; if (!on) rows.forEach((r) => { o[r.id] = true; }); setOff(o); };
+  return (
+    <div className="modal-scrim" onClick={onClose} style={{ zIndex: 260 }}>
+      <div className="modal-card zn-confirm" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><div style={{ fontSize: 17, fontWeight: 800 }}>{trD('zn.arTitle')}</div><button className="jp-icon" onClick={onClose} aria-label={trD('dist.cancel')}><IconClose s={18} /></button></div>
+        <div className="modal-body">
+          {!d && !err && <div className="zn-sub">…</div>}
+          {d && <div className="zn-sub">{d.since ? trD('zn.arLead', { t: since }) : trD('zn.arNoZone')}</div>}
+          {d && d.since && (
+            <div className={'zn-impact' + (rows.length ? ' warn' : '')}>
+              {rows.length ? <IconTruck s={16} /> : <IconCheck s={16} />}
+              <span>{rows.length ? trD('zn.arN', { n: picked.length, t: rows.length }) : trD('zn.arNone')}</span>
+            </div>
+          )}
+          {rows.length > 0 && (
+            <div className="zn-chg">
+              <div className="zn-chg-h zn-ar">
+                <span><input type="checkbox" checked={picked.length === rows.length} onChange={(e) => toggleAll(e.target.checked)} aria-label={trD('zn.arAll')} /> {trD('zn.colCustomer')}</span>
+                <span>{trD('zn.colZone')}</span><span>{trD('zn.colArmada')}</span><span>{trD('zn.arFrom')}</span>
+              </div>
+              {rows.map((r) => (
+                <label key={r.id} className="zn-chg-r zn-ar">
+                  <span className="zn-chg-n"><input type="checkbox" checked={!off[r.id]} onChange={() => setOff((o) => Object.assign({}, o, { [r.id]: !o[r.id] }))} /> {r.code ? <em>{r.code}</em> : null}{r.name}</span>
+                  <span>{r.zone || '—'}</span>
+                  <span className="chg">{(r.now || '—') + ' → ' + r.before}</span>
+                  <span>{trD(r.from.kind === 'transaksi' ? 'zn.arFromTxn' : 'zn.arFromStop', { d: r.from.date })}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {d && d.unknown.length > 0 && <div className="zn-sub" style={{ marginTop: 10 }}>{trD('zn.arUnknown', { n: d.unknown.length })} {d.unknown.slice(0, 40).map((c) => c.name).join(', ')}{d.unknown.length > 40 ? ' …' : ''}</div>}
+          {rows.length > 0 && <div className="zn-sub" style={{ marginTop: 10 }}>{trD('zn.arNote')}</div>}
+          {err && <div className="zn-impact warn" role="alert"><IconWarn s={16} /><span>{err}</span></div>}
+        </div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>{trD('dist.cancel')}</button><button className="btn btn-primary" disabled={busy || !picked.length} onClick={apply}>{busy ? '…' : trD('zn.arApply', { n: picked.length })}</button></div>
+      </div>
+    </div>
+  );
+}
+
 // ── Automatic zones: group the points, preview on a map, then replace the zones ──────────────────
 // Two ways to cut the map:
 //   'daily' — one zone per (armada, day), each at most `max` customers: the route of one day. The
@@ -250,6 +309,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
   const [confirm, setConfirm] = uSz(null);   // { title, changes, applied, run }
   const [busy, setBusy] = uSz(false);
   const [autoOpen, setAutoOpen] = uSz(false);
+  const [arOpen, setArOpen] = uSz(false);   // Kembalikan armada sebelum zona
   const [moveOpen, setMoveOpen] = uSz(false);
   const [fx, setFx] = uSz(null);           // { id, on, days } — the fixed-days editor, bound to ONE customer
   const [toast, setToast] = uSz('');
@@ -451,6 +511,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
         <div className="zn-title"><h2>{trD('nav.distZones')}</h2><span className="zn-mut">{trD('zn.lead')}</span></div>
         {canManage && !drawing && !depotMode && (
           <div className="zn-head-act">
+            <button type="button" className="btn btn-ghost" onClick={() => setArOpen(true)}><IconTruck s={16} />{trD('zn.arBtn')}</button>
             <button type="button" className="btn btn-ghost" onClick={() => setAutoOpen(true)} disabled={!custs.length}><IconSparkle s={16} />{trD('zn.auto')}</button>
             <button type="button" className="btn btn-ghost" onClick={() => { setPick(null); setDepotPt(data && data.depot ? [data.depot.lat, data.depot.lng] : null); setDepotMode(true); }}><IconHome s={16} />{trD('zn.depotSet')}</button>
             <button type="button" className="btn btn-primary" onClick={startDraw}><IconPlus s={16} />{trD('zn.draw')}</button>
@@ -643,6 +704,7 @@ function DistZones({ refreshKey, canManage: capManage, canCustomers, fleet, onCh
 
       {confirm && <ZnConfirm title={confirm.title} changes={confirm.changes} confirmLabel={confirm.confirmLabel} busy={busy} onCancel={() => setConfirm(null)} onConfirm={runConfirm} />}
       {autoOpen && <ZnAuto initialK={zones.length || 5} armadaOpts={armadaOpts} armadaDefault={[...new Set(custs.map((c) => c.armada).filter(Boolean))].sort()} onClose={() => setAutoOpen(false)} onApplied={(r) => { setAutoOpen(false); setSelId(null); done(trD('zn.autoDone', { z: (r.zones || []).length, n: r.applied })); }} />}
+      {arOpen && <ZnArmadaRestore onClose={() => setArOpen(false)} onApplied={(r) => { setArOpen(false); done(trD('zn.arDone', { n: r.restored })); }} />}
       {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
     </div>
   );

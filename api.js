@@ -303,6 +303,8 @@
         remove: (id, dryRun) => req('DELETE', '/distribusi/zones/' + encodeURIComponent(id) + (dryRun ? '?dryRun=1' : '')),
         assign: (body) => req('POST', '/distribusi/zones/assign', body),
         auto: (body) => req('POST', '/distribusi/zones/auto', body),
+        armadaRestore: () => req('GET', '/distribusi/zones/armada-restore'),
+        armadaRestoreApply: (ids) => req('POST', '/distribusi/zones/armada-restore', { ids }),
       },
       // A `fleet` filter ('Merah'/'Biru'/…) narrows a full-access user to one fleet;
       // scoped users are always restricted server-side regardless. Falsy/'all' = no filter.
