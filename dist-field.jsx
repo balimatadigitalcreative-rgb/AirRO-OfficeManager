@@ -19,6 +19,8 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const [ctx, setCtx] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [tab, setTab] = uSfl('kirim');
+  const [custFilter, setCustFilter] = uSfl('all');   // the Pelanggan filter — the board can open it on "Belum lengkap"
+  const goIncomplete = () => { setCustFilter('warn'); setTab('pelanggan'); };
   const [view, setView] = uSfl(null);   // { name: 'stop'|'sale'|'run', stop? }
   const [menu, setMenu] = uSfl(false);
   const menuDrag = useFldSheetDrag(() => setMenu(false));
@@ -171,13 +173,13 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   } else if (!ready) {
     body = <div className="mlap-empty">{trFl('fld.loading')}</div>;
   } else if (tab === 'kirim') {
-    body = <FldBoardScreen api={api} ctx={ctx} tick={tick} can={can} onStop={(s) => setView({ name: 'stop', stop: s })} onSale={(s) => setView({ name: 'sale', stop: s })} onOpenRun={() => setView({ name: 'run' })} onRoute={() => setTab('peta')} />;
+    body = <FldBoardScreen api={api} ctx={ctx} tick={tick} can={can} onStop={(s) => setView({ name: 'stop', stop: s })} onSale={(s) => setView({ name: 'sale', stop: s })} onOpenRun={() => setView({ name: 'run' })} onIncomplete={goIncomplete} onOutside={() => (can.addStop ? setView({ name: 'addStop' }) : setTab('peta'))} />;
   } else if (tab === 'peta') {
     body = <FldRoute api={api} ctx={ctx} tick={tick} onOpenRun={() => setView({ name: 'run' })} />;
   } else if (tab === 'setoran') {
     body = <FldSetoran api={api} ctx={ctx} tick={tick} canKoreksi={can.correct || can.void} onKoreksiSaya={() => setView({ name: 'koreksiSaya' })} onChanged={(m) => done(m)} />;
   } else {
-    body = <FldCustomers api={api} tick={tick} onOpen={(c) => setView({ name: 'cust', cust: c })} />;
+    body = <FldCustomers api={api} tick={tick} filter={custFilter} onFilter={setCustFilter} onOpen={(c) => setView({ name: 'cust', cust: c })} />;
   }
 
   return (

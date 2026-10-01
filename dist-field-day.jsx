@@ -17,9 +17,11 @@ function fldLoadDay(api, ctx) {
   });
 }
 
+// The tag at the right of a stop row (mockup colours): delivered green, held/cancelled red, fixed order
+// purple, extra blue, open bon amber.
 function fldStopTag(s) {
   if (s.status === 'terkirim') return ['ok', trFl('fld.st_terkirim')];
-  if (s.status === 'ditunda') return ['held', trFl('fld.st_ditunda')];
+  if (s.status === 'ditunda') return ['neg', trFl('fld.st_ditunda')];
   if (s.status === 'batal') return ['neg', trFl('fld.st_batal')];
   if (s.pinned) return ['pin', trFl('fld.tagPinned')];
   if (s.source === 'tambahan') return ['info', trFl('fld.tagExtra')];
@@ -27,41 +29,48 @@ function fldStopTag(s) {
   return null;
 }
 
-function FldStopRow({ s, n, onClick }) {
+function FldStopRow({ s, n, tone, onClick }) {
   const tag = fldStopTag(s);
   const sub = [s.customerCode, trFl('fld.nGalon', { n: s.planQty }), s.legKm != null ? FIELDLOGIC.fmtKm(s.legKm) : '', s.pendingReason].filter(Boolean).join(' · ');
   return (
     <button type="button" className="mlap-row mlap-rowbtn" onClick={onClick}>
-      <span className="mlap-num">{n}</span>
-      <span className="mlap-grow"><span className="nm">{s.customerName}{s.gaps.count > 0 ? <span className="mlap-warn-dot" role="img" aria-label={trFl('fld.incompleteB')}>!</span> : null}</span><span className="sb">{sub}</span></span>
+      <span className={'mlap-num' + (tone ? ' ' + tone : '')}>{n}</span>
+      <span className="mlap-grow"><span className="nm">{s.customerName}</span><span className="sb">{sub}</span></span>
+      {s.gaps.count > 0 ? <span className="mlap-warn-dot" role="img" aria-label={trFl('fld.incompleteB')}><FldSvg n="exclamThin" s={11} sw={3} /></span> : null}
       {tag && <span className={'mlap-tag ' + tag[0]}>{tag[1]}</span>}
     </button>
   );
 }
 
-function FldNextCard({ s, canSale, onSale, onOpen }) {
+// BERIKUTNYA (mockup next-stop card): the stop's number, the distance, name + address (opens the stop),
+// coloured chips, then Navigasi and the wider "Antar & catat".
+function FldNextCard({ s, n, canSale, onSale, onOpen }) {
   const links = fldLinks(s);
-  const chips = [trFl('fld.nGalon', { n: s.planQty })];
-  if (s.sisaBon > 0) chips.push(trFl('fld.bonTag', { v: FIELDLOGIC.fmtRp(s.sisaBon) }));
-  if (s.gallonsHeld != null) chips.push(trFl('fld.heldTag', { n: s.gallonsHeld }));
-  if (s.gaps.wa) chips.push(trFl('fld.noWa'));
+  const chips = [['blue', trFl('fld.nGalon', { n: s.planQty })]];
+  if (s.sisaBon > 0) chips.push(['bon', trFl('fld.bonTag', { v: FIELDLOGIC.fmtRp(s.sisaBon) })]);
+  if (s.gallonsHeld != null) chips.push(['gray', trFl('fld.heldTag', { n: s.gallonsHeld })]);
+  if (s.gaps.wa) chips.push(['warn', trFl('fld.noWa')]);
   return (
     <div className="mlap-card mlap-next">
       <button type="button" className="mlap-next-hd" onClick={onOpen}>
-        <span className="mlap-eyebrow">{trFl('fld.next')}{s.legKm != null ? ' · ' + FIELDLOGIC.fmtKm(s.legKm) : ''}</span>
-        <span className="mlap-next-nm">{s.customerName}</span>
-        {s.address ? <span className="sb">{s.address}</span> : null}
+        <span className="mlap-nbig">{n}</span>
+        <span className="mlap-grow">
+          <span className="mlap-next-eb">{trFl('fld.next')}{s.legKm != null ? ' · ' + FIELDLOGIC.fmtKm(s.legKm) : ''}</span>
+          <span className="mlap-next-nm">{s.customerName}</span>
+          {s.address ? <span className="mlap-next-ad">{s.address}</span> : null}
+        </span>
+        <FldSvg n="chevron" s={14} sw={2.4} style={{ color: '#8A9AA3', flexShrink: 0 }} />
       </button>
-      <div className="mlap-chips">{chips.map((c) => <span key={c} className="mlap-chip-s">{c}</span>)}</div>
+      <div className="mlap-chips">{chips.map(([t, c]) => <span key={c} className={'mlap-chip-s ' + t}>{t === 'warn' ? <FldSvg n="exclam" s={11} sw={2.8} /> : null}{c}</span>)}</div>
       <div className="mlap-actions">
-        <FldLinkBtn href={links.nav} className="mlap-btn" newTab>{trFl('fld.navigate')}</FldLinkBtn>
-        {canSale ? <button type="button" className="mlap-btn primary" onClick={onSale}>{trFl('fld.deliverRecord')}</button> : null}
+        <FldLinkBtn href={links.nav} className="mlap-btn gray" newTab><FldSvg n="navigate" s={16} />{trFl('fld.navigate')}</FldLinkBtn>
+        {canSale ? <button type="button" className="mlap-btn primary" onClick={onSale}><FldSvg n="check" s={16} sw={2.6} />{trFl('fld.deliverRecord')}</button> : null}
       </div>
     </div>
   );
 }
 
-function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onRoute }) {
+function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onIncomplete, onOutside }) {
   const [d, setD] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [seg, setSeg] = uSfl('pending');
@@ -74,39 +83,68 @@ function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onRout
   if (!d) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const v = d.view; const rs = d.rs; const r = d.route;
   const list = seg === 'pending' ? v.pending.filter((s) => !v.next || s.id !== v.next.id) : seg === 'done' ? v.done : v.held;
+  // numbers run on like the board: delivered 1…k, the next stop k+1, then the waiting list; held = "!"
+  const first = seg === 'pending' ? v.counts.done + (v.next ? 2 : 1) : 1;
+  const pct = rs.open ? FIELDLOGIC.loadPct(rs.remaining, rs.open.gallonsOut) : 0;
   return (
     <>
-      <div className="mlap-card mlap-run">
+      <div className="mlap-card mlap-ritcard">
         {rs.open && rs.stale ? (
           <FldNotice tone="warn" title={trFl('fld.staleRunT', { n: rs.open.runNo, date: rs.open.date })} sub={trFl('fld.staleRunB')} action={trFl('fld.closeRun')} onAction={onOpenRun} />
         ) : rs.open ? (
           <>
-            <div className="mlap-run-l"><b>{trFl('fld.ritN', { n: rs.open.runNo })}</b><span className="mlap-run-big">{rs.remaining}</span><span className="sb">{trFl('fld.ofLoadLeft', { n: rs.open.gallonsOut })}</span></div>
-            {r ? <div className="sb">{trFl('fld.routeLine', { stops: r.rit.length, km: FIELDLOGIC.fmtKm(r.totalKm - r.returnKm), back: FIELDLOGIC.fmtKm(r.returnKm), rits: r.estRits })}</div> : null}
-            <div className="mlap-actions"><button type="button" className="mlap-btn" onClick={onRoute}>{trFl('fld.seeRoute')}</button><button type="button" className="mlap-btn" onClick={onOpenRun}>{trFl('fld.closeRun')}</button></div>
+            <div className="mlap-rit-l">
+              <span className="mlap-rit-dot" aria-hidden="true" />
+              <b className="n">{trFl('fld.ritN', { n: rs.open.runNo })}</b>
+              <span className="mlap-rit-left">· <b>{rs.remaining}</b> {trFl('fld.ofLoadLeft', { n: rs.open.gallonsOut })}</span>
+              <button type="button" className="mlap-rit-link" onClick={onOpenRun}>{trFl('fld.closeRun')}</button>
+            </div>
+            <div className="mlap-bar" role="img" aria-label={trFl('fld.loadPctL', { p: pct })}><span style={{ width: pct + '%' }} /></div>
+            {r ? (
+              <div className="mlap-rit-meta">
+                <span>{trFl('fld.nStops', { n: r.rit.length })}</span>
+                <span>{trFl('fld.kmPlusBack', { km: FIELDLOGIC.fmtKm(r.totalKm - r.returnKm), back: FIELDLOGIC.fmtKm(r.returnKm) })}</span>
+                {r.estRits ? <span>{trFl('fld.moreRits', { n: r.estRits })}</span> : null}
+              </div>
+            ) : null}
           </>
         ) : (
           <>
-            <div className="mlap-run-l"><b>{trFl('fld.noRunT')}</b></div>
-            <div className="sb">{trFl('fld.noRunB')}</div>
+            <div className="mlap-rit-l"><span className="mlap-rit-dot off" aria-hidden="true" /><b className="n">{trFl('fld.noRunT')}</b></div>
+            <div className="mlap-rit-meta">{trFl('fld.noRunB')}</div>
             <button type="button" className="mlap-btn primary" onClick={onOpenRun}>{trFl('fld.openRunN', { n: rs.nextNo })}</button>
           </>
         )}
       </div>
-      {v.incomplete > 0 && <FldNotice tone="warn" title={trFl('fld.incompleteT', { n: v.incomplete })} sub={trFl('fld.incompleteB')} />}
-      {v.outsideRoute > 0 && <FldNotice tone="info" title={trFl('fld.outsideT', { n: v.outsideRoute })} sub={trFl('fld.outsideB')} />}
-      {v.next && <FldNextCard s={v.next} canSale={!!(can && can.sale)} onSale={() => onSale(v.next)} onOpen={() => onStop(v.next)} />}
-      <FldSeg label={trFl('fld.filter')} value={seg} onChange={setSeg} options={[['pending', trFl('fld.segPending', { n: v.counts.pending })], ['done', trFl('fld.segDone', { n: v.counts.done })], ['held', trFl('fld.segHeld', { n: v.counts.held })]]} />
-      <div className="mlap-card">
-        {list.length ? list.map((s, i) => <FldStopRow key={s.id} s={s} n={i + (seg === 'pending' && v.next ? 2 : 1)} onClick={() => onStop(s)} />) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
+      {v.incomplete > 0 && (
+        <button type="button" className="mlap-alert warn" onClick={onIncomplete}>
+          <FldSvg n="warn" s={18} sw={2.2} style={{ flexShrink: 0 }} />
+          <span className="mlap-grow"><span className="t">{trFl('fld.incompleteT', { n: v.incomplete })}</span><span className="s">{trFl('fld.incompleteB')}</span></span>
+          <span className="act">{trFl('fld.lengkapi')}</span>
+        </button>
+      )}
+      {v.outsideRoute > 0 && (
+        <button type="button" className="mlap-alert" onClick={onOutside}>
+          <FldSvg n="pinOff" s={18} style={{ flexShrink: 0, color: '#9A3412' }} />
+          <span className="mlap-grow"><span className="t">{trFl('fld.outsideT', { n: v.outsideRoute })}</span><span className="s">{trFl('fld.outsideB')}</span></span>
+          <FldSvg n="chevron" s={14} sw={2.4} style={{ color: '#8A9AA3', flexShrink: 0 }} />
+        </button>
+      )}
+      {v.next && <FldNextCard s={v.next} n={v.counts.done + 1} canSale={!!(can && can.sale)} onSale={() => onSale(v.next)} onOpen={() => onStop(Object.assign({}, v.next, { boardNo: v.counts.done + 1 }))} />}
+      <FldSeg size="sm" label={trFl('fld.filter')} value={seg} onChange={setSeg} options={[['pending', trFl('fld.segPending', { n: v.counts.pending })], ['done', trFl('fld.segDone', { n: v.counts.done })], ['held', trFl('fld.segHeld', { n: v.counts.held })]]} />
+      <div className="mlap-card mlap-list">
+        {list.length ? list.map((s, i) => {
+          const n = seg === 'held' ? '!' : first + i;
+          return <FldStopRow key={s.id} s={s} n={n} tone={seg === 'done' ? 'ok' : seg === 'held' ? 'neg' : ''} onClick={() => onStop(Object.assign({}, s, { boardNo: n }))} />;
+        }) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
       </div>
       {v.outstanding.length > 0 && (
         <>
-          <div className="mlap-eyebrow">{trFl('fld.outstandingT', { n: v.outstanding.length })}</div>
-          <div className="mlap-card">
+          <div className="mlap-label">{trFl('fld.outstandingT', { n: v.outstanding.length })}</div>
+          <div className="mlap-card mlap-list">
             {v.outstanding.map((o) => (
               <div key={o.id} className="mlap-row">
-                <span className="mlap-num">{o.umur}</span>
+                <span className="mlap-num neg">{o.umur}</span>
                 <span className="mlap-grow"><span className="nm">{o.customerName}</span><span className="sb">{[o.customerCode, o.date, o.pendingReason].filter(Boolean).join(' · ')}</span></span>
               </div>
             ))}

@@ -5,11 +5,10 @@
    expense; expenses always cash from the deposit; gallon adjustments wait for the office; a pin moved
    more than 150 m from the phone asks to confirm. */
 
-function FldCustomers({ api, tick, onOpen }) {
+function FldCustomers({ api, tick, filter, onFilter, onOpen }) {
   const [list, setList] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [q, setQ] = uSfl('');
-  const [filter, setFilter] = uSfl('all');
   uEfl(() => { let live = true; setErr(null); api.customers().then((r) => { if (live) setList(r || []); }).catch((e) => { if (live) setErr(e); }); return () => { live = false; }; }, [api, tick]);
   if (err) return <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!list) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
@@ -17,7 +16,7 @@ function FldCustomers({ api, tick, onOpen }) {
   return (
     <>
       <input className="mlap-text mlap-search" type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
-      <FldSeg label={trFl('fld.filter')} value={filter} onChange={setFilter} options={[['all', trFl('fld.f_all', { n: v.counts.all })], ['warn', trFl('fld.f_warn', { n: v.counts.warn })], ['bon', trFl('fld.f_bon', { n: v.counts.bon })], ['fixed', trFl('fld.f_fixed', { n: v.counts.fixed })]]} />
+      <FldSeg label={trFl('fld.filter')} value={filter} onChange={onFilter} options={[['all', trFl('fld.f_all', { n: v.counts.all })], ['warn', trFl('fld.f_warn', { n: v.counts.warn })], ['bon', trFl('fld.f_bon', { n: v.counts.bon })], ['fixed', trFl('fld.f_fixed', { n: v.counts.fixed })]]} />
       <div className="mlap-card">
         {v.rows.length ? v.rows.map((c) => (
           <button key={c.id} type="button" className="mlap-row mlap-rowbtn" onClick={() => onOpen(c)}>

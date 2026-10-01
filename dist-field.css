@@ -379,3 +379,39 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 
 /* ── 3D-2 BOOT — the blank field-coloured screen while the owner's rules load (M13) ── */
 .mlap-boot { position: fixed; inset: 0; z-index: 30; background: #EEF2F6; }
+
+/* ── 3D-2 PENGIRIMAN — mockup Main board ── */
+.mlap-ritcard { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.mlap-rit-l { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.mlap-rit-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: #1A8C87; }
+.mlap-rit-dot.off { background: #AFC0CB; }
+.mlap-rit-l .n { font-weight: 600; }
+.mlap-rit-left { flex: 1; min-width: 0; color: var(--mlap-sub); }
+.mlap-rit-left b { color: #0F6B66; }
+.mlap-rit-link { min-height: 44px; display: flex; align-items: center; padding: 0; border: 0; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: #065489; cursor: pointer; flex-shrink: 0; }
+.mlap-bar { height: 6px; border-radius: 3px; background: #E1E8ED; overflow: hidden; }
+.mlap-bar > span { display: block; height: 100%; border-radius: 3px; background: #1A8C87; transition: width .45s cubic-bezier(.34,1.56,.64,1); }
+.mlap-rit-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--mlap-sub); }
+.mlap-alert { width: 100%; min-height: 44px; border-radius: 14px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 0; background: #FFFFFF; color: var(--mlap-ink); font: inherit; text-align: left; cursor: pointer; }
+.mlap-alert.warn { background: #FFF1E8; border: 1px solid #F4C7A8; color: #9A3412; }
+.mlap-alert .t { font-size: 14px; font-weight: 600; }
+.mlap-alert.warn .t { font-weight: 700; }
+.mlap-alert .s { font-size: 12px; color: var(--mlap-sub); }
+.mlap-alert.warn .s { color: #9A3412; }
+.mlap-alert .act { font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.mlap-next { padding: 12px; border: 0; border-radius: 18px; display: flex; flex-direction: column; gap: 10px; }
+.mlap-next-hd { flex-direction: row; align-items: center; gap: 10px; width: 100%; }
+.mlap-next-eb { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #065489; text-transform: uppercase; }
+.mlap-next-nm { font-size: 17px; font-weight: 700; }
+.mlap-next-ad { font-size: 13px; color: var(--mlap-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mlap-chip-s { height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 7px; font-size: 12px; font-weight: 600; background: #EEF2F6; color: #3E4E58; }
+.mlap-chip-s.blue { background: #E8F1F8; color: #065489; }
+.mlap-chip-s.bon { background: #FCF1D6; color: #7A4B00; }
+.mlap-chip-s.warn { background: #FFF1E8; color: #9A3412; }
+.mlap-btn.gray { background: #E8EEF3; color: var(--mlap-ink); }
+.mlap-next .mlap-actions .mlap-btn { border-radius: 12px; }
+.mlap-next .mlap-actions .mlap-btn.primary { flex: 1.3; box-shadow: none; }
+.mlap-list { border-radius: 18px; }
+.mlap-num.ok { background: #E3F3EA; color: #1E6B40; }
+.mlap-num.neg { background: #FDE8E6; color: #9B2C22; }
+.mlap-warn-dot { width: 20px; height: 20px; border: 0; flex-shrink: 0; background: #FFF1E8; color: #9A3412; display: grid; place-items: center; }

@@ -177,7 +177,7 @@ describe('Plan 3C: 3A minors', () => {
   it('the next stop is not listed again under Menunggu; the list numbers after it', () => {
     const f = fn('FldBoardScreen');
     expect(f).toMatch(/v\.pending\.filter\(\(s\) => !v\.next \|\| s\.id !== v\.next\.id\)/);
-    expect(f).toMatch(/n=\{i \+ \(seg === 'pending' && v\.next \? 2 : 1\)\}/);
+    expect(f).toMatch(/const first = seg === 'pending' \? v\.counts\.done \+ \(v\.next \? 2 : 1\) : 1;/);   // 3D-2: numbers run on after the delivered ones
   });
   it('Peta reads today\'s rits (the next rit number is right) and the map can be retried', () => {
     const f = fn('FldRoute');
