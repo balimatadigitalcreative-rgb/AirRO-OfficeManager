@@ -56,9 +56,9 @@ function FldCustSheet({ cust: c0, can, onClose, onAction }) {
         <h2>{c.name}</h2>
         <p>{[c.code, c.address].filter(Boolean).join(' · ')}</p>
         <div className="mlap-links">
-          <a className={'mlap-btn' + (links.nav ? '' : ' off')} href={links.nav || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!links.nav}>{trFl('fld.navigate')}</a>
-          <a className={'mlap-btn' + (links.tel ? '' : ' off')} href={links.tel || undefined} aria-disabled={!links.tel}>{trFl('fld.call')}</a>
-          <a className={'mlap-btn' + (links.wa ? '' : ' off')} href={links.wa || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!links.wa}>{trFl('fld.wa')}</a>
+          <FldLinkBtn href={links.nav} className="mlap-btn" newTab>{trFl('fld.navigate')}</FldLinkBtn>
+          <FldLinkBtn href={links.tel} className="mlap-btn">{trFl('fld.call')}</FldLinkBtn>
+          <FldLinkBtn href={links.wa} className="mlap-btn" newTab>{trFl('fld.wa')}</FldLinkBtn>
         </div>
         <div className="mlap-card mlap-facts">
           <div><span className="sb">{trFl('fld.bonNow')}</span><b>{FIELDLOGIC.fmtRp(c.sisaBon || 0)}</b></div>

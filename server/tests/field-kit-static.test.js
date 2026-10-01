@@ -61,3 +61,20 @@ describe('Plan 3B kit', () => {
     expect(f).toMatch(/inputMode="numeric"/);
   });
 });
+
+describe('Plan 3C kit', () => {
+  it('standing notices are not alerts (only errors interrupt a screen reader)', () => {
+    const f = kit.slice(kit.indexOf('function FldNotice('), kit.indexOf('function FldNotice(') + 400);
+    expect(f).not.toMatch(/role=\{tone === 'warn' \? 'alert'/);
+  });
+  it('a link with nowhere to go is a disabled span', () => {
+    const f = kit.slice(kit.indexOf('function FldLinkBtn('));
+    expect(f).toMatch(/if \(!href\) return <span className=\{className \+ ' off'\} aria-disabled="true">/);
+  });
+  it('selects are 44px and 16px (no iOS zoom); the CSS header no longer claims a dark mode', () => {
+    const css = fs.readFileSync(path.join(root, 'dist-field.css'), 'utf8');
+    expect(css).toMatch(/\.mlap-select \{ min-height: 44px; font-size: 16px; \}/);
+    expect(css).toMatch(/\.mlap-chip select \{ min-height: 44px; font-size: 16px; \}/);
+    expect(css.slice(0, 400)).not.toMatch(/Tokens redefined for dark mode/);
+  });
+});

@@ -1,6 +1,6 @@
 /* MODE LAPANGAN — phone-first field UI (Liquid Glass on the FUNCTIONAL layer only: dock, round
    buttons, sheets, the Catat menu; content cards stay opaque). Prefix mlap- ("mode lapangan"); the old
-   form field classes are never touched. Tokens redefined for dark mode. */
+   form field classes are never touched. The app has no dark theme: the field UI is light only. */
 .mlap-root {
   --mlap-bg: #EEF2F6; --mlap-surface: #FFFFFF; --mlap-ink: #0E1B24; --mlap-sub: #5B6B75; --mlap-line: #EDF1F4;
   --mlap-accent: #065489; --mlap-accent-soft: #E8F1F8; --mlap-teal-ink: #0F6B66; --mlap-teal-soft: #DDF4F2;
@@ -208,6 +208,11 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-pad { padding: 4px 12px 12px; }
 /* KOREKSI (3C) */
 .mlap-rowbtn.on { background: var(--mlap-accent-soft); box-shadow: inset 3px 0 0 var(--mlap-accent); }
+/* TOUCH TARGETS (3C): every control ≥ 44px; selects at 16px so iOS does not zoom */
+.mlap-select { min-height: 44px; font-size: 16px; }
+.mlap-chip select { min-height: 44px; font-size: 16px; }
+.mlap-chip:has(select) { height: auto; padding: 0 6px; }
+.mlap-range { min-height: 44px; }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

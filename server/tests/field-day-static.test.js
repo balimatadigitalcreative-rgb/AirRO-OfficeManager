@@ -172,3 +172,28 @@ describe('Plan 3C: day screens', () => {
     expect(f).toMatch(/onClick=\{\(\) => \(sum\.closeout \? setAskRe\(true\) : close\(\)\)\}/);
   });
 });
+
+describe('Plan 3C: 3A minors', () => {
+  it('the next stop is not listed again under Menunggu; the list numbers after it', () => {
+    const f = fn('FldBoardScreen');
+    expect(f).toMatch(/v\.pending\.filter\(\(s\) => !v\.next \|\| s\.id !== v\.next\.id\)/);
+    expect(f).toMatch(/n=\{i \+ \(seg === 'pending' && v\.next \? 2 : 1\)\}/);
+  });
+  it('Peta reads today\'s rits (the next rit number is right) and the map can be retried', () => {
+    const f = fn('FldRoute');
+    expect(f).toMatch(/api\.runs\(\)/);
+    expect(f).toMatch(/FIELDLOGIC\.runState\(\{ today: ctx\.today, openRun: ctx\.openRun, runs \}\)/);
+    expect(f).toMatch(/action=\{trFl\('fld\.retry'\)\} onAction=\{\(\) => setMapErr\(false\)\}/);
+    expect(f).toMatch(/\}, \[route, mapErr\]\);/);
+  });
+  it('the close-rit difference is stored in Indonesian whatever the screen language', () => {
+    expect(day).toMatch(/\['kembali_besok', 'fld\.d_besok', 'Tetap di armada \(besok\)'\]/);
+    expect(fn('FldCloseRun')).toMatch(/body\.diffReason = label \+/);
+    expect(fn('FldCloseRun')).not.toMatch(/diffReason = trFl\(/);
+  });
+  it('a11y: the warning dot is an image with a label; links without a target are not links', () => {
+    expect(fn('FldStopRow')).toMatch(/className="mlap-warn-dot" role="img" aria-label=/);
+    expect(day).not.toMatch(/href=\{links\.\w+ \|\| undefined\}/);
+    expect(day).toMatch(/<FldLinkBtn href=\{links\.nav\}/);
+  });
+});

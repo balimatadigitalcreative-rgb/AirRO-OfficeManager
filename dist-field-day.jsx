@@ -33,7 +33,7 @@ function FldStopRow({ s, n, onClick }) {
   return (
     <button type="button" className="mlap-row mlap-rowbtn" onClick={onClick}>
       <span className="mlap-num">{n}</span>
-      <span className="mlap-grow"><span className="nm">{s.customerName}{s.gaps.count > 0 ? <span className="mlap-warn-dot" aria-label={trFl('fld.incompleteB')}>!</span> : null}</span><span className="sb">{sub}</span></span>
+      <span className="mlap-grow"><span className="nm">{s.customerName}{s.gaps.count > 0 ? <span className="mlap-warn-dot" role="img" aria-label={trFl('fld.incompleteB')}>!</span> : null}</span><span className="sb">{sub}</span></span>
       {tag && <span className={'mlap-tag ' + tag[0]}>{tag[1]}</span>}
     </button>
   );
@@ -54,7 +54,7 @@ function FldNextCard({ s, canSale, onSale, onOpen }) {
       </button>
       <div className="mlap-chips">{chips.map((c) => <span key={c} className="mlap-chip-s">{c}</span>)}</div>
       <div className="mlap-actions">
-        <a className={'mlap-btn' + (links.nav ? '' : ' off')} href={links.nav || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!links.nav}>{trFl('fld.navigate')}</a>
+        <FldLinkBtn href={links.nav} className="mlap-btn" newTab>{trFl('fld.navigate')}</FldLinkBtn>
         {canSale ? <button type="button" className="mlap-btn primary" onClick={onSale}>{trFl('fld.deliverRecord')}</button> : null}
       </div>
     </div>
@@ -73,7 +73,7 @@ function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onRout
   if (err) return <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!d) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const v = d.view; const rs = d.rs; const r = d.route;
-  const list = seg === 'pending' ? v.pending : seg === 'done' ? v.done : v.held;
+  const list = seg === 'pending' ? v.pending.filter((s) => !v.next || s.id !== v.next.id) : seg === 'done' ? v.done : v.held;
   return (
     <>
       <div className="mlap-card mlap-run">
@@ -98,7 +98,7 @@ function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onRout
       {v.next && <FldNextCard s={v.next} canSale={!!(can && can.sale)} onSale={() => onSale(v.next)} onOpen={() => onStop(v.next)} />}
       <FldSeg label={trFl('fld.filter')} value={seg} onChange={setSeg} options={[['pending', trFl('fld.segPending', { n: v.counts.pending })], ['done', trFl('fld.segDone', { n: v.counts.done })], ['held', trFl('fld.segHeld', { n: v.counts.held })]]} />
       <div className="mlap-card">
-        {list.length ? list.map((s, i) => <FldStopRow key={s.id} s={s} n={i + 1} onClick={() => onStop(s)} />) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
+        {list.length ? list.map((s, i) => <FldStopRow key={s.id} s={s} n={i + (seg === 'pending' && v.next ? 2 : 1)} onClick={() => onStop(s)} />) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
       </div>
       {v.outstanding.length > 0 && (
         <>
@@ -157,9 +157,9 @@ function FldStopSheet({ api, stop: s, can, onClose, onSale, onAction, onChanged 
           </div>
         )}
         <div className="mlap-links">
-          <a className={'mlap-btn' + (links.nav ? '' : ' off')} href={links.nav || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!links.nav}>{trFl('fld.navigate')}</a>
-          <a className={'mlap-btn' + (links.tel ? '' : ' off')} href={links.tel || undefined} aria-disabled={!links.tel}>{trFl('fld.call')}</a>
-          <a className={'mlap-btn' + (links.wa ? '' : ' off')} href={links.wa || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!links.wa}>{trFl('fld.wa')}</a>
+          <FldLinkBtn href={links.nav} className="mlap-btn" newTab>{trFl('fld.navigate')}</FldLinkBtn>
+          <FldLinkBtn href={links.tel} className="mlap-btn">{trFl('fld.call')}</FldLinkBtn>
+          <FldLinkBtn href={links.wa} className="mlap-btn" newTab>{trFl('fld.wa')}</FldLinkBtn>
         </div>
         <div className="mlap-card mlap-facts">
           <div><span className="sb">{trFl('fld.orderToday')}</span><b>{trFl('fld.nGalon', { n: s.planQty })}</b></div>
@@ -276,7 +276,7 @@ function FldSale({ api, stop: s, pending, refs, onDone, onBack }) {
 }
 
 const FLD_SOP_REASONS = ['fld.sop_sedikit', 'fld.sop_stok', 'fld.sop_armada', 'fld.sop_terakhir'];
-const FLD_DIFF = [['kembali_besok', 'fld.d_besok'], ['rusak', 'fld.d_rusak'], ['hilang', 'fld.d_hilang'], ['salah_hitung', 'fld.d_salah']];
+const FLD_DIFF = [['kembali_besok', 'fld.d_besok', 'Tetap di armada (besok)'], ['rusak', 'fld.d_rusak', 'Rusak'], ['hilang', 'fld.d_hilang', 'Hilang'], ['salah_hitung', 'fld.d_salah', 'Salah hitung']];   // [code, label key, the Indonesian text office records keep]
 
 // BUKA RIT — how many gallons go on the truck. Capacity is a hard cap; below the owner's SOP the new
 // UI always asks why (the server only insists once the switch is on). The preview plans the rit from
@@ -362,9 +362,9 @@ function FldCloseRun({ api, run, stale, onDone, onBack }) {
   uEfl(() => { if (res && !allowed.some(([k]) => k === res)) setRes(''); }, [full]);
   const close = () => {
     setBusy(true); setErr('');
-    const label = (FLD_DIFF.find(([k]) => k === res) || [null, ''])[1];
+    const label = (FLD_DIFF.find(([k]) => k === res) || [null, '', ''])[2];
     const body = { gallonsFullReturned: full, gallonsEmptyReturned: empty };
-    if (diff !== 0) { body.diffReason = trFl(label) + (note.trim() ? ' · ' + note.trim() : ''); body.resolution = res; }
+    if (diff !== 0) { body.diffReason = label + (note.trim() ? ' · ' + note.trim() : ''); body.resolution = res; }
     api.closeRun(run.id, body).then(() => onDone(trFl('fld.runClosed', { n: run.runNo }))).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
   };
   return (
@@ -394,7 +394,9 @@ function FldCloseRun({ api, run, stale, onDone, onBack }) {
 // copy of it in practice): map with numbered stops + the list. The map is a bonus: when Leaflet or the
 // tiles can't load (offline), the list still works.
 function FldRoute({ api, ctx, tick, onOpenRun }) {
-  const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs: [] });
+  const [runs, setRuns] = uSfl([]);
+  uEfl(() => { let live = true; api.runs().then((r) => { if (live) setRuns(r || []); }).catch(() => {}); return () => { live = false; }; }, [api, tick]);
+  const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs });
   const [route, setRoute] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [mapErr, setMapErr] = uSfl(false);
@@ -409,7 +411,7 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
     return () => { live = false; };
   }, [api, tick, routeOk]);
   uEfl(() => {
-    if (!route || !mapEl.current) return undefined;
+    if (!route || mapErr || !mapEl.current) return undefined;
     let live = true;
     znLoadLeaflet().then((L) => {
       if (!live || !mapEl.current) return;
@@ -431,7 +433,7 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
       map.fitBounds(L.latLngBounds(pts).pad(0.2));
     }).catch(() => { if (live) setMapErr(true); });
     return () => { live = false; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
-  }, [route]);
+  }, [route, mapErr]);
   if (!rs.open || rs.stale) return (
     <FldNotice tone={rs.stale ? 'warn' : 'info'} title={rs.stale ? trFl('fld.staleRunT', { n: rs.open.runNo, date: rs.open.date }) : trFl('fld.noRunT')} sub={rs.stale ? trFl('fld.staleRunB') : trFl('fld.noRunB')}
       action={rs.stale ? trFl('fld.closeRun') : trFl('fld.openRunN', { n: rs.nextNo })} onAction={onOpenRun} />
@@ -443,7 +445,7 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
   const firstNav = first ? fldLinks(first).nav : '';
   return (
     <>
-      {mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} /> : <div ref={mapEl} className="mlap-map" role="img" aria-label={trFl('fld.routeT', { n: route.run.runNo })} />}
+      {mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} action={trFl('fld.retry')} onAction={() => setMapErr(false)} /> : <div ref={mapEl} className="mlap-map" role="img" aria-label={trFl('fld.routeT', { n: route.run.runNo })} />}
       <div className="mlap-card mlap-routehd">
         <div><b>{trFl('fld.routeT', { n: route.run.runNo })}</b><span className="sb">{trFl('fld.fromDepot')}</span></div>
         <div className="mlap-routefig"><span><b>{route.used}/{route.capacity}</b><span className="sb">{trFl('fld.gallonsUsed')}</span></span><span><b>{FIELDLOGIC.fmtKm(route.totalKm - route.returnKm)}</b><span className="sb">{trFl('fld.kmBack', { km: FIELDLOGIC.fmtKm(route.returnKm) })}</span></span><span><b>{route.leftover.length}</b><span className="sb">{trFl('fld.toNextRun')}</span></span></div>
@@ -463,7 +465,7 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
       </div>
       <div className="mlap-actions">
         <button type="button" className="mlap-btn" onClick={onOpenRun}>{trFl('fld.closeRun')}</button>
-        <a className={'mlap-btn primary' + (firstNav ? '' : ' off')} href={firstNav || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!firstNav}>{first ? trFl('fld.navTo', { n: first.order }) : trFl('fld.navigate')}</a>
+        <FldLinkBtn href={firstNav} className="mlap-btn primary" newTab>{first ? trFl('fld.navTo', { n: first.order }) : trFl('fld.navigate')}</FldLinkBtn>
       </div>
     </>
   );

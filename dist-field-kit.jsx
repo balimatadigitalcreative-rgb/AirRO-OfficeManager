@@ -45,6 +45,13 @@ const fldLinks = (s) => {
   return { nav, tel: digits ? 'tel:' + digits : '', wa: typeof waHref === 'function' ? waHref(x.phone) : '' };
 };
 
+// A button-styled link; with nowhere to go it is a disabled span (a disabled <a> without href is still
+// announced as a link and focusable on some readers).
+function FldLinkBtn({ href, className, newTab, children }) {
+  if (!href) return <span className={className + ' off'} aria-disabled="true">{children}</span>;
+  return <a className={className} href={href} target={newTab ? '_blank' : undefined} rel={newTab ? 'noopener noreferrer' : undefined}>{children}</a>;
+}
+
 function FldTop({ title, sub, onBack }) {
   return (
     <div className="mlap-top">
@@ -97,7 +104,7 @@ function FldChips({ options, otherLabel, value, onChange }) {
 
 function FldNotice({ tone, title, sub, action, onAction }) {
   return (
-    <div className={'mlap-notice ' + (tone || 'info')} role={tone === 'warn' ? 'alert' : 'status'}>
+    <div className={'mlap-notice ' + (tone || 'info')} role="note">
       <span className="mlap-grow"><b>{title}</b>{sub ? <span className="sb">{sub}</span> : null}</span>
       {action && onAction ? <button type="button" className="mlap-btn" onClick={onAction}>{action}</button> : null}
     </div>
