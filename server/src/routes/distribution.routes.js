@@ -53,6 +53,8 @@ router.get('/customers/location-coverage', requireCap('distribusi'), ctrl.locati
 // rewrites the armada + delivery days of the customers inside it). Literal paths before '/:id'.
 router.get('/zones', requireCap('distribusiZona'), ctrl.listZones);
 router.post('/zones/auto', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.zoneAutoSchema }), ctrl.autoZones);
+router.get('/zones/armada-restore', requireCap('distribusiZonaKelola'), ctrl.zoneArmadaRestorePlan);
+router.post('/zones/armada-restore', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.zoneArmadaRestoreSchema }), ctrl.zoneArmadaRestore);
 router.post('/zones/assign', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.zoneAssignSchema }), ctrl.assignZone);
 router.post('/zones', requireCap('distribusiZonaKelola'), validate({ body: ctrl.schemas.zoneCreateSchema }), ctrl.createZone);
 router.put('/zones/:id', requireCap('distribusiZonaKelola'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.zoneUpdateSchema }), ctrl.updateZone);

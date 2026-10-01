@@ -488,4 +488,63 @@ async function assertScheduleEditable(cur, data) {
   }
 }
 
-module.exports = { listZones, createZone, updateZone, deleteZone, assignCustomer, autoZones, syncCustomers, assertScheduleEditable };
+// ── Kembalikan armada sebelum zona (owner request 2026-10-01) ─────────────────
+// Zones moved many customers to another armada. The armada a customer had BEFORE the first zone is
+// read from their own history: a transaction keeps the armada it was input under (immutable), a
+// delivery stop keeps the armada it ran on (only days strictly before the zone day — that day's
+// pending stops follow the new armada). The newest entry wins. Only customers still in a zone are
+// offered (one taken out of their zone by hand made their own choice since).
+async function firstZoneAt() {
+  const a = await prisma.distAuditLog.findFirst({
+    where: { OR: [{ title: { startsWith: 'Zona dibuat' } }, { title: { startsWith: 'Zona otomatis' } }, { title: { startsWith: 'Zona per hari' } }] },
+    orderBy: { createdAt: 'asc' }, select: { createdAt: true },
+  });
+  if (a) return a.createdAt;
+  const z = await prisma.distZone.findFirst({ orderBy: { createdAt: 'asc' }, select: { createdAt: true } });
+  return z ? z.createdAt : null;
+}
+
+async function armadaRestorePlan(actor) {
+  assertCanManage(actor);
+  const since = await firstZoneAt();
+  const zones = await prisma.distZone.findMany({ select: { id: true, name: true, armada: true } });
+  const zoneName = new Map(zones.map((z) => [z.id, z.name]));
+  const out = { since: since ? since.toISOString() : null, rows: [], unknown: [], zonesWithArmada: zones.filter((z) => (z.armada || '') !== '').length };
+  if (!since) return out;
+  const sinceDay = require('../lib/time').todayISO(since);
+  const custs = await prisma.customer.findMany({ where: { zoneId: { not: null }, active: { not: false } }, select: { id: true, code: true, name: true, armada: true, zoneId: true }, orderBy: { name: 'asc' } });
+  if (!custs.length) return out;
+  const ids = custs.map((c) => c.id);
+  const best = new Map();   // customerId → { armada, kind, date }
+  const take = (cid, armada, kind, date) => { const b = best.get(cid); if (!b || date > b.date || (date === b.date && kind === 'transaksi' && b.kind !== 'transaksi')) best.set(cid, { armada, kind, date }); };
+  const txns = await prisma.distTransaction.findMany({ where: { customerId: { in: ids }, createdAt: { lt: since }, fleetId: { not: '' } }, select: { customerId: true, fleetId: true, txnDate: true } });
+  txns.forEach((t) => take(t.customerId, t.fleetId, 'transaksi', t.txnDate));
+  const stops = await prisma.delivery.findMany({ where: { customerId: { in: ids }, date: { lt: sinceDay }, fleetId: { not: '' } }, select: { customerId: true, fleetId: true, date: true } });
+  stops.forEach((s) => take(s.customerId, s.fleetId, 'pengiriman', s.date));
+  custs.forEach((c) => {
+    const base = { id: c.id, code: c.code || '', name: c.name, zone: zoneName.get(c.zoneId) || '', now: c.armada || '' };
+    const b = best.get(c.id);
+    if (!b) { out.unknown.push(base); return; }
+    if (b.armada !== base.now) out.rows.push(Object.assign(base, { before: b.armada, from: { kind: b.kind, date: b.date } }));
+  });
+  return out;
+}
+
+async function armadaRestoreApply(body, actor) {
+  const plan = await armadaRestorePlan(actor);
+  const want = new Set(Array.isArray(body && body.ids) ? body.ids : []);
+  const rows = plan.rows.filter((r) => want.has(r.id));   // only what the preview offers
+  const res = await prisma.$transaction(async (tx) => {
+    // every zone stops setting an armada (its days stay) — otherwise the next zone edit moves them again
+    const z = await tx.distZone.updateMany({ where: { armada: { not: '' } }, data: { armada: '' } });
+    for (const r of rows) await tx.customer.update({ where: { id: r.id }, data: { armada: r.before } });
+    return { zones: z.count };
+  }, TX);
+  for (const r of rows) {
+    await dist().logDistAudit('pelanggan', `Armada dikembalikan: ${r.name}`, `${r.now || '-'} → ${r.before} (armada sebelum zona, dari ${r.from.kind} ${r.from.date})`, actor, r.before);
+  }
+  await dist().logDistAudit('pelanggan', 'Armada dikembalikan: ringkasan', `${rows.length} pelanggan kembali ke armada sebelum zona; ${res.zones} zona tidak lagi mengatur armada (hari kirim tetap)`, actor, '');
+  return { restored: rows.length, zones: res.zones };
+}
+
+module.exports = { listZones, createZone, updateZone, deleteZone, assignCustomer, autoZones, syncCustomers, assertScheduleEditable, armadaRestorePlan, armadaRestoreApply };
