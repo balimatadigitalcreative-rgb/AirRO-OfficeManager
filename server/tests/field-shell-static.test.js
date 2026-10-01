@@ -32,7 +32,7 @@ it('latihan ribbon + confirmed mode switch + reset', () => {
   expect(jsx).toMatch(/askSwitch\(/);
   expect(jsx).toMatch(/trFl\('fld\.switchToAsliB'\)/);
   expect(jsx).toMatch(/trFl\('fld\.resetLatihanB'\)/);
-  expect(jsx).toMatch(/openLatihan\(\{ key, real, storage: storageRef\.current, today \}\)/);   // yesterday's practice copy is never reused
+  expect(jsx).toMatch(/openLatihan\(\{ key, real, storage: storageRef\.current, today, onPersist: \(ok\) => \{ if \(live\) setPersistOk\(ok\); \} \}\)/);   // yesterday's practice copy is never reused
 });
 it('the old view stays reachable from the menu, also after release (spec 5: masa transisi)', () => {
   expect(jsx).toMatch(/onClick=\{\(\) => \{ setMenu\(false\); onExit\(\); \}\}>\{trFl\('fld\.backOld'\)\}/);
@@ -66,4 +66,21 @@ it('every fld.* key used exists in EN and ID', () => {
   const dynamic = ['fld.st_pending', 'fld.st_terkirim', 'fld.st_ditunda', 'fld.st_batal', 'fld.catatSale', 'fld.catatBon', 'fld.catatExp', 'fld.catatStop', 'fld.catatAdj', 'fld.catatDmg', 'fld.tabKirim', 'fld.tabPeta', 'fld.tabPelanggan', 'fld.tabSetoran'];
   expect(used.length).toBeGreaterThan(20);
   [...used, ...dynamic].forEach((k) => expect({ k, n: (i18n.match(new RegExp("'" + k.replace('.', '\\.') + "':", 'g')) || []).length }).toEqual({ k, n: 2 }));
+});
+
+describe('Plan 3A shell wiring', () => {
+  it('screens only run on the adaptor of the ACTIVE mode (never the old one after a switch)', () => {
+    expect(jsx).toMatch(/const ready = !!api && api\.mode === mode && !!ctx;/);
+  });
+  it('the armada follows the list when it arrives later', () => {
+    expect(jsx).toMatch(/if \(!fleets\.includes\(fleet\)\) setFleet\(fleets\[0\] \|\| ''\);/);
+  });
+  it('tabs and views map to the day screens', () => {
+    ['<FldBoardScreen ', '<FldRoute ', '<FldSetoran ', '<FldSale ', '<FldOpenRun ', '<FldStopSheet '].forEach((t) => expect(jsx).toContain(t));
+    expect(jsx).not.toMatch(/function FldBoard\(/);   // the Plan 2 stub is gone
+  });
+  it('a lost practice save and a failed restart are shown', () => {
+    expect(jsx).toMatch(/api\.persisted === false \|\| persistOk === false/);
+    expect(jsx).toMatch(/\.catch\(\(e\) => flash\(trFl\('fld\.resetFail'\)/);
+  });
 });

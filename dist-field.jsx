@@ -1,8 +1,8 @@
 /* MODE LAPANGAN — the new phone UI for delivery staff (demo until the owner releases it). This file
-   holds the shell (header, MODE LATIHAN ribbon, mode switch, glass dock + Catat menu) and the owner's
-   Aturan lapangan & armada screen. The full screens (mockup) arrive in the next plan; until then the
-   Pengiriman tab lists the day's stops so both modes can be tried end to end. Every read/write goes
-   through ONE adaptor (FIELDAPI): real = the server, latihan = this phone only.
+   holds the shell (header, MODE LATIHAN ribbon, mode switch, glass dock + Catat menu, which tab and
+   which task screen is open) and the owner's Aturan lapangan & armada screen. The day screens live in
+   dist-field-day.jsx, the shared pieces in dist-field-kit.jsx. Every read/write goes through ONE
+   adaptor (FIELDAPI): real = the server, latihan = this phone only.
    The bundle shares one scope across files, so every top-level name here is unique (Fld*, *fl). */
 // Releasing makes this the main view for EVERY field account. Locked until the full field screens
 // (Plan 3) replace the foundation stub; flip to true then. Un-releasing is always allowed.
@@ -14,30 +14,47 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   const fleets = scope || fldPlates(fleetList);
   const [fleet, setFleet] = uSfl(fleets[0] || '');
   const [api, setApi] = uSfl(null);
+  const [ctx, setCtx] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [tab, setTab] = uSfl('kirim');
+  const [view, setView] = uSfl(null);   // { name: 'stop'|'sale'|'run', stop? }
   const [menu, setMenu] = uSfl(false);
   const [catat, setCatat] = uSfl(false);
   const [ask, setAsk] = uSfl(null);
   const [toast, setToast] = uSfl('');
-  const [tick, setTick] = uSfl(0);
+  const [tick, setTick] = uSfl(0);           // bumped after every write → screens and context reload
+  const [openTick, setOpenTick] = uSfl(0);   // bumped by "Coba lagi" / restart → the adaptor reopens
+  const [persistOk, setPersistOk] = uSfl(true);
   const storageRef = uRfl(null);
   const key = 'latihan:' + ((user && user.id) || 'anon') + ':' + (fleet || '');
-
-  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2400); };
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
   // The glass dock IS the navigation here: the app's own phone bottom nav steps aside while this is
   // open (the topbar menu still reaches every other screen).
   uEfl(() => { document.body.classList.add('mlap-on'); return () => { document.body.classList.remove('mlap-on'); }; }, []);
+  // The armada list can arrive after the first render (empty cache): follow it.
+  uEfl(() => { if (!fleets.includes(fleet)) setFleet(fleets[0] || ''); }, [fleets.join('|')]);
+  // Open the adaptor of the chosen mode (practice copy is per user + armada + day).
   uEfl(() => {
-    let live = true; setApi(null); setErr(null);
+    let live = true; setApi(null); setCtx(null); setErr(null); setPersistOk(true); setView(null);
     const real = window.FIELDAPI.real(window.API, { date: today, fleet });
     if (mode === 'asli') { setApi(real); return () => { live = false; }; }
     if (!storageRef.current) storageRef.current = window.indexedDB ? window.FIELDAPI.idbStorage() : window.FIELDAPI.memoryStorage();
-    window.FIELDAPI.openLatihan({ key, real, storage: storageRef.current, today })
+    window.FIELDAPI.openLatihan({ key, real, storage: storageRef.current, today, onPersist: (ok) => { if (live) setPersistOk(ok); } })
       .then((a) => { if (live) setApi(a); })
       .catch((e) => { if (live) setErr(e); });
     return () => { live = false; };
-  }, [mode, fleet, today, tick]);
+  }, [mode, fleet, today, openTick]);
+  // The day's context (rules, warehouse, open rit, expected gallons) — reloaded after every write and,
+  // in Mode asli, when the office changes something (refreshKey).
+  uEfl(() => {
+    if (!api || api.mode !== mode) return undefined;
+    let live = true;
+    api.context().then((c) => { if (live) setCtx(c); }).catch((e) => { if (live) setErr(e); });
+    return () => { live = false; };
+  }, [api, tick, mode === 'asli' ? refreshKey : 0]);
+  // Screens only ever run on the adaptor of the ACTIVE mode — never the previous one after a switch.
+  const ready = !!api && api.mode === mode && !!ctx;
+  const done = (m) => { setView(null); setTick((t) => t + 1); if (m) flash(m); };
 
   const askSwitch = (to) => setAsk({
     title: to === 'asli' ? trFl('fld.switchToAsliT') : trFl('fld.switchToLatihanT'),
@@ -47,55 +64,76 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   });
   const askReset = () => setAsk({
     title: trFl('fld.resetLatihanT'), body: trFl('fld.resetLatihanB'), danger: true,
-    run: () => { Promise.resolve(api && api.reset && api.reset()).then(() => { setMenu(false); setTick((t) => t + 1); flash(trFl('fld.resetDone')); }); },
+    run: () => {
+      Promise.resolve(api && api.reset ? api.reset() : null)
+        .then(() => { setMenu(false); setOpenTick((t) => t + 1); flash(trFl('fld.resetDone')); })
+        .catch((e) => flash(trFl('fld.resetFail') + (fldErrMsg(e) ? ' (' + fldErrMsg(e) + ')' : '')));
+    },
   });
 
   const TABS = [['kirim', 'IconTruck'], ['peta', 'IconPin'], null, ['pelanggan', 'IconCustomers'], ['setoran', 'IconWallet']];
   const TAB_LABEL = { kirim: 'fld.tabKirim', peta: 'fld.tabPeta', pelanggan: 'fld.tabPelanggan', setoran: 'fld.tabSetoran' };
   const ACTIONS = ['catatSale', 'catatBon', 'catatExp', 'catatStop', 'catatAdj', 'catatDmg'];
+  const full = view && (view.name === 'sale' || view.name === 'run');   // full-screen task: no tab header/dock
+
+  let body = null;
+  if (err) {
+    body = (
+      <div className="mlap-err" role="alert">
+        <b>{err.offline ? trFl('fld.offline') : trFl('fld.loadErr')}</b>
+        <span>{fldErrMsg(err)}</span>
+        <button type="button" className="mlap-btn" onClick={() => setOpenTick((t) => t + 1)}>{trFl('fld.retry')}</button>
+      </div>
+    );
+  } else if (!ready) {
+    body = <div className="mlap-empty">{trFl('fld.loading')}</div>;
+  } else if (tab === 'kirim') {
+    body = <FldBoardScreen api={api} ctx={ctx} tick={tick} onStop={(s) => setView({ name: 'stop', stop: s })} onSale={(s) => setView({ name: 'sale', stop: s })} onOpenRun={() => setView({ name: 'run' })} onRoute={() => setTab('peta')} />;
+  } else if (tab === 'peta') {
+    body = <FldRoute api={api} ctx={ctx} tick={tick} onOpenRun={() => setView({ name: 'run' })} />;
+  } else if (tab === 'setoran') {
+    body = <FldSetoran api={api} ctx={ctx} tick={tick} onChanged={(m) => done(m)} />;
+  } else {
+    body = <div className="mlap-card"><div className="mlap-empty">{trFl('fld.soon')}</div></div>;
+  }
 
   return (
     <div className="mlap-root">
       {mode === 'latihan' && <div className="mlap-ribbon" role="status">{trFl('fld.bannerLatihan')}</div>}
-      <div className="mlap-head">
-        <h1>{trFl(TAB_LABEL[tab])}</h1>
-        <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={() => setMenu(true)}>{FldIco('IconDots', 20)}</button>
-      </div>
-      <div className="mlap-eyebrow mlap-meta">
-        <span>{today}</span>
-        <span className={'mlap-chip ' + mode}>{mode === 'latihan' ? trFl('fld.modeLatihan') : trFl('fld.modeAsli')}</span>
-        {fleets.length > 1 ? (
-          <span className="mlap-chip">
-            <select value={fleet} onChange={(e) => setFleet(e.target.value)} aria-label={trFl('fld.pickFleet')}>
-              {fleets.map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </span>
-        ) : <span className="mlap-chip">{fleet || '—'}</span>}
-      </div>
-
-      <div className="mlap-body">
-        {err && (
-          <div className="mlap-err" role="alert">
-            <b>{err.offline ? trFl('fld.offline') : trFl('fld.loadErr')}</b>
-            <span>{fldErrMsg(err)}</span>
-            <button type="button" className="mlap-btn" onClick={() => setTick((t) => t + 1)}>{trFl('fld.retry')}</button>
+      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
+      {!full && (
+        <>
+          <div className="mlap-head">
+            <h1>{trFl(TAB_LABEL[tab])}</h1>
+            <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={() => setMenu(true)}>{FldIco('IconDots', 20)}</button>
           </div>
-        )}
-        {!err && api && api.persisted === false && <div className="mlap-err" role="status">{trFl('fld.noStore')}</div>}
-        {!err && !api && <div className="mlap-empty">{trFl('fld.loading')}</div>}
-        {!err && api && tab === 'kirim' && <FldBoard api={api} refreshKey={mode === 'asli' ? refreshKey : 0} />}
-        {!err && api && tab !== 'kirim' && <div className="mlap-card"><div className="mlap-empty">{trFl('fld.soon')}</div></div>}
-      </div>
-
-      <nav className="mlap-dock" aria-label={trFl('fld.nav')}>
-        {TABS.map((t, i) => (t ? (
-          <button key={t[0]} type="button" className={'mlap-tab' + (tab === t[0] ? ' on' : '')} aria-current={tab === t[0] ? 'page' : undefined} onClick={() => setTab(t[0])}>
-            {FldIco(t[1], 20)}<span>{trFl(TAB_LABEL[t[0]])}</span>
-          </button>
-        ) : <span key={'gap' + i} aria-hidden="true" />))}
-      </nav>
-      <button type="button" className={'mlap-catat' + (catat ? ' open' : '')} aria-label={trFl('fld.tabCatat')} aria-expanded={catat} onClick={() => setCatat(!catat)}>{FldIco('IconPlus', 24)}</button>
-      {catat && (
+          <div className="mlap-eyebrow mlap-meta">
+            <span>{today}</span>
+            <span className={'mlap-chip ' + mode}>{mode === 'latihan' ? trFl('fld.modeLatihan') : trFl('fld.modeAsli')}</span>
+            {fleets.length > 1 ? (
+              <span className="mlap-chip">
+                <select value={fleet} onChange={(e) => setFleet(e.target.value)} aria-label={trFl('fld.pickFleet')}>
+                  {fleets.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </span>
+            ) : <span className="mlap-chip">{fleet || '—'}</span>}
+          </div>
+          <div className="mlap-body">
+            {api && mode === 'latihan' && (api.persisted === false || persistOk === false) && <div className="mlap-err" role="status">{trFl('fld.noStore')}</div>}
+            {body}
+          </div>
+          <nav className="mlap-dock" aria-label={trFl('fld.nav')}>
+            {TABS.map((t, i) => (t ? (
+              <button key={t[0]} type="button" className={'mlap-tab' + (tab === t[0] ? ' on' : '')} aria-current={tab === t[0] ? 'page' : undefined} onClick={() => { setTab(t[0]); setView(null); }}>
+                {FldIco(t[1], 20)}<span>{trFl(TAB_LABEL[t[0]])}</span>
+              </button>
+            ) : <span key={'gap' + i} aria-hidden="true" />))}
+          </nav>
+          <button type="button" className={'mlap-catat' + (catat ? ' open' : '')} aria-label={trFl('fld.tabCatat')} aria-expanded={catat} onClick={() => setCatat(!catat)}>{FldIco('IconPlus', 24)}</button>
+        </>
+      )}
+      {catat && !full && (
         <>
           <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={() => setCatat(false)} />
           <div className="mlap-catat-menu" role="menu" aria-label={trFl('fld.catatTitle')}>
@@ -106,7 +144,7 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
           </div>
         </>
       )}
-
+      {ready && view && view.name === 'stop' && <FldStopSheet api={api} stop={view.stop} onClose={() => setView(null)} onSale={(s) => setView({ name: 'sale', stop: s })} onChanged={done} />}
       {menu && (
         <>
           <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={() => setMenu(false)} />
@@ -124,31 +162,6 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
       )}
       {ask && <FldSheet title={ask.title} body={ask.body} danger={ask.danger} onClose={() => setAsk(null)} onConfirm={() => { const r = ask.run; setAsk(null); r(); }} />}
       {toast && <div className="mlap-toast" role="status">{toast}</div>}
-    </div>
-  );
-}
-
-// Temporary Pengiriman list (both modes) — replaced by the full board in the next plan.
-function FldBoard({ api, refreshKey }) {
-  const [rows, setRows] = uSfl(null);
-  const [err, setErr] = uSfl(null);
-  uEfl(() => {
-    let live = true;
-    api.board().then((r) => { if (live) { setRows(r || []); setErr(null); } }).catch((e) => { if (live) setErr(e); });
-    return () => { live = false; };
-  }, [api, refreshKey]);
-  if (err) return <div className="mlap-err" role="alert">{fldErrMsg(err) || trFl('fld.loadErr')}</div>;
-  if (!rows) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
-  if (!rows.length) return <div className="mlap-card"><div className="mlap-empty">{trFl('fld.emptyBoard')}</div></div>;
-  return (
-    <div className="mlap-card">
-      {rows.map((s, i) => (
-        <div key={s.id} className="mlap-row">
-          <span className="mlap-num">{i + 1}</span>
-          <span style={{ flex: 1, minWidth: 0 }}><span className="nm">{s.customerName}</span><br /><span className="sb">{[s.customerCode, s.pendingReason].filter(Boolean).join(' · ')}</span></span>
-          <span className={'mlap-tag ' + s.status}>{trFl('fld.st_' + s.status)}</span>
-        </div>
-      ))}
     </div>
   );
 }
