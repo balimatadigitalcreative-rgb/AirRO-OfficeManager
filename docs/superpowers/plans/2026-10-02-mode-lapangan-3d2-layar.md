@@ -213,9 +213,9 @@ describe('Review Focus guards (kit)', () => {
     expect(rule('.mlap-sheethd-t')).toMatch(/overflow-wrap: anywhere;/);
   });
   it('the last card clears the fixed bars (root bottom padding stays); reduced motion still stops everything', () => {
-    expect(css).toMatch(/.mlap-root {[^}]*padding: 0 0 calc(130px + env(safe-area-inset-bottom));/);
+    expect(css).toMatch(/\.mlap-root \{[^}]*padding: 0 0 calc\(130px \+ env\(safe-area-inset-bottom\)\);/);
     expect(rule('.mlap-ctaspace')).toMatch(/height: 72px;/);
-    expect(css).toMatch(/@media (prefers-reduced-motion: reduce) {s*.mlap-root */);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.mlap-root \*/);
   });
 });
 describe('3D-1 deferred minors (chrome)', () => {

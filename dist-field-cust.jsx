@@ -11,7 +11,7 @@ function FldCustomers({ api, tick, onOpen }) {
   const [q, setQ] = uSfl('');
   const [filter, setFilter] = uSfl('all');
   uEfl(() => { let live = true; setErr(null); api.customers().then((r) => { if (live) setList(r || []); }).catch((e) => { if (live) setErr(e); }); return () => { live = false; }; }, [api, tick]);
-  if (err) return <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
+  if (err) return <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!list) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const v = FIELDLOGIC.customerList(list, { q, filter });
   return (
@@ -228,7 +228,7 @@ function FldAddStop({ api, preset, can, onPin, onDone, onBack }) {
   const [busy, setBusy] = uSfl(false);
   const [msg, setMsg] = uSfl('');
   uEfl(() => { let live = true; Promise.all([api.board(), api.customers()]).then(([board, customers]) => { if (live) setD({ board, customers }); }).catch((e) => { if (live) setErr(e); }); return () => { live = false; }; }, [api]);
-  if (err) return <div className="mlap-screen"><FldTop title={trFl('fld.addStopT')} onBack={onBack} /><div className="mlap-body"><FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /></div></div>;
+  if (err) return <div className="mlap-screen"><FldTop title={trFl('fld.addStopT')} onBack={onBack} /><div className="mlap-body"><FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /></div></div>;
   if (!d) return <div className="mlap-screen"><FldTop title={trFl('fld.addStopT')} onBack={onBack} /><div className="mlap-empty">{trFl('fld.loading')}</div></div>;
   const cand = FIELDLOGIC.addStopCandidates({ board: d.board, customers: d.customers, q });
   const pickHasPin = !!pick && typeof pick.lat === 'number' && typeof pick.lng === 'number';

@@ -56,7 +56,7 @@ function FldKoreksi({ api, target, can, onDone, onBack, onSaya }) {
     p.then(() => onDone(trFl('fld.kSent'))).catch((e) => setMsg(fldErrMsg(e))).finally(() => setBusy(false));
   };
   const head = <FldTop title={trFl('fld.koreksiT')} sub={d ? [d.name, d.code].filter(Boolean).join(' · ') : ''} onBack={onBack} />;
-  if (err) return <div className="mlap-screen">{head}<div className="mlap-body"><FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /></div></div>;
+  if (err) return <div className="mlap-screen">{head}<div className="mlap-body"><FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /></div></div>;
   if (!d) return <div className="mlap-screen">{head}<div className="mlap-empty">{trFl('fld.loading')}</div></div>;
   if (!t) return <div className="mlap-screen">{head}<div className="mlap-body"><FldNotice tone="warn" title={trFl('fld.kNotFound')} /></div></div>;
   const opts = FIELDLOGIC.koreksiOptions(t, can);
@@ -182,7 +182,7 @@ function FldKoreksiSaya({ api, tick, onResubmit, onBack, onChanged }) {
     <div className="mlap-screen">
       <FldTop title={trFl('fld.kSaya')} onBack={onBack} />
       <div className="mlap-body">
-        {err ? <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /> : null}
+        {err ? <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /> : null}
         {!list && !err ? <div className="mlap-empty">{trFl('fld.loading')}</div> : null}
         {list && !list.length ? <div className="mlap-empty">{trFl('fld.kSayaEmpty')}</div> : null}
         {list && list.map((r) => {

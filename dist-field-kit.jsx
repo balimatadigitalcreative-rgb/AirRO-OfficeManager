@@ -85,40 +85,86 @@ function FldCloseX({ onClick, label }) {
   return <button type="button" className="mlap-closex" aria-label={label || trFl('fld.close')} onClick={onClick}><FldSvg n="close" s={14} sw={2.6} /></button>;
 }
 
+// A task screen's customer (mockup Transaksi / Bayar bon / Lengkapi): the name at 22 px, one sub line,
+// an optional item on the right (a progress badge, "Ganti pelanggan").
+function FldCustHead({ name, sub, aside }) {
+  return (
+    <div className="mlap-custhead">
+      <span className="mlap-grow"><span className="mlap-custhead-nm">{name}</span>{sub ? <span className="mlap-custhead-sb">{sub}</span> : null}</span>
+      {aside || null}
+    </div>
+  );
+}
+
+// A sheet's head (mockup Stop / Buka rit / Tambah stop): optional lead (the 38 px stop number), the
+// title, one sub line, the glass close X.
+function FldSheetHead({ title, sub, lead, onClose, big }) {
+  return (
+    <div className={'mlap-sheethd' + (big ? ' big' : '')}>
+      {lead || null}
+      <span className="mlap-grow"><span className="mlap-sheethd-t">{title}</span>{sub ? <span className="mlap-sheethd-sb">{sub}</span> : null}</span>
+      <FldCloseX onClick={onClose} />
+    </div>
+  );
+}
+
+// A list choice in a sheet (instead of a <select>, which the boards never show): radio rows.
+function FldPickSheet({ title, options, value, onPick, onClose }) {
+  const drag = useFldSheetDrag(onClose);
+  return (
+    <>
+      <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onClose} />
+      <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={title} ref={drag.ref} style={drag.style}>
+        <FldGrab handle={drag.handle} />
+        <FldSheetHead title={title} onClose={onClose} />
+        <div className="mlap-card mlap-picklist">
+          {options.map((o) => (
+            <button key={o} type="button" className={'mlap-pickrow' + (value === o ? ' on' : '')} aria-pressed={value === o} onClick={() => onPick(o)}>
+              <span className="mlap-radio" aria-hidden="true" /><span className="mlap-grow">{o}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // "Selasa, 30 Sep" in the screen's language (the eyebrow upper-cases it).
 const fldDayLabel = (iso) => { try { return new Date(iso + 'T00:00').toLocaleDateString(trFl('fld.locale'), { weekday: 'long', day: 'numeric', month: 'short' }); } catch (e) { return iso; } };
 // The number can be cleared and retyped (a typed "4" never becomes "14"); it clamps when the field
-// is left. The −/+ buttons always step from the last valid value.
-function FldStepper({ label, hint, value, onChange, min, max }) {
+// is left. The −/+ buttons always step from the last valid value. Drawn like the boards: a gray −, a
+// tinted +, the value between. `cls`: 'big' (Buka rit's 44 px load), 'under' (below SOP), 'teal' (+).
+function FldStepper({ label, hint, value, onChange, min, max, cls }) {
   const lo = min == null ? 0 : min; const hi = max == null ? 999 : max;
   const [draft, setDraft] = uSfl(null);   // the text while typing; null = show the value
   const set = (v) => { setDraft(null); onChange(Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))); };
   const typed = (text) => { const r = FIELDLOGIC.stepInput(text, lo, hi); setDraft(r.draft); if (r.value != null) onChange(r.value); };
   const leave = () => { if (draft === null) return; const r = FIELDLOGIC.stepInput(draft, lo, hi); setDraft(null); onChange(r.value != null ? r.value : lo); };
+  const ico = cls && cls.split(' ').indexOf('big') >= 0 ? 18 : 16;
   return (
-    <div className="mlap-stepper">
+    <div className={'mlap-stepper' + (cls ? ' ' + cls : '')}>
       <span className="lb">{label}{hint ? <span className="ht">{hint}</span> : null}</span>
-      <button type="button" className="mlap-step" aria-label={trFl('fld.less') + ' — ' + label} disabled={value <= lo} onClick={() => set(value - 1)}>−</button>
+      <button type="button" className="mlap-step minus" aria-label={trFl('fld.less') + ' — ' + label} disabled={value <= lo} onClick={() => set(value - 1)}><FldSvg n="minus" s={ico} sw={2.6} /></button>
       <input className="mlap-stepval" inputMode="numeric" aria-label={label} value={draft !== null ? draft : value} onChange={(e) => typed(e.target.value)} onBlur={leave} />
-      <button type="button" className="mlap-step" aria-label={trFl('fld.more') + ' — ' + label} disabled={value >= hi} onClick={() => set(value + 1)}>+</button>
+      <button type="button" className="mlap-step plus" aria-label={trFl('fld.more') + ' — ' + label} disabled={value >= hi} onClick={() => set(value + 1)}><FldSvg n="plus" s={ico} sw={2.6} /></button>
     </div>
   );
 }
 
-function FldSeg({ label, options, value, onChange }) {
+function FldSeg({ label, options, value, onChange, size }) {
   return (
-    <div className="mlap-seg" role="group" aria-label={label}>
+    <div className={'mlap-seg' + (size ? ' ' + size : '')} role="group" aria-label={label}>
       {options.map(([k, text]) => <button key={k} type="button" aria-pressed={value === k} className={'mlap-seg-b' + (value === k ? ' on' : '')} onClick={() => onChange(k)}>{text}</button>)}
     </div>
   );
 }
 
 // Single choice of a written reason; the "other" option opens a text field (value = the final text).
-function FldChips({ options, otherLabel, value, onChange }) {
+function FldChips({ options, otherLabel, value, onChange, tone }) {
   const [other, setOther] = uSfl(false);
   const pick = (o) => { if (o === otherLabel) { setOther(true); onChange(''); } else { setOther(false); onChange(o); } };
   return (
-    <div className="mlap-chips">
+    <div className={'mlap-chips' + (tone ? ' ' + tone : '')}>
       {options.map((o) => {
         const on = o === otherLabel ? other : (!other && value === o);
         return <button key={o} type="button" aria-pressed={on} className={'mlap-chip-b' + (on ? ' on' : '')} onClick={() => pick(o)}>{o}</button>;
@@ -128,19 +174,24 @@ function FldChips({ options, otherLabel, value, onChange }) {
   );
 }
 
-function FldNotice({ tone, title, sub, action, onAction }) {
+// A standing notice (mockup info/warn cards): icon, title, one line. `alert` only for errors — a standing
+// notice must not interrupt a screen reader.
+function FldNotice({ tone, title, sub, action, onAction, alert }) {
+  const t = tone || 'info';
   return (
-    <div className={'mlap-notice ' + (tone || 'info')} role="note">
+    <div className={'mlap-notice ' + t} role={alert ? 'alert' : 'note'}>
+      <FldSvg n={t === 'warn' ? 'warn' : t === 'ok' ? 'check' : 'info'} s={16} sw={2.2} style={{ flexShrink: 0, marginTop: 1 }} />
       <span className="mlap-grow"><b>{title}</b>{sub ? <span className="sb">{sub}</span> : null}</span>
       {action && onAction ? <button type="button" className="mlap-btn" onClick={onAction}>{action}</button> : null}
     </div>
   );
 }
 
-// PROOF PHOTO — rear camera, shrunk to ≤1024 px (the app's shrinkToJpeg), uploaded through the
-// adaptor (practice photos stay on the phone), stamped with the time and, when the phone gives one,
-// a GPS fix. Gallery photos can't be blocked on the web; the stamp records when/where it was attached.
-function FldPhoto({ api, value, onChange, hintKey }) {
+// PROOF PHOTO (mockup photo card) — rear camera, shrunk to ≤1024 px (the app's shrinkToJpeg), uploaded
+// through the adaptor (practice photos stay on the phone), stamped with the time and, when the phone
+// gives one, a GPS fix. Gallery photos can't be blocked on the web; the stamp records when/where it was
+// attached. Card: title + red "Wajib …" label, the stamped thumbnail, a dashed camera tile, the hint.
+function FldPhoto({ api, value, onChange, hintKey, title, req, w, h, optional }) {
   const inputRef = uRfl(null);
   const [busy, setBusy] = uSfl(false);
   const [err, setErr] = uSfl('');
@@ -163,21 +214,19 @@ function FldPhoto({ api, value, onChange, hintKey }) {
     setBusy(false);
   };
   const stamp = value ? new Date(value.takenAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' · ' + (value.lat != null ? trFl('fld.gpsOk') : trFl('fld.gpsNo')) : '';
+  const pw = w || 76; const ph = h || pw;
+  const missing = !value && !optional;
   return (
-    <div className="mlap-card mlap-photo">
+    <div className={'mlap-card mlap-photo' + (missing ? ' miss' : '')}>
       <input ref={inputRef} type="file" accept="image/*" capture="environment" hidden onChange={onPick} />
-      {value ? (
-        <div className="mlap-photo-has">
-          <img src={value.preview} alt={trFl('fld.proof')} />
-          <span className="mlap-grow"><b>{trFl('fld.photoTaken')}</b><span className="sb">{stamp}</span></span>
-          <button type="button" className="mlap-btn" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}>{trFl('fld.retake')}</button>
-        </div>
-      ) : (
-        <button type="button" className="mlap-photo-btn" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}>
-          {FldIco('IconPlus', 22)}<b>{busy ? trFl('fld.photoBusy') : trFl('fld.camera')}</b>
-          <span className="sb">{trFl(hintKey || 'fld.proofHint')}</span>
+      <div className="mlap-photo-hd"><b>{title || trFl('fld.proof')}</b><span className={'mlap-photo-req' + (optional ? ' opt' : '')}>{req || trFl(optional ? 'fld.reqSuggest' : 'fld.reqPlain')}</span></div>
+      <div className="mlap-photo-row">
+        {value ? <span className="mlap-photo-thumb" style={{ width: pw, height: ph }}><img src={value.preview} alt={trFl('fld.photoTaken')} /><span className="mlap-stamp">{stamp}</span></span> : null}
+        <button type="button" className={'mlap-cam' + (missing ? ' miss' : '')} style={{ width: pw, height: ph }} disabled={busy} onClick={() => inputRef.current && inputRef.current.click()}>
+          <FldSvg n="camera" s={20} />{busy ? trFl('fld.photoBusy') : value ? trFl('fld.retake') : trFl('fld.cam')}
         </button>
-      )}
+        <span className="mlap-photo-hint">{trFl(hintKey || 'fld.proofHint')}</span>
+      </div>
       {err && <div className="mlap-err" role="alert">{err}</div>}
     </div>
   );
@@ -201,14 +250,15 @@ const fldCustFromStop = (s) => ({
   sisaBon: s.sisaBon || 0, gallonsHeld: s.gallonsHeld, armada: s.fleetId || '',
 });
 
-// Rupiah amount: shows 45.000, can be cleared while typing (value null = nothing typed yet).
+// Rupiah amount (mockup Bayar bon / Pengeluaran): a big 30 px number after "Rp"; shows 45.000, can be
+// cleared while typing (value null = nothing typed yet).
 function FldMoney({ label, value, onChange }) {
   const shown = value == null ? '' : Number(value).toLocaleString('id-ID');
   return (
-    <label className="mlap-field mlap-money">
+    <label className="mlap-money">
       <span className="lb">{label}</span>
-      <span className="mlap-money-in"><span className="sb">Rp</span>
-        <input className="mlap-input" inputMode="numeric" aria-label={label} value={shown} onChange={(e) => { const d = String(e.target.value).replace(/[^0-9]/g, '').slice(0, 10); onChange(d === '' ? null : parseInt(d, 10)); }} />
+      <span className="mlap-money-in"><span className="rp" aria-hidden="true">Rp</span>
+        <input className="mlap-money-val" inputMode="numeric" aria-label={label} value={shown} onChange={(e) => { const d = String(e.target.value).replace(/[^0-9]/g, '').slice(0, 10); onChange(d === '' ? null : parseInt(d, 10)); }} />
       </span>
     </label>
   );
@@ -227,7 +277,7 @@ function FldPickCustomer({ api, title, hint, accept, onPick, onBack }) {
       <FldTop title={title} sub={hint} onBack={onBack} />
       <div className="mlap-body">
         <input className="mlap-text mlap-search" type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
-        {err ? <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /> : null}
+        {err ? <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /> : null}
         {!list && !err ? <div className="mlap-empty">{trFl('fld.loading')}</div> : null}
         {list ? (
           <div className="mlap-card">

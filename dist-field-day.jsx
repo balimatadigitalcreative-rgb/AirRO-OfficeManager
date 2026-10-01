@@ -70,7 +70,7 @@ function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onRout
     fldLoadDay(api, ctx).then((x) => { if (live) setD(x); }).catch((e) => { if (live) setErr(e); });
     return () => { live = false; };
   }, [api, tick]);   // the shell bumps tick right after the context reloads — ctx is current here
-  if (err) return <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
+  if (err) return <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!d) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const v = d.view; const rs = d.rs; const r = d.route;
   const list = seg === 'pending' ? v.pending.filter((s) => !v.next || s.id !== v.next.id) : seg === 'done' ? v.done : v.held;
@@ -296,7 +296,7 @@ function FldOpenRun({ api, ctx, tick, onDone, onBack }) {
     Promise.all([api.board(), api.runs()]).then(([board, runs]) => { if (live) setD({ board, runs }); }).catch((e) => { if (live) setErr(fldErrMsg(e)); });
     return () => { live = false; };
   }, [api, tick]);
-  if (!d) return err ? <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={err} /> : <div className="mlap-empty">{trFl('fld.loading')}</div>;
+  if (!d) return err ? <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={err} /> : <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs: d.runs });
   if (rs.open) return <FldCloseRun api={api} run={rs.open} stale={rs.stale} onDone={onDone} onBack={onBack} />;
   const g = FIELDLOGIC.runGauge({ load, capacity: cap, minLoad });
@@ -439,7 +439,7 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
     <FldNotice tone={rs.stale ? 'warn' : 'info'} title={rs.stale ? trFl('fld.staleRunT', { n: rs.open.runNo, date: rs.open.date }) : trFl('fld.noRunT')} sub={rs.stale ? trFl('fld.staleRunB') : trFl('fld.noRunB')}
       action={rs.stale ? trFl('fld.closeRun') : trFl('fld.openRunN', { n: rs.nextNo })} onAction={onOpenRun} />
   );
-  if (err) return <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
+  if (err) return <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!route) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const legs = all ? route.rit : route.rit.slice(0, 4);
   const first = route.rit[0];
@@ -489,7 +489,7 @@ function FldSetoran({ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged }) {
     Promise.all([api.daySummary(), api.board()]).then(([sum, board]) => { if (live) setD({ sum, board }); }).catch((e) => { if (live) setErr(e); });
     return () => { live = false; };
   }, [api, tick, reload]);
-  if (err) return <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
+  if (err) return <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!d) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const sum = d.sum;
   const pending = d.board.filter((s) => s.status === 'pending');
