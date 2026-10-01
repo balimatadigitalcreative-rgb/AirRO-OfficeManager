@@ -84,3 +84,25 @@ describe('Plan 3A shell wiring', () => {
     expect(jsx).toMatch(/\.catch\(\(e\) => flash\(trFl\('fld\.resetFail'\)/);
   });
 });
+
+describe('final review fixes (shell)', () => {
+  it('a saved-but-unmarked sale is remembered per mode + user and handed to the sale screen', () => {
+    expect(jsx).toMatch(/FIELDLOGIC\.pendingSales\(/);
+    expect(jsx).toMatch(/<FldSale api=\{api\} stop=\{view\.stop\} pending=\{pending\}/);
+  });
+  it('one write → context reload → ONE screen reload; office events are coalesced', () => {
+    expect(jsx).toMatch(/\.then\(\(c\) => \{ if \(!live\) return; ctxRef\.current = c; setCtx\(c\); setTick\(\(t\) => t \+ 1\); \}\)/);
+    expect(jsx).toMatch(/window\.DISTLIVE\.createCoalescer\(/);
+    expect(jsx).toMatch(/const done = \(m\) => \{ setView\(null\); setCtxTick\(\(t\) => t \+ 1\);/);
+  });
+  it('a failed context reload keeps the working screen (only the first load may show the error)', () => {
+    expect(jsx).toMatch(/if \(ctxRef\.current\) flash\(trFl\('fld\.reloadErr'\)\); else setErr\(e\);/);
+  });
+  it('in Mode asli the driver\'s position is sent (throttled like the old board), never in practice', () => {
+    expect(jsx).toMatch(/if \(mode !== 'asli' \|\| !ready\) return undefined;/);
+    expect(jsx).toMatch(/navigator\.geolocation\.watchPosition\(/);
+    expect(jsx).toMatch(/navigator\.geolocation\.clearWatch\(/);
+    expect(jsx).toMatch(/POS_EVERY_MS/);
+    expect(jsx).toMatch(/api\.position\(/);
+  });
+});

@@ -165,7 +165,8 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-preview { padding: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
 .mlap-preview .sb { font-size: 13px; color: var(--mlap-sub); }
 /* ── RUTE RIT / PETA ── */
-.mlap-map { height: 280px; border-radius: 16px; overflow: hidden; background: #DCE5EC; }
+/* Leaflet panes use z-index 400-1000: keep them inside the map so sheets, menus and the dock stay on top. */
+.mlap-map { position: relative; z-index: 0; isolation: isolate; height: 280px; border-radius: 16px; overflow: hidden; background: #DCE5EC; }
 .mlap-pin-wrap { background: transparent; border: 0; }
 .mlap-pin { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--mlap-accent); color: #fff; font: 700 12px/1 -apple-system, system-ui, sans-serif; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(6,51,79,.35); box-sizing: border-box; }
 .mlap-pin.depot { width: 30px; height: 30px; border-radius: 9px; background: #0E1B24; }
@@ -185,6 +186,8 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-closerow { gap: 8px; }
 .mlap-select { min-height: 40px; max-width: 55%; border-radius: 10px; border: 1px solid #D5DDE3; background: #F7F9FA; color: var(--mlap-ink); font: inherit; font-size: 13px; padding: 0 8px; }
 .mlap-select.miss { border: 1.5px solid #C2410C; background: #FFF4EE; color: var(--mlap-warn); }
+.mlap-fs { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.mlap-fs:disabled { opacity: .6; }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

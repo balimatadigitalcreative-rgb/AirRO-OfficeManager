@@ -69,7 +69,7 @@ function FldBoardScreen({ api, ctx, tick, onStop, onSale, onOpenRun, onRoute }) 
     let live = true; setErr(null);
     fldLoadDay(api, ctx).then((x) => { if (live) setD(x); }).catch((e) => { if (live) setErr(e); });
     return () => { live = false; };
-  }, [api, ctx, tick]);
+  }, [api, tick]);   // the shell bumps tick right after the context reloads — ctx is current here
   if (err) return <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
   if (!d) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
   const v = d.view; const rs = d.rs; const r = d.route;
@@ -197,8 +197,10 @@ function FldStopSheet({ api, stop: s, onClose, onSale, onChanged }) {
 
 // TRANSAKSI — gallons out/back, Lunas/Bon/Transfer, what the customer pays now and what their bon
 // becomes, a proof photo (always required here), then "save & mark delivered". The sale is created
-// ONCE: if marking fails (no signal, or the server asks for a position), only the marking is retried.
-function FldSale({ api, stop: s, onDone, onBack }) {
+// ONCE: if marking fails (no signal, or the server asks for a position), only the marking is retried —
+// also after leaving this screen and coming back (the shell remembers the saved sale per stop), and the
+// inputs lock once the sale is saved (they could no longer change it).
+function FldSale({ api, stop: s, pending, onDone, onBack }) {
   const held = s.gallonsHeld == null ? null : s.gallonsHeld;
   const [qty, setQty] = uSfl(Math.max(1, s.planQty || 1));
   const [back, setBack] = uSfl(held == null ? 0 : Math.min(held, 999));
@@ -208,35 +210,42 @@ function FldSale({ api, stop: s, onDone, onBack }) {
   const [err, setErr] = uSfl('');
   const [needReason, setNeedReason] = uSfl(false);
   const [noLoc, setNoLoc] = uSfl('');
-  const txnRef = uRfl(null);
+  const [txnId, setTxnId] = uSfl(() => pending.get(s.id));
+  const keep = (id) => { setTxnId(id); pending.set(s.id, id); };
   const pv = FIELDLOGIC.salePreview({ qty, price: s.masterPrice, method, sisaBon: s.sisaBon || 0 });
-  const why = FIELDLOGIC.canSaveSale({ qty, photo });
+  const why = txnId ? '' : FIELDLOGIC.canSaveSale({ qty, photo });
   const save = () => {
     setBusy(true); setErr('');
     const body = FIELDLOGIC.saleBody({ customerId: s.customerId, qty, gallonIn: back, method, photo });
-    FIELDLOGIC.recordSale(api, { stopId: s.id, body, txnId: txnRef.current, noLocationReason: needReason ? noLoc.trim() : '' })
-      .then((r) => { txnRef.current = r.txnId; if (r.done) onDone(trFl('fld.saleDone', { name: s.customerName })); else setNeedReason(true); })
-      .catch((e) => { if (e && e.txnId) txnRef.current = e.txnId; setErr(fldErrMsg(e) || trFl('fld.loadErr')); })
+    FIELDLOGIC.recordSale(api, { stopId: s.id, body, txnId, noLocationReason: needReason ? noLoc.trim() : '' })
+      .then((r) => {
+        if (r.done) { pending.clear(s.id); onDone(trFl('fld.saleDone', { name: s.customerName })); return; }
+        keep(r.txnId); setNeedReason(true);
+      })
+      .catch((e) => { if (e && e.txnId) keep(e.txnId); setErr(fldErrMsg(e) || trFl('fld.loadErr')); })
       .finally(() => setBusy(false));
   };
   return (
     <div className="mlap-screen">
       <FldTop title={trFl('fld.saleTitle')} sub={[s.customerName, s.customerCode].filter(Boolean).join(' · ')} onBack={onBack} />
       <div className="mlap-body">
-        <div className="mlap-card">
-          <FldStepper label={trFl('fld.galOut')} hint={trFl('fld.galOutHint', { n: s.planQty })} value={qty} onChange={setQty} min={1} max={999} />
-          <FldStepper label={trFl('fld.galBack')} hint={held == null ? '' : trFl('fld.galBackHint', { n: held })} value={back} onChange={setBack} min={0} max={999} />
-        </div>
-        <div className="mlap-eyebrow">{trFl('fld.payment')}</div>
-        <FldSeg label={trFl('fld.payment')} value={method} onChange={setMethod} options={[['lunas', trFl('fld.m_lunas')], ['bon', trFl('fld.m_bon')], ['transfer', trFl('fld.m_transfer')]]} />
-        <div className="mlap-card mlap-sum">
-          <div className="mlap-sumrow"><span>{trFl('fld.qtyLine', { n: qty, p: FIELDLOGIC.fmtRp(s.masterPrice) })}</span><b>{FIELDLOGIC.fmtRp(pv.subtotal)}</b></div>
-          {s.sisaBon > 0 ? <div className="mlap-sumrow"><span>{trFl('fld.oldBon')}</span><span>{FIELDLOGIC.fmtRp(s.sisaBon)}</span></div> : null}
-          <div className="mlap-sumrow total"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.paidNow)}</b></div>
-          <div className={'mlap-after' + (method === 'bon' ? ' bon' : '')}>{method === 'bon' ? trFl('fld.bonAfter', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) }) : trFl('fld.bonStays', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) })}</div>
-        </div>
-        <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.required')}</div>
-        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintSale" />
+        {txnId ? <FldNotice tone="warn" title={trFl('fld.savedNotMarkedT')} sub={trFl('fld.savedNotMarkedB')} /> : null}
+        <fieldset className="mlap-fs" disabled={!!txnId}>
+          <div className="mlap-card">
+            <FldStepper label={trFl('fld.galOut')} hint={trFl('fld.galOutHint', { n: s.planQty })} value={qty} onChange={setQty} min={1} max={999} />
+            <FldStepper label={trFl('fld.galBack')} hint={held == null ? '' : trFl('fld.galBackHint', { n: held })} value={back} onChange={setBack} min={0} max={999} />
+          </div>
+          <div className="mlap-eyebrow">{trFl('fld.payment')}</div>
+          <FldSeg label={trFl('fld.payment')} value={method} onChange={setMethod} options={[['lunas', trFl('fld.m_lunas')], ['bon', trFl('fld.m_bon')], ['transfer', trFl('fld.m_transfer')]]} />
+          <div className="mlap-card mlap-sum">
+            <div className="mlap-sumrow"><span>{trFl('fld.qtyLine', { n: qty, p: FIELDLOGIC.fmtRp(s.masterPrice) })}</span><b>{FIELDLOGIC.fmtRp(pv.subtotal)}</b></div>
+            {s.sisaBon > 0 ? <div className="mlap-sumrow"><span>{trFl('fld.oldBon')}</span><span>{FIELDLOGIC.fmtRp(s.sisaBon)}</span></div> : null}
+            <div className="mlap-sumrow total"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.paidNow)}</b></div>
+            <div className={'mlap-after' + (method === 'bon' ? ' bon' : '')}>{method === 'bon' ? trFl('fld.bonAfter', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) }) : trFl('fld.bonStays', { v: FIELDLOGIC.fmtRp(pv.sisaAfter) })}</div>
+          </div>
+          <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.required')}</div>
+          <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintSale" />
+        </fieldset>
         {needReason && (
           <div className="mlap-card mlap-reason warn">
             <b>{trFl('fld.noLocT')}</b>
@@ -246,7 +255,7 @@ function FldSale({ api, stop: s, onDone, onBack }) {
         )}
         {err && <div className="mlap-err" role="alert">{err}</div>}
         {why ? <div className="mlap-hint">{trFl(why)}</div> : null}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !!why || (needReason && !noLoc.trim())} onClick={save}>{trFl(txnRef.current ? 'fld.retryMark' : 'fld.saveDeliver')}</button>
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !!why || (needReason && !noLoc.trim())} onClick={save}>{trFl(txnId ? 'fld.retryMark' : 'fld.saveDeliver')}</button>
       </div>
     </div>
   );
@@ -298,7 +307,7 @@ function FldOpenRun({ api, ctx, tick, onDone, onBack }) {
           <div className={'mlap-loadval' + (g.under ? ' under' : '')}>{g.load}</div>
           <input type="range" className="mlap-range" min="0" max={g.max} value={g.load} onChange={(e) => setLoad(+e.target.value)} aria-label={trFl('fld.loadQ')} />
           <div className="mlap-scale"><span>0</span><span>{trFl('fld.sopN', { n: minLoad })}</span>{cap ? <span>{trFl('fld.capN', { n: cap })}</span> : <span />}</div>
-          <FldStepper label={trFl('fld.loadQ')} value={g.load} onChange={setLoad} min={0} max={g.max} />
+          <FldStepper label={trFl('fld.loadQ')} value={g.load} onChange={setLoad} min={0} max={cap || 9999} />
           <div className="mlap-chips">{presets.map((v) => <button key={v} type="button" className={'mlap-chip-b' + (g.load === v ? ' on' : '')} aria-pressed={g.load === v} onClick={() => setLoad(v)}>{v}</button>)}</div>
           {g.atCap ? <div className="mlap-hint ok">{trFl('fld.fullLoad')}</div> : null}
         </div>

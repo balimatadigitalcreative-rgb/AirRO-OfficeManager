@@ -124,3 +124,30 @@ it('closeCheck lists every pending stop still without a reason', () => {
   expect(L.closeCheck(pending, { a: 'Toko tutup', b: '  ' })).toEqual({ missing: ['b', 'c'], ok: false });
   expect(L.closeCheck([], {})).toEqual({ missing: [], ok: true });
 });
+
+describe('final review fixes', () => {
+  const memStore = () => { const m = {}; return { getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; }, m }; };
+  it('pendingSales remembers a saved-but-unmarked sale per stop, across screen visits', () => {
+    const st = memStore();
+    const a = L.pendingSales(st, 'k1');
+    expect(a.get('s1')).toBeNull();
+    a.set('s1', 't9');
+    expect(L.pendingSales(st, 'k1').get('s1')).toBe('t9');   // a new screen visit sees it
+    expect(L.pendingSales(st, 'k2').get('s1')).toBeNull();   // another mode/user key does not
+    a.clear('s1');
+    expect(a.get('s1')).toBeNull();
+  });
+  it('pendingSales survives a storage that throws (private mode) by remembering in memory', () => {
+    const bad = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); }, removeItem() { throw new Error('blocked'); } };
+    const a = L.pendingSales(bad, 'k');
+    a.set('s1', 't1');
+    expect(a.get('s1')).toBe('t1');
+  });
+  it('stepInput lets a field be cleared while typing and clamps only real numbers', () => {
+    expect(L.stepInput('', 1, 999)).toEqual({ draft: '', value: null });
+    expect(L.stepInput('4', 1, 999)).toEqual({ draft: '4', value: 4 });
+    expect(L.stepInput('0', 1, 999)).toEqual({ draft: '0', value: null });
+    expect(L.stepInput('12a3', 0, 999)).toEqual({ draft: '123', value: 123 });
+    expect(L.stepInput('5000', 0, 120)).toEqual({ draft: '120', value: 120 });
+  });
+});

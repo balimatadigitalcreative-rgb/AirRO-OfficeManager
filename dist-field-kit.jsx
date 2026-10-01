@@ -54,14 +54,19 @@ function FldTop({ title, sub, onBack }) {
   );
 }
 
+// The number can be cleared and retyped (a typed "4" never becomes "14"); it clamps when the field
+// is left. The −/+ buttons always step from the last valid value.
 function FldStepper({ label, hint, value, onChange, min, max }) {
   const lo = min == null ? 0 : min; const hi = max == null ? 999 : max;
-  const set = (v) => onChange(Math.max(lo, Math.min(hi, Math.round(Number(v) || 0))));
+  const [draft, setDraft] = uSfl(null);   // the text while typing; null = show the value
+  const set = (v) => { setDraft(null); onChange(Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))); };
+  const typed = (text) => { const r = FIELDLOGIC.stepInput(text, lo, hi); setDraft(r.draft); if (r.value != null) onChange(r.value); };
+  const leave = () => { if (draft === null) return; const r = FIELDLOGIC.stepInput(draft, lo, hi); setDraft(null); onChange(r.value != null ? r.value : lo); };
   return (
     <div className="mlap-stepper">
       <span className="lb">{label}{hint ? <span className="ht">{hint}</span> : null}</span>
       <button type="button" className="mlap-step" aria-label={trFl('fld.less') + ' — ' + label} disabled={value <= lo} onClick={() => set(value - 1)}>−</button>
-      <input className="mlap-stepval" inputMode="numeric" aria-label={label} value={value} onChange={(e) => set(String(e.target.value).replace(/[^0-9]/g, ''))} />
+      <input className="mlap-stepval" inputMode="numeric" aria-label={label} value={draft !== null ? draft : value} onChange={(e) => typed(e.target.value)} onBlur={leave} />
       <button type="button" className="mlap-step" aria-label={trFl('fld.more') + ' — ' + label} disabled={value >= hi} onClick={() => set(value + 1)}>+</button>
     </div>
   );

@@ -119,6 +119,28 @@
     });
   }
 
+  // A sale saved on the server whose stop could not yet be marked delivered: remembered per stop
+  // (sessionStorage, per mode + user) so coming back to the stop — even after leaving the sale screen —
+  // retries ONLY the marking instead of creating the sale a second time. Blocked storage → memory.
+  function pendingSales(storage, key) {
+    var mem = {}; var k = function (stopId) { return key + ':' + stopId; };
+    return {
+      get: function (stopId) { try { var v = storage.getItem(k(stopId)); if (v) return v; } catch (e) { /* blocked */ } return mem[stopId] || null; },
+      set: function (stopId, txnId) { mem[stopId] = txnId; try { storage.setItem(k(stopId), txnId); } catch (e) { /* memory only */ } },
+      clear: function (stopId) { delete mem[stopId]; try { storage.removeItem(k(stopId)); } catch (e) { /* memory only */ } },
+    };
+  }
+  // A number field the driver may clear while typing: digits only; empty (or below the minimum) → no
+  // value yet (the field keeps what was typed and clamps on blur); above the maximum → the maximum.
+  function stepInput(text, lo, hi) {
+    var d = String(text == null ? '' : text).replace(/[^0-9]/g, '').slice(0, 5);
+    if (d === '') return { draft: '', value: null };
+    var n = parseInt(d, 10);
+    if (n > hi) return { draft: String(hi), value: hi };
+    if (n < lo) return { draft: d, value: null };
+    return { draft: d, value: n };
+  }
+
   // TUTUP HARI — every stop still waiting needs a written reason.
   function closeCheck(pending, reasons) {
     var r = reasons || {};
@@ -126,5 +148,5 @@
     return { missing: missing, ok: missing.length === 0 };
   }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck };
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, pendingSales: pendingSales, stepInput: stepInput };
 });

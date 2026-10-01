@@ -44,14 +44,17 @@ describe('Detail stop', () => {
 describe('Transaksi', () => {
   const f = () => fn('FldSale');
   it('a proof photo is always required; save is locked until then', () => {
-    expect(f()).toMatch(/const why = FIELDLOGIC\.canSaveSale\(\{ qty, photo \}\);/);
+    expect(f()).toMatch(/const why = txnId \? '' : FIELDLOGIC\.canSaveSale\(\{ qty, photo \}\);/);   // once saved, only marking remains
     expect(f()).toMatch(/disabled=\{busy \|\| !!why \|\| \(needReason && !noLoc\.trim\(\)\)\}/);
     expect(f()).toMatch(/<FldPhoto api=\{api\} value=\{photo\} onChange=\{setPhoto\}/);
   });
   it('a saved sale is never created twice — only the marking is retried (also after a network error)', () => {
-    expect(f()).toMatch(/const txnRef = uRfl\(null\);/);
-    expect(f()).toMatch(/FIELDLOGIC\.recordSale\(api, \{ stopId: s\.id, body, txnId: txnRef\.current,/);
-    expect(f()).toMatch(/if \(e && e\.txnId\) txnRef\.current = e\.txnId;/);
+    expect(f()).toMatch(/const \[txnId, setTxnId\] = uSfl\(\(\) => pending\.get\(s\.id\)\);/);   // a saved sale survives leaving the screen
+    expect(f()).toMatch(/FIELDLOGIC\.recordSale\(api, \{ stopId: s\.id, body, txnId,/);
+    expect(f()).toMatch(/if \(e && e\.txnId\) keep\(e\.txnId\);/);
+    expect(f()).toMatch(/const keep = \(id\) => \{ setTxnId\(id\); pending\.set\(s\.id, id\); \};/);
+    expect(f()).toMatch(/pending\.clear\(s\.id\)/);
+    expect(f()).toMatch(/<fieldset className="mlap-fs" disabled=\{!!txnId\}>/);   // inputs locked once saved
   });
   it('Lunas / Bon / Transfer', () => {
     expect(f()).toMatch(/\['lunas', trFl\('fld\.m_lunas'\)\], \['bon', trFl\('fld\.m_bon'\)\], \['transfer', trFl\('fld\.m_transfer'\)\]/);
@@ -106,5 +109,23 @@ describe('Setoran', () => {
     expect(f()).toMatch(/const chk = FIELDLOGIC\.closeCheck\(pending, reasons\);/);
     expect(f()).toMatch(/disabled=\{busy \|\| !chk\.ok\}/);
     expect(f()).toMatch(/api\.closeDay\(\{ reasons: picked, generalNote: note\.trim\(\) \}\)/);
+  });
+});
+
+describe('final review fixes (screens)', () => {
+  it('the board reloads once per tick, not again for every new context object', () => {
+    const f = fn('FldBoardScreen');
+    expect(f).toMatch(/\}, \[api, tick\]\);/);
+  });
+  it('a stepper can be cleared while typing (no "14" when the driver types 4)', () => {
+    const kit = read('dist-field-kit.jsx'); const st = kit.slice(kit.indexOf('function FldStepper('));
+    expect(st).toMatch(/FIELDLOGIC\.stepInput\(/);
+    expect(st).toMatch(/onBlur=/);
+  });
+  it('the load stepper is not capped at 2×SOP when the armada has no capacity', () => {
+    expect(fn('FldOpenRun')).toMatch(/<FldStepper label=\{trFl\('fld\.loadQ'\)\} value=\{g\.load\} onChange=\{setLoad\} min=\{0\} max=\{cap \|\| 9999\} \/>/);
+  });
+  it('the Leaflet map never paints over the sheets, menu or dock', () => {
+    expect(read('dist-field.css')).toMatch(/\.mlap-map \{[^}]*isolation: isolate;/);
   });
 });

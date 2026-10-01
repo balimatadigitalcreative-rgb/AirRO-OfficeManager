@@ -11,7 +11,7 @@
   if (root) root.FIELDAPI = api;                                               // browser (global)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this), function (root) {
   'use strict';
-  var METHODS = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'outstanding', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo'];
+  var METHODS = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'outstanding', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo', 'position'];
   var unwrap = function (r) { return r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, 'data') ? r.data : r; };
   var U = function (p) { return Promise.resolve(p).then(unwrap); };
   var A = function (base, extra) { return Object.assign({}, base || {}, extra || {}); };
@@ -52,6 +52,8 @@
       closeDay: function (b) { return U(F.closeDay(A({ date: c.date, fleet: c.fleet }, b))); },
       uploadPhoto: function (b) { return U(F.upload(b)); },
       photo: function (id) { return U(F.photo(id)).then(function (d) { return d && d.data ? d.data : null; }); },
+      // The driver's live position (the owner's tracking map + "Selesai" needs a recent fix).
+      position: function (b) { return U(F.position(b)); },
     };
   }
 

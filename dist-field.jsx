@@ -22,10 +22,18 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   const [catat, setCatat] = uSfl(false);
   const [ask, setAsk] = uSfl(null);
   const [toast, setToast] = uSfl('');
-  const [tick, setTick] = uSfl(0);           // bumped after every write → screens and context reload
+  const [tick, setTick] = uSfl(0);           // bumped right after the context reloads → screens reload ONCE
+  const [ctxTick, setCtxTick] = uSfl(0);     // bumped after every write / office event → context reloads
+  const ctxRef = uRfl(null);
   const [openTick, setOpenTick] = uSfl(0);   // bumped by "Coba lagi" / restart → the adaptor reopens
   const [persistOk, setPersistOk] = uSfl(true);
   const storageRef = uRfl(null);
+  // A sale saved on the server whose stop could not be marked delivered yet, per stop — remembered per
+  // mode + user for the browser session, so coming back to that stop retries only the marking.
+  const pendKey = 'airro.fld.pending:' + mode + ':' + ((user && user.id) || 'anon');
+  const pendRef = uRfl({});
+  if (!pendRef.current[pendKey]) pendRef.current[pendKey] = FIELDLOGIC.pendingSales((() => { try { return window.sessionStorage; } catch (e) { return null; } })(), pendKey);
+  const pending = pendRef.current[pendKey];
   const key = 'latihan:' + ((user && user.id) || 'anon') + ':' + (fleet || '');
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
   // The glass dock IS the navigation here: the app's own phone bottom nav steps aside while this is
@@ -35,7 +43,7 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   uEfl(() => { if (!fleets.includes(fleet)) setFleet(fleets[0] || ''); }, [fleets.join('|')]);
   // Open the adaptor of the chosen mode (practice copy is per user + armada + day).
   uEfl(() => {
-    let live = true; setApi(null); setCtx(null); setErr(null); setPersistOk(true); setView(null);
+    let live = true; setApi(null); setCtx(null); ctxRef.current = null; setErr(null); setPersistOk(true); setView(null);
     const real = window.FIELDAPI.real(window.API, { date: today, fleet });
     if (mode === 'asli') { setApi(real); return () => { live = false; }; }
     if (!storageRef.current) storageRef.current = window.indexedDB ? window.FIELDAPI.idbStorage() : window.FIELDAPI.memoryStorage();
@@ -46,15 +54,43 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   }, [mode, fleet, today, openTick]);
   // The day's context (rules, warehouse, open rit, expected gallons) — reloaded after every write and,
   // in Mode asli, when the office changes something (refreshKey).
+  // Then the screens reload once (tick) with the fresh context. A failed RELOAD keeps the working screen
+  // (a small notice); only the very first load may show the error screen.
   uEfl(() => {
     if (!api || api.mode !== mode) return undefined;
     let live = true;
-    api.context().then((c) => { if (live) setCtx(c); }).catch((e) => { if (live) setErr(e); });
+    api.context()
+      .then((c) => { if (!live) return; ctxRef.current = c; setCtx(c); setTick((t) => t + 1); })
+      .catch((e) => { if (!live) return; if (ctxRef.current) flash(trFl('fld.reloadErr')); else setErr(e); });
     return () => { live = false; };
-  }, [api, tick, mode === 'asli' ? refreshKey : 0]);
+  }, [api, ctxTick]);
+  // Office events (Mode asli) are coalesced, like the old board: a burst of company-wide changes costs
+  // one reload, not one per event.
+  const coalRef = uRfl(null);
+  if (!coalRef.current && window.DISTLIVE) coalRef.current = window.DISTLIVE.createCoalescer(() => setCtxTick((t) => t + 1), 1500);
+  uEfl(() => { if (mode === 'asli' && refreshKey && coalRef.current) coalRef.current.trigger(); }, [refreshKey]);
+  uEfl(() => () => { if (coalRef.current) coalRef.current.cancel(); }, []);
   // Screens only ever run on the adaptor of the ACTIVE mode — never the previous one after a switch.
   const ready = !!api && api.mode === mode && !!ctx;
-  const done = (m) => { setView(null); setTick((t) => t + 1); if (m) flash(m); };
+  const done = (m) => { setView(null); setCtxTick((t) => t + 1); if (m) flash(m); };
+  // MODE ASLI: report the driver's position like the old board (every POS_EVERY_MS or after POS_MOVE_M;
+  // fixes vaguer than POS_MAX_ACC_M skipped) — for the owner's live map, and because finishing a stop
+  // can require a recent fix. Never in practice. Stops when this screen closes or the mode changes.
+  uEfl(() => {
+    if (mode !== 'asli' || !ready) return undefined;
+    const geo = typeof navigator !== 'undefined' && navigator.geolocation;
+    if (!(geo && geo.watchPosition)) return undefined;
+    const last = { lat: null, lng: null, at: 0 };
+    const id = navigator.geolocation.watchPosition((p) => {
+      const c = p.coords; const acc = Math.round(c.accuracy);
+      if (acc > POS_MAX_ACC_M) return;
+      const moved = last.lat == null ? Infinity : haversineM(last.lat, last.lng, c.latitude, c.longitude);
+      if (!(moved > POS_MOVE_M || Date.now() - last.at >= POS_EVERY_MS)) return;
+      last.lat = c.latitude; last.lng = c.longitude; last.at = Date.now();
+      api.position({ lat: c.latitude, lng: c.longitude, accuracy: acc, recordedAt: p.timestamp || Date.now() }).catch(() => { /* a dropped fix is not worth interrupting a round */ });
+    }, () => { /* denied / unavailable: finishing a stop then asks for a reason */ }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+    return () => { navigator.geolocation.clearWatch(id); };
+  }, [mode, ready, api]);
 
   const askSwitch = (to) => setAsk({
     title: to === 'asli' ? trFl('fld.switchToAsliT') : trFl('fld.switchToLatihanT'),
@@ -100,7 +136,7 @@ function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, 
   return (
     <div className="mlap-root">
       {mode === 'latihan' && <div className="mlap-ribbon" role="status">{trFl('fld.bannerLatihan')}</div>}
-      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} onDone={done} onBack={() => setView(null)} />}
+      {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
       {!full && (
         <>

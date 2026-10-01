@@ -309,6 +309,8 @@
         if (!s.photos[id]) return Promise.resolve(null);
         return Promise.resolve(photoStore ? photoStore.get(id) : s.photos[id]);
       },
+      // Practice never reports a position: the live tracking map shows real drivers only.
+      position: function () { return Promise.resolve({ ok: true, practice: true }); },
       exportState: function () { return clone(s); },
     };
     return api;
