@@ -164,6 +164,18 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-load .mlap-stepper { border: 0; padding: 0; min-height: 52px; }
 .mlap-preview { padding: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
 .mlap-preview .sb { font-size: 13px; color: var(--mlap-sub); }
+/* ── RUTE RIT / PETA ── */
+.mlap-map { height: 280px; border-radius: 16px; overflow: hidden; background: #DCE5EC; }
+.mlap-pin-wrap { background: transparent; border: 0; }
+.mlap-pin { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--mlap-accent); color: #fff; font: 700 12px/1 -apple-system, system-ui, sans-serif; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(6,51,79,.35); box-sizing: border-box; }
+.mlap-pin.depot { width: 30px; height: 30px; border-radius: 9px; background: #0E1B24; }
+.mlap-routehd { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.mlap-routehd > div:first-child { display: flex; align-items: baseline; gap: 8px; }
+.mlap-routefig { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mlap-routefig > span { display: flex; flex-direction: column; }
+.mlap-routefig b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.mlap-legleft { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.mlap-legs .mlap-btn { margin: 8px 12px; width: calc(100% - 24px); }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

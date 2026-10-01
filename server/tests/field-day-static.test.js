@@ -75,3 +75,22 @@ describe('Buka / Tutup rit', () => {
     expect(f).toMatch(/\(k === 'rusak' \|\| k === 'hilang'\) \? lost > 0 : true/);
   });
 });
+
+describe('Rute rit / Peta', () => {
+  const f = () => fn('FldRoute');
+  it('no open rit (or a stale one) → the button, not an error; the route only for today\'s rit', () => {
+    expect(f()).toMatch(/if \(!rs\.open \|\| rs\.stale\) return/);
+    expect(f()).toMatch(/api\.ritRoute\(\)/);
+  });
+  it('the map is optional: a Leaflet failure keeps the list', () => {
+    expect(f()).toMatch(/znLoadLeaflet\(\)\.then\(/);
+    expect(f()).toMatch(/\.catch\(\(\) => \{ if \(live\) setMapErr\(true\); \}\)/);
+    const list = f().indexOf('className="mlap-card mlap-legs"'); const mapBranch = f().indexOf('mapErr ?');
+    expect(list).toBeGreaterThan(-1); expect(mapBranch).toBeGreaterThan(-1);
+    expect(f()).toMatch(/mapRef\.current\.remove\(\)/);   // no leaked map on unmount
+  });
+  it('uses the same OSM tiles + attribution as Peta Zona', () => {
+    expect(f()).toMatch(/https:\/\/tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/);
+    expect(f()).toMatch(/OpenStreetMap<\/a>/);
+  });
+});
