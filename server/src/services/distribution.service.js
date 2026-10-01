@@ -4743,7 +4743,18 @@ async function fieldContext(user, query) {
     const rows = await prisma.delivery.findMany({ where: { date: today, fleetId: fleet, status: 'pending' }, select: { id: true, customerId: true, qty: true } });
     demand = await demandFor(rows);
   }
-  return { today, fleet, fleets, rules, depot, demand };
+  // The armada's open rit, WHATEVER its date: a rit left open yesterday blocks opening a new one
+  // (openRun refuses), so the phone must see it and offer "Tutup rit" first.
+  let openRun = null;
+  if (fleet) {
+    const run = await prisma.deliveryRun.findFirst({ where: { fleetId: fleet, status: 'open' }, orderBy: [{ date: 'desc' }, { runNo: 'desc' }] });
+    if (run) {
+      const sold = (await soldForRuns([run.id]))[run.id] || 0;
+      const corrs = (await correctionsForRuns([run.id]))[run.id] || [];
+      openRun = runClient(run, sold, corrs);
+    }
+  }
+  return { today, fleet, fleets, rules, depot, demand, openRun };
 }
 // A driver fixing a customer's WhatsApp number in the field (Lengkapi data) — the same cap that lets
 // them save the location; audited. '' clears it.

@@ -39,6 +39,12 @@ it('the owner rules screen is never tagged', async () => {
 });
 it('the field namespace covers every adaptor method', () => {
   const { API } = loadApi();
-  ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo']
+  ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo', 'outstanding']
     .forEach((m) => expect(typeof API.distribusi.field[m]).toBe('function'));
+});
+it('outstanding is a tagged read scoped to the armada', async () => {
+  const { API, calls } = loadApi();
+  await API.distribusi.field.outstanding('DK 1');
+  expect(calls[0]).toMatchObject({ method: 'GET', url: 'http://x/api/v1/distribusi/deliveries/outstanding?fleet=DK%201' });
+  expect(calls[0].headers['X-Airro-Ui']).toBe('field');
 });

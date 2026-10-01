@@ -273,6 +273,7 @@
         runs: (date, fleet) => freq('GET', '/distribusi/runs' + qd(date, fleet)),
         ritRoute: (date, fleet) => freq('GET', '/distribusi/deliveries/rit-route' + qd(date, fleet)),
         daySummary: (date, fleet) => freq('GET', '/distribusi/deliveries/day-summary' + qd(date, fleet)),
+        outstanding: (fleet) => freq('GET', '/distribusi/deliveries/outstanding' + qd(null, fleet)),
         myChangeRequests: () => freq('GET', '/distribusi/change-requests/mine'),
         mark: (id, body) => freq('PATCH', '/distribusi/deliveries/' + id, body),
         sale: (body) => freq('POST', '/distribusi/transactions', body),

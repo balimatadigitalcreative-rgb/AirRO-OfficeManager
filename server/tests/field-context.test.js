@@ -66,3 +66,13 @@ it('a driver can set a customer\'s WhatsApp number (normalised, audited) without
 it('a driver cannot touch a customer outside their armada', async () => {
   expect((await request(app).patch(`${D}/customers/${cOther}/phone`).set(auth(driver)).send({ phone: '0811' })).status).toBe(404);
 });
+it('an open rit from an earlier day is reported (it blocks opening a new one)', async () => {
+  const { addDaysISO } = require('../src/config/permissions');
+  const yesterday = addDaysISO(today, -1);
+  await prisma.deliveryRun.deleteMany();
+  expect((await request(app).post(`${D}/runs/open`).set(auth(gm)).send({ date: yesterday, fleet: 'DK 1', gallonsOut: 90 })).status).toBe(201);
+  const c = (await request(app).get(`${D}/field-context`).set(auth(driver))).body.data;
+  expect(c.openRun).toMatchObject({ date: yesterday, runNo: 1, gallonsOut: 90, status: 'open', sold: 0 });
+  const none = (await request(app).get(`${D}/field-context?fleet=DK%202`).set(auth(gm))).body.data;
+  expect(none.openRun).toBeNull();
+});
