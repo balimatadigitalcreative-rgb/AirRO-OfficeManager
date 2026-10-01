@@ -156,6 +156,9 @@ function FldBoardScreen({ api, ctx, tick, can, onStop, onSale, onOpenRun, onInco
   );
 }
 
+// DETAIL STOP (mockup Stop board): a tall sheet — the stop's number + name, what data is missing (each
+// with its own action), Navigasi / Telepon / WhatsApp, the order and the gallons held, the note, the
+// money/gallon actions, Tunda / Batal (always with a written reason), and "Antar & catat" fixed below.
 function FldStopSheet({ api, stop: s, can, onClose, onSale, onAction, onChanged }) {
   const drag = useFldSheetDrag(onClose);
   const [mode, setMode] = uSfl('');   // '' | 'tunda' | 'batal'
@@ -175,67 +178,80 @@ function FldStopSheet({ api, stop: s, can, onClose, onSale, onAction, onChanged 
     setBusy(true); setErr('');
     api.markStop(s.id, { status: 'pending' }).then(() => onChanged(trFl('fld.reopened'))).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
   };
-  const checks = [['titik', 'fld.chkTitik'], ['wa', 'fld.chkWa'], ['foto', 'fld.chkFoto']];
+  const checks = [['titik', 'fld.chkTitik', 'fld.setPin'], ['wa', 'fld.chkWa', 'fld.fillNo'], ['foto', 'fld.chkFoto', 'fld.camera']];
   const sub = [s.customerCode, s.address, s.deliveryDays && s.deliveryDays.length ? trFl('fld.sendDays', { d: s.deliveryDays.join(', ') }) : ''].filter(Boolean).join(' · ');
+  const fix = can.location && s.gaps.count > 0 ? () => onAction('complete', fldCustFromStop(s)) : null;
+  const acts = [];
+  if (can.bon && s.sisaBon > 0) acts.push(['bon', 'cash', 'fld.terimaBon', FIELDLOGIC.fmtRp(s.sisaBon)]);
+  if (can.adjust) acts.push(['adjust', 'adjust', 'fld.adjRow', '']);
+  if (can.damage && s.gallonsHeld > 0) acts.push(['damage', 'bottleBroken', 'fld.dmgRow', '']);
+  const pending = s.status === 'pending';
   return (
     <>
       <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onClose} />
-      <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={s.customerName} ref={drag.ref} style={drag.style}>
+      <div className="mlap-sheet tall" role="dialog" aria-modal="true" aria-label={s.customerName} ref={drag.ref} style={drag.style}>
         <FldGrab handle={drag.handle} />
-        <h2>{s.customerName}</h2>
-        {sub ? <p>{sub}</p> : null}
-        {s.gaps.count > 0 && (
-          <div className="mlap-card mlap-checks">
-            <div className="mlap-check-hd">{trFl('fld.gapsT', { n: 3 - s.gaps.count })}</div>
-            {checks.map(([k, key]) => (
-              <div key={k} className="mlap-check">
-                <span className={'mlap-dot ' + (s.gaps[k] ? 'miss' : 'ok')} aria-hidden="true">{s.gaps[k] ? '!' : '✓'}</span>
-                <span className="mlap-grow">{trFl(key)}</span>
+        <FldSheetHead title={s.customerName} sub={sub} lead={s.boardNo != null ? <span className="mlap-nbig">{s.boardNo}</span> : null} onClose={onClose} />
+        <div className="mlap-sheet-body">
+          {s.gaps.count > 0 && (
+            <div className="mlap-gapcard">
+              <div className="mlap-gapcard-hd"><FldSvg n="warn" s={16} sw={2.2} /><span>{trFl('fld.gapsT', { n: 3 - s.gaps.count })}</span></div>
+              {checks.map(([k, key, act]) => (
+                <div key={k} className="mlap-check">
+                  <span className={'mlap-dot ' + (s.gaps[k] ? 'miss' : 'ok')} aria-hidden="true">{s.gaps[k] ? '!' : '✓'}</span>
+                  <span className="mlap-grow">{trFl(key)}</span>
+                  {s.gaps[k] && fix ? <button type="button" className="mlap-gapact" onClick={fix}>{trFl(act)}</button> : null}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mlap-contacts">
+            <FldLinkBtn href={links.nav} className="mlap-ctile" newTab><FldSvg n="navigate" s={18} />{trFl('fld.navigate')}</FldLinkBtn>
+            <FldLinkBtn href={links.tel} className="mlap-ctile"><FldSvg n="phone" s={18} />{trFl('fld.call')}</FldLinkBtn>
+            {links.wa ? <FldLinkBtn href={links.wa} className="mlap-ctile" newTab><FldSvg n="wa" s={18} />{trFl('fld.wa')}</FldLinkBtn>
+              : fix ? <button type="button" className="mlap-ctile miss" onClick={fix}><FldSvg n="wa" s={18} />{trFl('fld.fillWaTile')}</button>
+                : <FldLinkBtn href="" className="mlap-ctile"><FldSvg n="wa" s={18} />{trFl('fld.wa')}</FldLinkBtn>}
+          </div>
+          <div className="mlap-card mlap-facts2">
+            <div><span className="sb">{trFl('fld.orderToday')}</span><b className="blue">{trFl('fld.nGalon', { n: s.planQty })}</b></div>
+            <div><span className="sb">{trFl('fld.heldAt')}</span><b>{s.gallonsHeld == null ? '—' : s.gallonsHeld}</b></div>
+          </div>
+          {s.note ? <div className="mlap-card mlap-notecard"><FldSvg n="note" s={16} /><span>{s.note}</span></div> : null}
+          {acts.length || (!can.bon && s.sisaBon > 0) ? (
+            <div className="mlap-card">
+              {acts.map(([k, ico, key, val]) => (
+                <button key={k} type="button" className="mlap-actrow" onClick={() => onAction(k, fldCustFromStop(s))}>
+                  <FldSvg n={ico} s={17} /><span className="mlap-grow">{trFl(key)}</span>{val ? <b className="mlap-bontxt">{val}</b> : null}<FldSvg n="chevron" s={13} sw={2.4} />
+                </button>
+              ))}
+              {!can.bon && s.sisaBon > 0 ? <div className="mlap-actrow off"><FldSvg n="cash" s={17} /><span className="mlap-grow">{trFl('fld.bonNow')}</span><b className="mlap-bontxt">{FIELDLOGIC.fmtRp(s.sisaBon)}</b></div> : null}
+            </div>
+          ) : null}
+          {err && <div className="mlap-err" role="alert">{err}</div>}
+          {pending && !mode && (
+            <div className="mlap-holdrow">
+              <button type="button" className="mlap-btn hold" onClick={() => { setMode('tunda'); setReason(''); }}><FldSvg n="clock" s={16} sw={2.2} />{trFl('fld.hold')}</button>
+              <button type="button" className="mlap-btn cancel" onClick={() => { setMode('batal'); setReason(''); }}><FldSvg n="ban" s={16} sw={2.2} />{trFl('fld.cancelStop')}</button>
+            </div>
+          )}
+          {mode && (
+            <div className={'mlap-card mlap-reason' + (mode === 'batal' ? ' neg' : '')}>
+              <b>{trFl(mode === 'tunda' ? 'fld.holdWhy' : 'fld.cancelWhy')}</b>
+              <FldChips options={reasons} otherLabel={trFl('fld.r_other')} value={reason} onChange={setReason} tone={mode === 'tunda' ? 'hold' : 'danger'} />
+              <div className="mlap-actions">
+                <button type="button" className="mlap-btn gray" onClick={() => setMode('')}>{trFl('fld.cancel')}</button>
+                <button type="button" className={'mlap-btn ' + (mode === 'batal' ? 'danger' : 'primary')} disabled={busy || !reason.trim()} onClick={doHold}>{trFl(mode === 'tunda' ? 'fld.holdSave' : 'fld.cancelSave')}</button>
               </div>
-            ))}
-          </div>
-        )}
-        <div className="mlap-links">
-          <FldLinkBtn href={links.nav} className="mlap-btn" newTab>{trFl('fld.navigate')}</FldLinkBtn>
-          <FldLinkBtn href={links.tel} className="mlap-btn">{trFl('fld.call')}</FldLinkBtn>
-          <FldLinkBtn href={links.wa} className="mlap-btn" newTab>{trFl('fld.wa')}</FldLinkBtn>
-        </div>
-        <div className="mlap-card mlap-facts">
-          <div><span className="sb">{trFl('fld.orderToday')}</span><b>{trFl('fld.nGalon', { n: s.planQty })}</b></div>
-          <div><span className="sb">{trFl('fld.heldAt')}</span><b>{s.gallonsHeld == null ? '—' : s.gallonsHeld}</b></div>
-          <div><span className="sb">{trFl('fld.bonNow')}</span><b>{FIELDLOGIC.fmtRp(s.sisaBon || 0)}</b></div>
-        </div>
-        <div className="mlap-actlist">
-          {can.bon && s.sisaBon > 0 ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('bon', fldCustFromStop(s))}>{trFl('fld.catatBon')} · {FIELDLOGIC.fmtRp(s.sisaBon)}</button> : null}
-          {can.location && s.gaps.count > 0 ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('complete', fldCustFromStop(s))}>{trFl('fld.completeData')}</button> : null}
-          {can.adjust ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('adjust', fldCustFromStop(s))}>{trFl('fld.catatAdj')}</button> : null}
-          {can.damage && s.gallonsHeld > 0 ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('damage', fldCustFromStop(s))}>{trFl('fld.catatDmg')}</button> : null}
-        </div>
-        {s.note ? <div className="mlap-note">{s.note}</div> : null}
-        {err && <div className="mlap-err" role="alert">{err}</div>}
-        {s.status === 'pending' && !mode && (
-          <>
-            <div className="mlap-actions">
-              <button type="button" className="mlap-btn" onClick={() => { setMode('tunda'); setReason(''); }}>{trFl('fld.hold')}</button>
-              <button type="button" className="mlap-btn danger" onClick={() => { setMode('batal'); setReason(''); }}>{trFl('fld.cancelStop')}</button>
             </div>
-            {can.sale ? <button type="button" className="mlap-btn primary mlap-wide" onClick={() => onSale(s)}>{trFl('fld.deliverRecord')}</button> : null}
-          </>
-        )}
-        {mode && (
-          <div className="mlap-card mlap-reason">
-            <b>{trFl(mode === 'tunda' ? 'fld.holdWhy' : 'fld.cancelWhy')}</b>
-            <FldChips options={reasons} otherLabel={trFl('fld.r_other')} value={reason} onChange={setReason} />
-            <div className="mlap-actions">
-              <button type="button" className="mlap-btn" onClick={() => setMode('')}>{trFl('fld.cancel')}</button>
-              <button type="button" className={'mlap-btn ' + (mode === 'batal' ? 'danger' : 'primary')} disabled={busy || !reason.trim()} onClick={doHold}>{trFl(mode === 'tunda' ? 'fld.holdSave' : 'fld.cancelSave')}</button>
-            </div>
-          </div>
-        )}
-        {(s.status === 'ditunda' || s.status === 'batal') && <button type="button" className="mlap-btn mlap-wide" disabled={busy} onClick={reopen}>{trFl('fld.reopen')}</button>}
-        {s.status === 'terkirim' && s.transactionId && (can.correct || can.void)
-          ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('koreksi', { transactionId: s.transactionId, customerId: s.customerId })}>{trFl('fld.koreksiT')}</button>
-          : s.status === 'terkirim' ? <div className="mlap-note">{trFl('fld.doneNote')}</div> : null}
+          )}
+          {(s.status === 'ditunda' || s.status === 'batal') && <button type="button" className="mlap-btn mlap-wide" disabled={busy} onClick={reopen}>{trFl('fld.reopen')}</button>}
+          {s.status === 'terkirim' && s.transactionId && (can.correct || can.void)
+            ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('koreksi', { transactionId: s.transactionId, customerId: s.customerId })}>{trFl('fld.koreksiT')}</button>
+            : s.status === 'terkirim' ? <div className="mlap-note">{trFl('fld.doneNote')}</div> : null}
+        </div>
+        {pending && !mode && can.sale ? (
+          <div className="mlap-sheet-cta"><button type="button" className="mlap-btn primary" onClick={() => onSale(s)}><FldSvg n="check" s={18} sw={2.6} />{trFl('fld.deliverRecordFull')}</button></div>
+        ) : null}
       </div>
     </>
   );

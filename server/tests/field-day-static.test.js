@@ -144,7 +144,7 @@ describe('Plan 3B: sale screen', () => {
 it('Plan 3B: the stop sheet offers bon / adjustment / damage / complete for the stop\'s customer, by cap', () => {
   const f = fn('FldStopSheet');
   expect(f).toMatch(/can\.bon && s\.sisaBon > 0/);
-  expect(f).toMatch(/onAction\('adjust', fldCustFromStop\(s\)\)/);
+  expect(f).toMatch(/if \(can\.adjust\) acts\.push\(\['adjust',/);   // 3D-2: one icon row per action
   expect(f).toMatch(/can\.damage && s\.gallonsHeld > 0/);
   expect(f).toMatch(/can\.location && s\.gaps\.count > 0/);
 });

@@ -54,3 +54,30 @@ describe('Pengiriman (mockup Main board)', () => {
     expect(rule('PENGIRIMAN', '.mlap-num.neg')).toMatch(/background: #FDE8E6; color: #9B2C22;/);
   });
 });
+
+describe('Detail stop (mockup Stop board)', () => {
+  const f = () => fn(day, 'FldStopSheet');
+  it('a tall sheet: 38 px number, name, glass close X; the body scrolls, the CTA stays at the bottom', () => {
+    expect(f()).toMatch(/<div className="mlap-sheet tall" role="dialog" aria-modal="true" aria-label=\{s\.customerName\} ref=\{drag\.ref\} style=\{drag\.style\}>/);
+    expect(f()).toMatch(/<FldSheetHead title=\{s\.customerName\} sub=\{sub\} lead=\{s\.boardNo != null \? <span className="mlap-nbig">\{s\.boardNo\}<\/span> : null\} onClose=\{onClose\} \/>/);
+    expect(f()).toMatch(/<div className="mlap-sheet-body">/);
+    expect(f()).toMatch(/<div className="mlap-sheet-cta"><button type="button" className="mlap-btn primary" onClick=\{\(\) => onSale\(s\)\}><FldSvg n="check"/);
+  });
+  it('each missing item has its own action pill (32 px pill, 44 px touch); contact tiles with icons; no WhatsApp = dashed orange', () => {
+    expect(f()).toMatch(/s\.gaps\[k\] && fix \? <button type="button" className="mlap-gapact" onClick=\{fix\}>/);
+    expect(f()).toMatch(/className="mlap-ctile" newTab><FldSvg n="navigate"/);
+    expect(f()).toMatch(/className="mlap-ctile"><FldSvg n="phone"/);
+    expect(f()).toMatch(/<button type="button" className="mlap-ctile miss" onClick=\{fix\}><FldSvg n="wa"/);
+    expect(rule('STOP', '.mlap-ctile.miss')).toMatch(/border: 1px dashed #F4C7A8; color: #9A3412;/);
+    expect(rule('STOP', '.mlap-gapact::before')).toMatch(/inset: -6px 0;/);
+  });
+  it('two coloured facts, the note card, an icon action list with chevrons, Tunda / Batal with icons', () => {
+    expect(f()).toMatch(/<div className="mlap-card mlap-facts2">/);
+    expect(f()).toMatch(/<div className="mlap-card mlap-notecard"><FldSvg n="note"/);
+    expect(f()).toMatch(/className="mlap-actrow" onClick=\{\(\) => onAction\(k, fldCustFromStop\(s\)\)\}>/);
+    expect(f()).toMatch(/<button type="button" className="mlap-btn hold"[\s\S]*?<FldSvg n="clock"/);
+    expect(f()).toMatch(/<button type="button" className="mlap-btn cancel"[\s\S]*?<FldSvg n="ban"/);
+    expect(f()).toMatch(/tone=\{mode === 'tunda' \? 'hold' : 'danger'\}/);
+    expect(rule('STOP', '.mlap-facts2 b.blue')).toMatch(/color: #065489;/);
+  });
+});
