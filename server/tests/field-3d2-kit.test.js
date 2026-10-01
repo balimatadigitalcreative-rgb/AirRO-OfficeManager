@@ -166,3 +166,12 @@ describe('3D-1 deferred minors (login)', () => {
     expect(read('dist-field.css')).toMatch(/\.mlap-boot \{ position: fixed; inset: 0; z-index: 30; background: #EEF2F6; \}/);
   });
 });
+
+describe('Small phones (320 px wide, 640 px tall)', () => {
+  it('cards inside a scrolling sheet keep their height (the sheet scrolls; nothing is squashed)', () => {
+    expect(css).toMatch(/\n\.mlap-sheet-body > \*, \.mlap-mapsheet-in > \* \{ flex-shrink: 0; \}/);
+  });
+  it('the dock fits a 320 px screen (narrower centre slot, 10 px labels)', () => {
+    expect(css).toMatch(/@media \(max-width: 360px\) \{\s*\.mlap-dock \{ grid-template-columns: 1fr 1fr 62px 1fr 1fr; \}\s*\.mlap-tab span \{ font-size: 10px; \}/);
+  });
+});

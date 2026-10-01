@@ -370,6 +370,10 @@ yang disetujui: tampilan, animasi, dan gesture, bukan hanya fungsi.
   - `FldCtaBar` sebagai CTA tetap (dipakai layar di 3D-2);
   - `useFldSheetDrag`, `swipeTab`, dan Atur titik dengan pin tengah.
 
+**Sesuai yang dibangun (Rencana 3D-2, 2026-10-02): setiap layar mengikuti papan mockupnya.**
+
+Every field screen now follows its mockup board: Pengiriman (compact rit card + bar, tappable warnings, next-stop card, numbered coloured list), Detail stop (tall sheet), Transaksi, Buka/Tutup rit (sheet over Pengiriman with presets, SOP gauge and route-fit bar), Peta (full-bleed map, glass bar, 470/700 sheet), Setoran (KPI tiles, reason picker sheet, fixed close bar above the dock), Pelanggan (floating glass search, sideways chips), Lengkapi (mini-map), Atur titik (full-bleed map + glass sheet), Tambah stop (sheet), Bayar bon / Penyesuaian / Ganti rugi / Pengeluaran, Koreksi (tiles + impact rows), Koreksi saya (two segments), Armada & SOP. Deliberate differences: no Satelit toggle (needs a second tile service — owner to decide); Setoran and Peta keep the dock; the ganti-rugi price stays the owner's setting; reasons are picked in a sheet; board sample data the app does not have is not invented; touch targets stay ≥ 44 px. 3D-1 minors M5–M13 closed (old-view choice ends with the session, no finance flash before the rules load, scroll reset, keyboard pan counts, edge swipes left to the phone, tile press, top bar, quiet latihan chip, solid fallbacks). Small phones (320 × 640): sheet content scrolls instead of shrinking; the dock fits with a narrower centre slot. Screens were checked side by side with each board at 390 × 844 (boards rendered from the mockup files; the app through a real-time Chrome DevTools harness).
+
 ### 5. Rilis
 
 1. **Demo:** deploy dengan semua saklar aturan mati. Hanya akun berizin yang melihat tampilan baru.

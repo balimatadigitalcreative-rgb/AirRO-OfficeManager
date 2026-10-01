@@ -731,3 +731,10 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-capbar > i { position: absolute; top: -3px; width: 2px; height: 12px; margin-left: -1px; border-radius: 1px; background: #0E1B24; transition: left .45s cubic-bezier(.34,1.56,.64,1); }
 .mlap-step.plus.teal { background: #DDF4F2; color: #0F6B66; }
 .mlap-foot { font-size: 12px; line-height: 16px; color: var(--mlap-sub); padding: 0 4px; }
+
+/* ── 3D-2 SMALL PHONES — 320 px wide, 640 px tall ── */
+.mlap-sheet-body > *, .mlap-mapsheet-in > * { flex-shrink: 0; }
+@media (max-width: 360px) {
+  .mlap-dock { grid-template-columns: 1fr 1fr 62px 1fr 1fr; }
+  .mlap-tab span { font-size: 10px; }
+}
