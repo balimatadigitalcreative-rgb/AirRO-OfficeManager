@@ -135,3 +135,34 @@ describe('Buka / Tutup rit (mockup Buka rit board) — a sheet over Pengiriman',
     expect(shell).toMatch(/const full = view && \['sale', 'pick',/);
   });
 });
+
+describe('Peta (mockup Rute rit board)', () => {
+  const f = () => fn(day, 'FldRoute');
+  it('a full-bleed map; the OSM attribution moves to the top (the sheet covers the bottom)', () => {
+    expect(f()).toMatch(/className="mlap-map mlap-mapfull"/);
+    expect(f()).toMatch(/L\.map\(mapEl\.current, \{ zoomControl: false, attributionControl: false \}\);/);
+    expect(f()).toMatch(/L\.control\.attribution\(\{ position: 'topright' \}\)\.addTo\(map\);/);
+    expect(rule('PETA', '.mlap-mapfull')).toMatch(/position: fixed; inset: 0;/);
+  });
+  it('a glass bar (rit pill, locate, menu) and a detent sheet 470 / 700 with the figures and the legs', () => {
+    expect(f()).toMatch(/<div className="mlap-glass mlap-mappill">/);
+    expect(f()).toMatch(/className=\{'mlap-mapsheet' \+ \(open \? ' open' : ''\)\}/);
+    expect(f()).toMatch(/aria-expanded=\{open\} onClick=\{\(\) => setOpen\(!open\)\}/);
+    expect(f()).toMatch(/className=\{'mlap-legno' \+ \(i === 0 \? ' now' : ''\)\}/);
+    expect(rule('PETA', '.mlap-mapsheet')).toMatch(/height: min\(470px, 56vh\);/);
+    expect(rule('PETA', '.mlap-mapsheet.open')).toMatch(/height: min\(700px, calc\(100vh - 120px\)\);/);
+    expect(rule('PETA', '.mlap-mapsheet')).toMatch(/background: rgba\(248,250,252,\.88\);/);
+  });
+  it('the warehouse row reads 14 px grey like the board', () => {
+    expect(fn(day, 'FldRoute')).toMatch(/<span className="mlap-grow mlap-legdep">\{trFl\('fld\.backToDepot'/);
+    expect(rule('PETA', '.mlap-legdep')).toMatch(/font-size: 14px; color: #3E4E58;/);
+  });
+  it('the route line is solid out and dashed back; the next stop is the filled pin', () => {
+    expect(f()).toMatch(/dashArray: '2 7'/);
+    expect(f()).toMatch(/'<span class="mlap-pin' \+ \(i === 0 \? ' now' : ''\) \+ '">'/);
+  });
+  it('the shell drops its header on Peta (the glass bar replaces it) and hands it the menu', () => {
+    expect(shell).toMatch(/\{tab !== 'peta' \? \(\s*<div className="mlap-head">/);
+    expect(shell).toMatch(/<FldRoute api=\{api\} ctx=\{ctx\} tick=\{tick\} fleet=\{fleet\} onOpenRun=\{\(\) => setView\(\{ name: 'run' \}\)\} onMenu=\{\(\) => setMenu\(true\)\} onAddStop=\{can\.addStop \? \(\) => setView\(\{ name: 'addStop' \}\) : null\} \/>/);
+  });
+});

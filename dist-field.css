@@ -492,3 +492,39 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-fitbar > span { border-radius: 2px; background: #DDE4EA; transition: background .25s ease; }
 .mlap-fitbar > span.on { background: #1A8C87; }
 .mlap-after.ok { background: #E3F3EA; color: #1E6B40; }
+
+/* ── 3D-2 PETA — mockup Rute rit board (full-bleed map, glass bar, detent sheet) ── */
+.mlap-mapfull { position: fixed; inset: 0; height: auto; border-radius: 0; z-index: 0; }
+.mlap-mapfull .leaflet-top { top: calc(64px + env(safe-area-inset-top)); }
+.mlap-mapbar { position: fixed; z-index: 5; top: calc(8px + env(safe-area-inset-top)); left: 16px; right: 16px; max-width: 528px; margin: 0 auto; display: flex; align-items: center; gap: 8px; }
+.mlap-mappill { flex: 1; min-width: 0; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.mlap-mapempty { padding-top: calc(64px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 10px; }
+.mlap-mapsheet { position: fixed; z-index: 6; left: 50%; transform: translateX(-50%); bottom: 0; width: min(560px, 100vw); height: min(470px, 56vh); display: flex; flex-direction: column; box-sizing: border-box; padding-bottom: calc(96px + env(safe-area-inset-bottom)); border-radius: 28px 28px 0 0; background: rgba(248,250,252,.88); -webkit-backdrop-filter: blur(34px) saturate(1.5); backdrop-filter: blur(34px) saturate(1.5); border-top: 1px solid rgba(255,255,255,.95); box-shadow: 0 -10px 40px rgba(6,51,79,.18), inset 0 1px 0 rgba(255,255,255,.95); transition: height .45s cubic-bezier(.34,1.3,.64,1); }
+.mlap-mapsheet.open { height: min(700px, calc(100vh - 120px)); }
+.mlap-mapsheet-grab { height: 24px; flex-shrink: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.mlap-mapsheet-grab .mlap-grab { margin: 0; }
+.mlap-mapsheet-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 2px 16px 0; }
+.mlap-mapsheet-hd b { font-size: 19px; font-weight: 700; }
+.mlap-mapsheet-hd .sb { font-size: 13px; color: var(--mlap-sub); }
+.mlap-mapsheet-in { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 0; display: flex; flex-direction: column; gap: 8px; }
+.mlap-routefig2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: 14px; flex-shrink: 0; }
+.mlap-routefig2 > div { padding: 8px 12px; display: flex; flex-direction: column; border-right: 1px solid var(--mlap-line); }
+.mlap-routefig2 > div:last-child { border-right: 0; }
+.mlap-routefig2 b { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mlap-routefig2 b.teal { color: #0F6B66; }
+.mlap-routefig2 span { font-size: 12px; color: var(--mlap-sub); }
+.mlap-alert.sm { min-height: 44px; border-radius: 12px; padding: 0 10px; gap: 8px; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+.mlap-legs { border-radius: 14px; flex-shrink: 0; }
+.mlap-legrow { min-height: 46px; padding: 0 12px; }
+.mlap-legno { width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: #E8F1F8; color: #065489; }
+.mlap-legno.now { background: #065489; color: #FFFFFF; }
+.mlap-legno.depot { background: #0E1B24; color: #FFFFFF; }
+.mlap-legrow .nm { font-size: 14px; }
+.mlap-legdep { font-size: 14px; color: #3E4E58; }
+.mlap-legleft b { font-size: 14px; font-weight: 700; color: #0F6B66; }
+.mlap-legleft .sb { font-size: 11px; }
+.mlap-mapsheet-cta { padding: 10px 16px 0; flex-shrink: 0; }
+.mlap-mapsheet-cta .mlap-btn { width: 100%; min-height: 48px; border-radius: 14px; font-size: 16px; }
+.mlap-pin { background: #FFFFFF; color: #065489; border: 2.5px solid #065489; }
+.mlap-pin.now { width: 28px; height: 28px; background: #065489; color: #FFFFFF; border-color: #FFFFFF; box-shadow: 0 0 0 6px rgba(6,84,137,.18); }
+.mlap-pin.depot { width: 34px; height: 34px; border-radius: 50%; background: #0E1B24; border: 0; }

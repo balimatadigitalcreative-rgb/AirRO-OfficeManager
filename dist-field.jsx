@@ -175,7 +175,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   } else if (tab === 'kirim') {
     body = <FldBoardScreen api={api} ctx={ctx} tick={tick} can={can} onStop={(s) => setView({ name: 'stop', stop: s })} onSale={(s) => setView({ name: 'sale', stop: s })} onOpenRun={() => setView({ name: 'run' })} onIncomplete={goIncomplete} onOutside={() => (can.addStop ? setView({ name: 'addStop' }) : setTab('peta'))} />;
   } else if (tab === 'peta') {
-    body = <FldRoute api={api} ctx={ctx} tick={tick} onOpenRun={() => setView({ name: 'run' })} />;
+    body = <FldRoute api={api} ctx={ctx} tick={tick} fleet={fleet} onOpenRun={() => setView({ name: 'run' })} onMenu={() => setMenu(true)} onAddStop={can.addStop ? () => setView({ name: 'addStop' }) : null} />;
   } else if (tab === 'setoran') {
     body = <FldSetoran api={api} ctx={ctx} tick={tick} canKoreksi={can.correct || can.void} onKoreksiSaya={() => setView({ name: 'koreksiSaya' })} onChanged={(m) => done(m)} />;
   } else {
@@ -201,19 +201,21 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       {ready && full && view.name === 'koreksiSaya' && <FldKoreksiSaya api={api} tick={tick} onResubmit={(tg) => setView({ name: 'koreksi', target: tg })} onBack={() => setView(null)} onChanged={(m) => { flash(m); setCtxTick((t) => t + 1); }} />}
       {!full && (
         <>
-          <div className="mlap-head">
-            <div className="mlap-head-t">
-              <span className="mlap-eyebrow mlap-meta">
-                <span>{fldDayLabel(today)}{fleet ? ' · ' + fleet : ''}</span>
-                {mode === 'latihan' ? <span className="mlap-chip latihan" role="note">{trFl('fld.modeLatihan')}</span> : null}
-              </span>
-              <h1>{trFl(TAB_LABEL[tab])}</h1>
+          {tab !== 'peta' ? (
+            <div className="mlap-head">
+              <div className="mlap-head-t">
+                <span className="mlap-eyebrow mlap-meta">
+                  <span>{fldDayLabel(today)}{fleet ? ' · ' + fleet : ''}</span>
+                  {mode === 'latihan' ? <span className="mlap-chip latihan" role="note">{trFl('fld.modeLatihan')}</span> : null}
+                </span>
+                <h1>{trFl(TAB_LABEL[tab])}</h1>
+              </div>
+              <div className="mlap-head-act">
+                {tab === 'kirim' ? <button type="button" className="mlap-round" aria-label={trFl('fld.seeRoute')} onClick={() => setTab('peta')}><FldSvg n="route" s={19} /></button> : null}
+                <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={() => setMenu(true)}><FldSvg n="dots" s={19} /></button>
+              </div>
             </div>
-            <div className="mlap-head-act">
-              {tab === 'kirim' ? <button type="button" className="mlap-round" aria-label={trFl('fld.seeRoute')} onClick={() => setTab('peta')}><FldSvg n="route" s={19} /></button> : null}
-              <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={() => setMenu(true)}><FldSvg n="dots" s={19} /></button>
-            </div>
-          </div>
+          ) : null}
           <div className="mlap-body mlap-swipe" onPointerDown={swipeDown} onPointerUp={swipeUp} onPointerCancel={() => { swipeRef.current = null; }}>
             {api && mode === 'latihan' && (api.persisted === false || persistOk === false) && <div className="mlap-err" role="status">{trFl('fld.noStore')}</div>}
             {body}

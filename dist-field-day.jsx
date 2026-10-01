@@ -464,17 +464,18 @@ function FldCloseRun({ api, run, stale, onDone, onBack }) {
   );
 }
 
-// RUTE RIT / PETA — today's open rit planned from the warehouse (the server's planner, or the phone's
-// copy of it in practice): map with numbered stops + the list. The map is a bonus: when Leaflet or the
-// tiles can't load (offline), the list still works.
-function FldRoute({ api, ctx, tick, onOpenRun }) {
+// RUTE RIT / PETA (mockup Rute rit board) — today's open rit planned from the warehouse (the server's
+// planner, or the phone's copy of it in practice): a full-bleed map under a glass bar, and a sheet that
+// opens from 470 to 700 px with the figures and the legs. The map is a bonus: when Leaflet or the tiles
+// can't load (offline), the sheet still works.
+function FldRoute({ api, ctx, tick, fleet, onOpenRun, onMenu, onAddStop }) {
   const [runs, setRuns] = uSfl([]);
   uEfl(() => { let live = true; api.runs().then((r) => { if (live) setRuns(r || []); }).catch(() => {}); return () => { live = false; }; }, [api, tick]);
   const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs });
   const [route, setRoute] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [mapErr, setMapErr] = uSfl(false);
-  const [all, setAll] = uSfl(false);
+  const [open, setOpen] = uSfl(false);
   const mapEl = uRfl(null);
   const mapRef = uRfl(null);
   const routeOk = !!(rs.open && !rs.stale);
@@ -490,56 +491,87 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
     znLoadLeaflet().then((L) => {
       if (!live || !mapEl.current) return;
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
-      const map = L.map(mapEl.current, { zoomControl: false, attributionControl: true });
+      const map = L.map(mapEl.current, { zoomControl: false, attributionControl: false });
+      L.control.attribution({ position: 'topright' }).addTo(map);
       mapRef.current = map;
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
       }).addTo(map);
       const depot = [route.origin.lat, route.origin.lng];
       const pts = [depot];
-      L.marker(depot, { keyboard: false, icon: L.divIcon({ className: 'mlap-pin-wrap', iconSize: [30, 30], html: '<span class="mlap-pin depot">G</span>' }) }).addTo(map);
-      route.rit.forEach((s) => {
+      L.marker(depot, { keyboard: false, icon: L.divIcon({ className: 'mlap-pin-wrap', iconSize: [34, 34], html: '<span class="mlap-pin depot"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"><path d="M3 12 12 4l9 8v8H3z"/></svg></span>' }) }).addTo(map);
+      route.rit.forEach((s, i) => {
         if (typeof s.lat !== 'number' || typeof s.lng !== 'number') return;
         pts.push([s.lat, s.lng]);
-        L.marker([s.lat, s.lng], { keyboard: false, icon: L.divIcon({ className: 'mlap-pin-wrap', iconSize: [26, 26], html: '<span class="mlap-pin">' + Number(s.order) + '</span>' }) }).addTo(map);
+        L.marker([s.lat, s.lng], { keyboard: false, icon: L.divIcon({ className: 'mlap-pin-wrap', iconSize: [28, 28], html: '<span class="mlap-pin' + (i === 0 ? ' now' : '') + '">' + Number(s.order) + '</span>' }) }).addTo(map);
       });
-      L.polyline(pts.concat([depot]), { color: '#065489', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(map);
-      map.fitBounds(L.latLngBounds(pts).pad(0.2));
+      L.polyline(pts, { color: '#065489', weight: 4, opacity: 0.9 }).addTo(map);
+      if (pts.length > 1) L.polyline([pts[pts.length - 1], depot], { color: '#065489', weight: 3.5, opacity: 0.75, dashArray: '2 7' }).addTo(map);
+      map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [24, 80], paddingBottomRight: [24, Math.min(470, window.innerHeight * 0.56) + 24] });
     }).catch(() => { if (live) setMapErr(true); });
     return () => { live = false; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
   }, [route, mapErr]);
-  if (!rs.open || rs.stale) return (
-    <FldNotice tone={rs.stale ? 'warn' : 'info'} title={rs.stale ? trFl('fld.staleRunT', { n: rs.open.runNo, date: rs.open.date }) : trFl('fld.noRunT')} sub={rs.stale ? trFl('fld.staleRunB') : trFl('fld.noRunB')}
-      action={rs.stale ? trFl('fld.closeRun') : trFl('fld.openRunN', { n: rs.nextNo })} onAction={onOpenRun} />
+  const locate = () => { fldGeo(8000).then((p) => { if (p && mapRef.current) mapRef.current.setView([p.lat, p.lng], 16); }); };
+  const bar = (title) => (
+    <div className="mlap-mapbar">
+      <div className="mlap-glass mlap-mappill">{routeOk ? <span className="mlap-rit-dot" aria-hidden="true" /> : null}{title}</div>
+      {route && !mapErr ? <button type="button" className="mlap-round" aria-label={trFl('fld.myPos')} onClick={locate}><FldSvg n="locate" s={18} /></button> : null}
+      <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={onMenu}><FldSvg n="dots" s={19} /></button>
+    </div>
   );
-  if (err) return <FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
-  if (!route) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
-  const legs = all ? route.rit : route.rit.slice(0, 4);
+  if (!rs.open || rs.stale) return (
+    <div className="mlap-mapempty">
+      {bar(trFl('fld.tabPeta'))}
+      <FldNotice tone={rs.stale ? 'warn' : 'info'} title={rs.stale ? trFl('fld.staleRunT', { n: rs.open.runNo, date: rs.open.date }) : trFl('fld.noRunT')} sub={rs.stale ? trFl('fld.staleRunB') : trFl('fld.noRunB')}
+        action={rs.stale ? trFl('fld.closeRun') : trFl('fld.openRunN', { n: rs.nextNo })} onAction={onOpenRun} />
+    </div>
+  );
+  const title = trFl('fld.ritN', { n: rs.open.runNo }) + (fleet ? ' · ' + fleet : '');
+  if (err) return <div className="mlap-mapempty">{bar(title)}<FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /></div>;
+  if (!route) return <div className="mlap-mapempty">{bar(title)}<div className="mlap-empty">{trFl('fld.loading')}</div></div>;
+  const legs = open ? route.rit : route.rit.slice(0, 4);
   const first = route.rit[0];
   const firstNav = first ? fldLinks(first).nav : '';
   return (
     <>
-      {mapErr ? <FldNotice tone="info" title={trFl('fld.mapOff')} action={trFl('fld.retry')} onAction={() => setMapErr(false)} /> : <div ref={mapEl} className="mlap-map" role="img" aria-label={trFl('fld.routeT', { n: route.run.runNo })} />}
-      <div className="mlap-card mlap-routehd">
-        <div><b>{trFl('fld.routeT', { n: route.run.runNo })}</b><span className="sb">{trFl('fld.fromDepot')}</span></div>
-        <div className="mlap-routefig"><span><b>{route.used}/{route.capacity}</b><span className="sb">{trFl('fld.gallonsUsed')}</span></span><span><b>{FIELDLOGIC.fmtKm(route.totalKm - route.returnKm)}</b><span className="sb">{trFl('fld.kmBack', { km: FIELDLOGIC.fmtKm(route.returnKm) })}</span></span><span><b>{route.leftover.length}</b><span className="sb">{trFl('fld.toNextRun')}</span></span></div>
-      </div>
-      {route.unlocated.length > 0 ? <FldNotice tone="warn" title={trFl('fld.unlocatedT', { n: route.unlocated.length })} /> : null}
-      {route.tooBig.length > 0 ? <FldNotice tone="warn" title={trFl('fld.tooBigT', { n: route.tooBig.length })} /> : null}
-      <div className="mlap-card mlap-legs">
-        {legs.length ? legs.map((s) => (
-          <div key={s.id} className="mlap-row">
-            <span className="mlap-num">{s.order}</span>
-            <span className="mlap-grow"><span className="nm">{s.customerName}</span><span className="sb">{trFl('fld.legSub', { q: s.qty, km: FIELDLOGIC.fmtKm(s.legKm) })}</span></span>
-            <span className="mlap-legleft"><b>{s.loadAfter}</b><span className="sb">{trFl('fld.loadLeft')}</span></span>
+      {mapErr ? null : <div ref={mapEl} className="mlap-map mlap-mapfull" role="img" aria-label={trFl('fld.routeT', { n: route.run.runNo })} />}
+      {bar(title)}
+      {mapErr ? <div className="mlap-mapempty"><FldNotice tone="info" title={trFl('fld.mapOff')} action={trFl('fld.retry')} onAction={() => setMapErr(false)} /></div> : null}
+      <div className={'mlap-mapsheet' + (open ? ' open' : '')}>
+        <button type="button" className="mlap-mapsheet-grab" aria-label={trFl(open ? 'fld.sheetLess' : 'fld.sheetMore')} aria-expanded={open} onClick={() => setOpen(!open)}><span className="mlap-grab" /></button>
+        <div className="mlap-mapsheet-hd"><b>{trFl('fld.routeT', { n: route.run.runNo })}</b><span className="sb">{trFl('fld.fromDepot')}</span></div>
+        <div className="mlap-mapsheet-in">
+          <div className="mlap-card mlap-routefig2">
+            <div><b className="teal">{route.used}/{route.capacity}</b><span>{trFl('fld.gallonsUsed')}</span></div>
+            <div><b>{FIELDLOGIC.fmtKm(route.totalKm - route.returnKm)}</b><span>{trFl('fld.kmBack', { km: FIELDLOGIC.fmtKm(route.returnKm) })}</span></div>
+            <div><b>{route.leftover.length}</b><span>{trFl('fld.toRitN', { n: route.run.runNo + 1 })}</span></div>
           </div>
-        )) : <div className="mlap-empty">{trFl('fld.emptyRoute')}</div>}
-        {route.rit.length > 4 && !all ? <button type="button" className="mlap-btn mlap-wide" onClick={() => setAll(true)}>{trFl('fld.showAll')}</button> : null}
-        {route.rit.length ? <div className="mlap-row"><span className="mlap-num">G</span><span className="mlap-grow sb">{trFl('fld.backToDepot', { km: FIELDLOGIC.fmtKm(route.returnKm) })}</span></div> : null}
-      </div>
-      <div className="mlap-actions">
-        <button type="button" className="mlap-btn" onClick={onOpenRun}>{trFl('fld.closeRun')}</button>
-        <FldLinkBtn href={firstNav} className="mlap-btn primary" newTab>{first ? trFl('fld.navTo', { n: first.order }) : trFl('fld.navigate')}</FldLinkBtn>
+          {route.unlocated.length > 0 ? (
+            <button type="button" className="mlap-alert warn sm" disabled={!onAddStop} onClick={onAddStop || undefined}>
+              <FldSvg n="pinOff" s={15} sw={2.2} style={{ flexShrink: 0 }} />
+              <span className="mlap-grow">{trFl('fld.unlocatedT', { n: route.unlocated.length })}</span>
+              {onAddStop ? <span className="act">{trFl('fld.see')}</span> : null}
+            </button>
+          ) : null}
+          {route.tooBig.length > 0 ? <FldNotice tone="warn" title={trFl('fld.tooBigT', { n: route.tooBig.length })} /> : null}
+          <div className="mlap-card mlap-legs">
+            {legs.length ? legs.map((s, i) => (
+              <div key={s.id} className="mlap-row mlap-legrow">
+                <span className={'mlap-legno' + (i === 0 ? ' now' : '')}>{s.order}</span>
+                <span className="mlap-grow"><span className="nm">{s.customerName}</span><span className="sb">{trFl('fld.legSub', { q: s.qty, km: FIELDLOGIC.fmtKm(s.legKm) })}{i === 0 ? ' · ' + trFl('fld.nextLow') : ''}</span></span>
+                <span className="mlap-legleft"><b>{s.loadAfter}</b><span className="sb">{trFl('fld.loadLeft')}</span></span>
+              </div>
+            )) : <div className="mlap-empty">{trFl('fld.emptyRoute')}</div>}
+            {route.rit.length ? (
+              <div className="mlap-row mlap-legrow">
+                <span className="mlap-legno depot"><FldSvg n="home" s={14} sw={2.4} /></span>
+                <span className="mlap-grow mlap-legdep">{trFl('fld.backToDepot', { km: FIELDLOGIC.fmtKm(route.returnKm) })}</span>
+                <button type="button" className="mlap-rit-link" onClick={onOpenRun}>{trFl('fld.closeRun')}</button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="mlap-mapsheet-cta"><FldLinkBtn href={firstNav} className="mlap-btn primary" newTab><FldSvg n="navigate" s={18} sw={2.2} />{first ? trFl('fld.navTo', { n: first.order }) : trFl('fld.navigate')}</FldLinkBtn></div>
       </div>
     </>
   );
