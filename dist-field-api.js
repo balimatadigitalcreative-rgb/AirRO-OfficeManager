@@ -174,7 +174,11 @@
     var canAsli = board && (released || !!p.distribusiDemoPenuh);
     var eligible = board && (released || canLatihan);
     // An account that may use the field view lands in it (owner, 3D); "old" is a choice for this session.
-    var ui = !eligible ? 'old' : (prefs.ui === 'old' ? 'old' : 'new');
+    // owner/GM run the office: after release they are not forced into the phone view (they may open it);
+    // a demo grant — the owner's own included — always lands in it
+    var office = a.role === 'owner' || a.role === 'gm';
+    var lands = canLatihan || (released && !office);
+    var ui = !eligible ? 'old' : (prefs.ui === 'old' || prefs.ui === 'new' ? prefs.ui : (lands ? 'new' : 'old'));
     var mode = !canAsli ? 'latihan' : !canLatihan ? 'asli' : (prefs.mode === 'asli' || prefs.mode === 'latihan' ? prefs.mode : (released ? 'asli' : 'latihan'));
     return { eligible: eligible, released: released, canLatihan: canLatihan, canAsli: canAsli, ui: ui, mode: mode };
   }

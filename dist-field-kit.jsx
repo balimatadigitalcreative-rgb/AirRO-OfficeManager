@@ -290,19 +290,22 @@ function FldDock({ tabs, tab, onTab, labelOf, catat, onCatat }) {
 // Pull a sheet down by its grabber to close it (mockup grabbers): it follows the finger; past the line
 // (or on a flick) it slides away, otherwise it springs back.
 function useFldSheetDrag(onClose) {
-  const ref = uRfl(null); const st = uRfl(null);
+  const ref = uRfl(null); const st = uRfl(null); const touched = uRfl(false);
   const [dy, setDy] = uSfl(0);
   const [leaving, setLeaving] = uSfl(false);
-  const down = (e) => { st.current = { y: e.clientY, t: Date.now() }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) { /* older browsers */ } };
+  const down = (e) => { st.current = { y: e.clientY, t: Date.now() }; touched.current = true; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) { /* older browsers */ } };
   const move = (e) => { if (st.current) setDy(Math.max(0, e.clientY - st.current.y)); };
   const up = (e) => {
     const s = st.current; st.current = null; if (!s) return;
     const d = Math.max(0, e.clientY - s.y);
     const r = FIELDLOGIC.dragRelease({ dy: d, ms: Date.now() - s.t, height: ref.current ? ref.current.offsetHeight : 600 });
-    if (r === 'close') { setLeaving(true); setTimeout(onClose, 220); } else setDy(0);
+    // a sheet that stays mounted (the ⋯ menu) must open normally next time
+    if (r === 'close') { setLeaving(true); setTimeout(() => { setLeaving(false); setDy(0); touched.current = false; onClose(); }, 220); } else setDy(0);
   };
   const style = leaving ? { transform: 'translate(-50%, 110%)', transition: 'transform .22s ease-in', animation: 'none' }
-    : dy ? { transform: 'translate(-50%, ' + dy + 'px)', transition: 'none', animation: 'none' } : undefined;
+    : dy ? { transform: 'translate(-50%, ' + dy + 'px)', transition: 'none', animation: 'none' }
+      // after a pull: spring back to place — never replay the entrance pop
+      : touched.current ? { animation: 'none', transform: 'translate(-50%, 0)', transition: 'transform .3s cubic-bezier(.34,1.3,.64,1)' } : undefined;
   return { ref, style, handle: { onPointerDown: down, onPointerMove: move, onPointerUp: up, onPointerCancel: () => { st.current = null; setDy(0); } } };
 }
 function FldGrab({ handle }) {

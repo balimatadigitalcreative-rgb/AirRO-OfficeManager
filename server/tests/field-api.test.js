@@ -237,3 +237,12 @@ describe('Plan 3D: the field view is the default for an account that may use it'
     } finally { global.localStorage = prev; }
   });
 });
+
+it('3D-1 final fix: after release, owner/GM are not forced into the phone view (they may still open it); field accounts are', () => {
+  const rel = { fieldUiDefault: 'new' };
+  expect(FA.prefState({ perms: { distribusiPengiriman: true }, rules: rel, prefs: {}, role: 'owner' }).ui).toBe('old');
+  expect(FA.prefState({ perms: { distribusiPengiriman: true }, rules: rel, prefs: {}, role: 'gm' }).ui).toBe('old');
+  expect(FA.prefState({ perms: { distribusiPengiriman: true }, rules: rel, prefs: { ui: 'new' }, role: 'gm' }).ui).toBe('new');
+  expect(FA.prefState({ perms: { distribusiPengiriman: true }, rules: rel, prefs: {}, role: 'finance' }).ui).toBe('new');
+  expect(FA.prefState({ perms: { distribusiPengiriman: true, distribusiDemoPenuh: true }, rules: {}, prefs: {}, role: 'owner' }).ui).toBe('new');   // the owner's own demo grant
+});

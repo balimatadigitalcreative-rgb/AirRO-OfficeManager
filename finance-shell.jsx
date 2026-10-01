@@ -339,7 +339,7 @@ function FApp() {
   // MODE LAPANGAN — which view the Pengiriman screen opens (old board or the new phone UI) and in which
   // mode; decided by one pure rule (FIELDAPI.prefState) from the caps, the owner's release switch and
   // this phone's preference. No demo cap and not released → the old board exactly as before.
-  const fieldPref = window.FIELDAPI ? window.FIELDAPI.prefState({ perms: p, rules: fieldRules, prefs: fieldPrefs }) : { eligible: false, ui: 'old', mode: 'latihan' };
+  const fieldPref = window.FIELDAPI ? window.FIELDAPI.prefState({ perms: p, rules: fieldRules, prefs: fieldPrefs, role: user && user.role }) : { eligible: false, ui: 'old', mode: 'latihan' };
   const setFieldPref = (next) => { const merged = Object.assign({}, fieldPrefs, next); setFieldPrefs(merged); if (window.FIELDAPI) window.FIELDAPI.savePrefs(merged); };
   uEh(() => {
     if (!user || !p.distribusiPengiriman || !window.API || !window.API.distribusi || !window.API.distribusi.fieldRules) { setFieldRules(null); return undefined; }
@@ -1753,12 +1753,47 @@ function FApp() {
   // MODE LAPANGAN — an account that may use the phone view lands in it FULL SCREEN: no app bar, no unit
   // banner (owner, 3D). "Kembali ke tampilan lama" (⋯ menu) returns to the old Pengiriman; the rules
   // screen opens inside the app and any other screen brings the phone view back.
+  // Overlays the whole app needs on every screen — also in the full-screen field view (3D-1 review).
+  const globalOverlays = (
+    <>
+      {toast && <FToast msg={toast} onDone={() => setToast(null)} />}
+      {newVer && (
+        <div className={`ver-banner ${newVer.stuck ? 'stuck' : ''}`} role="status" aria-live="polite">
+          <IconRefresh s={16} />
+          <span className="ver-msg">{newVer.stuck ? tr('ver.force') : tr('ver.available')}</span>
+          {/* Record which build we're reloading FOR, so if the reload doesn't take (cached bundle) the
+              next load detects it's stuck and switches to the force-reload message instead of looping. */}
+          <button className="ver-reload" onClick={() => { try { localStorage.setItem('airro_reloaded_for', newVer.version); } catch (e) {} location.reload(); }}>{tr('ver.reload')}</button>
+          <button className="ver-x" title={tr('ver.later')} aria-label={tr('ver.later')} onClick={() => setNewVer(null)}>×</button>
+        </div>
+      )}
+      {pwModal && <AUTH.ChangePassword onClose={dismissOverlay} onDone={() => { dismissOverlay(); setToast(tr('pw.changed')); }} />}
+      {sessionExpired && (
+        <div className="modal-scrim" style={{ zIndex: 200 }}>
+          <div className="modal-card" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-body" style={{ textAlign: 'center', padding: '10px 6px' }}>
+              <span className="sess-ic"><IconLock s={26} /></span>
+              <div style={{ fontSize: 18, fontWeight: 800, marginTop: 12 }}>{tr('sess.title')}</div>
+              <div style={{ fontSize: 13.5, color: 'var(--text-mut)', marginTop: 8, lineHeight: 1.5 }}>{tr('sess.body')}</div>
+            </div>
+            <div className="modal-foot" style={{ justifyContent: 'center' }}>
+              <button className="btn btn-primary" onClick={() => { setSessionExpired(false); logout(); }}>{tr('sess.login')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <PROOFMOUNT />
+    </>
+  );
   const fieldFull = !!(window.FIELD && p.distribusiPengiriman && fieldPref.eligible && fieldPref.ui === 'new' && screen !== 'dist-field-rules');
   if (fieldFull) return (
-    <window.FIELD.App user={user} perms={p} pref={fieldPref} today={FIN.TODAY}
+    <>
+    <window.FIELD.App user={user} perms={p} pref={fieldPref} today={FIN.TODAY} onLogout={logout}
       fleetList={fleet} fleetScope={user && user.fleetScope} refreshKey={distTick}
       onExit={() => { setFieldPref({ ui: 'old' }); go('dist-deliveries'); }} onPref={setFieldPref}
       onOpenRules={p.distribusiAturanLapangan ? () => go('dist-field-rules') : null} />
+    {globalOverlays}
+    </>
   );
   return (
     <div className="app">
@@ -2153,33 +2188,7 @@ function FApp() {
         <button className={`mnav ${drawer || !NAV.filter((n) => !n.hidden).slice(0, 4).some((n) => n.id === screen) ? 'on' : ''}`} onClick={openDrawer}><IconMenu s={22} /><span>{tr('nav.more')}</span></button>
       </nav>
 
-      {toast && <FToast msg={toast} onDone={() => setToast(null)} />}
-      {newVer && (
-        <div className={`ver-banner ${newVer.stuck ? 'stuck' : ''}`} role="status" aria-live="polite">
-          <IconRefresh s={16} />
-          <span className="ver-msg">{newVer.stuck ? tr('ver.force') : tr('ver.available')}</span>
-          {/* Record which build we're reloading FOR, so if the reload doesn't take (cached bundle) the
-              next load detects it's stuck and switches to the force-reload message instead of looping. */}
-          <button className="ver-reload" onClick={() => { try { localStorage.setItem('airro_reloaded_for', newVer.version); } catch (e) {} location.reload(); }}>{tr('ver.reload')}</button>
-          <button className="ver-x" title={tr('ver.later')} aria-label={tr('ver.later')} onClick={() => setNewVer(null)}>×</button>
-        </div>
-      )}
-      {pwModal && <AUTH.ChangePassword onClose={dismissOverlay} onDone={() => { dismissOverlay(); setToast(tr('pw.changed')); }} />}
-      {sessionExpired && (
-        <div className="modal-scrim" style={{ zIndex: 200 }}>
-          <div className="modal-card" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-body" style={{ textAlign: 'center', padding: '10px 6px' }}>
-              <span className="sess-ic"><IconLock s={26} /></span>
-              <div style={{ fontSize: 18, fontWeight: 800, marginTop: 12 }}>{tr('sess.title')}</div>
-              <div style={{ fontSize: 13.5, color: 'var(--text-mut)', marginTop: 8, lineHeight: 1.5 }}>{tr('sess.body')}</div>
-            </div>
-            <div className="modal-foot" style={{ justifyContent: 'center' }}>
-              <button className="btn btn-primary" onClick={() => { setSessionExpired(false); logout(); }}>{tr('sess.login')}</button>
-            </div>
-          </div>
-        </div>
-      )}
-      <PROOFMOUNT />
+      {globalOverlays}
       {editing && p.edit && (
         <EDIT.EntryModal entry={editing} incomeCats={cats.income} expenseCats={cats.expense} accounts={accounts} units={allowedUnits} onSave={saveEdit} onClose={dismissOverlay} />
       )}

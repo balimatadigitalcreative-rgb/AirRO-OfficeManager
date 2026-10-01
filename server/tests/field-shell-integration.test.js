@@ -9,7 +9,7 @@ const css = fs.readFileSync(path.join(root, 'finance.css'), 'utf8');
 
 it('parses', () => { expect(() => parse(shell, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow(); });
 it('an account that may use the field view gets it FULL SCREEN (no app bar, no unit banner); the rules screen stays in the app', () => {
-  expect(shell).toMatch(/const fieldPref = window\.FIELDAPI \? window\.FIELDAPI\.prefState\(\{ perms: p, rules: fieldRules, prefs: fieldPrefs \}\)/);
+  expect(shell).toMatch(/const fieldPref = window\.FIELDAPI \? window\.FIELDAPI\.prefState\(\{ perms: p, rules: fieldRules, prefs: fieldPrefs, role: user && user\.role \}\)/);
   expect(shell).toMatch(/const fieldFull = !!\(window\.FIELD && p\.distribusiPengiriman && fieldPref\.eligible && fieldPref\.ui === 'new' && screen !== 'dist-field-rules'\);/);
   const early = shell.indexOf('if (fieldFull) return (');
   expect(early).toBeGreaterThan(-1);
@@ -44,4 +44,14 @@ it('the field UI receives the user\'s caps (to show only the actions they may us
 it('Plan 3C: after release the board card no longer calls the field view a demo', () => {
   expect(shell).toMatch(/\{tr\(fieldPref\.released \? 'fld\.fieldView' : 'fld\.tryNew'\)\}/);
   expect(shell).toMatch(/\{tr\(fieldPref\.released \? 'fld\.fieldViewSub' : 'fld\.tryNewSub'\)\}/);
+});
+
+it('3D-1 final fix: full screen keeps the global overlays (session expired, new version, toast, proof viewer) and offers Keluar', () => {
+  expect(shell).toMatch(/const globalOverlays = \(/);
+  expect(shell).toMatch(/if \(fieldFull\) return \(\s*<>\s*<window\.FIELD\.App /);
+  expect(shell).toMatch(/onLogout=\{logout\}/);
+  expect(shell).toMatch(/\{globalOverlays\}\s*<\/>\s*\);/);
+  expect(shell).toMatch(/prefState\(\{ perms: p, rules: fieldRules, prefs: fieldPrefs, role: user && user\.role \}\)/);
+  const field = fs.readFileSync(path.join(__dirname, '..', '..', 'dist-field.jsx'), 'utf8');
+  expect(field).toMatch(/onLogout && <button type="button" className="mlap-menu-item" onClick=\{\(\) => \{ setMenu\(false\); onLogout\(\); \}\}>\{trFl\('fld\.logout'\)\}<\/button>/);
 });

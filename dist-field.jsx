@@ -9,7 +9,7 @@
 // 3C: all screens built (day, customers, manual inputs, koreksi).
 const FLD_SCREENS_READY = true;
 
-function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, onExit, onPref, onOpenRules }) {
+function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, onExit, onPref, onOpenRules, onLogout }) {
   const mode = pref.mode;
   const can = fldCan(perms);
   const scope = Array.isArray(fleetScope) ? fleetScope : null;
@@ -248,6 +248,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
             {(can.correct || can.void) && <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); setView({ name: 'koreksiSaya' }); }}>{trFl('fld.kSaya')}</button>}
             {onOpenRules && <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onOpenRules(); }}>{trFl('fld.rules')}</button>}
             <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onExit(); }}>{trFl('fld.backOld')}</button>
+            {onLogout && <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onLogout(); }}>{trFl('fld.logout')}</button>}
           </div>
         </>
       )}

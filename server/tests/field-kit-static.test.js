@@ -155,7 +155,7 @@ describe('Plan 3D gestures: sheets', () => {
     const f = kit.slice(kit.indexOf('function useFldSheetDrag('));
     expect(f).toMatch(/e\.currentTarget\.setPointerCapture\(e\.pointerId\)/);
     expect(f).toMatch(/FIELDLOGIC\.dragRelease\(\{ dy: d, ms: Date\.now\(\) - s\.t, height: ref\.current \? ref\.current\.offsetHeight : 600 \}\)/);
-    expect(f).toMatch(/if \(r === 'close'\) \{ setLeaving\(true\); setTimeout\(onClose, 220\); \} else setDy\(0\);/);
+    expect(f).toMatch(/if \(r === 'close'\) \{ setLeaving\(true\); setTimeout\(\(\) => \{ setLeaving\(false\); setDy\(0\); touched\.current = false; onClose\(\); \}, 220\); \} else setDy\(0\);/);   // reset for a sheet that stays mounted (3D-1 review)
     expect(css).toMatch(/\.mlap-grabzone \{[^}]*touch-action: none;/);
   });
   it('every sheet uses it', () => {
@@ -168,5 +168,15 @@ describe('Plan 3D gestures: sheets', () => {
       expect(src).toMatch(/ref=\{drag\.ref\} style=\{drag\.style\}/);
     });
     expect(shell).toMatch(/const menuDrag = useFldSheetDrag\(\(\) => setMenu\(false\)\);/);
+  });
+});
+
+describe('3D-1 final review fixes (sheets)', () => {
+  const f = () => kit.slice(kit.indexOf('function useFldSheetDrag('), kit.indexOf('function FldGrab('));
+  it('a pulled-closed sheet that stays mounted (the ⋯ menu) opens normally next time', () => {
+    expect(f()).toMatch(/setTimeout\(\(\) => \{ setLeaving\(false\); setDy\(0\); touched\.current = false; onClose\(\); \}, 220\)/);
+  });
+  it('a small pull springs back (no replay of the entrance pop)', () => {
+    expect(f()).toMatch(/touched\.current \? \{ animation: 'none', transform: 'translate\(-50%, 0\)', transition: 'transform \.3s cubic-bezier\(\.34,1\.3,\.64,1\)' \}/);
   });
 });
