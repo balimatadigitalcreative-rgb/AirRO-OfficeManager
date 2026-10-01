@@ -1750,6 +1750,16 @@ function FApp() {
     ? { t: (NAV.find((n) => n.id === screen) || {}).label || tr('dist.module'), s: tr('dist.module') }
     : { t: '', s: '' });
 
+  // MODE LAPANGAN — an account that may use the phone view lands in it FULL SCREEN: no app bar, no unit
+  // banner (owner, 3D). "Kembali ke tampilan lama" (⋯ menu) returns to the old Pengiriman; the rules
+  // screen opens inside the app and any other screen brings the phone view back.
+  const fieldFull = !!(window.FIELD && p.distribusiPengiriman && fieldPref.eligible && fieldPref.ui === 'new' && screen !== 'dist-field-rules');
+  if (fieldFull) return (
+    <window.FIELD.App user={user} perms={p} pref={fieldPref} today={FIN.TODAY}
+      fleetList={fleet} fleetScope={user && user.fleetScope} refreshKey={distTick}
+      onExit={() => { setFieldPref({ ui: 'old' }); go('dist-deliveries'); }} onPref={setFieldPref}
+      onOpenRules={p.distribusiAturanLapangan ? () => go('dist-field-rules') : null} />
+  );
   return (
     <div className="app">
       <aside className="sidebar">
@@ -1833,13 +1843,7 @@ function FApp() {
               onGoApprovals={p.distribusiApprove ? () => go('approvals', false) : null}
               onOpenLoss={p.distribusiBonAdjust ? () => go('dist-loss-report', false) : null} />
           )}
-          {screen === 'dist-deliveries' && p.distribusiPengiriman && fieldPref.ui === 'new' && window.FIELD && (
-            <window.FIELD.App user={user} perms={p} pref={fieldPref} today={FIN.TODAY}
-              fleetList={fleet} fleetScope={user && user.fleetScope} refreshKey={distTick}
-              onExit={() => setFieldPref({ ui: 'old' })} onPref={setFieldPref}
-              onOpenRules={p.distribusiAturanLapangan ? () => go('dist-field-rules') : null} />
-          )}
-          {screen === 'dist-deliveries' && p.distribusiPengiriman && !(fieldPref.ui === 'new' && window.FIELD) && (
+          {screen === 'dist-deliveries' && p.distribusiPengiriman && (
             <>
               {fieldPref.eligible && <div className="fld-try" role="region" aria-label={tr(fieldPref.released ? 'fld.fieldView' : 'fld.tryNew')}>
                 <span><b>{tr(fieldPref.released ? 'fld.fieldView' : 'fld.tryNew')}</b><br /><small>{tr(fieldPref.released ? 'fld.fieldViewSub' : 'fld.tryNewSub')}</small></span>

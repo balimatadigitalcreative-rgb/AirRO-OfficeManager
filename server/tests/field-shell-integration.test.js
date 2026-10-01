@@ -8,10 +8,14 @@ const users = fs.readFileSync(path.join(root, 'finance-users.jsx'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'finance.css'), 'utf8');
 
 it('parses', () => { expect(() => parse(shell, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow(); });
-it('the board screen switches on prefState', () => {
+it('an account that may use the field view gets it FULL SCREEN (no app bar, no unit banner); the rules screen stays in the app', () => {
   expect(shell).toMatch(/const fieldPref = window\.FIELDAPI \? window\.FIELDAPI\.prefState\(\{ perms: p, rules: fieldRules, prefs: fieldPrefs \}\)/);
-  expect(shell).toMatch(/screen === 'dist-deliveries' && p\.distribusiPengiriman && fieldPref\.ui === 'new' && window\.FIELD && \(/);
-  expect(shell).toMatch(/screen === 'dist-deliveries' && p\.distribusiPengiriman && !\(fieldPref\.ui === 'new' && window\.FIELD\) && \(/);
+  expect(shell).toMatch(/const fieldFull = !!\(window\.FIELD && p\.distribusiPengiriman && fieldPref\.eligible && fieldPref\.ui === 'new' && screen !== 'dist-field-rules'\);/);
+  const early = shell.indexOf('if (fieldFull) return (');
+  expect(early).toBeGreaterThan(-1);
+  expect(early).toBeLessThan(shell.indexOf('<div className="app">'));
+  expect(shell).toMatch(/onExit=\{\(\) => \{ setFieldPref\(\{ ui: 'old' \}\); go\('dist-deliveries'\); \}\}/);
+  expect(shell).not.toMatch(/screen === 'dist-deliveries' && p\.distribusiPengiriman && fieldPref\.ui === 'new' && window\.FIELD && \(/);
   expect(shell).toMatch(/\{fieldPref\.eligible && <div className="fld-try"/);
 });
 it('the old board keeps every prop it had', () => {

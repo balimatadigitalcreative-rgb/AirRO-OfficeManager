@@ -7,10 +7,15 @@
   --mlap-warn: #9A3412; --mlap-warn-soft: #FFF1E8; --mlap-warn-line: #F4C7A8; --mlap-bon: #7A4B00; --mlap-bon-soft: #FCF1D6;
   --mlap-ok: #1E6B40; --mlap-ok-soft: #E3F3EA; --mlap-neg: #9B2C22; --mlap-neg-soft: #FDE8E6;
   --mlap-glass: rgba(255,255,255,.66); --mlap-glass-line: rgba(255,255,255,.85); --mlap-grab: #B9C4CC;
-  position: relative; min-height: calc(100vh - 60px); max-width: 480px; margin: 0 auto; background: var(--mlap-bg); color: var(--mlap-ink);
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; padding: 0 0 120px; box-sizing: border-box;
+  position: fixed; inset: 0; z-index: 30; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch;
+  background: var(--mlap-bg); color: var(--mlap-ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; padding: 0 0 calc(130px + env(safe-area-inset-bottom)); box-sizing: border-box;
 }
 :root[data-theme="dark"] .mlap-root { --mlap-bg: #0C141A; --mlap-surface: #16222B; --mlap-ink: #E8EEF2; --mlap-sub: #9DB0BC; --mlap-line: #22313C; --mlap-accent: #5AA9E0; --mlap-accent-soft: #15324A; --mlap-glass: rgba(22,34,43,.72); --mlap-glass-line: rgba(255,255,255,.12); --mlap-warn: #F4A27A; --mlap-warn-soft: #3A2217; --mlap-warn-line: #6B3A22; --mlap-bon: #F2C46B; --mlap-bon-soft: #3A2E12; --mlap-ok: #7FD3A3; --mlap-ok-soft: #173326; --mlap-neg: #F19A8F; --mlap-neg-soft: #3A1B18; --mlap-teal-ink: #6ED3CC; --mlap-teal-soft: #123331; --mlap-grab: #4A5A66; }
+
+/* Wide screens: the phone layout stays a readable column in the middle of the full-screen view. */
+.mlap-root > .mlap-head, .mlap-root > .mlap-meta, .mlap-root > .mlap-body, .mlap-root > .mlap-screen { max-width: 560px; margin-left: auto; margin-right: auto; }
+body.mlap-on { background: #EEF2F6; }
 
 /* The glass dock is the navigation while the field UI is open: the app's phone bottom nav steps aside
    (it would paint over the dock; the topbar hamburger still opens the full menu). */

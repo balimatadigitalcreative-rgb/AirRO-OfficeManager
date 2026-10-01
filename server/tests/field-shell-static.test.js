@@ -155,3 +155,12 @@ it('Plan 3C: after a pin is saved the screen we return to has it (no stale "pin 
   expect(jsx).toMatch(/<FldAddStop api=\{api\} preset=\{view\.preset\} can=\{can\} onPin=\{\(c, keep\) => setView\(\{ name: 'pin', cust: c, back: keep \? Object\.assign\(\{\}, view, \{ preset: c \}\) : view \}\)\}/);
   expect(jsx).toMatch(/onDone=\{\(m, pt\) => \{ if \(view\.back\) \{ setView\(pt \? FIELDLOGIC\.afterPin\(view\.back, view\.cust\.id, pt\) : view\.back\);/);
 });
+
+describe('Plan 3D shell', () => {
+  it('full screen: the root covers the viewport and the phone status bar takes the screen colour', () => {
+    const css = read('dist-field.css');
+    expect(css).toMatch(/\.mlap-root \{[^}]*position: fixed; inset: 0;[^}]*overflow-y: auto;/);
+    expect(jsx).toMatch(/document\.querySelector\('meta\[name="theme-color"\]'\)/);
+    expect(jsx).toMatch(/meta\.setAttribute\('content', '#EEF2F6'\)/);
+  });
+});

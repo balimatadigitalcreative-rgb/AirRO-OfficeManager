@@ -46,6 +46,14 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   // The glass dock IS the navigation here: the app's own phone bottom nav steps aside while this is
   // open (the topbar menu still reaches every other screen).
   uEfl(() => { document.body.classList.add('mlap-on'); return () => { document.body.classList.remove('mlap-on'); }; }, []);
+  // Full screen: the phone's status bar takes the screen's colour while the field view is open.
+  uEfl(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) return undefined;
+    const before = meta.getAttribute('content');
+    meta.setAttribute('content', '#EEF2F6');
+    return () => { meta.setAttribute('content', before); };
+  }, []);
   // The armada list can arrive after the first render (empty cache): follow it.
   uEfl(() => { if (!fleets.includes(fleet)) setFleet(fleets[0] || ''); }, [fleets.join('|')]);
   // Open the adaptor of the chosen mode (practice copy is per user + armada + day).
