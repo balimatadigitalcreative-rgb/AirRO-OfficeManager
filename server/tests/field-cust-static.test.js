@@ -61,3 +61,14 @@ describe('Tambah stop', () => {
     expect(f).toMatch(/api\.addStop\(\{ customerId: pick\.id, qty \}\)/);
   });
 });
+
+describe('Pembayaran bon', () => {
+  it('oldest bons first, never more than the bon, photo required, one clientRef per visit, cash or transfer', () => {
+    const f = fn('FldPayBon');
+    expect(f).toMatch(/FIELDLOGIC\.openBons\(/);
+    expect(f).toMatch(/const pv = FIELDLOGIC\.payPreview\(\{ sisaBon: bon, pay \}\);/);
+    expect(f).toMatch(/disabled=\{busy \|\| !pv\.ok \|\| !photo\}/);
+    expect(f).toMatch(/clientRef: refRef\.current/);
+    expect(f).toMatch(/\['tunai', trFl\('fld\.m_tunai'\)\], \['transfer', trFl\('fld\.m_transfer'\)\]/);
+  });
+});

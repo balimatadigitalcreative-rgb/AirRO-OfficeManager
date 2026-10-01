@@ -263,3 +263,53 @@ function FldAddStop({ api, preset, onPin, onDone, onBack }) {
     </div>
   );
 }
+
+// PEMBAYARAN BON — collect a customer's bon (cash or transfer) with a proof photo. The open bons are
+// listed oldest first, as the payment settles them (view only — the server keeps the real balance).
+function FldPayBon({ api, cust: c, onDone, onBack }) {
+  const [detail, setDetail] = uSfl(null);
+  const [pay, setPay] = uSfl(null);
+  const [via, setVia] = uSfl('tunai');
+  const [photo, setPhoto] = uSfl(null);
+  const [busy, setBusy] = uSfl(false);
+  const [err, setErr] = uSfl('');
+  const refRef = uRfl(FIELDLOGIC.newRef());
+  uEfl(() => { let live = true; api.customerDetail(c.id).then((x) => { if (live) setDetail(x); }).catch(() => { if (live) setDetail({ transactions: [] }); }); return () => { live = false; }; }, [api, c.id]);
+  const bon = detail && detail.sisaBon != null ? detail.sisaBon : (c.sisaBon || 0);
+  const pv = FIELDLOGIC.payPreview({ sisaBon: bon, pay });
+  const open = detail ? FIELDLOGIC.openBons(detail.transactions || []) : [];
+  const save = () => {
+    setBusy(true); setErr('');
+    const body = { customerId: c.id, payAmount: pay, payMethod: via, clientRef: refRef.current, proofPhotoId: photo.id, proofTakenAt: photo.takenAt };
+    if (typeof photo.lat === 'number' && typeof photo.lng === 'number') { body.proofLat = photo.lat; body.proofLng = photo.lng; }
+    api.payBon(body).then(() => onDone(trFl('fld.paidDone', { name: c.name, v: FIELDLOGIC.fmtRp(pay) }))).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
+  };
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.catatBon')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
+      <div className="mlap-body">
+        <div className="mlap-card mlap-sec"><span className="sb">{trFl('fld.bonNow')}</span><b className="mlap-bigrp">{FIELDLOGIC.fmtRp(bon)}</b></div>
+        {open.length > 0 && (
+          <div className="mlap-card">
+            {open.map((b) => <div key={b.id} className="mlap-row"><span className="mlap-grow"><span className="nm">{b.txnDate}</span><span className="sb">{trFl('fld.nGalon', { n: b.qty })}{b.partial ? ' · ' + trFl('fld.partPaid') : ''}</span></span><b>{FIELDLOGIC.fmtRp(b.amount)}</b></div>)}
+            <div className="mlap-hint">{trFl('fld.oldestFirst')}</div>
+          </div>
+        )}
+        <div className="mlap-card">
+          <FldMoney label={trFl('fld.payAmount')} value={pay} onChange={setPay} />
+          <div className="mlap-chips mlap-pad">{[[bon, trFl('fld.payAll')], [50000, '50.000'], [100000, '100.000']].filter(([v]) => v > 0 && v <= bon).map(([v, l]) => <button key={l} type="button" className={'mlap-chip-b' + (pay === v ? ' on' : '')} aria-pressed={pay === v} onClick={() => setPay(v)}>{l}</button>)}</div>
+        </div>
+        <FldSeg label={trFl('fld.payVia')} value={via} onChange={setVia} options={[['tunai', trFl('fld.m_tunai')], ['transfer', trFl('fld.m_transfer')]]} />
+        <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.required')}</div>
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintPay" />
+        <div className="mlap-card mlap-sec">
+          <div className="mlap-sumrow total"><span>{trFl('fld.bonAfterPay')}</span><b>{FIELDLOGIC.fmtRp(pv.rest)}</b></div>
+          {pv.over > 0 ? <div className="mlap-warnline">{trFl('fld.payOver', { v: FIELDLOGIC.fmtRp(pv.over) })}</div> : null}
+        </div>
+        {err && <div className="mlap-err" role="alert">{err}</div>}
+        {!photo ? <div className="mlap-hint">{trFl('fld.needPhoto')}</div> : null}
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !pv.ok || !photo} onClick={save}>{trFl('fld.payCta', { v: FIELDLOGIC.fmtRp(pay || 0) })}</button>
+      </div>
+    </div>
+  );
+}

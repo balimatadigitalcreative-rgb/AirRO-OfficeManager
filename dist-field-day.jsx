@@ -195,6 +195,9 @@ function FldStopSheet({ api, stop: s, onClose, onSale, onChanged }) {
   );
 }
 
+// A manual sale from Catat: no stop to mark — the same screen, `id: null`.
+const fldSaleStopFromCust = (c) => ({ id: null, customerId: c.id, customerName: c.name, customerCode: c.code || '', masterPrice: c.masterPrice || 0, sisaBon: c.sisaBon || 0, gallonsHeld: c.gallonsHeld, planQty: 1 });
+
 // TRANSAKSI — gallons out/back, Lunas/Bon/Transfer, what the customer pays now and what their bon
 // becomes, a proof photo (always required here), then "save & mark delivered". The sale is created
 // ONCE: if marking fails (no signal, or the server asks for a position), only the marking is retried —
@@ -210,16 +213,17 @@ function FldSale({ api, stop: s, pending, onDone, onBack }) {
   const [err, setErr] = uSfl('');
   const [needReason, setNeedReason] = uSfl(false);
   const [noLoc, setNoLoc] = uSfl('');
-  const [txnId, setTxnId] = uSfl(() => pending.get(s.id));
-  const keep = (id) => { setTxnId(id); pending.set(s.id, id); };
+  const [txnId, setTxnId] = uSfl(() => (s.id ? pending.get(s.id) : null));
+  const refRef = uRfl(FIELDLOGIC.newRef());   // one per visit: a retry after a lost response returns the saved sale
+  const keep = (id) => { setTxnId(id); if (s.id) pending.set(s.id, id); };
   const pv = FIELDLOGIC.salePreview({ qty, price: s.masterPrice, method, sisaBon: s.sisaBon || 0 });
   const why = txnId ? '' : FIELDLOGIC.canSaveSale({ qty, photo });
   const save = () => {
     setBusy(true); setErr('');
-    const body = FIELDLOGIC.saleBody({ customerId: s.customerId, qty, gallonIn: back, method, photo });
+    const body = FIELDLOGIC.saleBody({ customerId: s.customerId, qty, gallonIn: back, method, photo, clientRef: refRef.current });
     FIELDLOGIC.recordSale(api, { stopId: s.id, body, txnId, noLocationReason: needReason ? noLoc.trim() : '' })
       .then((r) => {
-        if (r.done) { pending.clear(s.id); onDone(trFl('fld.saleDone', { name: s.customerName })); return; }
+        if (r.done) { if (s.id) pending.clear(s.id); onDone(trFl('fld.saleDone', { name: s.customerName })); return; }
         keep(r.txnId); setNeedReason(true);
       })
       .catch((e) => { if (e && e.txnId) keep(e.txnId); setErr(fldErrMsg(e) || trFl('fld.loadErr')); })

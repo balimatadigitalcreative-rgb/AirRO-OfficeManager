@@ -49,10 +49,10 @@ describe('Transaksi', () => {
     expect(f()).toMatch(/<FldPhoto api=\{api\} value=\{photo\} onChange=\{setPhoto\}/);
   });
   it('a saved sale is never created twice — only the marking is retried (also after a network error)', () => {
-    expect(f()).toMatch(/const \[txnId, setTxnId\] = uSfl\(\(\) => pending\.get\(s\.id\)\);/);   // a saved sale survives leaving the screen
+    expect(f()).toMatch(/const \[txnId, setTxnId\] = uSfl\(\(\) => \(s\.id \? pending\.get\(s\.id\) : null\)\);/);   // a saved sale survives leaving the screen
     expect(f()).toMatch(/FIELDLOGIC\.recordSale\(api, \{ stopId: s\.id, body, txnId,/);
     expect(f()).toMatch(/if \(e && e\.txnId\) keep\(e\.txnId\);/);
-    expect(f()).toMatch(/const keep = \(id\) => \{ setTxnId\(id\); pending\.set\(s\.id, id\); \};/);
+    expect(f()).toMatch(/const keep = \(id\) => \{ setTxnId\(id\); if \(s\.id\) pending\.set\(s\.id, id\); \};/);
     expect(f()).toMatch(/pending\.clear\(s\.id\)/);
     expect(f()).toMatch(/<fieldset className="mlap-fs" disabled=\{!!txnId\}>/);   // inputs locked once saved
   });
@@ -127,5 +127,15 @@ describe('final review fixes (screens)', () => {
   });
   it('the Leaflet map never paints over the sheets, menu or dock', () => {
     expect(read('dist-field.css')).toMatch(/\.mlap-map \{[^}]*isolation: isolate;/);
+  });
+});
+
+describe('Plan 3B: sale screen', () => {
+  it('every visit carries one clientRef (a retry after a lost response is never a second sale); a manual sale has no stop', () => {
+    const f = fn('FldSale');
+    expect(f).toMatch(/const refRef = uRfl\(FIELDLOGIC\.newRef\(\)\);/);
+    expect(f).toMatch(/clientRef: refRef\.current/);
+    expect(f).toMatch(/s\.id \? pending\.get\(s\.id\) : null/);
+    expect(day).toMatch(/const fldSaleStopFromCust = \(c\) => \(\{ id: null, customerId: c\.id,/);
   });
 });
