@@ -22,6 +22,19 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const [view, setView] = uSfl(null);   // { name: 'stop'|'sale'|'run', stop? }
   const [menu, setMenu] = uSfl(false);
   const menuDrag = useFldSheetDrag(() => setMenu(false));
+  // Swipe between tabs (owner, 3D) — touch only; never from a map, an input, a sideways scroller or a sheet.
+  const TAB_ORDER = ['kirim', 'peta', 'pelanggan', 'setoran'];
+  const swipeRef = uRfl(null);
+  const swipeDown = (e) => {
+    if (e.pointerType === 'mouse') return;
+    if (e.target.closest('.mlap-map, input, textarea, select, .mlap-hscroll, .mlap-sheet, .leaflet-container')) return;
+    swipeRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
+  };
+  const swipeUp = (e) => {
+    const s = swipeRef.current; swipeRef.current = null; if (!s) return;
+    const next = FIELDLOGIC.swipeTab({ dx: e.clientX - s.x, dy: e.clientY - s.y, ms: Date.now() - s.t, tab, order: TAB_ORDER });
+    if (next) { setTab(next); setView(null); }
+  };
   const [catat, setCatat] = uSfl(false);
   const [ask, setAsk] = uSfl(null);
   const [toast, setToast] = uSfl('');
@@ -192,7 +205,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
               <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={() => setMenu(true)}><FldSvg n="dots" s={19} /></button>
             </div>
           </div>
-          <div className="mlap-body">
+          <div className="mlap-body mlap-swipe" onPointerDown={swipeDown} onPointerUp={swipeUp} onPointerCancel={() => { swipeRef.current = null; }}>
             {api && mode === 'latihan' && (api.persisted === false || persistOk === false) && <div className="mlap-err" role="status">{trFl('fld.noStore')}</div>}
             {body}
           </div>

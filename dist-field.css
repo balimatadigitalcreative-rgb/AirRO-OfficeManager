@@ -264,6 +264,7 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-grabzone { display: flex; justify-content: center; padding: 7px 0 10px; margin: -8px -16px 0; touch-action: none; cursor: grab; }
 .mlap-grabzone .mlap-grab { margin: 0; }
 .mlap-sheet { transition: transform .3s cubic-bezier(.34,1.3,.64,1); }
+.mlap-swipe { touch-action: pan-y; }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

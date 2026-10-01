@@ -349,5 +349,15 @@
     return dy >= 30 && dy / ms > 0.5 ? 'close' : 'stay';
   }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease };
+  // TABS (3D, owner): a clear sideways swipe (≥ 60 px, 1.5× more sideways than up/down, under 700 ms)
+  // moves one tab in the dock order; nothing past the first or last tab.
+  function swipeTab(o) {
+    var ax = Math.abs(num(o.dx)); var ay = Math.abs(num(o.dy));
+    if (ax < 60 || ax < ay * 1.5 || num(o.ms) > 700) return null;
+    var order = o.order || []; var i = order.indexOf(o.tab); if (i < 0) return null;
+    var j = num(o.dx) < 0 ? i + 1 : i - 1;
+    return j >= 0 && j < order.length ? order[j] : null;
+  }
+
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, swipeTab: swipeTab };
 });

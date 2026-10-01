@@ -177,3 +177,11 @@ describe('Plan 3D header', () => {
     expect(jsx).toMatch(/<div className="mlap-dockfade" aria-hidden="true" \/>/);
   });
 });
+
+it('Plan 3D: swipe between tabs on the tab body only — never from a map, an input, a sideways scroller or a sheet', () => {
+  expect(jsx).toMatch(/const TAB_ORDER = \['kirim', 'peta', 'pelanggan', 'setoran'\];/);
+  expect(jsx).toMatch(/e\.target\.closest\('\.mlap-map, input, textarea, select, \.mlap-hscroll, \.mlap-sheet, \.leaflet-container'\)/);
+  expect(jsx).toMatch(/FIELDLOGIC\.swipeTab\(\{ dx: e\.clientX - s\.x, dy: e\.clientY - s\.y, ms: Date\.now\(\) - s\.t, tab, order: TAB_ORDER \}\)/);
+  expect(jsx).toMatch(/<div className="mlap-body mlap-swipe" onPointerDown=\{swipeDown\} onPointerUp=\{swipeUp\} onPointerCancel=\{\(\) => \{ swipeRef\.current = null; \}\}>/);
+  expect(read('dist-field.css')).toMatch(/\.mlap-swipe \{ touch-action: pan-y; \}/);
+});

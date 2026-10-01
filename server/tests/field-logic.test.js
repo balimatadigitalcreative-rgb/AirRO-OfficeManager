@@ -336,3 +336,14 @@ it('Plan 3D: a sheet closes when pulled far enough or flicked; a small pull spri
   expect(L.dragRelease({ dy: 50, ms: 80, height: 600 })).toBe('close');              // a flick (>0.5 px/ms)
   expect(L.dragRelease({ dy: 20, ms: 20, height: 600 })).toBe('stay');               // a tap-sized move is never a flick
 });
+
+it('Plan 3D: a clear sideways swipe moves one tab; scrolling, slow drags and the ends do nothing', () => {
+  const order = ['kirim', 'peta', 'pelanggan', 'setoran'];
+  expect(L.swipeTab({ dx: -90, dy: 10, ms: 250, tab: 'kirim', order })).toBe('peta');
+  expect(L.swipeTab({ dx: 90, dy: -12, ms: 250, tab: 'peta', order })).toBe('kirim');
+  expect(L.swipeTab({ dx: 90, dy: 5, ms: 250, tab: 'kirim', order })).toBeNull();          // already first
+  expect(L.swipeTab({ dx: -90, dy: 5, ms: 250, tab: 'setoran', order })).toBeNull();       // already last
+  expect(L.swipeTab({ dx: -40, dy: 0, ms: 200, tab: 'kirim', order })).toBeNull();         // too short
+  expect(L.swipeTab({ dx: -90, dy: 80, ms: 250, tab: 'kirim', order })).toBeNull();        // mostly a scroll
+  expect(L.swipeTab({ dx: -90, dy: 0, ms: 900, tab: 'kirim', order })).toBeNull();         // a slow drag, not a swipe
+});
