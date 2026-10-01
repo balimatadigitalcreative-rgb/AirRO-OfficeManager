@@ -20,11 +20,7 @@ body.mlap-on { background: #EEF2F6; }
 /* The glass dock is the navigation while the field UI is open: the app's phone bottom nav steps aside
    (it would paint over the dock; the topbar hamburger still opens the full menu). */
 body.mlap-on .mobile-nav { display: none !important; }
-.mlap-ribbon { position: sticky; top: 0; z-index: 30; background: #C2410C; color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-align: center; padding: 6px 12px; }
-.mlap-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 6px; }
-.mlap-head h1 { margin: 0; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.02em; flex: 1; color: var(--mlap-ink); }
 .mlap-eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .03em; color: var(--mlap-sub); text-transform: uppercase; padding: 0 16px; }
-.mlap-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; text-transform: none; letter-spacing: 0; }
 .mlap-round { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--mlap-ink); cursor: pointer; border: 1px solid var(--mlap-glass-line); background: var(--mlap-glass); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: 0 6px 20px rgba(6,51,79,.14); }
 .mlap-chip { height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 15px; background: var(--mlap-surface); font-size: 13px; font-weight: 600; border: 0; color: var(--mlap-ink); }
 .mlap-chip.latihan { background: var(--mlap-warn-soft); color: var(--mlap-warn); }
@@ -88,11 +84,6 @@ body.mlap-on .mobile-nav { display: none !important; }
 
 /* ── KIT (Plan 3A) ── */
 .mlap-screen { display: flex; flex-direction: column; }
-.mlap-top { display: flex; align-items: center; gap: 10px; padding: 12px 16px 4px; }
-.mlap-top-t { flex: 1; min-width: 0; }
-.mlap-top h1 { margin: 0; font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -.02em; }
-.mlap-top-sub { font-size: 13px; color: var(--mlap-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mlap-chev { font-size: 28px; line-height: 1; margin-top: -3px; }
 .mlap-grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mlap-grow .sb, .mlap-notice .sb { font-size: 12px; color: var(--mlap-sub); font-weight: 400; }
 .mlap-stepper { min-height: 64px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--mlap-line); }
@@ -218,6 +209,28 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-chip select { min-height: 44px; font-size: 16px; }
 .mlap-chip:has(select) { height: auto; padding: 0 6px; }
 .mlap-range { min-height: 44px; }
+/* ── CHROME (3D) — mockup header, task-screen top, fixed CTA, fades ── */
+.mlap-head { display: flex; align-items: flex-start; gap: 8px; padding: calc(12px + env(safe-area-inset-top)) 16px 6px; }
+.mlap-head-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mlap-head h1 { margin: 0; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.02em; color: var(--mlap-ink); }
+.mlap-head-act { display: flex; gap: 8px; padding-top: 2px; }
+.mlap-head .mlap-eyebrow { padding: 0; }
+.mlap-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mlap-head .mlap-chip { height: 20px; padding: 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .03em; border-radius: 10px; }
+.mlap-menu-fleet { gap: 8px; }
+.mlap-menu-fleet .mlap-select { max-width: 50%; }
+.mlap-dockfade { position: fixed; left: 0; right: 0; bottom: 0; height: calc(130px + env(safe-area-inset-bottom)); z-index: 35; pointer-events: none; background: linear-gradient(to bottom, rgba(238,242,246,0), rgba(238,242,246,.92) 60%); }
+/* task screens */
+.mlap-top { position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: 70px minmax(0, 1fr) 70px; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 16px 26px; margin-bottom: -18px; background: linear-gradient(to top, rgba(238,242,246,0), rgba(238,242,246,.94) 55%); }
+.mlap-top-t { min-width: 0; text-align: center; }
+.mlap-top h1 { margin: 0; font-size: 16px; line-height: 20px; font-weight: 600; letter-spacing: 0; }
+.mlap-top-sub { font-size: 12px; color: var(--mlap-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mlap-pill { height: 44px; padding: 0 16px; border-radius: 22px; display: inline-flex; align-items: center; justify-self: start; font: inherit; font-size: 15px; font-weight: 500; color: var(--mlap-ink); cursor: pointer;
+  background: rgba(255,255,255,.62); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); border: 1px solid rgba(255,255,255,.85); box-shadow: 0 6px 20px rgba(6,51,79,.12), inset 0 1px 0 rgba(255,255,255,.9); }
+.mlap-ctafade { position: fixed; left: 0; right: 0; bottom: 0; height: calc(120px + env(safe-area-inset-bottom)); z-index: 36; pointer-events: none; background: linear-gradient(to bottom, rgba(238,242,246,0), rgba(238,242,246,.94) 45%); }
+.mlap-ctabar { position: fixed; left: 50%; transform: translateX(-50%); width: min(528px, calc(100vw - 32px)); bottom: calc(28px + env(safe-area-inset-bottom)); z-index: 37; display: flex; flex-direction: column; gap: 6px; }
+.mlap-ctabar .mlap-btn { min-height: 50px; border-radius: 15px; width: 100%; }
+.mlap-ctahint { text-align: center; font-size: 13px; font-weight: 600; color: var(--mlap-warn); }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }

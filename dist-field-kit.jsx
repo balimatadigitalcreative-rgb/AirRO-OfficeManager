@@ -52,15 +52,35 @@ function FldLinkBtn({ href, className, newTab, children }) {
   return <a className={className} href={href} target={newTab ? '_blank' : undefined} rel={newTab ? 'noopener noreferrer' : undefined}>{children}</a>;
 }
 
-function FldTop({ title, sub, onBack }) {
+// Task screens (mockup): a glass "Batal" pill on the left — or a round back chevron for screens you only
+// read (kind 'back') — the title centred, and a soft fade so the content scrolls under it.
+function FldTop({ title, sub, onBack, kind }) {
   return (
     <div className="mlap-top">
-      {onBack && <button type="button" className="mlap-round" aria-label={trFl('fld.back')} onClick={onBack}><span aria-hidden="true" className="mlap-chev">‹</span></button>}
+      {onBack ? (kind === 'back'
+        ? <button type="button" className="mlap-round" aria-label={trFl('fld.back')} onClick={onBack}><FldSvg n="back" s={18} sw={2.4} /></button>
+        : <button type="button" className="mlap-pill" onClick={onBack}>{trFl('fld.cancel')}</button>) : <span aria-hidden="true" />}
       <div className="mlap-top-t"><h1>{title}</h1>{sub && <div className="mlap-top-sub">{sub}</div>}</div>
+      <span aria-hidden="true" />
     </div>
   );
 }
 
+// The fixed bottom action of a task screen (mockup): its hint above it, a fade under the content.
+function FldCtaBar({ hint, children }) {
+  return (
+    <>
+      <div className="mlap-ctafade" aria-hidden="true" />
+      <div className="mlap-ctabar">
+        {hint ? <span className="mlap-ctahint">{hint}</span> : null}
+        {children}
+      </div>
+    </>
+  );
+}
+
+// "Selasa, 30 Sep" in the screen's language (the eyebrow upper-cases it).
+const fldDayLabel = (iso) => { try { return new Date(iso + 'T00:00').toLocaleDateString(trFl('fld.locale'), { weekday: 'long', day: 'numeric', month: 'short' }); } catch (e) { return iso; } };
 // The number can be cleared and retyped (a typed "4" never becomes "14"); it clamps when the field
 // is left. The −/+ buttons always step from the last valid value.
 function FldStepper({ label, hint, value, onChange, min, max }) {

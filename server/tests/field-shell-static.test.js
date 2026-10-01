@@ -27,12 +27,12 @@ it('top-level names in every field file are unique across the whole bundle (one 
     });
   });
 });
-it('latihan ribbon + confirmed mode switch + reset', () => {
-  expect(jsx).toMatch(/\{mode === 'latihan' && <div className="mlap-ribbon"[^>]*>\{trFl\('fld\.bannerLatihan'\)\}/);
+it('latihan is a chip in the header (always shown in practice) + confirmed mode switch + reset', () => {
+  expect(jsx).not.toMatch(/mlap-ribbon/);
+  expect(jsx).toMatch(/\{mode === 'latihan' \? <span className="mlap-chip latihan" role="status">\{trFl\('fld\.modeLatihan'\)\}<\/span> : null\}/);
   expect(jsx).toMatch(/askSwitch\(/);
   expect(jsx).toMatch(/trFl\('fld\.switchToAsliB'\)/);
   expect(jsx).toMatch(/trFl\('fld\.resetLatihanB'\)/);
-  expect(jsx).toMatch(/openLatihan\(\{ key, real, storage: storageRef\.current, today, onPersist: \(ok\) => \{ if \(live\) setPersistOk\(ok\); \} \}\)/);   // yesterday's practice copy is never reused
 });
 it('the old view stays reachable from the menu, also after release (spec 5: masa transisi)', () => {
   expect(jsx).toMatch(/onClick=\{\(\) => \{ setMenu\(false\); onExit\(\); \}\}>\{trFl\('fld\.backOld'\)\}/);
@@ -162,5 +162,18 @@ describe('Plan 3D shell', () => {
     expect(css).toMatch(/\.mlap-root \{[^}]*position: fixed; inset: 0;[^}]*overflow-y: auto;/);
     expect(jsx).toMatch(/document\.querySelector\('meta\[name="theme-color"\]'\)/);
     expect(jsx).toMatch(/meta\.setAttribute\('content', '#EEF2F6'\)/);
+  });
+});
+
+describe('Plan 3D header', () => {
+  it('eyebrow (day · armada) above the title; glass round buttons top-right (Rute on Pengiriman, ⋯ menu)', () => {
+    expect(jsx).toMatch(/<span>\{fldDayLabel\(today\)\}\{fleet \? ' · ' \+ fleet : ''\}<\/span>/);
+    expect(jsx.indexOf('{fldDayLabel(today)}')).toBeLessThan(jsx.indexOf('<h1>{trFl(TAB_LABEL[tab])}</h1>'));
+    expect(jsx).toMatch(/tab === 'kirim' \? <button type="button" className="mlap-round" aria-label=\{trFl\('fld\.seeRoute'\)\} onClick=\{\(\) => setTab\('peta'\)\}><FldSvg n="route"/);
+    expect(jsx).toMatch(/<FldSvg n="dots" s=\{19\} \/>/);
+  });
+  it('the armada picker moved into the ⋯ sheet; a soft fade sits under the dock', () => {
+    expect(jsx).toMatch(/fleets\.length > 1 && \(\s*<label className="mlap-menu-item mlap-menu-fleet">/);
+    expect(jsx).toMatch(/<div className="mlap-dockfade" aria-hidden="true" \/>/);
   });
 });

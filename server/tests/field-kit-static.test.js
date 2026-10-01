@@ -78,3 +78,22 @@ describe('Plan 3C kit', () => {
     expect(css.slice(0, 400)).not.toMatch(/Tokens redefined for dark mode/);
   });
 });
+
+describe('Plan 3D kit', () => {
+  it('task screens: glass "Batal" pill (or round back chevron), centred title, the top fade is CSS', () => {
+    const f = kit.slice(kit.indexOf('function FldTop('), kit.indexOf('function FldTop(') + 900);
+    expect(f).toMatch(/kind === 'back'\s*\?\s*<button type="button" className="mlap-round" aria-label=\{trFl\('fld\.back'\)\} onClick=\{onBack\}><FldSvg n="back"/);
+    expect(f).toMatch(/<button type="button" className="mlap-pill" onClick=\{onBack\}>\{trFl\('fld\.cancel'\)\}<\/button>/);
+    expect(css).toMatch(/\.mlap-top \{[^}]*position: sticky;[^}]*linear-gradient\(to top, rgba\(238,242,246,0\), rgba\(238,242,246,\.94\) 55%\)/);
+  });
+  it('a fixed bottom action bar with its fade and hint (screens adopt it in 3D-2)', () => {
+    const f = kit.slice(kit.indexOf('function FldCtaBar('));
+    expect(f).toMatch(/<div className="mlap-ctabar">/);
+    expect(f).toMatch(/hint \? <span className="mlap-ctahint">\{hint\}<\/span> : null/);
+    expect(css).toMatch(/\.mlap-ctabar \{[^}]*position: fixed;/);
+  });
+  it('the day label follows the screen language', () => {
+    expect(kit).toMatch(/const fldDayLabel = \(iso\) =>/);
+    expect(kit).toMatch(/toLocaleDateString\(trFl\('fld\.locale'\), \{ weekday: 'long', day: 'numeric', month: 'short' \}\)/);
+  });
+});

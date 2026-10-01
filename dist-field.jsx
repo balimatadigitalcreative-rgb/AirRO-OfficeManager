@@ -159,7 +159,6 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
 
   return (
     <div className="mlap-root">
-      {mode === 'latihan' && <div className="mlap-ribbon" role="status">{trFl('fld.bannerLatihan')}</div>}
       {ready && full && view.name === 'sale' && <FldSale api={api} stop={view.stop} pending={pending} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'run' && <FldOpenRun api={api} ctx={ctx} tick={tick} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'pick' && (
@@ -179,24 +178,23 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       {!full && (
         <>
           <div className="mlap-head">
-            <h1>{trFl(TAB_LABEL[tab])}</h1>
-            <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={() => setMenu(true)}>{FldIco('IconDots', 20)}</button>
-          </div>
-          <div className="mlap-eyebrow mlap-meta">
-            <span>{today}</span>
-            <span className={'mlap-chip ' + mode}>{mode === 'latihan' ? trFl('fld.modeLatihan') : trFl('fld.modeAsli')}</span>
-            {fleets.length > 1 ? (
-              <span className="mlap-chip">
-                <select value={fleet} onChange={(e) => setFleet(e.target.value)} aria-label={trFl('fld.pickFleet')}>
-                  {fleets.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
+            <div className="mlap-head-t">
+              <span className="mlap-eyebrow mlap-meta">
+                <span>{fldDayLabel(today)}{fleet ? ' · ' + fleet : ''}</span>
+                {mode === 'latihan' ? <span className="mlap-chip latihan" role="status">{trFl('fld.modeLatihan')}</span> : null}
               </span>
-            ) : <span className="mlap-chip">{fleet || '—'}</span>}
+              <h1>{trFl(TAB_LABEL[tab])}</h1>
+            </div>
+            <div className="mlap-head-act">
+              {tab === 'kirim' ? <button type="button" className="mlap-round" aria-label={trFl('fld.seeRoute')} onClick={() => setTab('peta')}><FldSvg n="route" s={19} /></button> : null}
+              <button type="button" className="mlap-round" aria-label={trFl('fld.menu')} onClick={() => setMenu(true)}><FldSvg n="dots" s={19} /></button>
+            </div>
           </div>
           <div className="mlap-body">
             {api && mode === 'latihan' && (api.persisted === false || persistOk === false) && <div className="mlap-err" role="status">{trFl('fld.noStore')}</div>}
             {body}
           </div>
+          <div className="mlap-dockfade" aria-hidden="true" />
           <nav className="mlap-dock" aria-label={trFl('fld.nav')}>
             {TABS.map((t, i) => (t ? (
               <button key={t[0]} type="button" className={'mlap-tab' + (tab === t[0] ? ' on' : '')} aria-current={tab === t[0] ? 'page' : undefined} onClick={() => { setTab(t[0]); setView(null); }}>
@@ -227,6 +225,14 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
           <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={trFl('fld.menu')}>
             <div className="mlap-grab" />
             <h2>{trFl('fld.menu')}</h2>
+            {fleets.length > 1 && (
+              <label className="mlap-menu-item mlap-menu-fleet">
+                <span className="mlap-grow">{trFl('fld.pickFleet')}</span>
+                <select className="mlap-select" value={fleet} onChange={(e) => { setFleet(e.target.value); setMenu(false); }} aria-label={trFl('fld.pickFleet')}>
+                  {fleets.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </label>
+            )}
             {pref.canAsli && pref.canLatihan && (mode === 'latihan'
               ? <button type="button" className="mlap-menu-item" onClick={() => askSwitch('asli')}>{trFl('fld.useAsli')}</button>
               : <button type="button" className="mlap-menu-item" onClick={() => askSwitch('latihan')}>{trFl('fld.useLatihan')}</button>)}
