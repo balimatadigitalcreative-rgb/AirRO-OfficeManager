@@ -398,3 +398,49 @@ function FldDamage({ api, cust: c, rules, onDone, onBack }) {
     </div>
   );
 }
+
+const FLD_EXP_CATS = [['bensin', 'fld.c_bensin'], ['parkir', 'fld.c_parkir'], ['servis', 'fld.c_servis'], ['makan', 'fld.c_makan'], ['lainnya', 'fld.c_lainnya']];
+// PENGELUARAN — paid from the day's deposit, always in cash (owner rule: never "uang pribadi"), with a
+// photo of the receipt. Fuel asks litres + odometer (kept in the note).
+function FldExpense({ api, onDone, onBack }) {
+  const [cat, setCat] = uSfl('');
+  const [amount, setAmount] = uSfl(null);
+  const [liters, setLiters] = uSfl('');
+  const [odo, setOdo] = uSfl('');
+  const [note, setNote] = uSfl('');
+  const [photo, setPhoto] = uSfl(null);
+  const [today, setToday] = uSfl(null);
+  const [busy, setBusy] = uSfl(false);
+  const [err, setErr] = uSfl('');
+  uEfl(() => { let live = true; api.daySummary().then((s) => { if (live) setToday(s && s.pengeluaran != null ? s.pengeluaran : null); }).catch(() => {}); return () => { live = false; }; }, [api]);
+  const save = () => {
+    setBusy(true); setErr('');
+    api.addExpense(FIELDLOGIC.expenseBody({ category: cat, amount, liters, odometer: odo, note, photo }))
+      .then(() => onDone(trFl('fld.expDone', { v: FIELDLOGIC.fmtRp(amount) })))
+      .catch((e) => setErr(fldErrMsg(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.catatExp')} sub={today != null ? trFl('fld.expToday', { v: FIELDLOGIC.fmtRp(today) }) : ''} onBack={onBack} />
+      <div className="mlap-body">
+        <div className="mlap-chips">{FLD_EXP_CATS.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (cat === k ? ' on' : '')} aria-pressed={cat === k} onClick={() => setCat(k)}>{trFl(key)}</button>)}</div>
+        <div className="mlap-card">
+          <FldMoney label={trFl('fld.expAmount')} value={amount} onChange={setAmount} />
+          {cat === 'bensin' && (
+            <>
+              <label className="mlap-field"><span className="lb">{trFl('fld.liters')}</span><input className="mlap-input" inputMode="decimal" value={liters} onChange={(e) => setLiters(e.target.value.replace(/[^0-9.,]/g, '').slice(0, 6))} aria-label={trFl('fld.liters')} /></label>
+              <label className="mlap-field"><span className="lb">{trFl('fld.odometer')}</span><input className="mlap-input" inputMode="numeric" value={odo} onChange={(e) => setOdo(e.target.value.replace(/[^0-9]/g, '').slice(0, 7))} aria-label={trFl('fld.odometer')} /></label>
+            </>
+          )}
+        </div>
+        <FldNotice tone="info" title={trFl('fld.expFromDeposit')} sub={trFl('fld.expFromDepositB')} />
+        <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder={trFl('fld.noteOpt')} aria-label={trFl('fld.noteOpt')} />
+        <div className="mlap-eyebrow">{trFl('fld.receipt')} · {trFl('fld.required')}</div>
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.receiptHint" />
+        {err && <div className="mlap-err" role="alert">{err}</div>}
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !cat || !(amount > 0) || !photo} onClick={save}>{trFl('fld.expCta')}</button>
+      </div>
+    </div>
+  );
+}

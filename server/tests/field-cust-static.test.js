@@ -90,3 +90,14 @@ describe('Penyesuaian + Ganti rugi', () => {
     expect(f).toContain("'fld.dmgNoApproval'");
   });
 });
+
+describe('Pengeluaran', () => {
+  it('always cash from the deposit, receipt photo required, fuel asks litres + odometer', () => {
+    const f = fn('FldExpense');
+    expect(f).toMatch(/api\.addExpense\(FIELDLOGIC\.expenseBody\(/);
+    expect(f).not.toMatch(/method:/);
+    expect(f).toMatch(/disabled=\{busy \|\| !cat \|\| !\(amount > 0\) \|\| !photo\}/);
+    expect(f).toMatch(/cat === 'bensin' &&/);
+    expect(f).toContain("'fld.expFromDeposit'");
+  });
+});
