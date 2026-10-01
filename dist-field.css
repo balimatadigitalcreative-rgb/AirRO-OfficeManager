@@ -622,3 +622,37 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-nopincard-hd b { font-size: 14px; font-weight: 700; }
 .mlap-nopincard-hd .mlap-grow > span { font-size: 13px; line-height: 17px; color: #7C2D12; }
 .mlap-btn.mlap-pinnow { border-radius: 12px; background: #FFFFFF; border: 1.5px solid #C2410C; color: #9A3412; font-size: 15px; font-weight: 700; }
+
+/* ── 3D-2 INPUT — mockup Bayar bon, Penyesuaian, Ganti rugi, Pengeluaran boards ── */
+.mlap-bonrow { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--mlap-line); }
+.mlap-bonrow .nm { font-size: 14px; font-weight: 600; }
+.mlap-bonrow .sb { font-size: 12px; color: var(--mlap-sub); }
+.mlap-bonrow > b { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mlap-bonst { width: 62px; height: 20px; line-height: 20px; text-align: center; border-radius: 5px; font-size: 11px; font-weight: 700; flex-shrink: 0; background: #EEF2F6; color: #3E4E58; }
+.mlap-bonst.lunas { background: #E3F3EA; color: #1E6B40; }
+.mlap-bonst.sebagian { background: #FCF1D6; color: #7A4B00; }
+.mlap-cardnote { padding: 6px 12px 8px; font-size: 12px; color: var(--mlap-sub); }
+.mlap-kv.tall { min-height: 48px; }
+.mlap-kv b.big { font-size: 17px; font-weight: 700; }
+.mlap-kv b.ok { color: #1E6B40; }
+.mlap-kv b.bon { color: #7A4B00; }
+.mlap-kv .strong { font-size: 15px; font-weight: 600; color: var(--mlap-ink); }
+.mlap-diffrow { min-height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; background: #FFF1E8; color: #9A3412; }
+.mlap-diffrow.same { background: #E3F3EA; color: #1E6B40; }
+.mlap-diffrow span { font-size: 14px; font-weight: 600; }
+.mlap-diffrow b { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mlap-cardsec { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--mlap-line); }
+.mlap-cardsec-t { font-size: 13px; font-weight: 600; color: var(--mlap-sub); }
+.mlap-pricebox { height: 40px; border-radius: 10px; border: 1px solid #D5DDE3; display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 15px; color: #3E4E58; }
+.mlap-pricebox b { font-size: 16px; font-weight: 600; color: var(--mlap-ink); font-variant-numeric: tabular-nums; }
+.mlap-cats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.mlap-cat { height: 64px; border-radius: 14px; border: 1px solid transparent; background: #FFFFFF; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0 2px; font: inherit; font-size: 11px; font-weight: 600; color: #3E4E58; cursor: pointer; text-align: center; transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+.mlap-cat:active { transform: scale(.9); }
+.mlap-cat.on { border: 1.5px solid #065489; background: #E8F1F8; color: #065489; }
+.mlap-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mlap-two label { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.mlap-two label:first-child { border-right: 1px solid var(--mlap-line); }
+.mlap-two span { font-size: 12px; color: var(--mlap-sub); }
+.mlap-two input { min-height: 28px; border: 0; padding: 0; background: transparent; font: inherit; font-size: 16px; font-weight: 600; color: var(--mlap-ink); outline: none; }
+.mlap-two label:focus-within { box-shadow: inset 0 0 0 2px #065489; }
+.mlap-two input::placeholder { color: #9AA8B1; font-weight: 500; }

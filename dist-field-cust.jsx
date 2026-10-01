@@ -363,6 +363,7 @@ function FldAddStop({ api, preset, can, onPin, onDone, onBack }) {
   );
 }
 
+const FLD_BS = { lunas: 'fld.bs_lunas', sebagian: 'fld.bs_sebagian', belum: 'fld.bs_belum' };
 // PEMBAYARAN BON — collect a customer's bon (cash or transfer) with a proof photo. The open bons are
 // listed oldest first, as the payment settles them (view only — the server keeps the real balance).
 function FldPayBon({ api, cust: c, refs, onDone, onBack }) {
@@ -384,32 +385,38 @@ function FldPayBon({ api, cust: c, refs, onDone, onBack }) {
     if (typeof photo.lat === 'number' && typeof photo.lng === 'number') { body.proofLat = photo.lat; body.proofLng = photo.lng; }
     api.payBon(body).then((r) => { refs.done(slot); onDone(r && r.replay ? trFl('fld.replayed') : trFl('fld.paidDone', { name: c.name, v: FIELDLOGIC.fmtRp(pay) })); }).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
   };
+  const settle = FIELDLOGIC.settleBons(open, pay);
+  const quick = [[bon, trFl('fld.payAllV', { v: FIELDLOGIC.fmtRp(bon) })], [open.length > 1 ? open[0].amount : 0, trFl('fld.payOldestV', { v: FIELDLOGIC.fmtRp(open.length > 1 ? open[0].amount : 0) })]].filter(([v]) => v > 0 && v <= bon);
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.catatBon')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
+      <FldTop title={trFl('fld.catatBon')} onBack={onBack} />
       <div className="mlap-body">
-        <div className="mlap-card mlap-sec"><span className="sb">{trFl('fld.bonNow')}</span><b className="mlap-bigrp">{FIELDLOGIC.fmtRp(bon)}</b></div>
+        <FldCustHead name={c.name} sub={<>{c.code ? c.code + ' · ' : ''}{trFl('fld.sisaBonL')} <b className="mlap-bontxt">{FIELDLOGIC.fmtRp(bon)}</b></>} />
         {open.length > 0 && (
           <div className="mlap-card">
-            {open.map((b) => <div key={b.id} className="mlap-row"><span className="mlap-grow"><span className="nm">{b.txnDate}</span><span className="sb">{trFl('fld.nGalon', { n: b.qty })}{b.partial ? ' · ' + trFl('fld.partPaid') : ''}</span></span><b>{FIELDLOGIC.fmtRp(b.amount)}</b></div>)}
-            <div className="mlap-hint">{trFl('fld.oldestFirst')}</div>
+            {open.map((b, i) => (
+              <div key={b.id} className="mlap-bonrow">
+                <span className="mlap-grow"><span className="nm">{b.txnDate}</span><span className="sb">{trFl('fld.nGalon', { n: b.qty })}{b.partial ? ' · ' + trFl('fld.partPaid') : ''}</span></span>
+                <b>{FIELDLOGIC.fmtRp(b.amount)}</b>
+                <span className={'mlap-bonst ' + settle[i]}>{trFl(FLD_BS[settle[i]])}</span>
+              </div>
+            ))}
+            <div className="mlap-cardnote">{trFl('fld.oldestFirst')}</div>
           </div>
         )}
         <div className="mlap-card">
           <FldMoney label={trFl('fld.payAmount')} value={pay} onChange={setPay} />
-          <div className="mlap-chips mlap-pad">{[[bon, trFl('fld.payAll')], [50000, '50.000'], [100000, '100.000']].filter(([v]) => v > 0 && v <= bon).map(([v, l]) => <button key={l} type="button" className={'mlap-chip-b' + (pay === v ? ' on' : '')} aria-pressed={pay === v} onClick={() => setPay(v)}>{l}</button>)}</div>
+          {quick.length ? <div className="mlap-chips mlap-pad">{quick.map(([v, l]) => <button key={l} type="button" className={'mlap-chip-b' + (pay === v ? ' on' : '')} aria-pressed={pay === v} onClick={() => setPay(v)}>{l}</button>)}</div> : null}
         </div>
         <FldSeg label={trFl('fld.payVia')} value={via} onChange={setVia} options={[['tunai', trFl('fld.m_tunai')], ['transfer', trFl('fld.m_transfer')]]} />
-        <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.required')}</div>
-        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.proofHintPay" />
-        <div className="mlap-card mlap-sec">
-          <div className="mlap-sumrow total"><span>{trFl('fld.bonAfterPay')}</span><b>{FIELDLOGIC.fmtRp(pv.rest)}</b></div>
-          {pv.over > 0 ? <div className="mlap-warnline">{trFl('fld.payOver', { v: FIELDLOGIC.fmtRp(pv.over) })}</div> : null}
-        </div>
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey={via === 'transfer' ? 'fld.payTfHint' : 'fld.payCashHint'} title={trFl(via === 'transfer' ? 'fld.payTfPhoto' : 'fld.payCashPhoto')} w={64} />
+        <div className="mlap-card"><div className="mlap-kv tall"><span>{trFl('fld.bonAfterPay')}</span><b className={pv.rest === 0 ? 'big ok' : 'big bon'}>{pv.rest === 0 ? trFl('fld.lunas') : FIELDLOGIC.fmtRp(pv.rest)}</b></div></div>
+        {pv.over > 0 ? <div className="mlap-warnline">{trFl('fld.payOver', { v: FIELDLOGIC.fmtRp(pv.over) })}</div> : null}
         {err && <div className="mlap-err" role="alert">{err}</div>}
-        {!photo ? <div className="mlap-hint">{trFl('fld.needPhoto')}</div> : null}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !pv.ok || !photo} onClick={save}>{trFl('fld.payCta', { v: FIELDLOGIC.fmtRp(pay || 0) })}</button>
       </div>
+      <FldCtaBar hint={!photo ? trFl('fld.needPhoto') : ''}>
+        <button type="button" className="mlap-btn primary" disabled={busy || !pv.ok || !photo} onClick={save}>{trFl('fld.payCta', { v: FIELDLOGIC.fmtRp(pay || 0) })}</button>
+      </FldCtaBar>
     </div>
   );
 }
@@ -435,22 +442,22 @@ function FldAdjust({ api, cust: c, needsApproval, onDone, onBack }) {
   };
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.catatAdj')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
+      <FldTop title={trFl('fld.catatAdj')} onBack={onBack} />
       <div className="mlap-body">
+        <FldCustHead name={c.name} sub={[c.code, trFl('fld.adjSub')].filter(Boolean).join(' · ')} />
         <div className="mlap-card">
-          <div className="mlap-field"><span className="lb">{trFl('fld.adjRecord')}</span><b>{trFl('fld.nGalon', { n: rec })}</b></div>
+          <div className="mlap-kv tall"><span>{trFl('fld.adjRecord')}</span><b className="big">{trFl('fld.nGalon', { n: rec })}</b></div>
           <FldStepper label={trFl('fld.adjCounted')} hint={trFl('fld.adjCountedHint')} value={counted} onChange={setCounted} min={0} max={9999} />
-          <div className="mlap-field"><span className="lb">{trFl('fld.adjDiff')}</span><b className={diff ? 'mlap-bontxt' : ''}>{(diff > 0 ? '+' : '') + diff}</b></div>
+          <div className={'mlap-diffrow' + (diff === 0 ? ' same' : '')}><span>{trFl('fld.adjDiff')}</span><b>{diff === 0 ? trFl('fld.pinSame') : (diff > 0 ? '+' : '−') + trFl('fld.nGalon', { n: Math.abs(diff) })}</b></div>
         </div>
-        <div className="mlap-eyebrow">{trFl('fld.reasonT')}</div>
+        <div className="mlap-label">{trFl('fld.reasonT')}</div>
         <div className="mlap-chips">{FIELDLOGIC.ADJ_REASON_KEYS.map(([k]) => <button key={k} type="button" className={'mlap-chip-b' + (reasonKey === k ? ' on' : '')} aria-pressed={reasonKey === k} onClick={() => setReasonKey(k)}>{trFl(k)}</button>)}</div>
         <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder={trFl('fld.noteOpt')} aria-label={trFl('fld.noteOpt')} />
-        <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.optional')}</div>
-        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.adjPhotoHint" />
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.adjPhotoHint" title={trFl('fld.adjPhotoT')} optional w={64} />
         <FldNotice tone="info" title={trFl(needsApproval === false ? 'fld.adjNoWait' : 'fld.adjWaits')} />
         {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !reasonKey || diff === 0} onClick={send}>{trFl('fld.adjCta')}</button>
       </div>
+      <FldCtaBar><button type="button" className="mlap-btn primary" disabled={busy || !reasonKey || diff === 0} onClick={send}>{trFl('fld.adjCta')}</button></FldCtaBar>
     </div>
   );
 }
@@ -478,30 +485,32 @@ function FldDamage({ api, cust: c, rules, refs, onDone, onBack }) {
   };
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.catatDmg')} sub={[c.name, c.code].filter(Boolean).join(' · ')} onBack={onBack} />
+      <FldTop title={trFl('fld.catatDmg')} onBack={onBack} />
       <div className="mlap-body">
+        <FldCustHead name={c.name} sub={[c.code, trFl('fld.dmgSub')].filter(Boolean).join(' · ')} />
         {pv.blocked ? <FldNotice tone="warn" title={trFl(pv.blocked)} sub={trFl(pv.blocked + 'B')} /> : null}
-        <div className="mlap-card"><FldStepper label={trFl('fld.dmgQty')} hint={trFl('fld.dmgFrom', { n: held })} value={qty} onChange={setQty} min={1} max={Math.max(1, held)} /></div>
-        <div className="mlap-eyebrow">{trFl('fld.dmgKind')}</div>
-        <div className="mlap-chips">{FLD_DMG_KINDS.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (kind === k ? ' on' : '')} aria-pressed={kind === k} onClick={() => setKind(k)}>{trFl(key)}</button>)}</div>
-        <div className="mlap-card"><div className="mlap-field"><span className="lb">{trFl('fld.dmgPrice')}</span><b>{FIELDLOGIC.fmtRp(rules.hargaGantiRugiGalon || 0)}</b></div></div>
-        <div className="mlap-eyebrow">{trFl('fld.payVia')}</div>
-        <FldSeg label={trFl('fld.payVia')} value={pay} onChange={setPay} options={[['tunai', trFl('fld.m_tunai')], ['bon', trFl('fld.m_bon')], ['transfer', trFl('fld.m_transfer')]]} />
-        <div className="mlap-eyebrow">{trFl('fld.proof')} · {trFl('fld.required')}</div>
-        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.dmgPhotoHint" />
-        <div className="mlap-card mlap-sum">
-          <div className="mlap-sumrow"><span>{trFl('fld.heldAfter')}</span><b>{pv.heldAfter}</b></div>
-          <div className="mlap-sumrow total"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.total)}</b></div>
+        <div className="mlap-card">
+          <FldStepper label={trFl('fld.dmgQty')} hint={trFl('fld.dmgFrom', { n: held })} value={qty} onChange={setQty} min={1} max={Math.max(1, held)} />
+          <div className="mlap-cardsec"><span className="mlap-cardsec-t">{trFl('fld.dmgKindL')}</span><div className="mlap-chips">{FLD_DMG_KINDS.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (kind === k ? ' on' : '')} aria-pressed={kind === k} onClick={() => setKind(k)}>{trFl(key)}</button>)}</div></div>
+          <div className="mlap-kv tall"><span className="strong">{trFl('fld.dmgPrice')}</span><span className="mlap-pricebox">Rp <b>{Number(rules.hargaGantiRugiGalon || 0).toLocaleString('id-ID')}</b></span></div>
         </div>
-        <FldNotice tone="ok" title={trFl('fld.dmgNoApproval')} />
+        <div className="mlap-label">{trFl('fld.payVia')}</div>
+        <FldSeg label={trFl('fld.payVia')} value={pay} onChange={setPay} options={[['tunai', trFl('fld.m_tunai')], ['bon', trFl('fld.toBon')], ['transfer', trFl('fld.m_transfer')]]} />
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.dmgPhotoHint" title={trFl('fld.dmgPhotoT')} w={72} />
+        <div className="mlap-card">
+          <div className="mlap-kv"><span>{trFl('fld.galAtCust')}</span><b>{held + ' → ' + pv.heldAfter}</b></div>
+          <div className="mlap-kv"><span>{trFl('fld.dmgToDepot')}</span><b>{kind === 'hilang' ? trFl('fld.dmgLost') : trFl('fld.nGalon', { n: qty })}</b></div>
+          <div className="mlap-kv total"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.total)}</b></div>
+        </div>
+        <div className="mlap-hint">{trFl('fld.dmgNoApproval')}</div>
         {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !!pv.blocked || !kind || !photo} onClick={save}>{trFl('fld.dmgCta')}</button>
       </div>
+      <FldCtaBar><button type="button" className="mlap-btn primary" disabled={busy || !!pv.blocked || !kind || !photo} onClick={save}>{trFl('fld.dmgCta')}</button></FldCtaBar>
     </div>
   );
 }
 
-const FLD_EXP_CATS = [['bensin', 'fld.c_bensin'], ['parkir', 'fld.c_parkir'], ['servis', 'fld.c_servis'], ['makan', 'fld.c_makan'], ['lainnya', 'fld.c_lainnya']];
+const FLD_EXP_CATS = [['bensin', 'fld.c_bensin', 'fuel'], ['parkir', 'fld.c_parkir', 'parking'], ['servis', 'fld.c_servis', 'wrench'], ['makan', 'fld.c_makan', 'food'], ['lainnya', 'fld.c_lainnya', 'dots']];
 // PENGELUARAN — paid from the day's deposit, always in cash (owner rule: never "uang pribadi"), with a
 // photo of the receipt. Fuel asks litres + odometer (kept in the note).
 function FldExpense({ api, refs, onDone, onBack }) {
@@ -526,25 +535,23 @@ function FldExpense({ api, refs, onDone, onBack }) {
   };
   return (
     <div className="mlap-screen">
-      <FldTop title={trFl('fld.catatExp')} sub={today != null ? trFl('fld.expToday', { v: FIELDLOGIC.fmtRp(today) }) : ''} onBack={onBack} />
+      <FldTop title={trFl('fld.catatExp')} onBack={onBack} />
       <div className="mlap-body">
-        <div className="mlap-chips">{FLD_EXP_CATS.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (cat === k ? ' on' : '')} aria-pressed={cat === k} onClick={() => setCat(k)}>{trFl(key)}</button>)}</div>
-        <div className="mlap-card">
-          <FldMoney label={trFl('fld.expAmount')} value={amount} onChange={setAmount} />
-          {cat === 'bensin' && (
-            <>
-              <label className="mlap-field"><span className="lb">{trFl('fld.liters')}</span><input className="mlap-input" inputMode="decimal" value={liters} onChange={(e) => setLiters(e.target.value.replace(/[^0-9.,]/g, '').slice(0, 6))} aria-label={trFl('fld.liters')} /></label>
-              <label className="mlap-field"><span className="lb">{trFl('fld.odometer')}</span><input className="mlap-input" inputMode="numeric" value={odo} onChange={(e) => setOdo(e.target.value.replace(/[^0-9]/g, '').slice(0, 7))} aria-label={trFl('fld.odometer')} /></label>
-            </>
-          )}
-        </div>
+        <div className="mlap-cats" role="group" aria-label={trFl('fld.catatExp')}>{FLD_EXP_CATS.map(([k, key, ico]) => <button key={k} type="button" className={'mlap-cat' + (cat === k ? ' on' : '')} aria-pressed={cat === k} onClick={() => setCat(k)}><FldSvg n={ico} s={20} /><span>{trFl(key)}</span></button>)}</div>
+        <div className="mlap-card"><FldMoney label={trFl('fld.expAmount')} value={amount} onChange={setAmount} /></div>
+        {cat === 'bensin' && (
+          <div className="mlap-card mlap-two">
+            <label><span>{trFl('fld.liters')}</span><input inputMode="decimal" placeholder={trFl('fld.litersPh')} value={liters} onChange={(e) => setLiters(e.target.value.replace(/[^0-9.,]/g, '').slice(0, 6))} /></label>
+            <label><span>{trFl('fld.odometer')}</span><input inputMode="numeric" placeholder={trFl('fld.odoPh')} value={odo} onChange={(e) => setOdo(e.target.value.replace(/[^0-9]/g, '').slice(0, 7))} /></label>
+          </div>
+        )}
         <FldNotice tone="info" title={trFl('fld.expFromDeposit')} sub={trFl('fld.expFromDepositB')} />
         <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder={trFl('fld.noteOpt')} aria-label={trFl('fld.noteOpt')} />
-        <div className="mlap-eyebrow">{trFl('fld.receipt')} · {trFl('fld.required')}</div>
-        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.receiptHint" />
+        <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.receiptHint" title={trFl('fld.receiptT')} w={64} h={76} />
+        {today != null ? <div className="mlap-card"><div className="mlap-kv"><span>{trFl('fld.expToday', { v: FIELDLOGIC.fmtRp(today) })}</span></div></div> : null}
         {err && <div className="mlap-err" role="alert">{err}</div>}
-        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !cat || !(amount > 0) || !photo} onClick={save}>{trFl('fld.expCta')}</button>
       </div>
+      <FldCtaBar><button type="button" className="mlap-btn primary" disabled={busy || !cat || !(amount > 0) || !photo} onClick={save}>{trFl('fld.expCta')}</button></FldCtaBar>
     </div>
   );
 }

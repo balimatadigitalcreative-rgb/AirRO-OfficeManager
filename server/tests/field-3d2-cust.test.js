@@ -94,3 +94,36 @@ describe('Tambah stop (mockup Tambah stop board) — a sheet', () => {
     expect(shell).not.toMatch(/'exp', 'addStop'/);
   });
 });
+
+describe('Manual inputs (mockup Bayar bon, Penyesuaian, Ganti rugi, Pengeluaran boards)', () => {
+  it('Bayar bon: each open bon shows how this payment settles it; quick chips; the photo title follows cash / transfer; a green "Lunas" after', () => {
+    const f = fn(cust, 'FldPayBon');
+    expect(f).toMatch(/const settle = FIELDLOGIC\.settleBons\(open, pay\);/);
+    expect(f).toMatch(/<span className=\{'mlap-bonst ' \+ settle\[i\]\}>\{trFl\(FLD_BS\[settle\[i\]\]\)\}<\/span>/);   // full keys (the key scan reads literals)
+    expect(cust).toMatch(/const FLD_BS = \{ lunas: 'fld\.bs_lunas', sebagian: 'fld\.bs_sebagian', belum: 'fld\.bs_belum' \};/);
+    expect(f).toMatch(/title=\{trFl\(via === 'transfer' \? 'fld\.payTfPhoto' : 'fld\.payCashPhoto'\)\}/);
+    expect(f).toMatch(/<FldCtaBar hint=\{!photo \? trFl\('fld\.needPhoto'\) : ''\}>/);
+    expect(rule('INPUT', '.mlap-bonst.lunas')).toMatch(/background: #E3F3EA; color: #1E6B40;/);
+  });
+  it('Penyesuaian: the record, the count, a coloured difference row (green when equal); fixed send bar', () => {
+    const f = fn(cust, 'FldAdjust');
+    expect(f).toMatch(/<div className=\{'mlap-diffrow' \+ \(diff === 0 \? ' same' : ''\)\}>/);
+    expect(f).toMatch(/<FldCtaBar><button type="button" className="mlap-btn primary" disabled=\{busy \|\| !reasonKey \|\| diff === 0\} onClick=\{send\}>/);
+    expect(rule('INPUT', '.mlap-diffrow.same')).toMatch(/background: #E3F3EA; color: #1E6B40;/);
+  });
+  it('Ganti rugi: count, damage chips, the owner\'s price in an input-styled box, the effect card with the highlighted total', () => {
+    const f = fn(cust, 'FldDamage');
+    expect(f).toMatch(/<span className="mlap-pricebox">/);
+    expect(f).toMatch(/<div className="mlap-kv total"><span>\{trFl\(pv\.totalKey\)\}<\/span><b>\{FIELDLOGIC\.fmtRp\(pv\.total\)\}<\/b><\/div>/);
+    expect(f).toMatch(/<FldCtaBar><button type="button" className="mlap-btn primary" disabled=\{busy \|\| !!pv\.blocked \|\| !kind \|\| !photo\} onClick=\{save\}>/);
+  });
+  it('Pengeluaran: five icon category tiles, the big amount, litres + odometer side by side for fuel, the receipt card', () => {
+    const f = fn(cust, 'FldExpense');
+    expect(cust).toMatch(/const FLD_EXP_CATS = \[\['bensin', 'fld\.c_bensin', 'fuel'\], \['parkir', 'fld\.c_parkir', 'parking'\], \['servis', 'fld\.c_servis', 'wrench'\], \['makan', 'fld\.c_makan', 'food'\], \['lainnya', 'fld\.c_lainnya', 'dots'\]\];/);
+    expect(f).toMatch(/className=\{'mlap-cat' \+ \(cat === k \? ' on' : ''\)\}/);
+    expect(f).toMatch(/<div className="mlap-card mlap-two">/);
+    expect(f).toMatch(/<FldCtaBar><button type="button" className="mlap-btn primary" disabled=\{busy \|\| !cat \|\| !\(amount > 0\) \|\| !photo\} onClick=\{save\}>/);
+    expect(rule('INPUT', '.mlap-two input::placeholder')).toMatch(/color: #9AA8B1; font-weight: 500;/);   // hints read as hints
+    expect(rule('INPUT', '.mlap-cat.on')).toMatch(/border: 1\.5px solid #065489; background: #E8F1F8; color: #065489;/);
+  });
+});

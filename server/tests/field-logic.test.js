@@ -375,3 +375,14 @@ describe('3D-2 rit preview bar', () => {
     expect(pv.bar.reduce((t, b) => t + (b.fit ? 0 : b.qty), 0)).toBe(pv.leftoverGallons);
   });
 });
+
+describe('3D-2 bon settlement', () => {
+  it('settleBons: the payment settles the oldest bons first', () => {
+    const bons = [{ amount: 18000 }, { amount: 27000 }];
+    expect(L.settleBons(bons, 45000)).toEqual(['lunas', 'lunas']);
+    expect(L.settleBons(bons, 18000)).toEqual(['lunas', 'belum']);
+    expect(L.settleBons(bons, 20000)).toEqual(['lunas', 'sebagian']);
+    expect(L.settleBons(bons, 0)).toEqual(['belum', 'belum']);
+    expect(L.settleBons(bons, null)).toEqual(['belum', 'belum']);
+  });
+});

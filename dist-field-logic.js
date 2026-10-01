@@ -209,6 +209,12 @@
     var bon = Math.max(0, num(o.sisaBon)); var pay = Math.max(0, Math.round(num(o.pay)));
     return { rest: Math.max(0, bon - pay), over: Math.max(0, pay - bon), ok: pay > 0 && pay <= bon };
   }
+  // BAYAR BON (3D-2): how this payment settles each open bon, oldest first (view only — the server keeps
+  // the real balance).
+  function settleBons(bons, pay) {
+    var left = Math.max(0, Math.round(num(pay)));
+    return (bons || []).map(function (b) { var a = Math.max(0, num(b.amount)); var paid = Math.min(left, a); left -= paid; return paid >= a && a > 0 ? 'lunas' : paid > 0 ? 'sebagian' : 'belum'; });
+  }
   // PENYESUAIAN — the words the driver picked map to the server's reason list; the words stay in the note.
   var ADJ_REASON_KEYS = [['fld.adj_hitung', 'rekonsiliasi_fisik'], ['fld.adj_hilang', 'galon_pecah_hilang'], ['fld.adj_kembali', 'rekonsiliasi_fisik'], ['fld.adj_salah', 'salah_input'], ['fld.r_other', 'lainnya']];
   function adjustBody(o) {
@@ -366,5 +372,5 @@
   // PENGIRIMAN (3D-2): share of the rit's load still on the truck, 0–100.
   function loadPct(remaining, out) { var o = num(out); if (!(o > 0)) return 0; return Math.max(0, Math.min(100, Math.round(100 * num(remaining) / o))); }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, swipeTab: swipeTab, swipeStart: swipeStart, loadPct: loadPct };
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, settleBons: settleBons, swipeTab: swipeTab, swipeStart: swipeStart, loadPct: loadPct };
 });
