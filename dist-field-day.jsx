@@ -251,3 +251,118 @@ function FldSale({ api, stop: s, onDone, onBack }) {
     </div>
   );
 }
+
+const FLD_SOP_REASONS = ['fld.sop_sedikit', 'fld.sop_stok', 'fld.sop_armada', 'fld.sop_terakhir'];
+const FLD_DIFF = [['kembali_besok', 'fld.d_besok'], ['rusak', 'fld.d_rusak'], ['hilang', 'fld.d_hilang'], ['salah_hitung', 'fld.d_salah']];
+
+// BUKA RIT — how many gallons go on the truck. Capacity is a hard cap; below the owner's SOP the new
+// UI always asks why (the server only insists once the switch is on). The preview plans the rit from
+// the warehouse with the same planner the server uses.
+function FldOpenRun({ api, ctx, tick, onDone, onBack }) {
+  const rules = ctx.rules || {};
+  const minLoad = (rules.ritSop && rules.ritSop.minLoad) || 80;
+  const cap = (rules.fleetCapacity || {})[ctx.fleet] || 0;
+  const [d, setD] = uSfl(null);
+  const [load, setLoad] = uSfl(cap || minLoad);
+  const [reason, setReason] = uSfl('');
+  const [busy, setBusy] = uSfl(false);
+  const [err, setErr] = uSfl('');
+  uEfl(() => {
+    let live = true;
+    Promise.all([api.board(), api.runs()]).then(([board, runs]) => { if (live) setD({ board, runs }); }).catch((e) => { if (live) setErr(fldErrMsg(e)); });
+    return () => { live = false; };
+  }, [api, tick]);
+  if (!d) return err ? <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={err} /> : <div className="mlap-empty">{trFl('fld.loading')}</div>;
+  const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs: d.runs });
+  if (rs.open) return <FldCloseRun api={api} run={rs.open} stale={rs.stale} onDone={onDone} onBack={onBack} />;
+  const g = FIELDLOGIC.runGauge({ load, capacity: cap, minLoad });
+  const pend = d.board.filter((s) => s.status === 'pending');
+  const pv = FIELDLOGIC.loadPreview({
+    planRit: window.RITPLAN && window.RITPLAN.planRit, depot: ctx.depot, load,
+    stops: pend.map((s) => ({ id: s.id, lat: s.lat, lng: s.lng, pinned: s.pinned, qty: s.qty > 0 ? s.qty : ((ctx.demand || {})[s.id] || 1) })),
+  });
+  const presets = [...new Set([60, minLoad, 100, cap].filter((v) => v > 0 && (!cap || v <= cap)))].sort((a, b) => a - b);
+  const open = () => {
+    setBusy(true); setErr('');
+    api.openRun({ gallonsOut: g.load, underSopReason: g.under ? reason.trim() : '' })
+      .then(() => onDone(trFl('fld.runOpened', { n: rs.nextNo })))
+      .catch((e) => setErr(fldErrMsg(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.openRunN', { n: rs.nextNo })} sub={[ctx.fleet, cap ? trFl('fld.capN', { n: cap }) : trFl('fld.capNone')].join(' · ')} onBack={onBack} />
+      <div className="mlap-body">
+        <div className="mlap-card mlap-load">
+          <span className="sb">{trFl('fld.loadQ')}</span>
+          <div className={'mlap-loadval' + (g.under ? ' under' : '')}>{g.load}</div>
+          <input type="range" className="mlap-range" min="0" max={g.max} value={g.load} onChange={(e) => setLoad(+e.target.value)} aria-label={trFl('fld.loadQ')} />
+          <div className="mlap-scale"><span>0</span><span>{trFl('fld.sopN', { n: minLoad })}</span>{cap ? <span>{trFl('fld.capN', { n: cap })}</span> : <span />}</div>
+          <FldStepper label={trFl('fld.loadQ')} value={g.load} onChange={setLoad} min={0} max={g.max} />
+          <div className="mlap-chips">{presets.map((v) => <button key={v} type="button" className={'mlap-chip-b' + (g.load === v ? ' on' : '')} aria-pressed={g.load === v} onClick={() => setLoad(v)}>{v}</button>)}</div>
+          {g.atCap ? <div className="mlap-hint ok">{trFl('fld.fullLoad')}</div> : null}
+        </div>
+        {g.under && (
+          <div className="mlap-card mlap-reason warn">
+            <b>{trFl('fld.underSopT', { n: g.load, min: minLoad })}</b>
+            <FldChips options={FLD_SOP_REASONS.map((k) => trFl(k)).concat([trFl('fld.r_other')])} otherLabel={trFl('fld.r_other')} value={reason} onChange={setReason} />
+            <span className="sb">{trFl('fld.underSopB')}</span>
+          </div>
+        )}
+        {pv ? (
+          <div className="mlap-card mlap-preview">
+            <b>{trFl('fld.previewT')}</b>
+            <span>{trFl('fld.previewFits', { n: pv.fits, g: pv.used })}</span>
+            {pv.leftoverGallons > 0 ? <span className="sb">{trFl('fld.previewLeft', { g: pv.leftoverGallons, r: pv.estRits })}</span> : null}
+            {pv.unlocated > 0 ? <span className="sb">{trFl('fld.previewNoPin', { n: pv.unlocated })}</span> : null}
+          </div>
+        ) : !ctx.depot ? <FldNotice tone="info" title={trFl('fld.noDepotT')} sub={trFl('fld.noDepotB')} /> : null}
+        {err && <div className="mlap-err" role="alert">{err}</div>}
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !g.canOpen || (g.under && !reason.trim())} onClick={open}>{trFl('fld.openAndRoute')}</button>
+      </div>
+    </div>
+  );
+}
+
+// TUTUP RIT — full and empty gallons brought back. A difference needs what happened; damaged/lost only
+// make sense when gallons are missing (the server refuses them otherwise).
+function FldCloseRun({ api, run, stale, onDone, onBack }) {
+  const expected = Math.max(0, run.expectedRemaining != null ? run.expectedRemaining : ((run.gallonsOut || 0) - (run.sold || 0)));
+  const [full, setFull] = uSfl(expected);
+  const [empty, setEmpty] = uSfl(0);
+  const [res, setRes] = uSfl('');
+  const [note, setNote] = uSfl('');
+  const [busy, setBusy] = uSfl(false);
+  const [err, setErr] = uSfl('');
+  const diff = full - expected; const lost = expected - full;
+  const allowed = FLD_DIFF.filter(([k]) => ((k === 'rusak' || k === 'hilang') ? lost > 0 : true));
+  uEfl(() => { if (res && !allowed.some(([k]) => k === res)) setRes(''); }, [full]);
+  const close = () => {
+    setBusy(true); setErr('');
+    const label = (FLD_DIFF.find(([k]) => k === res) || [null, ''])[1];
+    const body = { gallonsFullReturned: full, gallonsEmptyReturned: empty };
+    if (diff !== 0) { body.diffReason = trFl(label) + (note.trim() ? ' · ' + note.trim() : ''); body.resolution = res; }
+    api.closeRun(run.id, body).then(() => onDone(trFl('fld.runClosed', { n: run.runNo }))).catch((e) => setErr(fldErrMsg(e))).finally(() => setBusy(false));
+  };
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.closeRunT', { n: run.runNo })} sub={trFl('fld.loadedSold', { out: run.gallonsOut, sold: run.sold || 0 })} onBack={onBack} />
+      <div className="mlap-body">
+        {stale ? <FldNotice tone="warn" title={trFl('fld.staleNote', { date: run.date })} sub={trFl('fld.staleRunB')} /> : null}
+        <div className="mlap-card">
+          <FldStepper label={trFl('fld.fullBack')} hint={trFl('fld.fullBackHint', { n: expected })} value={full} onChange={setFull} min={0} max={9999} />
+          <FldStepper label={trFl('fld.emptyBack')} value={empty} onChange={setEmpty} min={0} max={9999} />
+        </div>
+        {diff !== 0 && (
+          <div className="mlap-card mlap-reason warn">
+            <b>{trFl('fld.diffT', { d: (diff > 0 ? '+' : '') + diff })}</b>
+            <div className="mlap-chips">{allowed.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (res === k ? ' on' : '')} aria-pressed={res === k} onClick={() => setRes(k)}>{trFl(key)}</button>)}</div>
+            <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder={trFl('fld.noteOpt')} aria-label={trFl('fld.noteOpt')} />
+          </div>
+        )}
+        {err && <div className="mlap-err" role="alert">{err}</div>}
+        <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || (diff !== 0 && !res)} onClick={close}>{trFl('fld.closeRunSave')}</button>
+      </div>
+    </div>
+  );
+}

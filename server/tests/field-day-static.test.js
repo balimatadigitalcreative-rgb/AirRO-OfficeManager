@@ -57,3 +57,21 @@ describe('Transaksi', () => {
     expect(f()).toMatch(/\['lunas', trFl\('fld\.m_lunas'\)\], \['bon', trFl\('fld\.m_bon'\)\], \['transfer', trFl\('fld\.m_transfer'\)\]/);
   });
 });
+
+describe('Buka / Tutup rit', () => {
+  it('an open rit (today or older) is closed first; otherwise the gauge', () => {
+    const f = fn('FldOpenRun');
+    expect(f).toMatch(/if \(rs\.open\) return <FldCloseRun api=\{api\} run=\{rs\.open\} stale=\{rs\.stale\}/);
+    expect(f).toMatch(/FIELDLOGIC\.runGauge\(\{ load, capacity: cap, minLoad \}\)/);
+  });
+  it('below the SOP a reason is always required; above capacity it cannot open', () => {
+    const f = fn('FldOpenRun');
+    expect(f).toMatch(/disabled=\{busy \|\| !g\.canOpen \|\| \(g\.under && !reason\.trim\(\)\)\}/);
+    expect(f).toMatch(/underSopReason: g\.under \? reason\.trim\(\) : ''/);
+  });
+  it('closing with a difference needs what happened; damaged/lost only when gallons are missing', () => {
+    const f = fn('FldCloseRun');
+    expect(f).toMatch(/disabled=\{busy \|\| \(diff !== 0 && !res\)\}/);
+    expect(f).toMatch(/\(k === 'rusak' \|\| k === 'hilang'\) \? lost > 0 : true/);
+  });
+});
