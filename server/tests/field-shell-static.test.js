@@ -5,23 +5,26 @@
 const fs = require('fs'); const path = require('path'); const { parse } = require('@babel/parser');
 const root = path.join(__dirname, '..', '..');
 const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
-const jsx = read('dist-field.jsx'); const css = read('dist-field.css'); const i18n = read('finance-i18n.js'); const build = read('build.mjs'); const html = read('index.html');
+const jsx = read('dist-field.jsx'); const allJsx = ['dist-field-kit.jsx', 'dist-field-day.jsx', 'dist-field.jsx'].filter((f) => fs.existsSync(path.join(root, f))).map(read).join('\n'); const css = read('dist-field.css'); const i18n = read('finance-i18n.js'); const build = read('build.mjs'); const html = read('index.html');
 
 it('parses and ships', () => {
   expect(() => parse(jsx, { sourceType: 'script', plugins: ['jsx'] })).not.toThrow();
-  expect(build).toMatch(/'dist-zones\.jsx',\s*'dist-field\.jsx',/);
+  expect(build.indexOf("'dist-zones.jsx'")).toBeLessThan(build.indexOf("'dist-field.jsx'"));
   expect(build).toMatch(/CSS_FILES = \[[^\]]*'dist-field\.css'/);
   expect(html).toMatch(/dist-field\.css\?v=/);
   expect(jsx).toMatch(/window\.FIELD = \{ App: FldApp, RulesScreen: FldRules \}/);
 });
-it('its top-level names do not collide with any other bundled file (one shared scope)', () => {
-  const names = [...jsx.matchAll(/^(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]);
-  const destructured = [...jsx.matchAll(/^const \{([^}]*)\} = React;/gm)].flatMap((m) => m[1].split(',').map((x) => x.split(':').pop().trim()));
-  const mine = [...names, ...destructured].filter(Boolean);
-  const files = [...build.matchAll(/'([\w.-]+\.jsx?)'/g)].map((m) => m[1]).filter((f) => f !== 'dist-field.jsx' && fs.existsSync(path.join(root, f)));
-  files.forEach((f) => {
-    const src = read(f);
-    mine.forEach((n) => expect({ file: f, name: n, clash: new RegExp('^(?:const|let|var|function)\\s+' + n.replace('$', '\\$') + '\\b|^const \\{[^}]*:\\s*' + n + '\\s*[,}]', 'm').test(src) }).toEqual({ file: f, name: n, clash: false }));
+it('top-level names in every field file are unique across the whole bundle (one shared scope)', () => {
+  const fieldFiles = ['dist-field-kit.jsx', 'dist-field-day.jsx', 'dist-field.jsx'].filter((f) => fs.existsSync(path.join(root, f)));
+  const namesOf = (src) => [...src.matchAll(/^(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1])
+    .concat([...src.matchAll(/^const \{([^}]*)\} = React;/gm)].flatMap((m) => m[1].split(',').map((x) => x.split(':').pop().trim())));
+  const bundled = [...build.matchAll(/'([\w.-]+\.jsx?)'/g)].map((m) => m[1]).filter((f) => fs.existsSync(path.join(root, f)));
+  fieldFiles.forEach((ff) => {
+    const mine = namesOf(read(ff)).filter(Boolean);
+    bundled.filter((f) => f !== ff).forEach((f) => {
+      const src = read(f);
+      mine.forEach((n) => expect({ in: ff, other: f, name: n, clash: new RegExp('^(?:const|let|var|function)\\s+' + n.replace('$', '\\$') + '\\b|^const \\{[^}]*:\\s*' + n + '\\s*[,}]', 'm').test(src) }).toEqual({ in: ff, other: f, name: n, clash: false }));
+    });
   });
 });
 it('latihan ribbon + confirmed mode switch + reset', () => {
@@ -59,7 +62,7 @@ it('glass only on the functional layer + reduced transparency / motion honoured'
   expect(css).not.toMatch(/(^|[\s,}])\.fld[-\s{]/m);   // the old form classes (.fld, .fld-label) are never restyled
 });
 it('every fld.* key used exists in EN and ID', () => {
-  const used = [...new Set([...jsx.matchAll(/trFl\('(fld\.[A-Za-z0-9_]+)'\s*[),]/g)].map((m) => m[1]))];   // literal keys; dynamic ones listed below
+  const used = [...new Set([...allJsx.matchAll(/trFl\('(fld\.[A-Za-z0-9_]+)'\s*[),]/g)].map((m) => m[1]))];   // literal keys; dynamic ones listed below
   const dynamic = ['fld.st_pending', 'fld.st_terkirim', 'fld.st_ditunda', 'fld.st_batal', 'fld.catatSale', 'fld.catatBon', 'fld.catatExp', 'fld.catatStop', 'fld.catatAdj', 'fld.catatDmg', 'fld.tabKirim', 'fld.tabPeta', 'fld.tabPelanggan', 'fld.tabSetoran'];
   expect(used.length).toBeGreaterThan(20);
   [...used, ...dynamic].forEach((k) => expect({ k, n: (i18n.match(new RegExp("'" + k.replace('.', '\\.') + "':", 'g')) || []).length }).toEqual({ k, n: 2 }));

@@ -4,31 +4,9 @@
    Pengiriman tab lists the day's stops so both modes can be tried end to end. Every read/write goes
    through ONE adaptor (FIELDAPI): real = the server, latihan = this phone only.
    The bundle shares one scope across files, so every top-level name here is unique (Fld*, *fl). */
-const { useState: uSfl, useEffect: uEfl, useRef: uRfl } = React;
-const trFl = (k, v) => window.t(k, v);
-const fldPlates = (list) => (list || []).map((f) => (typeof f === 'string' ? f : (f && (f.plate || f.name || f.id)) || '')).map((s) => String(s).trim()).filter(Boolean);
-const fldErrMsg = (e) => (e && e.body && e.body.error && e.body.error.message) || (e && e.message) || '';
-const FldIco = (name, s) => { const C = window[name]; return C ? <C s={s || 20} /> : null; };
 // Releasing makes this the main view for EVERY field account. Locked until the full field screens
 // (Plan 3) replace the foundation stub; flip to true then. Un-releasing is always allowed.
 const FLD_SCREENS_READY = false;
-
-function FldSheet({ title, body, confirmLabel, danger, onConfirm, onClose }) {
-  return (
-    <>
-      <button type="button" className="mlap-scrim" aria-label={trFl('fld.cancel')} onClick={onClose} />
-      <div className="mlap-sheet" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="mlap-grab" />
-        <h2>{title}</h2>
-        <p>{body}</p>
-        <div className="mlap-actions">
-          <button type="button" className="mlap-btn" onClick={onClose}>{trFl('fld.cancel')}</button>
-          <button type="button" className={'mlap-btn ' + (danger ? 'danger' : 'primary')} onClick={onConfirm}>{confirmLabel || trFl('fld.confirm')}</button>
-        </div>
-      </div>
-    </>
-  );
-}
 
 function FldApp({ user, pref, today, fleetList, fleetScope, refreshKey, onExit, onPref, onOpenRules }) {
   const mode = pref.mode;
