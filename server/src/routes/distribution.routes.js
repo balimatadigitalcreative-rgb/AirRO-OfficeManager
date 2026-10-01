@@ -140,8 +140,8 @@ router.post('/change-requests/reassign/preview', requireCap('distribusiKoreksi')
 router.post('/change-requests/reassign', requireCap('distribusiKoreksi'), validate({ body: ctrl.schemas.reassignSchema }), ctrl.requestReassign);
 // Change-request inbox + decisions — approver-only (distribusiApprove), fleet-scoped, server-enforced.
 // KOREKSI SAYA — before '/change-requests/:id' routes so 'mine' is never read as an id.
-router.get('/change-requests/mine', requireCap('distribusiKoreksi'), ctrl.listMyChangeRequests);
-router.post('/change-requests/:id/withdraw', requireCap('distribusiKoreksi'), validate({ params: ctrl.schemas.idParams }), ctrl.withdrawChangeRequest);
+router.get('/change-requests/mine', requireAnyCap(['distribusiKoreksi', 'distribusiVoid']), ctrl.listMyChangeRequests);
+router.post('/change-requests/:id/withdraw', requireAnyCap(['distribusiKoreksi', 'distribusiVoid']), validate({ params: ctrl.schemas.idParams }), ctrl.withdrawChangeRequest);
 router.get('/change-requests', requireCap('distribusiApprove'), validate({ query: ctrl.schemas.changeReqQuery }), ctrl.listChangeRequests);
 router.post('/change-requests/:id/approve', requireCap('distribusiApprove'), validate({ params: ctrl.schemas.idParams }), ctrl.approveChangeRequest);
 router.post('/change-requests/:id/reject', requireCap('distribusiApprove'), validate({ params: ctrl.schemas.idParams, body: ctrl.schemas.rejectSchema }), ctrl.rejectChangeRequest);

@@ -2039,18 +2039,20 @@ async function listMyChangeRequests(user) {
   for (const r of rows) data.push(await changeRequestClient(r));
   return { data };
 }
-// Withdraw a request the caller submitted, while it is still pending. 'withdrawn' is a terminal status
-// the approver inbox (status filter pending/approved/rejected) never lists as actionable.
+// Withdraw a request the caller submitted, while it is still pending. ONE conditional write (own +
+// pending), so an approval landing between the read and the write can never be turned into 'withdrawn'.
+const withdrawWhere = (id, actorId) => ({ id, requestedById: actorId, status: 'pending' });
 async function withdrawChangeRequest(id, actor) {
   const req = await prisma.distChangeRequest.findUnique({ where: { id } });
   if (!req || !actor || req.requestedById !== actor.id) throw ApiError.notFound('Pengajuan tidak ditemukan.');
   if (req.status !== 'pending') throw ApiError.badRequest('Pengajuan ini sudah diputuskan — tidak bisa ditarik.');
   const snap = await actorSnap(actor);
-  const updated = await prisma.distChangeRequest.update({ where: { id }, data: { status: 'withdrawn', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: 'ditarik oleh pemohon', decidedAt: new Date() } });
+  const res = await prisma.distChangeRequest.updateMany({ where: withdrawWhere(id, actor.id), data: { status: 'withdrawn', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decisionNote: 'ditarik oleh pemohon', decidedAt: new Date() } });
+  if (!res.count) throw ApiError.badRequest('Pengajuan ini sudah diputuskan — tidak bisa ditarik.');
+  const updated = await prisma.distChangeRequest.findUnique({ where: { id } });
   await logAudit('koreksi', 'Tarik pengajuan', `${req.kind} · ${shortRefServer(req.transactionId)}`, snap, req.fleetId);
   return changeRequestClient(updated);
 }
-
 // Approve (apply atomically) or reject (close, note required) a pending request.
 async function decideChangeRequest(id, decision, body, actor) {
   const req = await prisma.distChangeRequest.findUnique({ where: { id } });
@@ -5341,7 +5343,7 @@ module.exports = {
   deactivateCustomer, reactivateCustomer, deleteCustomer, customerImpact,
   listTypes, createType, renameType, deleteType, seedCustomerTypes,
   listTransactions, createTransaction, createOpeningBon, addCorrection, voidTransaction, setTransactionArchive, hardDeleteTransaction, bulkTxnPreview, bulkExecuteTransactions, restoreBulk, listAudit, dashboardSummary,
-  requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, decideChangeRequest, previewReassign, requestReassign,
+  requestChange, previewCorrection, listChangeRequests, listMyChangeRequests, withdrawChangeRequest, withdrawWhere, decideChangeRequest, previewReassign, requestReassign,
   createPaymentNotReceived, lossReport,
   createInvoice, listInvoices, getInvoice, billingReminders, cashIntegration, deliveryReport, daySummary,
   deliveryBoard, addOrder, markDelivery, reorderDeliveries, routeDeliveries, ritRoute, setDepot, depotOrigin, fieldContext, setCustomerPhone, pinDelivery, closeDay, listCloseouts,
