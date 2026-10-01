@@ -656,3 +656,29 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
 .mlap-two input { min-height: 28px; border: 0; padding: 0; background: transparent; font: inherit; font-size: 16px; font-weight: 600; color: var(--mlap-ink); outline: none; }
 .mlap-two label:focus-within { box-shadow: inset 0 0 0 2px #065489; }
 .mlap-two input::placeholder { color: #9AA8B1; font-weight: 500; }
+
+/* ── 3D-2 KOREKSI — mockup Koreksi + Koreksi saya boards ── */
+.mlap-txncard { padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
+.mlap-txnthumb { width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0; display: grid; place-items: center; background: #E8F1F8; color: #065489; }
+.mlap-txn-eb { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: var(--mlap-sub); text-transform: uppercase; }
+.mlap-txn-nm { font-size: 16px; font-weight: 700; }
+.mlap-txn-sb { font-size: 13px; color: #3E4E58; }
+.mlap-cat.k { height: 60px; }
+.mlap-cat.danger.on { border-color: #B42318; background: #FDECEA; color: #8C2A20; }
+.mlap-stepper.chg input.mlap-stepval { color: #065489; }
+.mlap-impact { padding: 8px 0 6px; }
+.mlap-impact-hd { padding: 0 12px 2px; font-size: 13px; font-weight: 600; color: var(--mlap-sub); }
+.mlap-improw { min-height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 13px; }
+.mlap-improw .l { flex: 1; min-width: 0; color: #3E4E58; }
+.mlap-improw s { color: var(--mlap-sub); font-variant-numeric: tabular-nums; }
+.mlap-improw > svg { color: #8A9AA3; flex-shrink: 0; }
+.mlap-improw b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.mlap-impact-none { padding: 4px 12px; font-size: 13px; color: var(--mlap-sub); }
+.mlap-voidcard { background: #FDECEA; border: 1px solid #F2B8B1; border-radius: 16px; padding: 10px 12px; display: flex; gap: 8px; color: #8C2A20; font-size: 13px; line-height: 17px; }
+.mlap-voidcard > svg { flex-shrink: 0; }
+.mlap-btn.danger.solid { background: #B42318; color: #FFFFFF; box-shadow: 0 8px 24px rgba(180,35,24,.28); }
+.mlap-kcust { padding-bottom: 4px; }
+.mlap-kcust-t { padding: 8px 12px 4px; font-size: 13px; font-weight: 600; color: var(--mlap-sub); }
+.mlap-kcust-sub { padding: 6px 12px 2px; font-size: 12px; font-weight: 600; color: var(--mlap-sub); }
+.mlap-searchbox.gray { margin: 0 12px 6px; background: #F1F4F7; min-height: 44px; }
+.mlap-kcust .mlap-pickrow { border-bottom: 0; border-top: 1px solid var(--mlap-line); }

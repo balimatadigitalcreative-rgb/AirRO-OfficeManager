@@ -316,6 +316,29 @@
     var s = String(text || '').trim();
     return kind === 'bayar' ? s + ' [cara bayar: ' + PAY_ID[payOf(t)] + ' → ' + PAY_ID[(ch || {}).pay] + ']' : s;
   }
+  // KOREKSI (3D-2): the board's "struck-through → new" rows — gallon counts from the transaction itself,
+  // money and both customers from the server's preview (the same calculation the approval applies).
+  // Raw values; the screen words them.
+  function koreksiImpact(o) {
+    var x = o || {}; var t = x.t || {}; var ch = x.change || {}; var pv = x.pv; var rows = [];
+    if (x.kind === 'batal') return [{ key: 'fld.ki_status', a: 'aktif', b: 'batal', type: 'status' }];
+    if (x.kind === 'pelanggan') {
+      if (!pv || !pv.fromCustomer || !pv.toCustomer) return [];
+      [pv.fromCustomer, pv.toCustomer].forEach(function (c) {
+        rows.push({ key: 'fld.ki_bonOf', name: c.name, a: num(c.sisaBonBefore), b: num(c.sisaBonAfter), type: 'rp' });
+        rows.push({ key: 'fld.ki_galOf', name: c.name, a: num(c.gallonsBefore), b: num(c.gallonsAfter), type: 'n' });
+      });
+      return rows;
+    }
+    if (x.kind === 'jumlah') {
+      if (num(ch.qty) !== num(t.qty)) rows.push({ key: 'fld.ki_out', a: num(t.qty), b: num(ch.qty), type: 'n' });
+      if (num(ch.gallonIn) !== num(t.gallonIn)) rows.push({ key: 'fld.ki_back', a: num(t.gallonIn), b: num(ch.gallonIn), type: 'n' });
+    }
+    if (x.kind === 'bayar' && ch.pay && ch.pay !== payOf(t)) rows.push({ key: 'fld.ki_pay', a: payOf(t), b: ch.pay, type: 'pay' });
+    if (pv && pv.oldAmount != null && num(pv.oldAmount) !== num(pv.newAmount)) rows.push({ key: 'fld.ki_bill', a: num(pv.oldAmount), b: num(pv.newAmount), type: 'rp' });
+    if (pv && pv.oldSisaBon != null && num(pv.oldSisaBon) !== num(pv.newSisaBon)) rows.push({ key: 'fld.ki_bon', a: num(pv.oldSisaBon), b: num(pv.newSisaBon), type: 'rp' });
+    return rows;
+  }
   function nearCustomers(customers, pt, excludeId, n) {
     if (!hasPt(pt)) return [];
     return (customers || []).filter(function (c) { return c.id !== excludeId && hasPt(c); })
@@ -372,5 +395,5 @@
   // PENGIRIMAN (3D-2): share of the rit's load still on the truck, 0–100.
   function loadPct(remaining, out) { var o = num(out); if (!(o > 0)) return 0; return Math.max(0, Math.min(100, Math.round(100 * num(remaining) / o))); }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, settleBons: settleBons, swipeTab: swipeTab, swipeStart: swipeStart, loadPct: loadPct };
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM, dragRelease: dragRelease, settleBons: settleBons, koreksiImpact: koreksiImpact, swipeTab: swipeTab, swipeStart: swipeStart, loadPct: loadPct };
 });

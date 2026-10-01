@@ -4,6 +4,9 @@
 // the driver's own requests. Built into the one bundle scope: top-level names start with Fld/FLD.
 
 const FLD_KOREKSI_REASONS = ['fld.kr_salahInput', 'fld.kr_pelangganMinta', 'fld.kr_salahPelanggan'];
+const FLD_KICO = { pelanggan: 'userMove', jumlah: 'bottlePlus', bayar: 'cash', nominal: 'cash', batal: 'ban' };
+// A raw value of a correction row, in words (the boards' "struck-through → new").
+const fldValText = (type, v) => (type === 'rp' ? FIELDLOGIC.fmtRp(v) : type === 'n' ? trFl('fld.nGalon', { n: v }) : type === 'pay' ? trFl('fld.m_' + v) : type === 'status' ? trFl('fld.ks_' + v) : String(v == null ? '—' : v));
 
 // KOREKSI TRANSAKSI — pick what is wrong (customer, gallon count, pay method, bon-payment amount, or
 // cancel); the server previews the effect with the same calculation the approval applies; a reason is
@@ -55,7 +58,7 @@ function FldKoreksi({ api, target, can, onDone, onBack, onSaya }) {
         : api.requestCorrection(t.id, Object.assign(FIELDLOGIC.correctionBody(t, change), { reason: FIELDLOGIC.koreksiReason(kind, t, change, text) }));
     p.then(() => onDone(trFl('fld.kSent'))).catch((e) => setMsg(fldErrMsg(e))).finally(() => setBusy(false));
   };
-  const head = <FldTop title={trFl('fld.koreksiT')} sub={d ? [d.name, d.code].filter(Boolean).join(' · ') : ''} onBack={onBack} />;
+  const head = <FldTop title={trFl('fld.koreksiT')} onBack={onBack} />;
   if (err) return <div className="mlap-screen">{head}<div className="mlap-body"><FldNotice tone="warn" alert title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /></div></div>;
   if (!d) return <div className="mlap-screen">{head}<div className="mlap-empty">{trFl('fld.loading')}</div></div>;
   if (!t) return <div className="mlap-screen">{head}<div className="mlap-body"><FldNotice tone="warn" title={trFl('fld.kNotFound')} /></div></div>;
@@ -63,12 +66,18 @@ function FldKoreksi({ api, target, can, onDone, onBack, onSaya }) {
   const payNow = FIELDLOGIC.payOf(t);
   const needPhoto = kind === 'bayar' && pay === 'transfer' && payNow !== 'transfer';
   const rp = FIELDLOGIC.fmtRp;
+  const impact = kind ? FIELDLOGIC.koreksiImpact({ kind, t, change, pv }) : [];
   return (
     <div className="mlap-screen">
       {head}
       <div className="mlap-body">
-        <div className="mlap-card mlap-sec">
-          <span className="sb">{trFl('fld.kTxnLine', { date: t.txnDate, n: t.qty, pay: trFl('fld.m_' + payNow), v: rp(t.effectiveAmount != null ? t.effectiveAmount : t.amount) })}</span>
+        <div className="mlap-card mlap-txncard">
+          <span className="mlap-txnthumb" aria-hidden="true"><FldSvg n="receipt" s={22} /></span>
+          <span className="mlap-grow">
+            <span className="mlap-txn-eb">{trFl('fld.kTxnAt', { d: t.txnDate })}</span>
+            <span className="mlap-txn-nm">{[d.name, d.code].filter(Boolean).join(' · ')}</span>
+            <span className="mlap-txn-sb">{trFl('fld.kTxnGal', { n: t.qty, b: t.gallonIn || 0 })} · <b className={payNow === 'bon' ? 'mlap-bontxt' : ''}>{trFl('fld.m_' + payNow)} {rp(t.effectiveAmount != null ? t.effectiveAmount : t.amount)}</b></span>
+          </span>
         </div>
         {t.pendingRequest ? (
           <FldNotice tone="warn" title={trFl('fld.kPendingT')} sub={trFl('fld.kPendingB')} action={onSaya ? trFl('fld.kSaya') : null} onAction={onSaya} />
@@ -77,54 +86,54 @@ function FldKoreksi({ api, target, can, onDone, onBack, onSaya }) {
         ) : (
           <>
             {t.kind === 'ganti_rugi' ? <FldNotice tone="info" title={trFl('fld.kOnlyVoid')} /> : null}
-            <div className="mlap-eyebrow">{trFl('fld.kWhat')}</div>
-            <div className="mlap-chips">{opts.map((k) => <button key={k} type="button" className={'mlap-chip-b' + (kind === k ? ' on' : '')} aria-pressed={kind === k} onClick={() => choose(k)}>{trFl('fld.ko_' + k)}</button>)}</div>
+            <div className="mlap-label">{trFl('fld.kWhat')}</div>
+            <div className="mlap-cats" style={{ gridTemplateColumns: 'repeat(' + opts.length + ', minmax(0, 1fr))' }}>
+              {opts.map((k) => <button key={k} type="button" className={'mlap-cat k' + (k === 'batal' ? ' danger' : '') + (kind === k ? ' on' : '')} aria-pressed={kind === k} onClick={() => choose(k)}><FldSvg n={FLD_KICO[k]} s={19} /><span>{trFl('fld.kt_' + k)}</span></button>)}
+            </div>
             {kind === 'jumlah' && (
               <div className="mlap-card">
-                <FldStepper label={trFl('fld.galOut')} value={qty} onChange={setQty} min={1} max={999} />
-                <FldStepper label={trFl('fld.galBack')} value={gIn} onChange={setGIn} min={0} max={999} />
+                <FldStepper label={trFl('fld.ki_out')} hint={trFl('fld.kWas', { n: t.qty })} value={qty} onChange={setQty} min={1} max={999} cls={qty !== t.qty ? 'chg' : ''} />
+                <FldStepper label={trFl('fld.galBack')} hint={trFl('fld.kWas', { n: t.gallonIn || 0 })} value={gIn} onChange={setGIn} min={0} max={999} cls={gIn !== (t.gallonIn || 0) ? 'chg' : ''} />
               </div>
             )}
             {kind === 'bayar' && (
-              <>
+              <div className="mlap-card mlap-cardsec">
+                <span className="mlap-cardsec-t">{trFl('fld.kShouldBe')} · {trFl('fld.kWasPay')} <b className={payNow === 'bon' ? 'mlap-bontxt' : ''}>{trFl('fld.m_' + payNow)}</b></span>
                 <FldSeg label={trFl('fld.ko_bayar')} value={pay} onChange={setPay} options={[['lunas', trFl('fld.m_lunas')], ['bon', trFl('fld.m_bon')], ['transfer', trFl('fld.m_transfer')]]} />
-                {needPhoto && (
-                  <>
-                    <div className="mlap-eyebrow">{trFl('fld.kTransferPhoto')} · {trFl('fld.required')}</div>
-                    <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.kTransferPhotoHint" />
-                  </>
-                )}
-              </>
-            )}
-            {kind === 'nominal' && <div className="mlap-card"><FldMoney label={trFl('fld.ko_nominal')} value={amount} onChange={setAmount} /></div>}
-            {kind === 'batal' && <FldNotice tone="warn" title={trFl('fld.kVoidNote')} />}
-            {kind === 'pelanggan' && <FldKoreksiCust api={api} t={t} fromId={target.customerId} value={toCust} onChange={setToCust} />}
-            {pv && kind === 'pelanggan' && (
-              <div className="mlap-card mlap-sum">
-                {[pv.fromCustomer, pv.toCustomer].map((c) => <div key={c.id} className="mlap-sumrow"><span>{trFl('fld.kMoveLine', { name: c.name, a: rp(c.sisaBonBefore), b: rp(c.sisaBonAfter), g: c.gallonsBefore, h: c.gallonsAfter })}</span></div>)}
               </div>
             )}
-            {pv && kind !== 'pelanggan' && (
-              <div className="mlap-card mlap-sum">
-                <div className="mlap-sumrow"><span>{trFl('fld.kAmountLine', { a: rp(pv.oldAmount), b: rp(pv.newAmount) })}</span></div>
-                <div className="mlap-sumrow"><span>{trFl('fld.kBonLine', { a: rp(pv.oldSisaBon), b: rp(pv.newSisaBon) })}</span></div>
-                {pv.wouldGoNegative ? <div className="mlap-warnline">{trFl('fld.kNegative')}</div> : null}
+            {kind === 'bayar' && needPhoto && (
+              <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.kTransferPhotoHint" title={trFl('fld.kTransferPhoto')} />
+            )}
+            {kind === 'nominal' && <div className="mlap-card"><FldMoney label={trFl('fld.ko_nominal')} value={amount} onChange={setAmount} /></div>}
+            {kind === 'batal' && <div className="mlap-voidcard" role="note"><FldSvg n="warn" s={18} sw={2.2} /><span>{trFl('fld.kVoidNote')}</span></div>}
+            {kind === 'pelanggan' && <FldKoreksiCust api={api} t={t} fromId={target.customerId} value={toCust} onChange={setToCust} />}
+            {kind && (
+              <div className="mlap-card mlap-impact">
+                <div className="mlap-impact-hd">{trFl('fld.kImpact')}</div>
+                {impact.length ? impact.map((r, i) => (
+                  <div key={i} className="mlap-improw"><span className="l">{trFl(r.key, { name: r.name })}</span><s>{fldValText(r.type, r.a)}</s><FldSvg n="arrowRight" s={12} sw={2.4} /><b>{fldValText(r.type, r.b)}</b></div>
+                )) : <div className="mlap-impact-none">{trFl('fld.kNoChange')}</div>}
+                {pv && pv.wouldGoNegative ? <div className="mlap-warnline">{trFl('fld.kNegative')}</div> : null}
               </div>
             )}
             {pvErr ? <div className="mlap-err" role="alert">{pvErr}</div> : null}
             {kind && (
-              <div className="mlap-card mlap-reason">
-                <b>{trFl('fld.kReasonT')}</b>
+              <>
+                <div className="mlap-label">{trFl('fld.kReasonL')}</div>
                 <FldChips options={FLD_KOREKSI_REASONS.map((k) => trFl(k)).concat([trFl('fld.r_other')])} otherLabel={trFl('fld.r_other')} value={reason} onChange={setReason} />
-              </div>
+              </>
             )}
-            {kind && kind !== 'batal' ? <div className="mlap-hint">{trFl('fld.kStaysValid')}</div> : null}
             {why ? <div className="mlap-hint">{trFl(why)}</div> : null}
             {msg && <div className="mlap-err" role="alert">{msg}</div>}
-            {kind && <button type="button" className={'mlap-btn mlap-wide ' + (kind === 'batal' ? 'danger' : 'primary')} disabled={busy || !!why || !!pvErr || !reason.trim()} onClick={send}>{trFl('fld.kSend')}</button>}
           </>
         )}
       </div>
+      {kind && !t.pendingRequest && opts.length ? (
+        <FldCtaBar hint={<span className="muted">{trFl('fld.kStaysValid')}</span>}>
+          <button type="button" className={'mlap-btn ' + (kind === 'batal' ? 'danger solid' : 'primary')} disabled={busy || !!why || !!pvErr || !reason.trim()} onClick={send}>{trFl(kind === 'batal' ? 'fld.kSendVoid' : 'fld.kSendFix')}</button>
+        </FldCtaBar>
+      ) : null}
     </div>
   );
 }
@@ -140,22 +149,20 @@ function FldKoreksiCust({ api, t, fromId, value, onChange }) {
   const near = q.trim() || !pt ? [] : FIELDLOGIC.nearCustomers(list, pt, fromId, 5);
   const rows = q.trim() ? FIELDLOGIC.customerList(list, { q, filter: 'all' }).rows.filter((c) => c.id !== fromId).slice(0, 40) : [];
   const row = (c, sub) => (
-    <button key={c.id} type="button" className={'mlap-row mlap-rowbtn' + (value && value.id === c.id ? ' on' : '')} aria-pressed={!!(value && value.id === c.id)} onClick={() => onChange(c)}>
+    <button key={c.id} type="button" className={'mlap-pickrow' + (value && value.id === c.id ? ' on' : '')} aria-pressed={!!(value && value.id === c.id)} onClick={() => onChange(c)}>
+      <span className="mlap-radio" aria-hidden="true" />
       <span className="mlap-grow"><span className="nm">{c.name}</span><span className="sb">{sub}</span></span>
     </button>
   );
+  const shown = q.trim() ? rows : near;
   return (
-    <>
-      {value ? <div className="mlap-card mlap-sec"><span className="sb">{trFl('fld.kMoveTo')}</span><b>{value.name}</b></div> : null}
-      {near.length > 0 && (
-        <>
-          <div className="mlap-eyebrow">{trFl('fld.kNear')}</div>
-          <div className="mlap-card">{near.map((c) => row(c, trFl('fld.kNearM', { m: c.meters })))}</div>
-        </>
-      )}
-      <input className="mlap-text mlap-search" type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
-      {rows.length > 0 && <div className="mlap-card">{rows.map((c) => row(c, c.code || ''))}</div>}
-    </>
+    <div className="mlap-card mlap-kcust">
+      <div className="mlap-kcust-t">{trFl('fld.kMoveTo')}</div>
+      <label className="mlap-searchbox gray"><FldSvg n="search" s={15} sw={2.2} /><input type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} /></label>
+      {!q.trim() && near.length ? <div className="mlap-kcust-sub">{trFl('fld.kNear')}</div> : null}
+      {value && !shown.some((c) => c.id === value.id) ? row(value, value.code || '') : null}
+      {q.trim() ? rows.map((c) => row(c, c.code || '')) : near.map((c) => row(c, [c.code, trFl('fld.kNearM', { m: c.meters })].filter(Boolean).join(' · ')))}
+    </div>
   );
 }
 

@@ -62,7 +62,7 @@ describe('Pelanggan salah', () => {
   it('previews both customers and sends a move request with the reason as its note', () => {
     const f = fn('FldKoreksi');
     expect(f).toMatch(/<FldKoreksiCust api=\{api\} t=\{t\} fromId=\{target\.customerId\} value=\{toCust\} onChange=\{setToCust\} \/>/);
-    expect(f).toMatch(/\[pv\.fromCustomer, pv\.toCustomer\]\.map/);
+    expect(f).toMatch(/FIELDLOGIC\.koreksiImpact\(\{ kind, t, change, pv \}\)/);   // 3D-2: both customers' rows come from the shared impact logic
     expect(f).toMatch(/api\.requestReassign\(\{ fromCustomerId: target\.customerId, toCustomerId: toCust\.id, transactionIds: \[t\.id\], priceMode: 'keep', note: text, reason: text \}\)/);
     expect(f).not.toContain('KOREKSI-PELANGGAN');
   });

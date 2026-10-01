@@ -386,3 +386,24 @@ describe('3D-2 bon settlement', () => {
     expect(L.settleBons(bons, null)).toEqual(['belum', 'belum']);
   });
 });
+
+describe('3D-2 koreksi impact', () => {
+  const t = { id: 't1', qty: 3, gallonIn: 2, method: 'bon', amount: 54000 };
+  it('gallon counts from the transaction, money from the server preview, raw values', () => {
+    expect(L.koreksiImpact({ kind: 'jumlah', t, change: { qty: 2, gallonIn: 2 }, pv: { oldAmount: 54000, newAmount: 36000, oldSisaBon: 54000, newSisaBon: 36000 } })).toEqual([
+      { key: 'fld.ki_out', a: 3, b: 2, type: 'n' },
+      { key: 'fld.ki_bill', a: 54000, b: 36000, type: 'rp' },
+      { key: 'fld.ki_bon', a: 54000, b: 36000, type: 'rp' },
+    ]);
+  });
+  it('a pay change names old and new; a cancel shows the status; a move shows both customers', () => {
+    expect(L.koreksiImpact({ kind: 'bayar', t, change: { pay: 'lunas' }, pv: null })).toEqual([{ key: 'fld.ki_pay', a: 'bon', b: 'lunas', type: 'pay' }]);
+    expect(L.koreksiImpact({ kind: 'batal', t, change: {} })).toEqual([{ key: 'fld.ki_status', a: 'aktif', b: 'batal', type: 'status' }]);
+    const pv = { fromCustomer: { name: 'A', sisaBonBefore: 54000, sisaBonAfter: 0, gallonsBefore: 4, gallonsAfter: 3 }, toCustomer: { name: 'B', sisaBonBefore: 0, sisaBonAfter: 54000, gallonsBefore: 5, gallonsAfter: 6 } };
+    expect(L.koreksiImpact({ kind: 'pelanggan', t, change: { toId: 'c2' }, pv })).toEqual([
+      { key: 'fld.ki_bonOf', name: 'A', a: 54000, b: 0, type: 'rp' }, { key: 'fld.ki_galOf', name: 'A', a: 4, b: 3, type: 'n' },
+      { key: 'fld.ki_bonOf', name: 'B', a: 0, b: 54000, type: 'rp' }, { key: 'fld.ki_galOf', name: 'B', a: 5, b: 6, type: 'n' },
+    ]);
+    expect(L.koreksiImpact({ kind: 'pelanggan', t, change: {}, pv: null })).toEqual([]);
+  });
+});
