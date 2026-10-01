@@ -6,7 +6,8 @@
    The bundle shares one scope across files, so every top-level name here is unique (Fld*, *fl). */
 // Releasing makes this the main view for EVERY field account. Locked until the full field screens
 // (Plan 3) replace the foundation stub; flip to true then. Un-releasing is always allowed.
-const FLD_SCREENS_READY = false;
+// 3C: all screens built (day, customers, manual inputs, koreksi).
+const FLD_SCREENS_READY = true;
 
 function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, onExit, onPref, onOpenRules }) {
   const mode = pref.mode;
@@ -270,7 +271,11 @@ function FldRules({ fleetList, canRelease, onSaved }) {
       body = { ritSop: r.ritSop, fleetCapacity: fc, wajibFotoTransaksi: !!r.wajibFotoTransaksi, wajibFotoPengeluaran: !!r.wajibFotoPengeluaran, wajibAlasanBatal: !!r.wajibAlasanBatal, hargaGantiRugiGalon: r.hargaGantiRugiGalon || 0 };
     }
     window.API.distribusi.fieldRules.set(body)
-      .then((x) => { got(x.data); setDone(trFl('fld.saved')); setTimeout(() => setDone(''), 2400); if (onSaved) onSaved(x.data); })
+      .then((x) => {
+        // the release switch alone: keep every other edit still unsaved on this screen
+        if (patch && patch.fieldUiDefault !== undefined) { setR((cur) => Object.assign({}, cur, { fieldUiDefault: x.data.fieldUiDefault })); } else got(x.data);
+        setDone(trFl('fld.saved')); setTimeout(() => setDone(''), 2400); if (onSaved) onSaved(x.data);
+      })
       .catch((e) => setErr(fldErrMsg(e)))
       .finally(() => setBusy(false));
   };

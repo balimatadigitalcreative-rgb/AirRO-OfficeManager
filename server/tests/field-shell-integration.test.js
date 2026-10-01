@@ -36,3 +36,8 @@ it('the rules cap is in the permission editor; withdrawn has a badge colour', ()
 it('the field UI receives the user\'s caps (to show only the actions they may use)', () => {
   expect(shell).toMatch(/<window\.FIELD\.App user=\{user\} perms=\{p\} pref=\{fieldPref\}/);
 });
+
+it('Plan 3C: after release the board card no longer calls the field view a demo', () => {
+  expect(shell).toMatch(/\{tr\(fieldPref\.released \? 'fld\.fieldView' : 'fld\.tryNew'\)\}/);
+  expect(shell).toMatch(/\{tr\(fieldPref\.released \? 'fld\.fieldViewSub' : 'fld\.tryNewSub'\)\}/);
+});

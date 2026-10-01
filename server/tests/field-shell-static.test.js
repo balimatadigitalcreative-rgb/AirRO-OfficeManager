@@ -38,11 +38,14 @@ it('the old view stays reachable from the menu, also after release (spec 5: masa
   expect(jsx).toMatch(/onClick=\{\(\) => \{ setMenu\(false\); onExit\(\); \}\}>\{trFl\('fld\.backOld'\)\}/);
   expect(jsx).not.toMatch(/!pref\.released && <button[^\n]*fld\.backOld/);
 });
-it('releasing is locked while the field screens are still the foundation stub; un-releasing never is', () => {
-  expect(jsx).toMatch(/^const FLD_SCREENS_READY = false;/m);
+it('the screens are ready: releasing is open (owner only, confirmed); un-releasing stays open', () => {
+  expect(jsx).toMatch(/^const FLD_SCREENS_READY = true;/m);
   expect(jsx).toMatch(/className="mlap-btn danger" disabled=\{busy \|\| !FLD_SCREENS_READY\}/);
-  expect(jsx).toMatch(/!FLD_SCREENS_READY && <small>\{trFl\('fld\.releaseLater'\)\}<\/small>/);
   expect(jsx).toMatch(/className="mlap-btn" disabled=\{busy\} onClick=\{\(\) => setAsk\('old'\)\}/);
+});
+it('releasing changes only the release switch — other unsaved edits on the rules screen stay', () => {
+  const f = jsx.slice(jsx.indexOf('function FldRules('));
+  expect(f).toMatch(/if \(patch && patch\.fieldUiDefault !== undefined\) \{ setR\(\(cur\) => Object\.assign\(\{\}, cur, \{ fieldUiDefault: x\.data\.fieldUiDefault \}\)\); \} else got\(x\.data\);/);
 });
 it('rules are saved through the untagged owner API, never the adaptor', () => {
   const rules = jsx.slice(jsx.indexOf('function FldRules('));

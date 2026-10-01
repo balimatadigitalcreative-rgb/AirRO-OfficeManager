@@ -1841,8 +1841,8 @@ function FApp() {
           )}
           {screen === 'dist-deliveries' && p.distribusiPengiriman && !(fieldPref.ui === 'new' && window.FIELD) && (
             <>
-              {fieldPref.eligible && <div className="fld-try" role="region" aria-label={tr('fld.tryNew')}>
-                <span><b>{tr('fld.tryNew')}</b><br /><small>{tr('fld.tryNewSub')}</small></span>
+              {fieldPref.eligible && <div className="fld-try" role="region" aria-label={tr(fieldPref.released ? 'fld.fieldView' : 'fld.tryNew')}>
+                <span><b>{tr(fieldPref.released ? 'fld.fieldView' : 'fld.tryNew')}</b><br /><small>{tr(fieldPref.released ? 'fld.fieldViewSub' : 'fld.tryNewSub')}</small></span>
                 <button type="button" className="btn btn-primary" onClick={() => setFieldPref({ ui: 'new' })}>{tr('fld.tryNewBtn')}</button>
               </div>}
               <DIST.Deliveries refreshKey={distTick} today={FIN.TODAY} canOrder={!!p.distribusiOrder} canRoute={!!p.distribusiRute} canClose={!!p.distribusiPengiriman} canKoreksi={!!p.distribusiKoreksi}
