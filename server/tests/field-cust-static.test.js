@@ -72,3 +72,21 @@ describe('Pembayaran bon', () => {
     expect(f).toMatch(/\['tunai', trFl\('fld\.m_tunai'\)\], \['transfer', trFl\('fld\.m_transfer'\)\]/);
   });
 });
+
+describe('Penyesuaian + Ganti rugi', () => {
+  it('adjustment: reasons from the shared list, waits for the office', () => {
+    const f = fn('FldAdjust');
+    expect(f).toMatch(/FIELDLOGIC\.ADJ_REASON_KEYS/);
+    expect(f).toMatch(/api\.adjustGallon\(c\.id, FIELDLOGIC\.adjustBody\(/);
+    expect(f).toContain("'fld.adjWaits'");
+    expect(f).toMatch(/disabled=\{busy \|\| !reasonKey \|\| diff === 0\}/);
+  });
+  it('damage: price from the owner\'s rules, explained when missing, photo required, clientRef, no approval', () => {
+    const f = fn('FldDamage');
+    expect(f).toMatch(/const pv = FIELDLOGIC\.damagePreview\(\{ qty, price: rules\.hargaGantiRugiGalon, held, payMethod: pay \}\);/);
+    expect(f).toMatch(/pv\.blocked \? <FldNotice tone="warn" title=\{trFl\(pv\.blocked\)\}/);
+    expect(f).toMatch(/disabled=\{busy \|\| !!pv\.blocked \|\| !kind \|\| !photo\}/);
+    expect(f).toMatch(/clientRef: refRef\.current/);
+    expect(f).toContain("'fld.dmgNoApproval'");
+  });
+});
