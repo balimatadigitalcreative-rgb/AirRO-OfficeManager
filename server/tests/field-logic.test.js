@@ -151,3 +151,78 @@ describe('final review fixes', () => {
     expect(L.stepInput('5000', 0, 120)).toEqual({ draft: '120', value: 120 });
   });
 });
+
+describe('Plan 3B logic', () => {
+  it('newRef is long and unique', () => {
+    const a = L.newRef(); const b = L.newRef();
+    expect(a.length).toBeGreaterThanOrEqual(16); expect(a).not.toBe(b);
+  });
+  const custs = [
+    { id: '1', name: 'Warung Bu Sari', code: 'C-0516', phone: '0812', lat: 1, lng: 2, locationPhotoId: null, sisaBon: 126000, fixedDays: false, active: true },
+    { id: '2', name: 'Hotel Sanur Asri', code: 'C-0402', phone: '0813', lat: 1, lng: 2, locationPhotoId: 'p', sisaBon: 0, fixedDays: true, active: true },
+    { id: '3', name: 'Pak Wayan', code: 'C-0511', phone: '', lat: null, lng: null, locationPhotoId: null, sisaBon: 45000, fixedDays: false, active: true },
+  ];
+  it('customerList: counts, filters, search by name / code / phone digits, sorted by name', () => {
+    const all = L.customerList(custs, { q: '', filter: 'all' });
+    expect(all.counts).toEqual({ all: 3, warn: 2, bon: 2, fixed: 1 });
+    expect(all.rows.map((r) => r.id)).toEqual(['2', '3', '1']);
+    expect(L.customerList(custs, { filter: 'warn' }).rows.map((r) => r.id)).toEqual(['3', '1']);
+    expect(L.customerList(custs, { filter: 'fixed' }).rows.map((r) => r.id)).toEqual(['2']);
+    expect(L.customerList(custs, { q: 'c-0511' }).rows.map((r) => r.id)).toEqual(['3']);
+    expect(L.customerList(custs, { q: '0813' }).rows.map((r) => r.id)).toEqual(['2']);
+  });
+  it('openBons: payments settle the oldest bon first', () => {
+    const txns = [
+      { id: 'p1', txnDate: '2026-09-25', method: 'pelunasan', amount: 9000, status: 'active' },
+      { id: 'b2', txnDate: '2026-09-23', method: 'bon', qty: 3, effectiveAmount: 54000, status: 'active' },
+      { id: 'b1', txnDate: '2026-09-16', method: 'bon', qty: 1, effectiveAmount: 18000, status: 'active' },
+      { id: 'bv', txnDate: '2026-09-10', method: 'bon', qty: 9, effectiveAmount: 99000, status: 'void' },
+    ];
+    expect(L.openBons(txns)).toEqual([
+      { id: 'b1', txnDate: '2026-09-16', qty: 1, amount: 9000, partial: true },
+      { id: 'b2', txnDate: '2026-09-23', qty: 3, amount: 54000, partial: false },
+    ]);
+  });
+  it('payPreview: never more than the bon', () => {
+    expect(L.payPreview({ sisaBon: 45000, pay: 20000 })).toEqual({ rest: 25000, over: 0, ok: true });
+    expect(L.payPreview({ sisaBon: 45000, pay: 50000 })).toEqual({ rest: 0, over: 5000, ok: false });
+    expect(L.payPreview({ sisaBon: 45000, pay: 0 }).ok).toBe(false);
+  });
+  it('adjustBody maps the shown reason to the server list and keeps the shown words in the note', () => {
+    expect(L.adjustBody({ counted: 8, reasonKey: 'fld.adj_kembali', reasonLabel: 'Dikembalikan pelanggan', note: '2 galon', photo: { id: 'p9' } }))
+      .toEqual({ value: 8, reason: 'rekonsiliasi_fisik', note: 'Dikembalikan pelanggan · 2 galon', evidenceUrl: 'p9' });
+    expect(L.adjustBody({ counted: 5, reasonKey: 'fld.adj_salah', reasonLabel: 'Salah input kemarin', note: '', photo: null }))
+      .toEqual({ value: 5, reason: 'salah_input', note: 'Salah input kemarin' });
+  });
+  it('damagePreview explains instead of failing', () => {
+    expect(L.damagePreview({ qty: 2, price: 45000, held: 6, payMethod: 'tunai' })).toEqual({ total: 90000, heldAfter: 4, blocked: '', totalKey: 'fld.cashIn' });
+    expect(L.damagePreview({ qty: 1, price: 0, held: 6, payMethod: 'tunai' }).blocked).toBe('fld.dmgNoPrice');
+    expect(L.damagePreview({ qty: 1, price: 45000, held: 0, payMethod: 'bon' }).blocked).toBe('fld.dmgNoHeld');
+    expect(L.damagePreview({ qty: 1, price: 45000, held: 3, payMethod: 'bon' }).totalKey).toBe('fld.toBon');
+  });
+  it('expenseBody: cash is implied, fuel litres + odometer go into the note', () => {
+    expect(L.expenseBody({ category: 'bensin', amount: 150000, liters: '15', odometer: '45210', note: 'Pertalite', photo: { id: 'p1' } }))
+      .toEqual({ amount: 150000, category: 'bensin', note: '15 L · odometer 45210 km · Pertalite', photoId: 'p1' });
+    expect(L.expenseBody({ category: 'parkir', amount: 5000, note: '', photo: null })).toEqual({ amount: 5000, category: 'parkir', note: '' });
+  });
+  it('pinMove: metres from the phone and the 150 m warning', () => {
+    expect(L.pinMove({ device: null, pin: { lat: 1, lng: 1 } })).toEqual({ meters: null, far: false });
+    const near = L.pinMove({ device: { lat: -8.65, lng: 115.2 }, pin: { lat: -8.6505, lng: 115.2 } });
+    expect(near.meters).toBeGreaterThan(50); expect(near.meters).toBeLessThan(60); expect(near.far).toBe(false);
+    expect(L.pinMove({ device: { lat: -8.65, lng: 115.2 }, pin: { lat: -8.652, lng: 115.2 } }).far).toBe(true);
+  });
+  it('addStopCandidates: today\'s stops without a pin + active customers not on today\'s board', () => {
+    const board = [{ id: 's1', customerId: '3', status: 'pending', lat: null, lng: null }, { id: 's2', customerId: '1', status: 'pending', lat: 1, lng: 2 }];
+    const r = L.addStopCandidates({ board, customers: custs.concat([{ id: '4', name: 'Nonaktif', active: false }]), q: '' });
+    expect(r.noPin.map((s) => s.id)).toEqual(['s1']);
+    expect(r.others.map((c) => c.id)).toEqual(['2']);
+    expect(L.addStopCandidates({ board, customers: custs, q: 'zzz' }).others).toEqual([]);
+  });
+  it('a manual sale (no stop) is created once and never marks a stop', async () => {
+    let marks = 0;
+    const api = { createSale: () => Promise.resolve({ id: 't1' }), markStop: () => { marks += 1; return Promise.resolve(); } };
+    expect(await L.recordSale(api, { stopId: null, body: {} })).toEqual({ txnId: 't1', done: true });
+    expect(marks).toBe(0);
+    expect(L.saleBody({ customerId: 'c', qty: 1, gallonIn: 0, method: 'lunas', photo: null, clientRef: 'r-123456789' }).clientRef).toBe('r-123456789');
+  });
+});
