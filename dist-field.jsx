@@ -119,12 +119,13 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   const ACTION_VIEW = { catatSale: { name: 'pick', act: 'sale' }, catatBon: { name: 'pick', act: 'bon' }, catatExp: { name: 'exp' }, catatStop: { name: 'addStop' }, catatAdj: { name: 'pick', act: 'adjust' }, catatDmg: { name: 'pick', act: 'damage' } };
   // a customer chosen for an action → the action's screen
   const openFor = (act, c) => {
+    if (act === 'koreksi') { setView({ name: 'koreksi', target: c }); return; }
     if (act !== 'sale') { setView(act === 'addStop' ? { name: 'addStop', preset: c } : { name: act, cust: c }); return; }
     // a customer with a pending stop today is sold THROUGH that stop (marked delivered, never sold twice)
     api.board().then((board) => FIELDLOGIC.saleStopFor({ board, customer: c, demand: ctx.demand })).catch(() => null)
       .then((s) => setView({ name: 'sale', stop: s || fldSaleStopFromCust(c) }));
   };
-  const full = view && ['sale', 'run', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin'].includes(view.name);   // full-screen task: no tab header/dock
+  const full = view && ['sale', 'run', 'pick', 'bon', 'adjust', 'damage', 'exp', 'addStop', 'complete', 'pin', 'koreksi', 'koreksiSaya'].includes(view.name);   // full-screen task: no tab header/dock
 
   let body = null;
   if (err) {
@@ -142,7 +143,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
   } else if (tab === 'peta') {
     body = <FldRoute api={api} ctx={ctx} tick={tick} onOpenRun={() => setView({ name: 'run' })} />;
   } else if (tab === 'setoran') {
-    body = <FldSetoran api={api} ctx={ctx} tick={tick} onChanged={(m) => done(m)} />;
+    body = <FldSetoran api={api} ctx={ctx} tick={tick} canKoreksi={can.correct || can.void} onKoreksiSaya={() => setView({ name: 'koreksiSaya' })} onChanged={(m) => done(m)} />;
   } else {
     body = <FldCustomers api={api} tick={tick} onOpen={(c) => setView({ name: 'cust', cust: c })} />;
   }
@@ -164,6 +165,8 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       {ready && full && view.name === 'addStop' && <FldAddStop api={api} preset={view.preset} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'complete' && <FldComplete api={api} cust={view.cust} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} depot={ctx.depot} onDone={(m) => { if (view.back) { setView(view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
+      {ready && full && view.name === 'koreksi' && <FldKoreksi api={api} target={view.target} can={can} onDone={(m) => { setView({ name: 'koreksiSaya' }); flash(m); setCtxTick((t) => t + 1); }} onBack={() => setView(null)} onSaya={() => setView({ name: 'koreksiSaya' })} />}
+      {ready && full && view.name === 'koreksiSaya' && <FldKoreksiSaya api={api} tick={tick} onResubmit={(tg) => setView({ name: 'koreksi', target: tg })} onBack={() => setView(null)} onChanged={(m) => { flash(m); setCtxTick((t) => t + 1); }} />}
       {!full && (
         <>
           <div className="mlap-head">
@@ -219,6 +222,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
               ? <button type="button" className="mlap-menu-item" onClick={() => askSwitch('asli')}>{trFl('fld.useAsli')}</button>
               : <button type="button" className="mlap-menu-item" onClick={() => askSwitch('latihan')}>{trFl('fld.useLatihan')}</button>)}
             {mode === 'latihan' && api && <button type="button" className="mlap-menu-item" onClick={askReset}>{trFl('fld.resetLatihan')}</button>}
+            {(can.correct || can.void) && <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); setView({ name: 'koreksiSaya' }); }}>{trFl('fld.kSaya')}</button>}
             {onOpenRules && <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onOpenRules(); }}>{trFl('fld.rules')}</button>}
             <button type="button" className="mlap-menu-item" onClick={() => { setMenu(false); onExit(); }}>{trFl('fld.backOld')}</button>
           </div>

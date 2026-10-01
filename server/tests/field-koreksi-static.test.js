@@ -67,3 +67,18 @@ describe('Pelanggan salah', () => {
     expect(f).not.toContain('KOREKSI-PELANGGAN');
   });
 });
+
+describe('Koreksi saya', () => {
+  const f = () => fn('FldKoreksiSaya');
+  it('lists the driver\'s own requests with their status, what was asked, and the office note', () => {
+    expect(f()).toMatch(/api\.myChangeRequests\(\)/);
+    expect(f()).toMatch(/const v = FIELDLOGIC\.requestView\(r\);/);
+    expect(f()).toMatch(/r\.decisionNote \?/);
+  });
+  it('withdraw only while waiting (after a confirm); resubmit a rejected or withdrawn one', () => {
+    expect(f()).toMatch(/v\.canWithdraw \?/);
+    expect(f()).toMatch(/api\.withdrawRequest\(ask\.id\)/);
+    expect(f()).toMatch(/v\.canResubmit && v\.target\.transactionId \?/);
+    expect(f()).toMatch(/onResubmit\(v\.target\)/);
+  });
+});

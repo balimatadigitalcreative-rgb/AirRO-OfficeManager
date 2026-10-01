@@ -194,7 +194,9 @@ function FldStopSheet({ api, stop: s, can, onClose, onSale, onAction, onChanged 
           </div>
         )}
         {(s.status === 'ditunda' || s.status === 'batal') && <button type="button" className="mlap-btn mlap-wide" disabled={busy} onClick={reopen}>{trFl('fld.reopen')}</button>}
-        {s.status === 'terkirim' && <div className="mlap-note">{trFl('fld.doneNote')}</div>}
+        {s.status === 'terkirim' && s.transactionId && (can.correct || can.void)
+          ? <button type="button" className="mlap-btn mlap-wide" onClick={() => onAction('koreksi', { transactionId: s.transactionId, customerId: s.customerId })}>{trFl('fld.koreksiT')}</button>
+          : s.status === 'terkirim' ? <div className="mlap-note">{trFl('fld.doneNote')}</div> : null}
       </div>
     </>
   );
@@ -470,7 +472,7 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
 // SETORAN / SELESAI KERJA — the day's money and gallons from the server's day summary (the same figures
 // as the delivery report), then "close the day": every stop still waiting needs a reason (it moves to
 // Tunda and carries over). Pending corrections never block closing.
-function FldSetoran({ api, ctx, tick, onChanged }) {
+function FldSetoran({ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged }) {
   const [d, setD] = uSfl(null);
   const [err, setErr] = uSfl(null);
   const [reasons, setReasons] = uSfl({});
@@ -478,6 +480,7 @@ function FldSetoran({ api, ctx, tick, onChanged }) {
   const [busy, setBusy] = uSfl(false);
   const [msg, setMsg] = uSfl('');
   const [reload, setReload] = uSfl(0);
+  const [askRe, setAskRe] = uSfl(false);
   uEfl(() => {
     let live = true; setErr(null);
     Promise.all([api.daySummary(), api.board()]).then(([sum, board]) => { if (live) setD({ sum, board }); }).catch((e) => { if (live) setErr(e); });
@@ -506,7 +509,9 @@ function FldSetoran({ api, ctx, tick, onChanged }) {
         <span><b>{sum.stops.ditunda}</b><span className="sb">{trFl('fld.k_tunda')}</span></span>
         <span><b>{sum.stops.batal}</b><span className="sb">{trFl('fld.k_batal')}</span></span>
       </div>
-      {sum.koreksiMenunggu > 0 ? <FldNotice tone="info" title={trFl('fld.koreksiWait', { n: sum.koreksiMenunggu })} sub={trFl('fld.koreksiWaitB')} /> : null}
+      {sum.koreksiMenunggu > 0 ? <FldNotice tone="info" title={trFl('fld.koreksiWait', { n: sum.koreksiMenunggu })} sub={trFl('fld.koreksiWaitB')} action={canKoreksi ? trFl('fld.kSaya') : null} onAction={onKoreksiSaya} /> : null}
+      {canKoreksi && !(sum.koreksiMenunggu > 0) ? <button type="button" className="mlap-btn mlap-wide" onClick={onKoreksiSaya}>{trFl('fld.kSaya')}</button> : null}
+      {sum.closeout ? <FldNotice tone="ok" title={trFl('fld.dayClosedT', { t: new Date(sum.closeout.closedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }), by: sum.closeout.closedByName ? ' · ' + sum.closeout.closedByName : '' })} sub={trFl('fld.dayClosedB')} /> : null}
       {rs.open ? <FldNotice tone="warn" title={trFl('fld.openRunWarn', { n: rs.open.runNo })} /> : null}
       <div className="mlap-card mlap-sum">
         {rows.map(([k, v, tone]) => <div key={k} className="mlap-sumrow"><span>{trFl(k)}</span><span className={tone === 'bon' ? 'mlap-bontxt' : ''}>{FIELDLOGIC.fmtRp(v)}</span></div>)}
@@ -543,7 +548,8 @@ function FldSetoran({ api, ctx, tick, onChanged }) {
       )}
       <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 500))} placeholder={trFl('fld.generalNote')} aria-label={trFl('fld.generalNote')} />
       {msg && <div className="mlap-err" role="alert">{msg}</div>}
-      <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !chk.ok} onClick={close}>{trFl('fld.closeDay')}</button>
+      <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !chk.ok} onClick={() => (sum.closeout ? setAskRe(true) : close())}>{trFl(sum.closeout ? 'fld.reclose' : 'fld.closeDay')}</button>
+      {askRe && <FldSheet title={trFl('fld.recloseT')} body={trFl('fld.recloseB')} confirmLabel={trFl('fld.reclose')} onClose={() => setAskRe(false)} onConfirm={() => { setAskRe(false); close(); }} />}
     </>
   );
 }

@@ -157,3 +157,18 @@ it('Final fix: the sale keeps ONE clientRef per stop/customer until saved, and s
   expect(f).toMatch(/refs\.done\(slot\);/);
   expect(f).toMatch(/r\.replay \? 'fld\.replayed' : 'fld\.saleDone'/);
 });
+
+describe('Plan 3C: day screens', () => {
+  it('a delivered stop with a sale offers Koreksi to an account that may correct or cancel', () => {
+    const f = fn('FldStopSheet');
+    expect(f).toMatch(/s\.status === 'terkirim' && s\.transactionId && \(can\.correct \|\| can\.void\)/);
+    expect(f).toMatch(/onAction\('koreksi', \{ transactionId: s\.transactionId, customerId: s\.customerId \}\)/);
+  });
+  it('Setoran opens Koreksi saya, says the day is already closed, and asks before closing again', () => {
+    const f = fn('FldSetoran');
+    expect(f).toMatch(/function FldSetoran\(\{ api, ctx, tick, canKoreksi, onKoreksiSaya, onChanged \}\)/);
+    expect(f).toMatch(/canKoreksi \?/);
+    expect(f).toMatch(/sum\.closeout \?/);
+    expect(f).toMatch(/onClick=\{\(\) => \(sum\.closeout \? setAskRe\(true\) : close\(\)\)\}/);
+  });
+});

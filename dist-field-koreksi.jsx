@@ -158,3 +158,53 @@ function FldKoreksiCust({ api, t, fromId, value, onChange }) {
     </>
   );
 }
+
+// KOREKSI SAYA — the driver's own requests (newest first): what was asked, its status, the office's
+// note. A waiting one can be withdrawn (after a confirm); a rejected or withdrawn one can be sent again.
+function FldKoreksiSaya({ api, tick, onResubmit, onBack, onChanged }) {
+  const [list, setList] = uSfl(null);
+  const [err, setErr] = uSfl(null);
+  const [ask, setAsk] = uSfl(null);
+  const [busy, setBusy] = uSfl(false);
+  const [reload, setReload] = uSfl(0);
+  uEfl(() => {
+    let live = true; setErr(null);
+    api.myChangeRequests().then((r) => { if (live) setList(r || []); }).catch((e) => { if (live) setErr(e); });
+    return () => { live = false; };
+  }, [api, tick, reload]);
+  const withdraw = () => {
+    setBusy(true);
+    api.withdrawRequest(ask.id).then(() => { setAsk(null); setReload((x) => x + 1); onChanged(trFl('fld.kWithdrawn')); })
+      .catch((e) => { setAsk(null); setErr(e); }).finally(() => setBusy(false));
+  };
+  const line = ([k, v]) => trFl(k, k === 'fld.rl_pay' ? { a: trFl('fld.m_' + v.a), b: trFl('fld.m_' + v.b) } : k === 'fld.rl_amount' ? { a: FIELDLOGIC.fmtRp(v.a), b: FIELDLOGIC.fmtRp(v.b) } : v);
+  return (
+    <div className="mlap-screen">
+      <FldTop title={trFl('fld.kSaya')} onBack={onBack} />
+      <div className="mlap-body">
+        {err ? <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /> : null}
+        {!list && !err ? <div className="mlap-empty">{trFl('fld.loading')}</div> : null}
+        {list && !list.length ? <div className="mlap-empty">{trFl('fld.kSayaEmpty')}</div> : null}
+        {list && list.map((r) => {
+          const v = FIELDLOGIC.requestView(r);
+          return (
+            <div key={r.id} className="mlap-card mlap-sec">
+              <div className="mlap-row">
+                <span className="mlap-grow"><span className="nm">{r.customerName || r.fromCustomerName || '—'}</span><span className="sb">{[trFl(v.kindKey), r.txnRef, r.txnDate].filter(Boolean).join(' · ')}</span></span>
+                <span className={'mlap-tag ' + v.tone}>{trFl(v.statusKey)}</span>
+              </div>
+              {v.lines.map((l) => <span key={l[0]} className="sb">{line(l)}</span>)}
+              {r.reason ? <span className="sb">{r.reason}</span> : null}
+              {r.decisionNote ? <span className="sb"><b>{trFl('fld.kOfficeNote', { note: r.decisionNote })}</b></span> : null}
+              <div className="mlap-actions">
+                {v.canWithdraw ? <button type="button" className="mlap-btn" disabled={busy} onClick={() => setAsk(r)}>{trFl('fld.kWithdraw')}</button> : null}
+                {v.canResubmit && v.target.transactionId ? <button type="button" className="mlap-btn primary" onClick={() => onResubmit(v.target)}>{trFl('fld.kResubmit')}</button> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {ask && <FldSheet title={trFl('fld.kWithdrawT')} body={trFl('fld.kWithdrawB')} confirmLabel={trFl('fld.kWithdraw')} danger onClose={() => setAsk(null)} onConfirm={withdraw} />}
+    </div>
+  );
+}

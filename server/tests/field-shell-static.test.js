@@ -136,3 +136,14 @@ describe('Final review fixes (shell)', () => {
     expect(jsx).toMatch(/<FldAdjust api=\{api\} cust=\{view\.cust\} needsApproval=\{ctx\.galonNeedsApproval\}/);
   });
 });
+
+describe('Plan 3C shell', () => {
+  it('Koreksi and Koreksi saya are full-screen views opened from the stop sheet, Setoran and the menu', () => {
+    expect(jsx).toMatch(/if \(act === 'koreksi'\) \{ setView\(\{ name: 'koreksi', target: c \}\); return; \}/);
+    expect(jsx).toMatch(/<FldKoreksi api=\{api\} target=\{view\.target\} can=\{can\}/);
+    expect(jsx).toMatch(/<FldKoreksiSaya api=\{api\} tick=\{tick\}/);
+    expect(jsx).toMatch(/'koreksi', 'koreksiSaya'\]\.includes\(view\.name\)/);
+    expect(jsx).toMatch(/<FldSetoran api=\{api\} ctx=\{ctx\} tick=\{tick\} canKoreksi=\{can\.correct \|\| can\.void\} onKoreksiSaya=\{\(\) => setView\(\{ name: 'koreksiSaya' \}\)\}/);
+    expect(jsx).toMatch(/\(can\.correct \|\| can\.void\) && <button type="button" className="mlap-menu-item" onClick=\{\(\) => \{ setMenu\(false\); setView\(\{ name: 'koreksiSaya' \}\); \}\}>/);
+  });
+});
