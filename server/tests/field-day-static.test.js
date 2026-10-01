@@ -94,3 +94,17 @@ describe('Rute rit / Peta', () => {
     expect(f()).toMatch(/OpenStreetMap<\/a>/);
   });
 });
+
+describe('Setoran', () => {
+  const f = () => fn('FldSetoran');
+  it('figures come from the day summary; transfer is shown but not deposited', () => {
+    expect(f()).toMatch(/Promise\.all\(\[api\.daySummary\(\), api\.board\(\)\]\)/);
+    ['fld.s_tunai', 'fld.s_pelunasan', 'fld.s_transfer', 'fld.s_bon', 'fld.s_gantiRugi', 'fld.s_expense', 'fld.s_setor'].forEach((k) => expect(f()).toContain("'" + k + "'"));
+    expect(f()).toMatch(/sum\.wajibSetor/);
+  });
+  it('closing the day needs a reason for every unfinished stop', () => {
+    expect(f()).toMatch(/const chk = FIELDLOGIC\.closeCheck\(pending, reasons\);/);
+    expect(f()).toMatch(/disabled=\{busy \|\| !chk\.ok\}/);
+    expect(f()).toMatch(/api\.closeDay\(\{ reasons: picked, generalNote: note\.trim\(\) \}\)/);
+  });
+});

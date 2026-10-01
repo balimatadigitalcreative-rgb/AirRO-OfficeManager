@@ -445,3 +445,84 @@ function FldRoute({ api, ctx, tick, onOpenRun }) {
     </>
   );
 }
+
+// SETORAN / SELESAI KERJA — the day's money and gallons from the server's day summary (the same figures
+// as the delivery report), then "close the day": every stop still waiting needs a reason (it moves to
+// Tunda and carries over). Pending corrections never block closing.
+function FldSetoran({ api, ctx, tick, onChanged }) {
+  const [d, setD] = uSfl(null);
+  const [err, setErr] = uSfl(null);
+  const [reasons, setReasons] = uSfl({});
+  const [note, setNote] = uSfl('');
+  const [busy, setBusy] = uSfl(false);
+  const [msg, setMsg] = uSfl('');
+  const [reload, setReload] = uSfl(0);
+  uEfl(() => {
+    let live = true; setErr(null);
+    Promise.all([api.daySummary(), api.board()]).then(([sum, board]) => { if (live) setD({ sum, board }); }).catch((e) => { if (live) setErr(e); });
+    return () => { live = false; };
+  }, [api, tick, reload]);
+  if (err) return <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} />;
+  if (!d) return <div className="mlap-empty">{trFl('fld.loading')}</div>;
+  const sum = d.sum;
+  const pending = d.board.filter((s) => s.status === 'pending');
+  const chk = FIELDLOGIC.closeCheck(pending, reasons);
+  const rs = FIELDLOGIC.runState({ today: ctx.today, openRun: ctx.openRun, runs: [] });
+  const opts = FLD_HOLD_REASONS.map((k) => trFl(k));
+  const rows = [['fld.s_tunai', sum.tunaiPenjualan], ['fld.s_pelunasan', sum.tunaiPelunasan], ['fld.s_transfer', sum.transfer], ['fld.s_bon', sum.bonBaru, 'bon'], ['fld.s_gantiRugi', sum.tunaiGantiRugi]];
+  const close = () => {
+    setBusy(true); setMsg('');
+    const picked = {}; pending.forEach((s) => { picked[s.id] = String(reasons[s.id] || '').trim(); });
+    api.closeDay({ reasons: picked, generalNote: note.trim() })
+      .then(() => { setReasons({}); setReload((x) => x + 1); onChanged(trFl('fld.dayClosed')); })
+      .catch((e) => setMsg(fldErrMsg(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <>
+      <div className="mlap-card mlap-kpis">
+        <span><b>{sum.stops.terkirim}</b><span className="sb">{trFl('fld.k_terkirim')}</span></span>
+        <span><b>{sum.stops.ditunda}</b><span className="sb">{trFl('fld.k_tunda')}</span></span>
+        <span><b>{sum.stops.batal}</b><span className="sb">{trFl('fld.k_batal')}</span></span>
+      </div>
+      {sum.koreksiMenunggu > 0 ? <FldNotice tone="info" title={trFl('fld.koreksiWait', { n: sum.koreksiMenunggu })} sub={trFl('fld.koreksiWaitB')} /> : null}
+      {rs.open ? <FldNotice tone="warn" title={trFl('fld.openRunWarn', { n: rs.open.runNo })} /> : null}
+      <div className="mlap-card mlap-sum">
+        {rows.map(([k, v, tone]) => <div key={k} className="mlap-sumrow"><span>{trFl(k)}</span><span className={tone === 'bon' ? 'mlap-bontxt' : ''}>{FIELDLOGIC.fmtRp(v)}</span></div>)}
+        <div className="mlap-sumrow"><span>{trFl('fld.s_expense')}</span><span>{FIELDLOGIC.fmtRp(-sum.pengeluaran)}</span></div>
+        <div className="mlap-sumrow total"><span>{trFl('fld.s_setor')}</span><b>{FIELDLOGIC.fmtRp(sum.wajibSetor)}</b></div>
+      </div>
+      <div className="mlap-card mlap-kpis">
+        <span><b>{sum.galon.keluar}</b><span className="sb">{trFl('fld.g_out')}</span></span>
+        <span><b>{sum.galon.kembali}</b><span className="sb">{trFl('fld.g_back')}</span></span>
+        <span><b>{sum.galon.rusak}</b><span className="sb">{trFl('fld.g_rusak')}</span></span>
+      </div>
+      {sum.ritDiBawahSop.length > 0 && (
+        <>
+          <div className="mlap-eyebrow">{trFl('fld.sopRuns')}</div>
+          <div className="mlap-card">{sum.ritDiBawahSop.map((r) => <div key={r.runNo} className="mlap-row"><span className="mlap-grow sb">{trFl('fld.sopRunRow', { n: r.runNo, g: r.gallonsOut, r: r.reason })}</span></div>)}</div>
+        </>
+      )}
+      {pending.length > 0 && (
+        <>
+          <div className="mlap-eyebrow">{trFl('fld.openStopsT')}</div>
+          <div className="mlap-card">
+            {pending.map((s) => (
+              <div key={s.id} className="mlap-row mlap-closerow">
+                <span className="mlap-grow"><span className="nm">{s.customerName}</span></span>
+                <select className={'mlap-select' + (String(reasons[s.id] || '').trim() ? '' : ' miss')} value={reasons[s.id] || ''} onChange={(e) => setReasons(Object.assign({}, reasons, { [s.id]: e.target.value }))} aria-label={trFl('fld.pickReason') + ' — ' + s.customerName}>
+                  <option value="">{trFl('fld.pickReason')}</option>
+                  {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          {!chk.ok ? <div className="mlap-hint">{trFl('fld.missingReasons', { n: chk.missing.length })}</div> : null}
+        </>
+      )}
+      <input className="mlap-text" value={note} onChange={(e) => setNote(e.target.value.slice(0, 500))} placeholder={trFl('fld.generalNote')} aria-label={trFl('fld.generalNote')} />
+      {msg && <div className="mlap-err" role="alert">{msg}</div>}
+      <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !chk.ok} onClick={close}>{trFl('fld.closeDay')}</button>
+    </>
+  );
+}

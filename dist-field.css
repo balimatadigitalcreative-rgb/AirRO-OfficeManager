@@ -176,6 +176,15 @@ a.mlap-btn { display: inline-flex; align-items: center; justify-content: center;
 .mlap-routefig b { font-size: 18px; font-variant-numeric: tabular-nums; }
 .mlap-legleft { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
 .mlap-legs .mlap-btn { margin: 8px 12px; width: calc(100% - 24px); }
+/* ── SETORAN ── */
+.mlap-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mlap-kpis > span { display: flex; flex-direction: column; align-items: center; padding: 10px 6px; border-right: 1px solid var(--mlap-line); }
+.mlap-kpis > span:last-child { border-right: 0; }
+.mlap-kpis b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.mlap-bontxt { color: var(--mlap-bon); font-weight: 600; }
+.mlap-closerow { gap: 8px; }
+.mlap-select { min-height: 40px; max-width: 55%; border-radius: 10px; border: 1px solid #D5DDE3; background: #F7F9FA; color: var(--mlap-ink); font: inherit; font-size: 13px; padding: 0 8px; }
+.mlap-select.miss { border: 1.5px solid #C2410C; background: #FFF4EE; color: var(--mlap-warn); }
 @keyframes mlapFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mlapUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 @keyframes mlapPop { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.22, .12); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: translate(-50%, 0); } }
