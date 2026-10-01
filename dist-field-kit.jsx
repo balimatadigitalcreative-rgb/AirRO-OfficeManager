@@ -149,3 +149,65 @@ function FldPhoto({ api, value, onChange, hintKey }) {
     </div>
   );
 }
+
+// Which field actions this account may use — the same caps the server checks, so a button never ends
+// in a 403.
+const fldCan = (perms) => {
+  const p = perms || {};
+  return {
+    sale: !!p.distribusiInput, bon: !!p.distribusiInput, damage: !!p.distribusiInput,
+    adjust: !!p.distribusiPenyesuaianGalon, expense: !!p.distribusiExpense,
+    addStop: !!p.distribusiOrder, location: !!p.distribusiLokasiSimpan,
+  };
+};
+// The customer behind a board stop, in the shape the customer screens use.
+const fldCustFromStop = (s) => ({
+  id: s.customerId, name: s.customerName, code: s.customerCode || '', address: s.address || '', phone: s.phone || '',
+  lat: s.lat, lng: s.lng, locationPhotoId: s.locationPhotoId || null, masterPrice: s.masterPrice || 0,
+  sisaBon: s.sisaBon || 0, gallonsHeld: s.gallonsHeld, armada: s.fleetId || '',
+});
+
+// Rupiah amount: shows 45.000, can be cleared while typing (value null = nothing typed yet).
+function FldMoney({ label, value, onChange }) {
+  const shown = value == null ? '' : Number(value).toLocaleString('id-ID');
+  return (
+    <label className="mlap-field mlap-money">
+      <span className="lb">{label}</span>
+      <span className="mlap-money-in"><span className="sb">Rp</span>
+        <input className="mlap-input" inputMode="numeric" aria-label={label} value={shown} onChange={(e) => { const d = String(e.target.value).replace(/[^0-9]/g, '').slice(0, 10); onChange(d === '' ? null : parseInt(d, 10)); }} />
+      </span>
+    </label>
+  );
+}
+
+// PILIH PELANGGAN — search the armada's customers; `accept(c)` returns '' or the key saying why this
+// customer can't be chosen for this action (the row stays visible, disabled, with the reason).
+function FldPickCustomer({ api, title, hint, accept, onPick, onBack }) {
+  const [list, setList] = uSfl(null);
+  const [err, setErr] = uSfl(null);
+  const [q, setQ] = uSfl('');
+  uEfl(() => { let live = true; api.customers().then((r) => { if (live) setList(r || []); }).catch((e) => { if (live) setErr(e); }); return () => { live = false; }; }, [api]);
+  const rows = list ? FIELDLOGIC.customerList(list, { q, filter: 'all' }).rows : [];
+  return (
+    <div className="mlap-screen">
+      <FldTop title={title} sub={hint} onBack={onBack} />
+      <div className="mlap-body">
+        <input className="mlap-text mlap-search" type="search" placeholder={trFl('fld.searchCust')} aria-label={trFl('fld.searchCust')} value={q} onChange={(e) => setQ(e.target.value)} />
+        {err ? <FldNotice tone="warn" title={trFl('fld.loadErr')} sub={fldErrMsg(err)} /> : null}
+        {!list && !err ? <div className="mlap-empty">{trFl('fld.loading')}</div> : null}
+        {list ? (
+          <div className="mlap-card">
+            {rows.length ? rows.map((c) => {
+              const why = accept ? accept(c) : '';
+              return (
+                <button key={c.id} type="button" className="mlap-row mlap-rowbtn" disabled={!!why} onClick={() => onPick(c)}>
+                  <span className="mlap-grow"><span className="nm">{c.name}</span><span className="sb">{why ? trFl(why) : [c.code, c.sisaBon > 0 ? trFl('fld.bonTag', { v: FIELDLOGIC.fmtRp(c.sisaBon) }) : ''].filter(Boolean).join(' · ')}</span></span>
+                </button>
+              );
+            }) : <div className="mlap-empty">{trFl('fld.emptySeg')}</div>}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

@@ -1834,7 +1834,7 @@ function FApp() {
               onOpenLoss={p.distribusiBonAdjust ? () => go('dist-loss-report', false) : null} />
           )}
           {screen === 'dist-deliveries' && p.distribusiPengiriman && fieldPref.ui === 'new' && window.FIELD && (
-            <window.FIELD.App user={user} pref={fieldPref} today={FIN.TODAY}
+            <window.FIELD.App user={user} perms={p} pref={fieldPref} today={FIN.TODAY}
               fleetList={fleet} fleetScope={user && user.fleetScope} refreshKey={distTick}
               onExit={() => setFieldPref({ ui: 'old' })} onPref={setFieldPref}
               onOpenRules={p.distribusiAturanLapangan ? () => go('dist-field-rules') : null} />

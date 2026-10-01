@@ -37,3 +37,27 @@ it('field screens are light-only (the app has no dark theme)', () => {
   expect(css).not.toMatch(/prefers-color-scheme/);
   expect(css).toMatch(/:root\[data-theme="dark"\] \.mlap-root/);
 });
+
+describe('Plan 3B kit', () => {
+  it('actions follow the server caps (no button that ends in a 403)', () => {
+    const f = kit.slice(kit.indexOf('const fldCan ='));
+    expect(f).toMatch(/sale: !!p\.distribusiInput/);
+    expect(f).toMatch(/bon: !!p\.distribusiInput/);
+    expect(f).toMatch(/damage: !!p\.distribusiInput/);
+    expect(f).toMatch(/adjust: !!p\.distribusiPenyesuaianGalon/);
+    expect(f).toMatch(/expense: !!p\.distribusiExpense/);
+    expect(f).toMatch(/addStop: !!p\.distribusiOrder/);
+    expect(f).toMatch(/location: !!p\.distribusiLokasiSimpan/);
+  });
+  it('the customer picker searches with the shared list logic and explains disabled rows', () => {
+    const f = kit.slice(kit.indexOf('function FldPickCustomer('));
+    expect(f).toMatch(/FIELDLOGIC\.customerList\(/);
+    expect(f).toMatch(/const why = accept \? accept\(c\) : '';/);
+    expect(f).toMatch(/disabled=\{!!why\}/);
+  });
+  it('money input can be cleared and shows thousands', () => {
+    const f = kit.slice(kit.indexOf('function FldMoney('));
+    expect(f).toMatch(/toLocaleString\('id-ID'\)/);
+    expect(f).toMatch(/inputMode="numeric"/);
+  });
+});

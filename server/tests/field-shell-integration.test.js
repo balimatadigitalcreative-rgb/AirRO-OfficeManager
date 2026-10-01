@@ -32,3 +32,7 @@ it('the rules cap is in the permission editor; withdrawn has a badge colour', ()
   expect(users).toMatch(/\['distribusiAturanLapangan', 'distribusi', /);
   expect(css).toMatch(/\.cr-status\.withdrawn \{/);
 });
+
+it('the field UI receives the user\'s caps (to show only the actions they may use)', () => {
+  expect(shell).toMatch(/<window\.FIELD\.App user=\{user\} perms=\{p\} pref=\{fieldPref\}/);
+});
