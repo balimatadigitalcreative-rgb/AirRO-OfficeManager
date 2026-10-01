@@ -246,3 +246,20 @@ it('3D-1 final fix: after release, owner/GM are not forced into the phone view (
   expect(FA.prefState({ perms: { distribusiPengiriman: true }, rules: rel, prefs: {}, role: 'finance' }).ui).toBe('new');
   expect(FA.prefState({ perms: { distribusiPengiriman: true, distribusiDemoPenuh: true }, rules: {}, prefs: {}, role: 'owner' }).ui).toBe('new');   // the owner's own demo grant
 });
+
+describe('3D-2 login minors (M5, M13)', () => {
+  it('M5: a new login starts without the last session\'s "old view" choice; Mode latihan/asli stays', () => {
+    expect(FA.sessionPrefs({ ui: 'old', mode: 'asli' })).toEqual({ mode: 'asli' });
+    expect(FA.sessionPrefs({ ui: 'old' })).toEqual({});
+    expect(FA.sessionPrefs(null)).toEqual({});
+  });
+  it('M13: only a board account that the release would move waits for the rules', () => {
+    const board = { distribusiPengiriman: true };
+    expect(FA.bootWait({ perms: board, role: 'finance', prefs: {}, rulesReady: false })).toBe(true);
+    expect(FA.bootWait({ perms: board, role: 'finance', prefs: {}, rulesReady: true })).toBe(false);
+    expect(FA.bootWait({ perms: board, role: 'finance', prefs: { ui: 'old' }, rulesReady: false })).toBe(false);   // chose the old view
+    expect(FA.bootWait({ perms: board, role: 'owner', prefs: {}, rulesReady: false })).toBe(false);                // office stays in the old view
+    expect(FA.bootWait({ perms: Object.assign({ distribusiDemoLatihan: true }, board), role: 'finance', prefs: {}, rulesReady: false })).toBe(false);   // a demo account lands anyway
+    expect(FA.bootWait({ perms: {}, role: 'finance', prefs: {}, rulesReady: false })).toBe(false);                 // no board
+  });
+});

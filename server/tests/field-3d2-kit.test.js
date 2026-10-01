@@ -150,3 +150,19 @@ describe('3D-1 deferred minors (field shell)', () => {
     expect(shell).toMatch(/<span className="mlap-chip latihan" role="note">\{trFl\('fld\.modeLatihan'\)\}<\/span>/);
   });
 });
+
+describe('3D-1 deferred minors (login)', () => {
+  const fsh = read('finance-shell.jsx');
+  it('M5: logging out forgets the session\'s old-view choice', () => {
+    expect(fsh).toMatch(/const logout = \(\) => \{[^\n]*setFieldPrefs\(\(x\) => \(window\.FIELDAPI \? window\.FIELDAPI\.sessionPrefs\(x\) : \{\}\)\);/);
+  });
+  it('M13: while the owner\'s rules load, a waiting account sees a blank field screen, never the finance app', () => {
+    expect(fsh).toMatch(/const fieldRulesReady = !!user && fieldRulesFor === user\.id;/);
+    expect(fsh).toMatch(/window\.FIELDAPI\.bootWait\(\{ perms: p, role: user\.role, prefs: fieldPrefs, rulesReady: fieldRulesReady \}\)/);
+    expect(fsh).toMatch(/if \(fieldWait\) return <div className="mlap-boot" role="status" aria-label=\{tr\('fld\.loading'\)\} \/>;/);
+    expect(fsh).toMatch(/const t = setTimeout\(done, 6000\);/);
+    expect(fsh.indexOf('if (fieldWait) return')).toBeGreaterThan(-1);
+    expect(fsh.indexOf('if (fieldWait) return')).toBeLessThan(fsh.indexOf('if (fieldFull) return'));
+    expect(read('dist-field.css')).toMatch(/\.mlap-boot \{ position: fixed; inset: 0; z-index: 30; background: #EEF2F6; \}/);
+  });
+});

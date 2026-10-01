@@ -376,3 +376,6 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
   .mlap-pill, .mlap-closex, .mlap-tile, .mlap-glass, .mlap-searchpill, .mlap-mapsheet, .mlap-pinsheet { background: var(--mlap-surface) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
   .mlap-scrim.menu { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 }
+
+/* ── 3D-2 BOOT — the blank field-coloured screen while the owner's rules load (M13) ── */
+.mlap-boot { position: fixed; inset: 0; z-index: 30; background: #EEF2F6; }

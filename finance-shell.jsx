@@ -273,6 +273,7 @@ function FApp() {
   const [fieldRules, setFieldRules] = uSh(null);
   const [fieldRulesTick, setFieldRulesTick] = uSh(0);   // bumped only by a 'rules' event — not every distribusi event
   const [fieldPrefs, setFieldPrefs] = uSh(() => (window.FIELDAPI ? window.FIELDAPI.loadPrefs() : {}));
+  const [fieldRulesFor, setFieldRulesFor] = uSh(null);   // the user the owner's field rules were loaded for (M13)
   const [distFleet, setDistFleet] = uSh('all');   // full-access fleet filter (GM toggle), shared across dist screens
   const [sessionExpired, setSessionExpired] = uSh(false);   // token expired → prompt re-login
   // Roles are DATA (managed via /roles). Seed FS with the cached list for instant
@@ -342,11 +343,14 @@ function FApp() {
   const fieldPref = window.FIELDAPI ? window.FIELDAPI.prefState({ perms: p, rules: fieldRules, prefs: fieldPrefs, role: user && user.role }) : { eligible: false, ui: 'old', mode: 'latihan' };
   const setFieldPref = (next) => { const merged = Object.assign({}, fieldPrefs, next); setFieldPrefs(merged); if (window.FIELDAPI) window.FIELDAPI.savePrefs(merged); };
   uEh(() => {
-    if (!user || !p.distribusiPengiriman || !window.API || !window.API.distribusi || !window.API.distribusi.fieldRules) { setFieldRules(null); return undefined; }
+    if (!user || !p.distribusiPengiriman || !window.API || !window.API.distribusi || !window.API.distribusi.fieldRules) { setFieldRules(null); setFieldRulesFor(user ? user.id : null); return undefined; }
     let live = true;
-    window.API.distribusi.fieldRules.get().then((r) => { if (live) setFieldRules((r && r.data) || null); }).catch(() => { /* rules unreadable → treated as not released */ });
-    return () => { live = false; };
+    const done = () => { if (live) setFieldRulesFor(user.id); };
+    const t = setTimeout(done, 6000);   // a slow server never keeps the screen blank longer than this
+    window.API.distribusi.fieldRules.get().then((r) => { if (live) setFieldRules((r && r.data) || null); }).catch(() => { /* rules unreadable → treated as not released */ }).then(() => { clearTimeout(t); done(); });
+    return () => { live = false; clearTimeout(t); };
   }, [user, p.distribusiPengiriman, fieldRulesTick]);
+  const fieldRulesReady = !!user && fieldRulesFor === user.id;
   // `manageUsers` is a NEW cap: an override saved before it existed omits it. Derive an
   // ABSENT value from the legacy `reset` toggle or the role default — mirrors the server's
   // resolvePerms exactly, so the sidebar and the API agree on who may administer users.
@@ -1198,7 +1202,7 @@ function FApp() {
     // live in REST tables (not the blob), so pull them explicitly too.
     if (window.CLOUD && window.CLOUD.active) { refreshAllSlices(); reloadEntries(); reloadSetoran(); reloadStaff(); reloadCashbons(); reloadApprovals(); reloadEvents(); reloadConfig(); }
   };
-  const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setDrawer(false); overlayStack.current = []; try { history.replaceState(null, '', location.pathname); } catch (e) {} };
+  const logout = () => { if (window.CLOUD) window.CLOUD.logout(); FS.setSession(null); setUser(null); setFieldPrefs((x) => (window.FIELDAPI ? window.FIELDAPI.sessionPrefs(x) : {})); setDrawer(false); overlayStack.current = []; try { history.replaceState(null, '', location.pathname); } catch (e) {} };
   // Self profile edit (display name + avatar colour only — server rejects anything
   // else). Reflect the new name/colour in the signed-in user + users list so every
   // profile card updates immediately; role/permissions are left untouched.
@@ -1785,6 +1789,9 @@ function FApp() {
       <PROOFMOUNT />
     </>
   );
+  // M13: no flash of the finance app while the owner's release switch is still loading.
+  const fieldWait = !!(window.FIELD && window.FIELDAPI && user && window.FIELDAPI.bootWait({ perms: p, role: user.role, prefs: fieldPrefs, rulesReady: fieldRulesReady }));
+  if (fieldWait) return <div className="mlap-boot" role="status" aria-label={tr('fld.loading')} />;
   const fieldFull = !!(window.FIELD && p.distribusiPengiriman && fieldPref.eligible && fieldPref.ui === 'new' && screen !== 'dist-field-rules');
   if (fieldFull) return (
     <>

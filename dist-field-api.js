@@ -194,6 +194,17 @@
   function savePrefs(p) {
     try { if (p && p.mode) root.localStorage.setItem(KEY_MODE, p.mode); root.localStorage.removeItem(KEY_UI); } catch (e) { /* private window / blocked: preference just isn't remembered */ }
   }
+  // A new login starts without the last session's "old view" choice (3D-1 M5): only Mode latihan/asli is kept.
+  function sessionPrefs(prefs) { var p = prefs || {}; return p.mode ? { mode: p.mode } : {}; }
+  // While the owner's rules load, a board account the release would move into the field view waits on a
+  // blank field-coloured screen instead of flashing the finance app first (M13). A demo account lands in
+  // the field view anyway; owner/GM stay in the old view; an "old" choice stays old.
+  function bootWait(o) {
+    var x = o || {}; var p = x.perms || {};
+    var demo = !!(p.distribusiDemoLatihan || p.distribusiDemoPenuh);
+    var office = x.role === 'owner' || x.role === 'gm';
+    return !!p.distribusiPengiriman && !demo && !office && !x.rulesReady && (x.prefs || {}).ui !== 'old';
+  }
   // Incomplete customer data the field screens warn about.
   function dataGaps(c) {
     var x = c || {};
@@ -201,5 +212,5 @@
     return { titik: titik, wa: wa, foto: foto, count: (titik ? 1 : 0) + (wa ? 1 : 0) + (foto ? 1 : 0) };
   }
 
-  return { METHODS: METHODS, real: real, snapshot: snapshot, openLatihan: openLatihan, memoryStorage: memoryStorage, idbStorage: idbStorage, prefState: prefState, loadPrefs: loadPrefs, savePrefs: savePrefs, dataGaps: dataGaps };
+  return { METHODS: METHODS, real: real, snapshot: snapshot, openLatihan: openLatihan, memoryStorage: memoryStorage, idbStorage: idbStorage, prefState: prefState, loadPrefs: loadPrefs, savePrefs: savePrefs, sessionPrefs: sessionPrefs, bootWait: bootWait, dataGaps: dataGaps };
 });
