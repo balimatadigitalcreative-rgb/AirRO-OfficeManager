@@ -263,3 +263,68 @@ it('Final fix: recordSale reports a replay (the server returned a sale already s
   const fresh = { createSale: () => Promise.resolve({ id: 't2' }), markStop: () => Promise.resolve({}) };
   expect(await L.recordSale(fresh, { stopId: 's1', body: {} })).toEqual({ txnId: 't2', done: true });
 });
+
+describe('Plan 3C: koreksi logic', () => {
+  const sale = (o) => Object.assign({ id: 't1', kind: 'jual', method: 'lunas', payMethod: 'tunai', qty: 3, unitPriceLocked: 18000, amount: 54000, gallonOut: 3, gallonIn: 1, status: 'active' }, o);
+  it('pay method of a row', () => {
+    expect(L.payOf(sale())).toBe('lunas');
+    expect(L.payOf(sale({ payMethod: 'transfer' }))).toBe('transfer');
+    expect(L.payOf(sale({ method: 'bon', payMethod: '' }))).toBe('bon');
+    expect(L.payOf({ method: 'pelunasan' })).toBe('pelunasan');
+  });
+  it('what may be corrected, by kind of row and by right', () => {
+    const both = { correct: true, void: true };
+    expect(L.koreksiOptions(sale(), both)).toEqual(['pelanggan', 'jumlah', 'bayar', 'batal']);
+    expect(L.koreksiOptions(sale(), { void: true })).toEqual(['batal']);
+    expect(L.koreksiOptions(sale(), { correct: true })).toEqual(['pelanggan', 'jumlah', 'bayar']);
+    expect(L.koreksiOptions({ id: 'p', method: 'pelunasan', kind: 'jual', qty: 0, amount: 5000, status: 'active' }, both)).toEqual(['nominal', 'batal']);
+    expect(L.koreksiOptions(sale({ kind: 'ganti_rugi', qty: 0 }), both)).toEqual(['batal']);
+    expect(L.koreksiOptions(sale({ status: 'void' }), both)).toEqual([]);
+  });
+  it('the payload is always complete (missing gallon fields would become 0 on the server)', () => {
+    expect(L.correctionBody(sale(), { pay: 'transfer', photo: { id: 'ph' } })).toEqual({ qty: 3, unitPrice: 18000, gallonOut: 3, gallonIn: 1, method: 'lunas', payMethod: 'transfer', proofPhotoId: 'ph' });
+    expect(L.correctionBody(sale(), { pay: 'bon' })).toEqual({ qty: 3, unitPrice: 18000, gallonOut: 3, gallonIn: 1, method: 'bon', payMethod: '' });
+    expect(L.correctionBody(sale(), { qty: 4, gallonIn: 2 })).toEqual({ qty: 4, unitPrice: 18000, gallonOut: 4, gallonIn: 2, method: 'lunas' });
+    expect(L.correctionBody(sale({ gallonOut: 5 }), { qty: 2 })).toMatchObject({ qty: 2, gallonOut: 4 });   // extra gallons out stay extra
+    expect(L.correctionBody({ method: 'pelunasan', amount: 5000 }, { amount: 7000 })).toEqual({ amount: 7000 });
+  });
+  it('what still blocks sending', () => {
+    const t = sale();
+    expect(L.koreksiCheck({ t, kind: 'jumlah', change: { qty: 3, gallonIn: 1 } })).toBe('fld.kNoChange');
+    expect(L.koreksiCheck({ t, kind: 'jumlah', change: { qty: 0, gallonIn: 1 } })).toBe('fld.kQtyMin');
+    expect(L.koreksiCheck({ t, kind: 'jumlah', change: { qty: 4, gallonIn: 1 } })).toBe('');
+    expect(L.koreksiCheck({ t, kind: 'bayar', change: { pay: 'lunas' } })).toBe('fld.kNoChange');
+    expect(L.koreksiCheck({ t, kind: 'bayar', change: { pay: 'transfer' } })).toBe('fld.kNeedTransferPhoto');
+    expect(L.koreksiCheck({ t, kind: 'bayar', change: { pay: 'transfer' }, preview: true })).toBe('');
+    expect(L.koreksiCheck({ t, kind: 'bayar', change: { pay: 'transfer', photo: { id: 'p' } } })).toBe('');
+    expect(L.koreksiCheck({ t: { method: 'pelunasan', amount: 5000 }, kind: 'nominal', change: { amount: 5000 } })).toBe('fld.kNoChange');
+    expect(L.koreksiCheck({ t: { method: 'pelunasan', amount: 5000 }, kind: 'nominal', change: { amount: null } })).toBe('fld.kAmountMin');
+    expect(L.koreksiCheck({ t, kind: 'pelanggan', change: {} })).toBe('fld.kPickCust');
+    expect(L.koreksiCheck({ t, kind: 'batal', change: {} })).toBe('');
+  });
+  it('the reason tells the office a pay change in Indonesian (the old inbox shows no pay method)', () => {
+    expect(L.koreksiReason('bayar', sale(), { pay: 'transfer' }, ' dibayar transfer ')).toBe('dibayar transfer [cara bayar: Lunas → Transfer]');
+    expect(L.koreksiReason('jumlah', sale(), { qty: 4 }, 'salah hitung')).toBe('salah hitung');
+  });
+  it('customers nearest to where the photo was taken', () => {
+    const cs = [{ id: 'a', lat: -8.6001, lng: 115.2 }, { id: 'b', lat: -8.7, lng: 115.3 }, { id: 'c' }, { id: 'me', lat: -8.6, lng: 115.2 }];
+    const n = L.nearCustomers(cs, { lat: -8.6, lng: 115.2 }, 'me', 2);
+    expect(n.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(n[0].meters).toBeLessThan(20);
+  });
+  it('Koreksi saya rows', () => {
+    const v = L.requestView({ id: 'r', kind: 'correction', status: 'rejected', transactionId: 't1', customerId: 'c1', current: { qty: 3, method: 'lunas', payMethod: 'tunai', amount: 54000 }, requested: { qty: 4, method: 'lunas', payMethod: 'transfer' } });
+    expect(v).toMatchObject({ statusKey: 'fld.rq_rejected', tone: 'neg', kindKey: 'fld.rk_correction', canWithdraw: false, canResubmit: true, target: { transactionId: 't1', customerId: 'c1' } });
+    expect(v.lines).toEqual([['fld.rl_qty', { a: 3, b: 4 }], ['fld.rl_pay', { a: 'lunas', b: 'transfer' }]]);
+    const m = L.requestView({ kind: 'reassign', status: 'pending', transactionIds: ['t9'], fromCustomerId: 'c1', toCustomerName: 'Bu Ketut' });
+    expect(m).toMatchObject({ canWithdraw: true, canResubmit: false, target: { transactionId: 't9', customerId: 'c1' }, lines: [['fld.rl_to', { name: 'Bu Ketut' }]] });
+  });
+  it('after a pin is saved, the screen we go back to has the new point', () => {
+    expect(L.afterPin({ name: 'complete', cust: { id: 'c1', lat: null } }, 'c1', { lat: 1, lng: 2 })).toEqual({ name: 'complete', cust: { id: 'c1', lat: 1, lng: 2 } });
+    expect(L.afterPin({ name: 'addStop', preset: { id: 'c1' } }, 'c1', { lat: 1, lng: 2 }).preset).toEqual({ id: 'c1', lat: 1, lng: 2 });
+    expect(L.afterPin({ name: 'addStop' }, 'c1', { lat: 1, lng: 2 })).toEqual({ name: 'addStop' });
+  });
+  it('archived (not counted) bons are not listed as open', () => {
+    expect(L.openBons([{ id: 'a', method: 'bon', amount: 1000, txnDate: '2026-09-01', bonCounted: false }, { id: 'b', method: 'bon', amount: 2000, txnDate: '2026-09-02' }]).map((b) => b.id)).toEqual(['b']);
+  });
+});

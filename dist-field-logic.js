@@ -196,7 +196,7 @@
   // PEMBAYARAN BON — the open bons, oldest first, after the payments are allocated to the oldest (view only;
   // the server computes the real balance). A damage charge put on bon is a bon too.
   function openBons(transactions) {
-    var live = (transactions || []).filter(function (t) { return t.status !== 'void'; });
+    var live = (transactions || []).filter(function (t) { return t.status !== 'void' && t.bonCounted !== false; });   // an archived (not counted) row is not part of Sisa Bon
     var bons = live.filter(function (t) { return t.method === 'bon'; }).map(function (t) { var amt = num(t.effectiveAmount != null ? t.effectiveAmount : t.amount); return { id: t.id, txnDate: t.txnDate, qty: num(t.qty), full: amt, amount: amt }; })
       .sort(function (a, b) { return String(a.txnDate).localeCompare(String(b.txnDate)); });
     var paid = live.filter(function (t) { return t.method === 'pelunasan'; }).reduce(function (s, t) { return s + num(t.amount); }, 0);
@@ -235,13 +235,16 @@
     return e;
   }
   // ATUR TITIK — how far the pin is from where the phone is; > 150 m asks the driver to confirm.
+  function distM(a, b) {
+    var R = 6371000, rad = function (x) { return (x * Math.PI) / 180; };
+    var dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+    var h = Math.pow(Math.sin(dLat / 2), 2) + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.pow(Math.sin(dLng / 2), 2);
+    return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+  }
   function pinMove(o) {
     var d = o && o.device; var p = o && o.pin;
     if (!hasPt(d) || !hasPt(p)) return { meters: null, far: false };
-    var R = 6371000, rad = function (x) { return (x * Math.PI) / 180; };
-    var dLat = rad(p.lat - d.lat), dLng = rad(p.lng - d.lng);
-    var h = Math.pow(Math.sin(dLat / 2), 2) + Math.cos(rad(d.lat)) * Math.cos(rad(p.lat)) * Math.pow(Math.sin(dLng / 2), 2);
-    var m = Math.round(2 * R * Math.asin(Math.sqrt(h)));
+    var m = distM(d, p);
     return { meters: m, far: m > 150 };
   }
   // TAMBAH STOP — today's stops that have no pin (fill it to put them on the route), and the active
@@ -260,5 +263,83 @@
     return { missing: missing, ok: missing.length === 0 };
   }
 
-  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor };
+  // ── PLAN 3C: koreksi ──
+  var PAY_ID = { lunas: 'Lunas', bon: 'Bon', transfer: 'Transfer', pelunasan: 'Pelunasan' };   // office records stay Indonesian
+  function payOf(t) { var x = t || {}; if (x.method === 'pelunasan') return 'pelunasan'; if (x.method === 'bon') return 'bon'; return x.payMethod === 'transfer' ? 'transfer' : 'lunas'; }
+  function isSaleRow(t) { return (t.kind || 'jual') === 'jual' && (t.method === 'lunas' || t.method === 'bon') && num(t.qty) > 0; }
+  // What a driver may correct: a gallon sale (customer, count, pay method), a bon payment (its amount),
+  // and — with the cancel right — any row. A damage charge can only be cancelled (spec 3.6).
+  function koreksiOptions(t, can) {
+    var c = can || {}; var x = t || {};
+    if (!t || x.status === 'void' || x.voided) return [];
+    var out = [];
+    if (x.kind !== 'ganti_rugi' && c.correct) {
+      if (isSaleRow(x)) out.push('pelanggan', 'jumlah', 'bayar');
+      else if (x.method === 'pelunasan') out.push('nominal');
+    }
+    if (c.void) out.push('batal');
+    return out;
+  }
+  // The FULL payload the server expects — it reads a missing gallon field as 0, so every field is sent,
+  // with the one change applied. Gallons out follow the sold count (extra gallons out stay extra).
+  function correctionBody(t, ch) {
+    var x = ch || {};
+    if (t.method === 'pelunasan') return { amount: Math.max(0, Math.round(num(x.amount))) };
+    var b = { qty: num(t.qty), unitPrice: num(t.unitPriceLocked), gallonOut: num(t.gallonOut), gallonIn: num(t.gallonIn), method: t.method };
+    if (x.qty != null) { var q = Math.max(0, Math.round(num(x.qty))); b.gallonOut = Math.max(0, b.gallonOut + (q - b.qty)); b.qty = q; }
+    if (x.gallonIn != null) b.gallonIn = Math.max(0, Math.round(num(x.gallonIn)));
+    if (x.pay) {
+      b.method = x.pay === 'bon' ? 'bon' : 'lunas';
+      b.payMethod = x.pay === 'bon' ? '' : x.pay === 'transfer' ? 'transfer' : 'tunai';
+      if (x.pay === 'transfer' && x.photo && x.photo.id) b.proofPhotoId = x.photo.id;
+    }
+    return b;
+  }
+  function koreksiCheck(o) {
+    var t = o.t || {}; var x = o.change || {};
+    if (o.kind === 'jumlah') { var q = Math.round(num(x.qty)); if (q < 1) return 'fld.kQtyMin'; return q === num(t.qty) && Math.round(num(x.gallonIn)) === num(t.gallonIn) ? 'fld.kNoChange' : ''; }
+    if (o.kind === 'bayar') { if (!x.pay || x.pay === payOf(t)) return 'fld.kNoChange'; return x.pay === 'transfer' && !o.preview && !(x.photo && x.photo.id) ? 'fld.kNeedTransferPhoto' : ''; }
+    if (o.kind === 'nominal') { var a = Math.round(num(x.amount)); if (!(a > 0)) return 'fld.kAmountMin'; return a === num(t.amount) ? 'fld.kNoChange' : ''; }
+    if (o.kind === 'pelanggan') return x.toId ? '' : 'fld.kPickCust';
+    return '';
+  }
+  // The old approval inbox shows count and Lunas/Bon but not the pay method — a pay change is spelled out.
+  function koreksiReason(kind, t, ch, text) {
+    var s = String(text || '').trim();
+    return kind === 'bayar' ? s + ' [cara bayar: ' + PAY_ID[payOf(t)] + ' → ' + PAY_ID[(ch || {}).pay] + ']' : s;
+  }
+  function nearCustomers(customers, pt, excludeId, n) {
+    if (!hasPt(pt)) return [];
+    return (customers || []).filter(function (c) { return c.id !== excludeId && hasPt(c); })
+      .map(function (c) { return Object.assign({}, c, { meters: distM(pt, c) }); })
+      .sort(function (a, b) { return a.meters - b.meters; }).slice(0, n || 5);
+  }
+  var RQ_STATUS = { pending: ['fld.rq_pending', 'info'], approved: ['fld.rq_approved', 'ok'], rejected: ['fld.rq_rejected', 'neg'], withdrawn: ['fld.rq_withdrawn', 'held'] };
+  var RQ_KIND = { correction: 'fld.rk_correction', void: 'fld.rk_void', reassign: 'fld.rk_reassign' };
+  function requestView(r) {
+    var x = r || {}; var st = RQ_STATUS[x.status] || RQ_STATUS.pending; var lines = [];
+    var cur = x.current || {}; var req = x.requested || {};
+    if (x.kind === 'reassign') lines.push(['fld.rl_to', { name: x.toCustomerName || '—' }]);
+    else if (x.kind === 'void') lines.push(['fld.rl_void', {}]);
+    else {
+      if (req.qty != null && cur.qty != null && num(req.qty) !== num(cur.qty)) lines.push(['fld.rl_qty', { a: num(cur.qty), b: num(req.qty) }]);
+      var pa = payOf(cur); var pb = payOf({ method: req.method || cur.method, payMethod: req.payMethod != null ? req.payMethod : cur.payMethod });
+      if (cur.method && cur.method !== 'pelunasan' && pa !== pb) lines.push(['fld.rl_pay', { a: pa, b: pb }]);
+      if (req.amount != null && cur.amount != null && num(req.amount) !== num(cur.amount) && cur.method === 'pelunasan') lines.push(['fld.rl_amount', { a: num(cur.amount), b: num(req.amount) }]);
+    }
+    return { statusKey: st[0], tone: st[1], kindKey: RQ_KIND[x.kind] || RQ_KIND.correction, lines: lines,
+      canWithdraw: x.status === 'pending', canResubmit: x.status === 'rejected' || x.status === 'withdrawn',
+      target: { transactionId: x.transactionId || (x.transactionIds || [])[0] || null, customerId: x.customerId || x.fromCustomerId || null } };
+  }
+  // After "Atur titik" was opened from another screen, that screen gets the customer's new point.
+  function afterPin(back, custId, pt) {
+    if (!back) return null;
+    var withPt = function (c) { return c && c.id === custId ? Object.assign({}, c, { lat: pt.lat, lng: pt.lng }) : c; };
+    var out = Object.assign({}, back);
+    if (back.cust) out.cust = withPt(back.cust);
+    if (back.preset) out.preset = withPt(back.preset);
+    return out;
+  }
+
+  return { fmtRp: fmtRp, fmtKm: fmtKm, gapsOf: gapsOf, boardView: boardView, runState: runState, runGauge: runGauge, loadPreview: loadPreview, salePreview: salePreview, saleBody: saleBody, canSaveSale: canSaveSale, recordSale: recordSale, closeCheck: closeCheck, newRef: newRef, customerList: customerList, openBons: openBons, payPreview: payPreview, ADJ_REASON_KEYS: ADJ_REASON_KEYS, adjustBody: adjustBody, damagePreview: damagePreview, expenseBody: expenseBody, pinMove: pinMove, addStopCandidates: addStopCandidates, pendingSales: pendingSales, stepInput: stepInput, refStore: refStore, pinStart: pinStart, saleStopFor: saleStopFor, payOf: payOf, koreksiOptions: koreksiOptions, correctionBody: correctionBody, koreksiCheck: koreksiCheck, koreksiReason: koreksiReason, nearCustomers: nearCustomers, requestView: requestView, afterPin: afterPin, distM: distM };
 });
