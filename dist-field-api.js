@@ -173,20 +173,22 @@
     var canLatihan = board && !!(p.distribusiDemoLatihan || p.distribusiDemoPenuh);
     var canAsli = board && (released || !!p.distribusiDemoPenuh);
     var eligible = board && (released || canLatihan);
-    var ui = !eligible ? 'old' : (prefs.ui === 'new' || prefs.ui === 'old' ? prefs.ui : (released ? 'new' : 'old'));
+    // An account that may use the field view lands in it (owner, 3D); "old" is a choice for this session.
+    var ui = !eligible ? 'old' : (prefs.ui === 'old' ? 'old' : 'new');
     var mode = !canAsli ? 'latihan' : !canLatihan ? 'asli' : (prefs.mode === 'asli' || prefs.mode === 'latihan' ? prefs.mode : (released ? 'asli' : 'latihan'));
     return { eligible: eligible, released: released, canLatihan: canLatihan, canAsli: canAsli, ui: ui, mode: mode };
   }
   var KEY_UI = 'airro.dist.fieldUi', KEY_MODE = 'airro.dist.fieldMode';
   function loadPrefs() {
     try {
-      var out = {}; var ui = root.localStorage.getItem(KEY_UI); var mode = root.localStorage.getItem(KEY_MODE);
-      if (ui) out.ui = ui; if (mode) out.mode = mode;
+      var out = {}; var mode = root.localStorage.getItem(KEY_MODE);
+      if (mode) out.mode = mode;
       return out;
     } catch (e) { return {}; }
   }
+  // Only the practice/real choice is remembered; the old-view choice lasts until the next login (3D).
   function savePrefs(p) {
-    try { if (p && p.ui) root.localStorage.setItem(KEY_UI, p.ui); if (p && p.mode) root.localStorage.setItem(KEY_MODE, p.mode); } catch (e) { /* private window / blocked: preference just isn't remembered */ }
+    try { if (p && p.mode) root.localStorage.setItem(KEY_MODE, p.mode); root.localStorage.removeItem(KEY_UI); } catch (e) { /* private window / blocked: preference just isn't remembered */ }
   }
   // Incomplete customer data the field screens warn about.
   function dataGaps(c) {

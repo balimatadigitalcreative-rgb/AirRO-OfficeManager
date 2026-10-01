@@ -100,9 +100,9 @@ describe('who sees what (prefState)', () => {
   it('Demo latihan only → never Mode asli, even with a stored preference', () => {
     expect(FA.prefState({ perms: { distribusiPengiriman: true, distribusiDemoLatihan: true }, rules: rulesOld, prefs: { ui: 'new', mode: 'asli' } })).toMatchObject({ eligible: true, ui: 'new', mode: 'latihan', canAsli: false });
   });
-  it('Demo penuh → both modes; default latihan; old UI until chosen', () => {
+  it('Demo penuh → both modes; default latihan; lands in the new UI (owner, 3D)', () => {
     const r = FA.prefState({ perms: { distribusiPengiriman: true, distribusiDemoPenuh: true, distribusiDemoLatihan: true }, rules: rulesOld, prefs: {} });
-    expect(r).toMatchObject({ eligible: true, ui: 'old', mode: 'latihan', canAsli: true, canLatihan: true });
+    expect(r).toMatchObject({ eligible: true, ui: 'new', mode: 'latihan', canAsli: true, canLatihan: true });
   });
   it('after release: every field user opens the new UI in Mode asli; latihan stays for demo holders', () => {
     expect(FA.prefState({ perms: { distribusiPengiriman: true }, rules: rulesNew, prefs: {} })).toMatchObject({ eligible: true, ui: 'new', mode: 'asli', canLatihan: false });
@@ -214,5 +214,26 @@ describe('Plan 3C adaptor', () => {
     expect(await real.previewReassign({ fromCustomerId: 'a' })).toEqual({ ok: 'previewReassign' });
     expect(await real.myChangeRequests()).toEqual([]);
     expect(FA.METHODS).toEqual(expect.arrayContaining(['previewCorrection', 'previewReassign']));
+  });
+});
+
+describe('Plan 3D: the field view is the default for an account that may use it', () => {
+  const base = { distribusiPengiriman: true };
+  it('a demo account lands in the new view; an account without field access stays on the old one', () => {
+    expect(FA.prefState({ perms: { ...base, distribusiDemoLatihan: true }, rules: {}, prefs: {} }).ui).toBe('new');
+    expect(FA.prefState({ perms: { ...base, distribusiDemoPenuh: true }, rules: {}, prefs: {} }).ui).toBe('new');
+    expect(FA.prefState({ perms: base, rules: {}, prefs: {} }).ui).toBe('old');
+    expect(FA.prefState({ perms: { distribusiDemoPenuh: true }, rules: {}, prefs: {} }).ui).toBe('old');   // no Pengiriman
+    expect(FA.prefState({ perms: { ...base, distribusiDemoLatihan: true }, rules: {}, prefs: { ui: 'old' } }).ui).toBe('old');
+  });
+  it('the old-view choice is not remembered across logins (only the practice/real mode is)', () => {
+    const store = {}; const ls = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
+    const prev = global.localStorage; global.localStorage = ls;
+    try {
+      FA.savePrefs({ ui: 'old', mode: 'asli' });
+      expect(store['airro.dist.fieldUi']).toBeUndefined();
+      store['airro.dist.fieldUi'] = 'old';   // left over from an earlier version
+      expect(FA.loadPrefs()).toEqual({ mode: 'asli' });
+    } finally { global.localStorage = prev; }
   });
 });

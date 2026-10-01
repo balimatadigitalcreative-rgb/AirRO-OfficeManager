@@ -347,6 +347,22 @@ Semua teks memakai `finance-i18n.js` (EN + ID), dengan prefix kunci `fld.*`.
   lama tetap ada kecuali diganti.
 - **Rilis:** `FLD_SCREENS_READY = true`. Tombol "Jadikan tampilan utama" (khusus Owner) kini aktif.
 
+**Rencana 3D — kesetiaan desain (keputusan pemilik 2026-10-01).** Pemilik menilai hasil terhadap mockup
+yang disetujui: tampilan, animasi, dan gesture, bukan hanya fungsi.
+- Akun yang berhak (izin Pengiriman + Demo latihan/penuh, atau setelah rilis) langsung masuk tampilan
+  lapangan **layar penuh** saat login, tanpa bar aplikasi lama dan tanpa banner unit.
+  - Menu ⋯ punya "Kembali ke tampilan lama"; pilihan itu berlaku sampai login berikutnya.
+  - Layar Aturan tetap dibuka di aplikasi.
+- Penanda latihan menjadi chip kecil di header, selalu terlihat saat latihan; pita oranye dihapus.
+- Gesture:
+  - tarik sheet ke bawah untuk menutup;
+  - usap kiri/kanan antar tab (tidak di peta, input, atau sheet);
+  - Atur titik dengan menggeser peta di bawah pin tengah;
+  - detent sheet peta (3D-2).
+- Nilai material dan animasi disalin persis dari papan mockup. Pekerjaan dibagi dua:
+  - 3D-1: fondasi;
+  - 3D-2: tata ulang setiap layar sesuai papannya.
+
 ### 5. Rilis
 
 1. **Demo:** deploy dengan semua saklar aturan mati. Hanya akun berizin yang melihat tampilan baru.
