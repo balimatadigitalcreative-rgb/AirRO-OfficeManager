@@ -11,7 +11,7 @@
   if (root) root.FIELDAPI = api;                                               // browser (global)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this), function (root) {
   'use strict';
-  var METHODS = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'outstanding', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo', 'position'];
+  var METHODS = ['context', 'board', 'customers', 'customerDetail', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'outstanding', 'markStop', 'holdStop', 'cancelStop', 'createSale', 'payBon', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addStop', 'adjustGallon', 'gallonDamage', 'addExpense', 'requestCorrection', 'requestVoid', 'requestReassign', 'withdrawRequest', 'closeDay', 'uploadPhoto', 'photo', 'position'];
   var unwrap = function (r) { return r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, 'data') ? r.data : r; };
   var U = function (p) { return Promise.resolve(p).then(unwrap); };
   var A = function (base, extra) { return Object.assign({}, base || {}, extra || {}); };
@@ -25,6 +25,7 @@
       context: function () { return U(F.context(c.date, c.fleet)); },
       board: function () { return U(F.board(c.date, c.fleet)); },
       customers: function () { return U(F.customers(c.fleet)); },
+      customerDetail: function (id) { return U(F.customer(id)); },
       runs: function () { return U(F.runs(c.date, c.fleet)); },
       ritRoute: function () { return U(F.ritRoute(c.date, c.fleet)); },
       daySummary: function () { return U(F.daySummary(c.date, c.fleet)); },
@@ -44,7 +45,8 @@
       addStop: function (b) { return U(F.addOrder(A({ date: c.date }, b))); },
       adjustGallon: function (cid, b) { var x = b || {}; return U(F.adjust(cid, { kind: 'galon', mode: 'set', value: x.value, reason: x.reason, note: x.note, evidenceUrl: x.evidenceUrl })); },
       gallonDamage: function (cid, b) { return U(F.gallonDamage(cid, A({ txnDate: c.date }, b))); },
-      addExpense: function (b) { return U(F.expense(A({ date: c.date, fleet: c.fleet, method: 'tunai' }, b))); },
+      // Field expenses are ALWAYS paid in cash from the day's deposit (owner rule) — never overridable.
+      addExpense: function (b) { return U(F.expense(A(A({ date: c.date, fleet: c.fleet }, b), { method: 'tunai' }))); },
       requestCorrection: function (id, b) { return U(F.correct(id, b)); },
       requestVoid: function (id, b) { return U(F.void(id, b)); },
       requestReassign: function (b) { return U(F.reassign(b)); },

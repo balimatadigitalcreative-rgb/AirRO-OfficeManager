@@ -7,7 +7,7 @@ const SB = require(path.join(root, 'dist-field-sandbox.js'));
 const FA = require(path.join(root, 'dist-field-api.js'));
 afterAll(() => { delete global.RITPLAN; });
 
-const FIELD_NAMES = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo', 'outstanding', 'position'];
+const FIELD_NAMES = ['context', 'board', 'customers', 'runs', 'ritRoute', 'daySummary', 'myChangeRequests', 'mark', 'sale', 'openRun', 'closeRun', 'setLocation', 'setLocationPhoto', 'setPhone', 'addOrder', 'adjust', 'gallonDamage', 'expense', 'correct', 'void', 'reassign', 'withdraw', 'closeDay', 'upload', 'photo', 'outstanding', 'position', 'customer'];
 const fakeApi = (over) => {
   const ok = (v) => () => Promise.resolve({ data: v });
   const F = {
@@ -25,7 +25,7 @@ const REAL = (over) => FA.real(fakeApi(over).API, { date: '2026-10-01', fleet: '
 it('both adaptors expose exactly the same methods', () => {
   const real = REAL();
   const lat = SB.createSandbox(SB.fromSnapshot({ context: {}, board: [], customers: [], runs: [], myRequests: [] }), {});
-  expect(FA.METHODS.length).toBe(30);
+  expect(FA.METHODS.length).toBe(31);
   FA.METHODS.forEach((m) => { expect(typeof real[m]).toBe('function'); expect(typeof lat[m]).toBe('function'); });
   expect(real.mode).toBe('asli'); expect(lat.mode).toBe('latihan');
 });
@@ -126,7 +126,7 @@ it('preferences survive a blocked localStorage', () => {
 describe('Plan 3A adaptor hardening', () => {
   it('29 methods incl. outstanding; real outstanding 403 → []', async () => {
     expect(FA.METHODS).toContain('outstanding');
-    expect(FA.METHODS.length).toBe(30);
+    expect(FA.METHODS.length).toBe(31);
     const denied = () => Promise.reject(Object.assign(new Error('Forbidden'), { status: 403 }));
     expect(await REAL({ outstanding: denied }).outstanding()).toEqual([]);
     expect(await REAL({ outstanding: () => Promise.resolve({ data: [{ id: 'o1' }], count: 1 }) }).outstanding()).toEqual([{ id: 'o1' }]);
@@ -185,5 +185,20 @@ describe('driver position', () => {
     const before = JSON.stringify(lat.exportState());
     expect(await lat.position({ lat: 1, lng: 2 })).toEqual({ ok: true, practice: true });
     expect(JSON.stringify(lat.exportState())).toBe(before);
+  });
+});
+
+describe('Plan 3B adaptor', () => {
+  it('31 methods incl. customerDetail; real asks the server', async () => {
+    expect(FA.METHODS).toContain('customerDetail');
+    expect(FA.METHODS.length).toBe(31);
+    const real = REAL({ customer: (id) => Promise.resolve({ data: { id, name: 'A', transactions: [] } }) });
+    expect(await real.customerDetail('c1')).toEqual({ id: 'c1', name: 'A', transactions: [] });
+  });
+  it('expenses are always paid in cash from the deposit — a caller cannot change that', async () => {
+    const calls = [];
+    const real = REAL({ expense: (b) => { calls.push(b); return Promise.resolve({ data: {} }); } });
+    await real.addExpense({ amount: 5000, category: 'bensin', method: 'transfer' });
+    expect(calls[0].method).toBe('tunai');
   });
 });

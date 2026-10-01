@@ -275,6 +275,7 @@
         daySummary: (date, fleet) => freq('GET', '/distribusi/deliveries/day-summary' + qd(date, fleet)),
         outstanding: (fleet) => freq('GET', '/distribusi/deliveries/outstanding' + qd(null, fleet)),
         position: (body) => freq('POST', '/distribusi/position', body),
+        customer: (id) => freq('GET', '/distribusi/customers/' + encodeURIComponent(id)),
         myChangeRequests: () => freq('GET', '/distribusi/change-requests/mine'),
         mark: (id, body) => freq('PATCH', '/distribusi/deliveries/' + id, body),
         sale: (body) => freq('POST', '/distribusi/transactions', body),

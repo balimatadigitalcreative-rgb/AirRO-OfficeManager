@@ -229,3 +229,42 @@ describe('practice context reports the open rit like the server', () => {
     expect((await api.context()).openRun).toBeNull();
   });
 });
+
+describe('Plan 3B: practice follows the server on field inputs', () => {
+  it('clientRef: a retried sale / payment / damage returns the saved row, state unchanged', async () => {
+    const { api } = make();
+    const ph = await api.uploadPhoto({ data: 'x' });
+    const a = await api.createSale({ customerId: 'c2', qty: 2, method: 'lunas', proofPhotoId: ph.id, clientRef: 'ref-s-0001' });
+    const b = await api.createSale({ customerId: 'c2', qty: 2, method: 'lunas', proofPhotoId: ph.id, clientRef: 'ref-s-0001' });
+    expect(b).toMatchObject({ id: a.id, replay: true });
+    const p1 = await api.payBon({ customerId: 'c1', payAmount: 5000, payMethod: 'tunai', proofPhotoId: ph.id, clientRef: 'ref-p-0001' });
+    const p2 = await api.payBon({ customerId: 'c1', payAmount: 5000, payMethod: 'tunai', proofPhotoId: ph.id, clientRef: 'ref-p-0001' });
+    expect(p2.id).toBe(p1.id);
+    expect((await api.customers()).find((c) => c.id === 'c1').sisaBon).toBe(40000);
+    const d1 = await api.gallonDamage('c2', { qty: 1, kind: 'pecah', payMethod: 'tunai', photoId: ph.id, clientRef: 'ref-d-0001' });
+    const d2 = await api.gallonDamage('c2', { qty: 1, kind: 'pecah', payMethod: 'tunai', photoId: ph.id, clientRef: 'ref-d-0001' });
+    expect(d2.transaction.id).toBe(d1.transaction.id);
+    expect(api.exportState().txns.length).toBe(3);
+    expect(await code(api.createSale({ customerId: 'c1', qty: 1, method: 'lunas', proofPhotoId: ph.id, clientRef: 'ref-s-0001' }))).toBe(409);
+  });
+  it('customerDetail lists the practice transactions, newest first', async () => {
+    const { api } = make();
+    const ph = await api.uploadPhoto({ data: 'x' });
+    await api.createSale({ customerId: 'c1', qty: 1, method: 'bon', proofPhotoId: ph.id });
+    await api.payBon({ customerId: 'c1', payAmount: 1000, payMethod: 'tunai', proofPhotoId: ph.id });
+    const d = await api.customerDetail('c1');
+    expect(d).toMatchObject({ id: 'c1', name: 'Pak Wayan' });
+    expect(d.transactions.map((t) => t.method)).toEqual(['pelunasan', 'bon']);
+  });
+  it('phone stored as 08…, adjustment reason from the server list, damage/expense fields required', async () => {
+    const { api } = make();
+    expect((await api.setPhone('c1', '+62 812-3456-789')).phone).toBe('08123456789');
+    expect((await api.setPhone('c1', '812 999')).phone).toBe('0812999');
+    expect(await code(api.adjustGallon('c1', { value: 5, reason: 'Hitung ulang' }))).toBe(400);
+    expect((await api.adjustGallon('c1', { value: 5, reason: 'rekonsiliasi_fisik' })).status).toBe('pending');
+    const ph = await api.uploadPhoto({ data: 'x' });
+    expect(await code(api.gallonDamage('c2', { qty: 1, payMethod: 'tunai', photoId: ph.id }))).toBe(400);
+    expect(await code(api.gallonDamage('c2', { qty: 1, kind: 'pecah', photoId: ph.id }))).toBe(400);
+    expect(await code(api.addExpense({ amount: 1000, photoId: ph.id }))).toBe(400);
+  });
+});

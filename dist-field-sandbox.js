@@ -22,7 +22,9 @@
     return e;
   }
   var hasPt = function (c) { return !!c && typeof c.lat === 'number' && typeof c.lng === 'number' && isFinite(c.lat) && isFinite(c.lng); };
-  var digits = function (p) { return String(p || '').replace(/[^0-9+]/g, ''); };
+  // Same as the server's normalizePhone: stored as "08…".
+  var phone08 = function (p) { var d = String(p || '').replace(/[^0-9]/g, ''); if (d.indexOf('62') === 0) d = '0' + d.slice(2); else if (d.charAt(0) === '8') d = '0' + d; return d; };
+  var ADJ_REASONS = ['rekonsiliasi_fisik', 'salah_input', 'galon_pecah_hilang', 'penghapusan_piutang', 'selisih_staf', 'lainnya'];
 
   function fromSnapshot(snap, meta) {
     var s = snap || {}; var ctx = s.context || {};
@@ -96,6 +98,15 @@
       var r = { id: nid('req'), transactionId: t.id, kind: kind, status: 'pending', reason: String(b.reason), payload: payload, createdAt: now().getTime(), decisionNote: '' };
       s.requests.push(r); return r;
     }
+    // IDEMPOTENCY (like the server): a write retried with the same clientRef returns the saved row.
+    function replay(ref, customerId) {
+      if (!ref) return null;
+      var t = s.txns.find(function (x) { return x.clientRef === ref; });
+      if (!t) return null;
+      if (t.customerId !== customerId) throw fail(409, 'Kode transaksi ini sudah dipakai untuk pelanggan lain.');
+      var c = s.customers[customerId];
+      return { txn: t, gallonsHeld: c.gallonsHeld, sisaBon: c.sisaBon };
+    }
     var txnOf = function (id) { var t = s.txns.find(function (x) { return x.id === id; }); if (!t) throw fail(404, 'Transaction not found'); if (t.status === 'void') throw fail(400, 'Transaksi ini sudah dibatalkan.'); return t; };
 
     var api = {
@@ -108,6 +119,13 @@
       }),
       board: run(function () { return s.stops.filter(function (st) { return st.date === s.date; }).sort(function (a, b) { return a.seq - b.seq; }).map(stopView); }),
       customers: run(function () { return Object.keys(s.customers).map(function (k) { return custView(s.customers[k]); }); }),
+      customerDetail: run(function (id) {
+        var c = cust(id);
+        // newest first by RECORDING order (two writes in the same millisecond must not swap)
+        var txns = s.txns.filter(function (t) { return t.customerId === id; }).slice().reverse()
+          .map(function (t) { return { id: t.id, txnDate: t.txnDate, method: t.method, kind: t.kind, qty: t.qty, amount: t.amount, effectiveAmount: t.amount, status: t.status, payMethod: t.payMethod, createdAt: t.createdAt }; });
+        return Object.assign(custView(c), { transactions: txns });
+      }),
       runs: run(function () { return s.runs.filter(function (r) { return r.date === s.date && r.fleetId === s.fleet; }); }),
       myChangeRequests: run(function () { return s.requests.slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); }); }),
 
@@ -132,6 +150,7 @@
 
       createSale: run(function (body) {
         var b = body || {}; var c = cust(b.customerId);
+        var rp = replay(b.clientRef, c.id); if (rp) return Object.assign({}, rp.txn, { sisaBon: rp.sisaBon, gallonsHeld: rp.gallonsHeld, replay: true });
         if (!c.active) throw fail(400, 'Pelanggan nonaktif — aktifkan kembali untuk transaksi baru.');
         var method = b.method === 'bon' ? 'bon' : 'lunas';
         var qty = int(b.qty); if (qty <= 0) throw fail(400, 'Jumlah galon harus lebih dari 0.');
@@ -139,18 +158,19 @@
         var amount = qty * c.masterPrice;
         var out = b.gallonOut != null ? Math.max(0, int(b.gallonOut)) : qty; var inn = Math.max(0, int(b.gallonIn));
         var ro = openRunOf();
-        var t = pushTxn(Object.assign({ customerId: c.id, qty: qty, unitPriceLocked: c.masterPrice, amount: amount, method: method, payMethod: method === 'bon' ? '' : (b.payMethod === 'transfer' ? 'transfer' : 'tunai'), kind: 'jual', gallonQty: 0, gallonOut: out, gallonIn: inn, deliveryRunId: ro ? ro.id : null, note: String(b.note || '') }, pr));
+        var t = pushTxn(Object.assign({ clientRef: b.clientRef || null, customerId: c.id, qty: qty, unitPriceLocked: c.masterPrice, amount: amount, method: method, payMethod: method === 'bon' ? '' : (b.payMethod === 'transfer' ? 'transfer' : 'tunai'), kind: 'jual', gallonQty: 0, gallonOut: out, gallonIn: inn, deliveryRunId: ro ? ro.id : null, note: String(b.note || '') }, pr));
         if (ro) ro.sold += qty;
         c.gallonsHeld += out - inn; if (method === 'bon') c.sisaBon += amount;
         return W(Object.assign({}, t, { sisaBon: c.sisaBon, gallonsHeld: c.gallonsHeld }));
       }),
       payBon: run(function (body) {
         var b = body || {}; var c = cust(b.customerId);
+        var rp = replay(b.clientRef, c.id); if (rp) return Object.assign({}, rp.txn, { sisaBon: rp.sisaBon, gallonsHeld: rp.gallonsHeld, isPayment: true, replay: true });
         var amt = int(b.payAmount); if (amt <= 0) throw fail(400, 'Jumlah pembayaran harus lebih dari 0.');
         if (c.sisaBon <= 0) throw fail(400, 'Pelanggan ini tidak punya sisa bon.');
         if (amt > c.sisaBon) throw fail(400, 'Pembayaran (' + amt + ') melebihi sisa bon (' + c.sisaBon + ').', null, { sisaBon: c.sisaBon });
         var pr = proof(b, 'wajibFotoTransaksi');
-        var t = pushTxn(Object.assign({ customerId: c.id, qty: 0, unitPriceLocked: 0, amount: amt, method: 'pelunasan', payMethod: b.payMethod === 'transfer' ? 'transfer' : 'tunai', kind: 'jual', gallonQty: 0, gallonOut: 0, gallonIn: 0, note: String(b.note || '') }, pr));
+        var t = pushTxn(Object.assign({ clientRef: b.clientRef || null, customerId: c.id, qty: 0, unitPriceLocked: 0, amount: amt, method: 'pelunasan', payMethod: b.payMethod === 'transfer' ? 'transfer' : 'tunai', kind: 'jual', gallonQty: 0, gallonOut: 0, gallonIn: 0, note: String(b.note || '') }, pr));
         c.sisaBon -= amt;
         return W(Object.assign({}, t, { sisaBon: c.sisaBon, gallonsHeld: c.gallonsHeld, isPayment: true }));
       }),
@@ -211,7 +231,7 @@
         var c = cust(cid); if (photoId && !photoOk(photoId)) throw fail(400, 'Foto tidak ditemukan — unggah ulang fotonya.');
         c.locationPhotoId = photoId || null; return W(custView(c));
       }),
-      setPhone: run(function (cid, phone) { var c = cust(cid); c.phone = digits(phone); return W(custView(c)); }),
+      setPhone: run(function (cid, phone) { var c = cust(cid); c.phone = phone08(phone); return W(custView(c)); }),
       addStop: run(function (body) {
         var b = body || {}; var c = cust(b.customerId);
         if (!c.active) throw fail(400, 'Pelanggan nonaktif — aktifkan kembali untuk menambah orderan.');
@@ -224,20 +244,22 @@
       adjustGallon: run(function (cid, body) {
         var c = cust(cid); var b = body || {}; var v = int(b.value);
         if (v < 0) throw fail(400, 'Jumlah galon tidak valid.');
-        if (!String(b.reason || '').trim()) throw fail(400, 'Alasan wajib diisi.');
+        if (ADJ_REASONS.indexOf(b.reason) < 0) throw fail(400, 'Pilih alasan penyesuaian.');
         var a = { id: nid('adj'), customerId: c.id, kind: 'galon', before: c.gallonsHeld, after: v, delta: v - c.gallonsHeld, reason: b.reason, note: String(b.note || ''), status: 'pending', createdAt: now().getTime() };
         s.adjustments.push(a); return W(a);
       }),
       gallonDamage: run(function (cid, body) {
         var c = cust(cid); var b = body || {}; var qty = int(b.qty);
+        var rp = replay(b.clientRef, c.id); if (rp) return { transaction: rp.txn, gallonsHeld: rp.gallonsHeld, sisaBon: rp.sisaBon, replay: true };
         if (qty <= 0) throw fail(400, 'Jumlah galon harus lebih dari 0.');
         if (!b.photoId) throw fail(400, 'Foto galon rusak wajib dilampirkan.', 'PROOF_REQUIRED');
         if (!photoOk(b.photoId)) throw fail(400, 'Foto tidak ditemukan — unggah ulang fotonya.', 'PROOF_MISSING');
         if (qty > c.gallonsHeld) throw fail(400, 'Pelanggan hanya memegang ' + c.gallonsHeld + ' galon — tidak bisa mengganti rugi ' + qty + '.', null, { held: c.gallonsHeld });
         var price = int(rules().hargaGantiRugiGalon); if (!price) throw fail(400, 'Harga ganti rugi galon belum diatur pemilik.', 'NO_PRICE');
-        var pay = ['tunai', 'bon', 'transfer'].indexOf(b.payMethod) >= 0 ? b.payMethod : 'tunai';
-        var kind = ['pecah', 'bocor', 'retak', 'hilang'].indexOf(b.kind) >= 0 ? b.kind : 'pecah';
-        var t = pushTxn({ customerId: c.id, qty: 0, unitPriceLocked: price, amount: qty * price, method: pay === 'bon' ? 'bon' : 'lunas', payMethod: pay === 'bon' ? '' : pay, kind: 'ganti_rugi', gallonQty: qty, gallonOut: 0, gallonIn: 0, proofPhotoId: b.photoId, note: 'Ganti rugi ' + qty + ' galon ' + kind });
+        if (['tunai', 'bon', 'transfer'].indexOf(b.payMethod) < 0) throw fail(400, 'Pilih cara bayar ganti rugi.');
+        if (['pecah', 'bocor', 'retak', 'hilang'].indexOf(b.kind) < 0) throw fail(400, 'Pilih jenis kerusakan.');
+        var pay = b.payMethod; var kind = b.kind;
+        var t = pushTxn({ clientRef: b.clientRef || null, customerId: c.id, qty: 0, unitPriceLocked: price, amount: qty * price, method: pay === 'bon' ? 'bon' : 'lunas', payMethod: pay === 'bon' ? '' : pay, kind: 'ganti_rugi', gallonQty: qty, gallonOut: 0, gallonIn: 0, proofPhotoId: b.photoId, note: 'Ganti rugi ' + qty + ' galon ' + kind });
         c.gallonsHeld -= qty; if (pay === 'bon') c.sisaBon += qty * price;
         return W({ transaction: t, gallonsHeld: c.gallonsHeld, sisaBon: c.sisaBon });
       }),
@@ -245,9 +267,10 @@
       addExpense: run(function (body) {
         var b = body || {}; var amt = int(b.amount);
         if (amt <= 0) throw fail(400, 'Nominal pengeluaran harus lebih dari 0.');
+        if (!String(b.category || '').trim()) throw fail(400, 'Pilih kategori pengeluaran.');
         if (!b.photoId && rules().wajibFotoPengeluaran) throw fail(400, 'Foto nota wajib dilampirkan.', 'PROOF_REQUIRED');
         if (b.photoId && !photoOk(b.photoId)) throw fail(400, 'Foto nota tidak ditemukan — unggah ulang fotonya.', 'PROOF_MISSING');
-        var x = { id: nid('exp'), date: s.date, fleetId: s.fleet, amount: amt, category: String(b.category || 'lainnya'), method: 'tunai', note: String(b.note || ''), photoId: b.photoId || null, status: 'active', createdAt: now().getTime() };
+        var x = { id: nid('exp'), date: s.date, fleetId: s.fleet, amount: amt, category: String(b.category), method: 'tunai', note: String(b.note || ''), photoId: b.photoId || null, status: 'active', createdAt: now().getTime() };
         s.expenses.push(x); return W(x);
       }),
 
