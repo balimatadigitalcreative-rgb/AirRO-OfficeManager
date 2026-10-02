@@ -105,17 +105,13 @@ describe('Guards still hold on archive rows', () => {
     expect(r.body.error.details && r.body.error.details.invoice).toBe(inv.number);
   });
 
-  it('the requester can NOT approve their own archive correction', async () => {
+  it('a requester with correction access only can NOT approve their own archive correction', async () => {
+    // owner 2026-10-02: approval access would let them self-approve (badged); correction access alone never can
     const cid = await mkCust('SelfAppr');
     await imp(gm, cid, [{ txnDate: '2026-05-02', price: 5000, bonQty: 5 }]);   // BON 25.000
     const row = bonRow(await detail(gm, cid), 25000);
-    // grant staff approve temporarily → still blocked because they filed it
-    await request(app).patch(`/api/v1/users/${staffId}`).set(auth(gm)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiVoid: true, distribusiApprove: true, distribusiLegacyImport: true } });
-    const self = await login('lc_staff', 'secret123');
-    const reqId = (await correct(self, row.id, { reason: 'x', qty: 4, unitPrice: 5000, gallonOut: 0, gallonIn: 0 })).body.data.id;
-    expect((await approve(self, reqId)).status).toBe(403);
-    await request(app).patch(`/api/v1/users/${staffId}`).set(auth(gm)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiVoid: true, distribusiApprove: false, distribusiLegacyImport: true } });
-    staff = await login('lc_staff', 'secret123');
+    const reqId = (await correct(staff, row.id, { reason: 'x', qty: 4, unitPrice: 5000, gallonOut: 0, gallonIn: 0 })).body.data.id;
+    expect((await approve(staff, reqId)).status).toBe(403);
   });
 
   it('a legacy LUNAS row (affects no balance) is still correctable, and the preview says Sisa Bon is unchanged', async () => {

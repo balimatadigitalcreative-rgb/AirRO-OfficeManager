@@ -231,6 +231,20 @@ Semua migrasi **hanya menambah** kolom atau tabel. Tidak ada data lama yang diub
 - Koreksi dan pindah pelanggan **ditolak** untuk ganti rugi. Satu-satunya jalan adalah batal (VOID,
   dengan persetujuan seperti biasa) lalu catat ulang. Void menonaktifkan movement-nya dan membalik
   jurnal.
+- **Keputusan pemilik 2026-10-02 — ganti rugi dan aset galon.**
+  - Ganti rugi yang dibayar uang (tunai/bon/transfer) otomatis menghapus galonnya dari aset galon
+    (pool): Dr 1-1900 Akumulasi (bagiannya), Dr 6-8500 Rugi Pelepasan/Kerusakan Aset (sisa nilai buku),
+    Cr 1-1440 Aset Galon (bagian harga perolehan). Nilai sisa ikut berkurang. Bagian akumulasi yang
+    dihapus disimpan di `FixedAsset.writtenOffAccum`, jadi nilai buku di daftar aset tetap sama dengan
+    buku besar. Satu baris `GallonPoolWriteOff` per transaksi mencatat apa yang diambil.
+  - Pilihan baru **"Diganti galon baru"** (`payMethod 'ganti_galon'`): pelanggan menyerahkan galon baru.
+    Tidak ada uang, tidak ada jurnal, aset tetap utuh, dan harga ganti rugi tidak diperlukan. Movement
+    `replace_customer` memasukkan galon baru ke stok baik di gudang. Foto tetap wajib.
+  - Batal (langsung, lewat persetujuan, atau massal) mengembalikan persis yang dihapus; memulihkan
+    batal menghapusnya lagi. Kalau periode transaksi sudah ditutup, jurnalnya bertanggal hari ini.
+  - Tanpa aset galon terdaftar, ganti rugi tetap tersimpan; tidak ada yang dihapus.
+  - Ganti rugi lama (sebelum keputusan ini): Pemilik melihat daftarnya di layar Aset (pool galon →
+    "Ganti rugi lama"), lalu menekan "Hapus dari aset".
 
 **3.7 Koreksi saya**
 - `GET /change-requests/mine`, izin `distribusiKoreksi`. Isinya pengajuan milik akun itu sendiri
@@ -238,6 +252,13 @@ Semua migrasi **hanya menambah** kolom atau tabel. Tidak ada data lama yang diub
 - `POST /change-requests/:id/withdraw`: pemohon menarik pengajuan yang masih `pending`. Status baru
   `withdrawn`, tercatat di audit.
 - Persetujuan tidak berubah: `distribusiApprove`, dengan aturan persetujuan sendiri yang sudah ada.
+- **Keputusan pemilik 2026-10-02 — menyetujui koreksi sendiri.** Akun yang punya akses Setujui
+  Perubahan (`distribusiApprove`) boleh menyetujui koreksi, pembatalan, dan pindah pelanggan yang ia
+  ajukan sendiri. Persetujuan itu tetap ditandai "disetujui sendiri", dicatat di audit, dan tetap kena
+  batas nominal per orang (`maxSelfApproveAmount`). Akun yang hanya punya akses koreksi hanya bisa
+  mengajukan. Izin terpisah `distribusiApproveSelf` kini mencakup sengketa, standar biaya, dan
+  penggajian; hanya Pemilik yang boleh memberinya, termasuk lewat template peran. Tombol setujui
+  tetap di kantor, tidak di HP.
 
 **3.8 Ringkasan setoran harian**
 - `GET /deliveries/day-summary?date&fleet` (izin `distribusiPengiriman`) mengembalikan:
@@ -264,7 +285,7 @@ Tambah stop, Penyesuaian galon, dan Ganti rugi galon.
 | Buka rit | `openRun` dengan pengukur SOP + kapasitas dan **alasan wajib di bawah SOP** |
 | Pelanggan | `customers`, dengan filter Semua / Belum lengkap / Ada bon / Hari tetap |
 | Lengkapi data | `setLocation` (GPS), `setPhone`, `setLocationPhoto` |
-| Atur titik lokasi | Pin bisa diseret di atas peta (Leaflet marker `draggable`), titik GPS perangkat + lingkaran akurasi, titik lama, dan peringatan di atas 150 m. Tampilan satelit **tidak** termasuk (lihat "Di luar cakupan") |
+| Atur titik lokasi | Pin bisa diseret di atas peta (Leaflet marker `draggable`), titik GPS perangkat + lingkaran akurasi, titik lama, dan peringatan di atas 150 m. Tombol Peta / Satelit kalau kunci ArcGIS diisi (keputusan pemilik 2026-10-02, lihat "Di luar cakupan") |
 | Tambah stop | `addStop`. Pelanggan tanpa titik langsung diarahkan ke Atur titik lokasi |
 | Pembayaran bon | `payBon` (tunai/transfer), **foto wajib**, dengan alokasi bon tertua tampil lebih dulu (tampilan saja; sisa bon dihitung server seperti sekarang) |
 | Penyesuaian galon | `adjustGallon` (fitur yang ada, tetap dengan persetujuan) |
@@ -420,8 +441,11 @@ Every field screen now follows its mockup board: Pengiriman (compact rit card + 
 
 ## Di luar cakupan
 
-- **Tampilan peta satelit.** OSM tidak punya citra satelit, dan penyedia lain butuh keputusan lisensi
-  tersendiri. Pin yang bisa digeser tetap berfungsi penuh di peta biasa.
+- ~~**Tampilan peta satelit.**~~ **Dibangun 2026-10-02 (keputusan pemilik):** Atur titik punya tombol
+  Peta / Satelit kalau Pemilik/GM mengisi kunci ArcGIS di Aturan lapangan (`fieldRules.satelliteKey`).
+  Citra: Esri World Imagery (`ibasemaps-api.arcgis.com`), kredit "Powered by Esri" selalu terlihat.
+  Tanpa kunci tombolnya tidak muncul. Kalau ubin satelit gagal dimuat, kembali ke peta jalan dengan
+  pesan. Kunci ini terlihat oleh HP yang memakainya, jadi batasi di dasbor ArcGIS (lihat DEPLOY.md).
 - Penghapusan tampilan lama. Dikerjakan setelah masa transisi, dalam pekerjaan terpisah.
 - Pelanggan baru dibuat dari HP. Tambah stop hanya untuk pelanggan yang sudah ada, sama seperti
   sekarang.
