@@ -77,15 +77,18 @@ async function assetCodes(asset) {
   return { assetCode, accCode, expCode };
 }
 
-// Posted accumulated depreciation for an asset (Σ posted DepreciationEntry.amount).
-async function accumulatedOf(assetId) {
-  const rows = await prisma.depreciationEntry.findMany({ where: { assetId }, select: { amount: true } });
-  return rows.reduce((s, r) => s + n(r.amount), 0);
+// Posted accumulated depreciation for an asset: Σ posted DepreciationEntry.amount, minus what partial
+// pool write-offs took out (writtenOffAccum). Accepts the asset row or its id.
+async function accumulatedOf(assetOrId, db = prisma) {
+  const a = typeof assetOrId === 'string' ? await db.fixedAsset.findUnique({ where: { id: assetOrId }, select: { id: true, writtenOffAccum: true } }) : assetOrId;
+  if (!a) return 0;
+  const rows = await db.depreciationEntry.findMany({ where: { assetId: a.id }, select: { amount: true } });
+  return rows.reduce((s, r) => s + n(r.amount), 0) - n(a.writtenOffAccum);
 }
 
 async function assetClient(a, extra = {}) {
   const codes = await assetCodes(a);
-  const posted = await accumulatedOf(a.id);
+  const posted = await accumulatedOf(a);
   const sched = buildSchedule(a, extra.policy || 'full');
   const cost = n(a.acquisitionCost);
   const bookValue = cost - posted;
@@ -334,32 +337,76 @@ async function gallonPoolLoss(id, body, actor) {
   const kind = /hilang/.test(String(body.kind || '')) ? 'hilang' : 'rusak';
   const date = isDate(body.date) ? body.date : todayISO();
   await period.assertPeriodOpen(date, 'kerugian galon');
-  const cost = n(a.acquisitionCost);
-  const perUnitCost = a.quantity ? Math.round(cost / a.quantity) : 0;
-  const accumulated = await accumulatedOf(id);
-  const perUnitAccum = a.quantity ? Math.round(accumulated / a.quantity) : 0;
-  const lossCost = perUnitCost * qty;                 // cost removed from the pool
-  const lossAccum = Math.min(perUnitAccum * qty, accumulated);   // its share of accumulated depreciation
-  const lossAmount = lossCost - lossAccum;            // book value written off → the P&L loss
-  const codes = await assetCodes(a);
+  // Shared write-off core (cost + accumulated + salvage shares). The source id carries a running number so
+  // two same-size write-offs on the same day both post (the old `${id}:${date}:${qty}` collided).
+  let w = null;
   const updated = await prisma.$transaction(async (tx) => {
-    if (config.accountingV2) {
-      const lines = [
-        { code: codes.accCode, debit: lossAccum, fleetId: a.fleetId || '' },   // remove its accumulated depreciation
-        { code: LOSS, debit: lossAmount, fleetId: a.fleetId || '' },           // book value → loss
-        { code: codes.assetCode, credit: lossCost, fleetId: a.fleetId || '' }, // remove its cost
-      ];
-      await acc.postJournal({ sourceType: 'gallon_pool_loss', sourceId: `${id}:${date}:${qty}`, date, description: `Galon ${kind} (pool): ${a.name} × ${qty}`, actor, businessUnitId: a.businessUnitId, lines }, tx);
-    }
-    return tx.fixedAsset.update({ where: { id }, data: { quantity: a.quantity - qty, acquisitionCost: BigInt(Math.max(0, cost - lossCost)) } });
+    const n0 = await tx.journalEntry.count({ where: { sourceType: 'gallon_pool_loss', sourceId: { startsWith: `${id}:${date}:` } } });
+    w = await writeOffPool({ asset: a, qty, date, kind, sourceType: 'gallon_pool_loss', sourceId: `${id}:${date}:${qty}:${n0 + 1}`, actor }, tx);
+    return tx.fixedAsset.findUnique({ where: { id } });
   });
+  const lossCost = w.cost, lossAccum = w.accum, lossAmount = w.cost - w.accum;
   // Record the physical rusak/hilang in the GALLON LEDGER too, so ledger total-owned drops by qty and
   // the pool stays reconciled (best-effort; the accounting write above is the source of truth).
   try { await require('./distribution.service').reportGallonDamage({ kind: kind === 'hilang' ? 'hilang' : 'rusak', qty, reason: String(body.reason || 'kerugian aset galon'), fleetId: a.fleetId || '' }, actor); } catch (e) { /* ledger write best-effort */ }
   return { ...(await assetClient(updated, { policy: await firstMonthPolicy() })), loss: { qty, kind, lossCost, lossAccum, lossAmount } };
 }
 
+// ── POOL WRITE-OFF CORE (owner 2026-10-02). Takes qty gallons' share of cost, accumulated depreciation and
+// salvage out of the pool: Dr Akumulasi (share) + Dr Rugi (book value) / Cr Aset (cost share). The share
+// of accumulated is remembered on the asset (writtenOffAccum) so the register keeps matching the ledger.
+async function findGallonPool(fleetId, db = prisma) {
+  const pools = await db.fixedAsset.findMany({ where: { pooled: true, category: 'galon', status: 'aktif', quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }] });
+  return pools.find((p) => fleetId && p.fleetId === fleetId) || pools.find((p) => !p.fleetId) || pools[0] || null;
+}
+async function poolShares(asset, qty, db) {
+  const q = Math.max(1, asset.quantity);
+  const cost = n(asset.acquisitionCost); const salvage = n(asset.salvageValue);
+  const accumulated = Math.max(0, await accumulatedOf(asset, db));
+  const take = Math.min(qty, asset.quantity);
+  const all = take >= asset.quantity;   // the last gallons take whatever is left (no rounding remainder)
+  return {
+    take,
+    cost: all ? cost : Math.round(cost / q) * take,
+    accum: all ? accumulated : Math.min(Math.round(accumulated / q) * take, accumulated),
+    salvage: all ? salvage : Math.min(Math.round(salvage / q) * take, salvage),
+  };
+}
+async function writeOffPool({ asset, qty, date, kind, sourceType, sourceId, actor, businessUnitId }, tx) {
+  const s = await poolShares(asset, int(qty), tx);
+  if (!s.take) return { cost: 0, accum: 0, salvage: 0, qty: 0, journalId: null };
+  let je = null;
+  if (config.accountingV2) {
+    const codes = await assetCodes(asset);
+    const f = asset.fleetId || '';
+    const lines = [{ code: codes.assetCode, credit: s.cost, fleetId: f }];                   // remove its cost
+    if (s.accum) lines.push({ code: codes.accCode, debit: s.accum, fleetId: f });             // remove its accumulated depreciation
+    if (s.cost - s.accum) lines.push({ code: LOSS, debit: s.cost - s.accum, fleetId: f });    // book value → loss
+    je = await acc.postJournal({ sourceType, sourceId, date, description: `Galon ${kind === 'hilang' ? 'hilang' : 'rusak'} dihapus dari aset: ${asset.name} × ${s.take}`, actor, businessUnitId: businessUnitId || asset.businessUnitId, lines }, tx);
+  }
+  await tx.fixedAsset.update({ where: { id: asset.id }, data: {
+    quantity: asset.quantity - s.take,
+    acquisitionCost: BigInt(Math.max(0, n(asset.acquisitionCost) - s.cost)),
+    salvageValue: BigInt(Math.max(0, n(asset.salvageValue) - s.salvage)),
+    writtenOffAccum: BigInt(n(asset.writtenOffAccum) + s.accum),
+  } });
+  return { cost: s.cost, accum: s.accum, salvage: s.salvage, qty: s.take, journalId: je ? je.id : null };
+}
+// Undo one write-off exactly: reverse its journal and put the same cost / accumulated / salvage back.
+async function restorePool({ asset, qty, cost, accum, salvage, date, sourceType, sourceId, actor }, tx) {
+  if (config.accountingV2) {
+    await acc.reverseJournal({ sourceType, sourceId, reversalSourceType: sourceType + '_rev', reversalSourceId: sourceId + ':rev', date, description: `Pembatalan hapus galon: ${asset.name} × ${qty}`, actor }, tx);
+  }
+  await tx.fixedAsset.update({ where: { id: asset.id }, data: {
+    quantity: asset.quantity + int(qty),
+    acquisitionCost: BigInt(n(asset.acquisitionCost) + n(cost)),
+    salvageValue: BigInt(n(asset.salvageValue) + n(salvage)),
+    writtenOffAccum: BigInt(Math.max(0, n(asset.writtenOffAccum) - n(accum))),
+  } });
+}
+
 module.exports = {
+  findGallonPool, writeOffPool, restorePool, accumulatedOf,
   CATEGORIES, METHODS, STATUSES, buildSchedule, methodFormula, firstMonthPolicy,
   createAsset, listAssets, getAsset, postDepreciation, pendingDepreciation, pendingDepreciationCount,
   disposeAsset, previewImport, commitImport, reconcileGallonPool, gallonPoolLoss,

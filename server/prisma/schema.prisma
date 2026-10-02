@@ -344,6 +344,7 @@ model FixedAsset {
   isProduction         Boolean  @default(false)        // charge → COGS (explicit routing, never from category)
   pooled               Boolean  @default(false)        // one record covers `quantity` units (gallon pool)
   quantity             Int      @default(1)            // pool size; reconciled to the gallon ledger for gallon pools
+  writtenOffAccum      BigInt   @default(0)            // accumulated depreciation removed by partial pool write-offs (register = Σ entries − this)
   status               String   @default("aktif")      // aktif | dijual | dilepas | rusak
   disposalDate         String?
   disposalProceeds     BigInt?
@@ -359,6 +360,25 @@ model FixedAsset {
   @@index([category])
   @@index([businessUnitId])
   @@index([fleetId])
+}
+
+// One gallon-pool write-off caused by a ganti rugi transaction (owner 2026-10-02): what was taken from
+// the pool, so a void can put back exactly that. UNIQUE transactionId = one write-off row per txn
+// (re-used with version+1 after a void → un-void, so journal sources stay unique).
+model GallonPoolWriteOff {
+  id             String    @id @default(cuid())
+  assetId        String
+  transactionId  String    @unique
+  qty            Int
+  cost           BigInt
+  accum          BigInt
+  salvage        BigInt
+  date           String
+  version        Int       @default(1)
+  reversedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  @@index([assetId])
 }
 
 // One posted depreciation charge for one asset in one month. UNIQUE (assetId, period) makes the monthly

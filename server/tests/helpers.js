@@ -18,6 +18,7 @@ async function resetDb() {
   await prisma.productionRun.deleteMany();        // FK → CostStandard
   await prisma.costStandardLine.deleteMany();     // FK → CostStandard (cascade)
   await prisma.costStandard.deleteMany();
+  await prisma.gallonPoolWriteOff.deleteMany();
   await prisma.depreciationEntry.deleteMany();   // FK → FixedAsset (cascade), delete before the parent
   await prisma.fixedAsset.deleteMany();
   await prisma.accountingPeriod.deleteMany();
