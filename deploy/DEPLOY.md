@@ -196,6 +196,27 @@ Installability does **not** require a service worker — the manifest alone is e
 a proper strategy (network-first for HTML/JS, never cache `/api/`, explicit SW versioning
 + `skipWaiting`), not a copy-pasted SW.
 
+## Deploy otomatis dari GitHub
+
+Every push to `master` (or **Actions → Deploy ke VPS → Run workflow** on github.com, also from a phone) runs
+`.github/workflows/deploy-vps.yml`, which SSHes into the VPS and runs `deploy/update.sh` with all its gates
+and the automatic rollback. A failed deploy fails the GitHub job (GitHub e-mails you); the log is also in
+`deploy/deploy.log` on the server.
+
+**Security:** the SSH key is made ON the server and can run only `deploy/remote-deploy.sh` (forced command,
+no shell, no forwarding). The server identity is pinned (`VPS_HOST_KEY`). Nothing in the workflow can pass
+`--skip-tests`. To revoke: delete the `airro-github-deploy` line from `~/.ssh/authorized_keys`.
+
+**One-time setup (~5 minutes):**
+1. On the VPS: `cd /var/www/airrooffice && bash deploy/setup-github-deploy.sh`
+2. github.com → the repo → Settings → Secrets and variables → Actions → **New repository secret**:
+   - `VPS_SSH_KEY` = the whole private key block it printed (from `-----BEGIN` to `-----END`)
+   - `VPS_HOST_KEY` = the one line it printed (`ssh-ed25519 AAAA…`)
+   - only if the script said the user is not root: Variables → `VPS_USER` = that user
+3. Test: Actions → Deploy ke VPS → Run workflow. A green check = deployed.
+
+Until the secrets exist the workflow only prints a warning and deploys nothing.
+
 ## Deploy pipeline (self-verifying + auto-rollback)
 
 ```bash

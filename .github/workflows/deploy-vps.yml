@@ -1,0 +1,40 @@
+# AUTO-DEPLOY — a push to master (or "Run workflow" on GitHub, e.g. from a phone) runs the normal
+# gated deploy/update.sh on the VPS: tests, build, migrations, health check, automatic rollback.
+# The SSH key can run ONLY that script (forced command, see deploy/setup-github-deploy.sh).
+# One-time setup: deploy/DEPLOY.md → "Deploy otomatis dari GitHub".
+name: Deploy ke VPS
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Jalankan deploy/update.sh di VPS
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+          DEPLOY_HOST: 187.77.122.105
+          DEPLOY_USER: ${{ vars.VPS_USER || 'root' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SSH_KEY" ] || [ -z "$HOST_KEY" ]; then
+            echo "::warning::Deploy otomatis belum disiapkan (secret VPS_SSH_KEY / VPS_HOST_KEY kosong) — lihat deploy/DEPLOY.md. Tidak ada yang di-deploy."
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s %s\n' "$DEPLOY_HOST" "$HOST_KEY" > ~/.ssh/known_hosts
+          # the server ignores the command we send and runs deploy/remote-deploy.sh (forced command);
+          # update.sh exits non-zero on any failed gate, which fails this job (GitHub e-mails the owner)
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "$DEPLOY_USER@$DEPLOY_HOST" deploy
