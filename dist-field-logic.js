@@ -227,8 +227,9 @@
   // GANTI RUGI — explain (no price yet / no gallons at the customer) instead of failing on the server.
   function damagePreview(o) {
     var qty = Math.max(0, Math.round(num(o.qty))); var price = Math.max(0, num(o.price)); var held = Math.max(0, Math.round(num(o.held)));
-    var blocked = !price ? 'fld.dmgNoPrice' : (!held ? 'fld.dmgNoHeld' : '');
-    return { total: qty * price, heldAfter: Math.max(0, held - qty), blocked: blocked, totalKey: o.payMethod === 'bon' ? 'fld.toBon' : (o.payMethod === 'transfer' ? 'fld.transferred' : 'fld.cashIn') };
+    var replace = o.payMethod === 'ganti_galon';   // a new gallon handed over (owner 2026-10-02): no money, no price needed
+    var blocked = !replace && !price ? 'fld.dmgNoPrice' : (!held ? 'fld.dmgNoHeld' : '');
+    return { total: replace ? 0 : qty * price, heldAfter: Math.max(0, held - qty), blocked: blocked, totalKey: replace ? 'fld.noMoney' : o.payMethod === 'bon' ? 'fld.toBon' : (o.payMethod === 'transfer' ? 'fld.transferred' : 'fld.cashIn') };
   }
   // PENGELUARAN — always cash from the deposit (the adaptor forces it); fuel litres + odometer into the note.
   function expenseBody(o) {

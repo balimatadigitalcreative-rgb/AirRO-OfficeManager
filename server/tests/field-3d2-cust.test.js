@@ -127,3 +127,13 @@ describe('Manual inputs (mockup Bayar bon, Penyesuaian, Ganti rugi, Pengeluaran 
     expect(rule('INPUT', '.mlap-cat.on')).toMatch(/border: 1\.5px solid #065489; background: #E8F1F8; color: #065489;/);
   });
 });
+
+describe('Ganti rugi — Diganti galon baru (owner 2026-10-02)', () => {
+  it('a fourth pay choice; with it the card says no money and that the gallon asset stays whole', () => {
+    const f = fn(cust, 'FldDamage');
+    expect(f).toMatch(/\['ganti_galon', trFl\('fld\.m_gantiGalon'\)\]/);
+    expect(f).toMatch(/\{pay === 'ganti_galon' \? <div className="mlap-kv"><span>\{trFl\('fld\.newGalonIn'\)\}<\/span><b>\{trFl\('fld\.nGalon', \{ n: qty \}\)\}<\/b><\/div> : null\}/);
+    expect(f).toMatch(/pay === 'ganti_galon' \? <div className="mlap-hint">\{trFl\('fld\.poolKept'\)\}<\/div> : null/);
+    expect(f).toMatch(/pay === 'ganti_galon' \? <span className="mlap-pricebox">—<\/span>/);
+  });
+});

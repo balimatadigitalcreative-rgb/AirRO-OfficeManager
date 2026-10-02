@@ -492,16 +492,18 @@ function FldDamage({ api, cust: c, rules, refs, onDone, onBack }) {
         <div className="mlap-card">
           <FldStepper label={trFl('fld.dmgQty')} hint={trFl('fld.dmgFrom', { n: held })} value={qty} onChange={setQty} min={1} max={Math.max(1, held)} />
           <div className="mlap-cardsec"><span className="mlap-cardsec-t">{trFl('fld.dmgKindL')}</span><div className="mlap-chips">{FLD_DMG_KINDS.map(([k, key]) => <button key={k} type="button" className={'mlap-chip-b' + (kind === k ? ' on' : '')} aria-pressed={kind === k} onClick={() => setKind(k)}>{trFl(key)}</button>)}</div></div>
-          <div className="mlap-kv tall"><span className="strong">{trFl('fld.dmgPrice')}</span><span className="mlap-pricebox">Rp <b>{Number(rules.hargaGantiRugiGalon || 0).toLocaleString('id-ID')}</b></span></div>
+          <div className="mlap-kv tall"><span className="strong">{trFl('fld.dmgPrice')}</span>{pay === 'ganti_galon' ? <span className="mlap-pricebox">—</span> : <span className="mlap-pricebox">Rp <b>{Number(rules.hargaGantiRugiGalon || 0).toLocaleString('id-ID')}</b></span>}</div>
         </div>
         <div className="mlap-label">{trFl('fld.payVia')}</div>
-        <FldSeg label={trFl('fld.payVia')} value={pay} onChange={setPay} options={[['tunai', trFl('fld.m_tunai')], ['bon', trFl('fld.toBon')], ['transfer', trFl('fld.m_transfer')]]} />
+        <FldSeg label={trFl('fld.payVia')} value={pay} onChange={setPay} options={[['tunai', trFl('fld.m_tunai')], ['bon', trFl('fld.toBon')], ['transfer', trFl('fld.m_transfer')], ['ganti_galon', trFl('fld.m_gantiGalon')]]} />
         <FldPhoto api={api} value={photo} onChange={setPhoto} hintKey="fld.dmgPhotoHint" title={trFl('fld.dmgPhotoT')} w={72} />
         <div className="mlap-card">
           <div className="mlap-kv"><span>{trFl('fld.galAtCust')}</span><b>{held + ' → ' + pv.heldAfter}</b></div>
           <div className="mlap-kv"><span>{trFl('fld.dmgToDepot')}</span><b>{kind === 'hilang' ? trFl('fld.dmgLost') : trFl('fld.nGalon', { n: qty })}</b></div>
+          {pay === 'ganti_galon' ? <div className="mlap-kv"><span>{trFl('fld.newGalonIn')}</span><b>{trFl('fld.nGalon', { n: qty })}</b></div> : null}
           <div className="mlap-kv total"><span>{trFl(pv.totalKey)}</span><b>{FIELDLOGIC.fmtRp(pv.total)}</b></div>
         </div>
+        {pay === 'ganti_galon' ? <div className="mlap-hint">{trFl('fld.poolKept')}</div> : null}
         <div className="mlap-hint">{trFl('fld.dmgNoApproval')}</div>
         {err && <div className="mlap-err" role="alert">{err}</div>}
       </div>

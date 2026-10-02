@@ -419,3 +419,13 @@ describe('3D-2 Koreksi saya', () => {
     expect(L.koreksiTabs(null)).toEqual({ wait: [], done: [] });
   });
 });
+
+describe('ganti rugi — diganti galon baru (owner 2026-10-02)', () => {
+  it('damagePreview: no money, never blocked by a missing price, gallons still leave the customer', () => {
+    const pv = L.damagePreview({ qty: 2, price: 0, held: 6, payMethod: 'ganti_galon' });
+    expect(pv).toEqual({ total: 0, heldAfter: 4, blocked: '', totalKey: 'fld.noMoney' });
+    expect(L.damagePreview({ qty: 2, price: 45000, held: 6, payMethod: 'ganti_galon' }).total).toBe(0);
+    expect(L.damagePreview({ qty: 1, price: 0, held: 6, payMethod: 'tunai' }).blocked).toBe('fld.dmgNoPrice');
+    expect(L.damagePreview({ qty: 1, price: 0, held: 0, payMethod: 'ganti_galon' }).blocked).toBe('fld.dmgNoHeld');
+  });
+});
