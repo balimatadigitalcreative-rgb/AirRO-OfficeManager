@@ -3836,7 +3836,10 @@ async function syncGantiRugiWriteOff(t, actor, tx) {
     const asset = await dep.findGallonPool(t.fleetId || '', tx);
     if (!asset) return null;
     const version = row ? row.version + 1 : 1;
-    const date = await dateFor(t.txnDate || todayISO());
+    // never before the pool was acquired (an old ganti rugi / a backdated one would credit 1-1440 before its
+    // acquisition debit), and never into a closed period
+    const base = t.txnDate || todayISO();
+    const date = await dateFor(asset.acquisitionDate && base < asset.acquisitionDate ? asset.acquisitionDate : base);
     const kind = /hilang/.test(String(t.note || '')) ? 'hilang' : 'rusak';
     const w = await dep.writeOffPool({ asset, qty: t.gallonQty, date, kind, sourceType: 'ganti_rugi_writeoff', sourceId: `${t.id}:v${version}`, actor }, tx);
     if (!w.qty) return null;

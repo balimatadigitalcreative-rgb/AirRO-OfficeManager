@@ -103,3 +103,16 @@ describe('old ganti rugi backfill (owner reviews, then applies)', () => {
     expect(fs.readFileSync(path.join(root, 'api.js'), 'utf8')).toMatch(/gantiRugiBackfill: \(apply\) =>/);
   });
 });
+
+describe('final review: a write-off is never dated before the gallon asset was acquired', () => {
+  it('an old ganti rugi from before the pool existed is written off on the pool acquisition date', async () => {
+    const c = await prisma.customer.create({ data: { name: 'Sangat Lama', type: 'reguler', masterPrice: 18000, armada: '' } });
+    const t = await prisma.distTransaction.create({ data: { customerId: c.id, fleetId: '', qty: 0, unitPriceLocked: 45000, amount: 45000, method: 'lunas', payMethod: 'tunai', kind: 'ganti_rugi', gallonQty: 1, note: 'Ganti rugi 1 galon pecah', txnDate: '2025-12-01' } });
+    const ap = (await request(app).post('/api/v1/accounting/gallon-pool/ganti-rugi-backfill').set(auth(owner)).send({})).body.data;
+    expect(ap.applied).toBe(1);
+    const w = await prisma.gallonPoolWriteOff.findUnique({ where: { transactionId: t.id } });
+    expect(w.date).toBe('2026-01-15');
+    const je = await prisma.journalEntry.findFirst({ where: { sourceType: 'ganti_rugi_writeoff', sourceId: t.id + ':v1' } });
+    expect(je.date).toBe('2026-01-15');
+  });
+});
