@@ -72,12 +72,8 @@ describe('reassign one bon between customers', () => {
     expect((await submitR(staff, { fromCustomerId: A.id, toCustomerId: B.id, transactionIds: [txnId], note: 'lagi' })).status).toBe(400);
   });
 
-  it('the requester can NOT approve their own request without distribusiApproveSelf', async () => {
-    await request(app).patch('/api/v1/users/' + staffId).set(auth(gm)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiApprove: true } });
-    const selfTok = await login('staff_ra', 'secret123');
-    expect((await approve(selfTok, reqId)).status).toBe(403);
-    await request(app).patch('/api/v1/users/' + staffId).set(auth(gm)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiApprove: false } });
-    staff = await login('staff_ra', 'secret123');
+  it('a requester with correction access only cannot approve their own move (owner 2026-10-02: approve access needed)', async () => {
+    expect((await approve(staff, reqId)).status).toBe(403);   // staff: distribusiKoreksi, no distribusiApprove
   });
 
   it('APPROVE moves the bon: Sisa Bon, gallon ledger and AR == Σ Sisa Bon all follow', async () => {

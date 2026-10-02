@@ -1,13 +1,25 @@
 'use strict';
 const prisma = require('../lib/prisma');
 const ApiError = require('../utils/ApiError');
-const { parsePerms, OWNER_ROLE } = require('../config/permissions');
+const { parsePerms, OWNER_ROLE, isOwnerRole } = require('../config/permissions');
 
 function toClient(r) {
   return { id: r.id, name: r.name, color: r.color, permissions: parsePerms(r.permissions) || {}, builtin: r.builtin, sortOrder: r.sortOrder };
 }
 // derive a safe role id from a name (e.g. "Supervisor Gudang" → "supervisor-gudang")
 const slug = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
+// distribusiApproveSelf (+ its ceiling) is a Pemilik-only grant — per user (user.service) AND through a
+// role template (else a manageUsers holder, e.g. a GM, could hand it to a whole role).
+const WAIVER_KEYS = ['distribusiApproveSelf', 'maxSelfApproveAmount'];
+async function assertWaiverGrant(beforeJson, after, actor) {
+  if (after == null) return;
+  const before = parsePerms(beforeJson) || {};
+  const val = (o, k) => JSON.stringify(o[k] === undefined || o[k] === false ? null : o[k]);
+  if (!WAIVER_KEYS.some((k) => val(before, k) !== val(after, k))) return;
+  const u = actor && actor.id ? await prisma.user.findUnique({ where: { id: actor.id }, select: { role: true } }) : null;
+  if (!(u && isOwnerRole(u.role))) throw ApiError.forbidden('Hanya Pemilik yang boleh memberi izin menyetujui pengajuan sendiri.');
+}
 
 async function list() {
   const rows = await prisma.role.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
@@ -21,7 +33,8 @@ async function getById(id) {
 async function roleExists(id) { return (await prisma.role.count({ where: { id } })) > 0; }
 async function usageCount(id) { return prisma.user.count({ where: { role: id } }); }
 
-async function create({ id, name, color, permissions }) {
+async function create({ id, name, color, permissions }, actor) {
+  await assertWaiverGrant(null, permissions || {}, actor);
   const nm = String(name || '').trim();
   if (!nm) throw ApiError.badRequest('Nama peran wajib diisi');
   const rid = (id && slug(id)) || slug(nm);
@@ -31,8 +44,10 @@ async function create({ id, name, color, permissions }) {
   const r = await prisma.role.create({ data: { id: rid, name: nm, color: color || '#22A7A1', permissions: JSON.stringify(permissions || {}), builtin: false, sortOrder: count } });
   return toClient(r);
 }
-async function update(id, { name, color, permissions }) {
-  if (!(await prisma.role.findUnique({ where: { id } }))) throw ApiError.notFound('Role not found');
+async function update(id, { name, color, permissions }, actor) {
+  const existing = await prisma.role.findUnique({ where: { id } });
+  if (!existing) throw ApiError.notFound('Role not found');
+  await assertWaiverGrant(existing.permissions, permissions, actor);
   const data = {};
   if (name != null) { const nm = String(name).trim(); if (!nm) throw ApiError.badRequest('Nama peran wajib diisi'); data.name = nm; }
   if (color != null) data.color = String(color);

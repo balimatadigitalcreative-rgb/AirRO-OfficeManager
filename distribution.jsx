@@ -3685,6 +3685,8 @@ function AdjustModal({ customer, kind, onClose, onSaved }) {
   );
 }
 
+const KOREKSI_KINDS = ['correction', 'void', 'reassign'];   // owner 2026-10-02: approval access is enough for one's own koreksi
+
 function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKoreksi, canVoid, canApprove, canApproveSelf, selfApproveLimit, currentUserId, canDelete, canLegacyImport, canBonAdjust, canPenyesuaianGalon, canPenyesuaianBon, isGmOwner, staffMode, refreshKey, fleet, fleetScope, distFleet, setDistFleet, onGoHarga, onChanged, onGoApprovals, onOpenLoss, userName, nav, histTick }) {
   const clParam0 = (k, d) => { try { return new URLSearchParams(window.location.search).get(k) || d; } catch (e) { return d; } };
   const [view, setView] = uSx(() => (clParam0('c', '') ? 'detail' : 'list'));   // ?c=<id> in the URL → open that detail (deep-link / refresh)
@@ -4318,8 +4320,7 @@ function DistCustomers({ canCustomers, canCustImport, canPrice, canInput, canKor
                   {t.pendingRequest.reason ? <div className="cd-pending-reason"><IconInvoice s={12} />{t.pendingRequest.reason}</div> : null}
                   {canApprove && (() => {
                     const own = !!(t.pendingRequest.requestedById && currentUserId && t.pendingRequest.requestedById === currentUserId);
-                    // Own request + NO self-approval cap → the classic block (server enforces it too).
-                    if (own && !canApproveSelf) return <div className="cd-pending-own">{trD('cd.pendOwn')}</div>;
+                    // Own correction / void: approval access is enough (owner 2026-10-02) — badged as self-approval.
                     return (
                       <div className="cd-pending-act">
                         {own && <div className="cd-pending-selfnote"><IconWarn s={12} />{trD('cd.selfApproveNote')}{selfApproveLimit > 0 ? ' ' + trD('cd.selfApproveLimit', { amt: rpFull(selfApproveLimit) }) : ''}</div>}
@@ -7687,7 +7688,8 @@ function DistChangeRequests({ refreshKey, fleetScope, fleet, distFleet, setDistF
                   {r.status === 'pending' && (() => {
                     const own = !!(r.requestedById && currentUserId && r.requestedById === currentUserId);
                     // Own request without the waiver → no approve button, just the reason why (server enforces).
-                    if (own && !canApproveSelf) {
+                    // Koreksi kinds are the exception: approval access is enough (owner 2026-10-02).
+                    if (own && !canApproveSelf && !KOREKSI_KINDS.includes(r.kind)) {
                       return <div className="cr-own-note"><IconWarn s={13} />{trD('cd.pendOwn')}</div>;
                     }
                     return (

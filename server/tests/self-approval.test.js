@@ -1,8 +1,8 @@
 'use strict';
 // SELF-APPROVAL (distribusiApproveSelf) — a deliberate, owner-granted waiver of segregation of duties
 // so a lone owner/GM isn't deadlocked approving their own submission. This asserts the whole control:
-//  • WITHOUT the cap, a requester approving their OWN change request is rejected server-side, even via a
-//    crafted direct API call (the UI hint is not the enforcement);
+//  • a correction / void (koreksi) needs only APPROVAL ACCESS to self-approve (owner 2026-10-02) — still
+//    badged selfApproved; correction-only access can never approve (self-approval-koreksi.test.js);
 //  • WITH distribusiApprove + distribusiApproveSelf, the self-approval SUCCEEDS and the record carries
 //    selfApproved=true (badge) + a self-approval audit row (the "Persetujuan mandiri" filter);
 //  • a normal approver deciding SOMEONE ELSE's request is unaffected — selfApproved stays false;
@@ -113,17 +113,13 @@ describe('Self-approval enforcement on change requests', () => {
     otherTok = await login('sa_other', 'secret123');
   });
 
-  it('WITHOUT distribusiApproveSelf, a requester approving their OWN request is rejected (crafted API call)', async () => {
+  it('approval access alone (no waiver): a requester may approve their OWN correction — badged selfApproved (owner 2026-10-02)', async () => {
     const txn = await mkTxn(owner, cid, 5);   // 30.000
     const cr = (await correct(selfTok, txn, { reason: 'salah jumlah', qty: 3, unitPrice: 6000, gallonOut: 3 })).body.data;
-    const r = await approveReq(selfTok, cr.id);   // the requester tries to approve their own — directly at the API
-    expect(r.status).toBe(403);
-    expect(r.body.error.message).toMatch(/sendiri/i);
-    // a DIFFERENT approver decides it normally → NOT flagged self-approved
-    const ok = await approveReq(otherTok, cr.id);
-    expect(ok.status).toBe(200);
+    const r = await approveReq(selfTok, cr.id);
+    expect(r.status).toBe(200);
     const decided = (await listReqs(owner, '?status=approved')).find((x) => x.id === cr.id);
-    expect(decided.selfApproved).toBe(false);
+    expect(decided.selfApproved).toBe(true);
   });
 
   it('WITH both caps, the requester approves their OWN request → success + selfApproved=true + audit', async () => {

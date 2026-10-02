@@ -193,7 +193,7 @@ async function deleteType(id, reassignTo, actor) {
 // actor = req.user ({ id, role, username }). We snapshot id+role (+name from DB) so
 // the trail is historical and can never be forged from the request body.
 async function actorSnap(actor) {
-  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null, actorStaff: false, canPrice: false, canApproveSelf: false, selfApproveLimit: 0 };
+  const out = { actorId: (actor && actor.id) || null, actorRole: (actor && actor.role) || null, actorName: null, actorStaff: false, canPrice: false, canApproveSelf: false, canApproveOwnKoreksi: false, selfApproveLimit: 0 };
   if (actor && actor.id) {
     const u = await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true, role: true, permissions: true } });
     if (u) {
@@ -207,6 +207,10 @@ async function actorSnap(actor) {
       // SELF-APPROVAL — read LIVE from the DB (never the token): may this actor approve their OWN
       // submission, and up to what rupiah ceiling (0 = unlimited). Both gate the approval doors below.
       out.canApproveSelf = !!perms.distribusiApproveSelf;
+      // KOREKSI (owner, 2026-10-02): approval access is enough to approve one's OWN correction / void /
+      // customer move (still badged + audited, per-user ceiling still applies); the separate waiver above
+      // keeps covering disputes, cost standards and payroll.
+      out.canApproveOwnKoreksi = !!perms.distribusiApprove;
       const lim = parseInt(perms.maxSelfApproveAmount, 10);
       out.selfApproveLimit = Number.isFinite(lim) && lim > 0 ? lim : 0;
     }
@@ -240,12 +244,15 @@ async function logAudit(kind, title, detail, snap, fleetId, selfApproved) {
 // Normally an approver may NOT decide their own submission. This resolves whether `snap` is allowed
 // to self-approve a record worth `amount` rupiah, throwing the RIGHT ApiError when not. It is called
 // only once we already know the actor IS the "self" (requester / original txn handler).
-//   • without distribusiApproveSelf → forbidden (the classic rule, unchanged for everyone else);
+//   • koreksi (correction / void / customer move, opts.koreksi — owner 2026-10-02): approval access
+//     (distribusiApprove) is enough; correction access alone never reaches here (the route needs approve);
+//   • anything else (disputes, cost standards, payroll) without distribusiApproveSelf → forbidden;
 //   • with the cap but over the per-approver ceiling (maxSelfApproveAmount) → forbidden, and the
 //     request stays pending for another approver;
 //   • with the cap and within the ceiling → allowed. `noun` names the flow for the message.
-function assertSelfApprovalAllowed(snap, amount, noun) {
-  if (!snap.canApproveSelf) {
+function assertSelfApprovalAllowed(snap, amount, noun, opts) {
+  const allowed = opts && opts.koreksi ? !!(snap.canApproveOwnKoreksi || snap.canApproveSelf) : !!snap.canApproveSelf;
+  if (!allowed) {
     throw ApiError.forbidden(`Anda tidak boleh menyetujui ${noun} Anda sendiri.`);
   }
   const limit = snap.selfApproveLimit || 0;
@@ -2112,12 +2119,12 @@ async function decideChangeRequest(id, decision, body, actor) {
   if (req.kind === 'reassign') return decideReassign(req, decision, body, actor, snap);
   const txn = await prisma.distTransaction.findUnique({ where: { id: req.transactionId }, include: { customer: { select: { name: true } } } });
   if (!txn) throw ApiError.notFound('Transaction not found');
-  // SEGREGATION OF DUTIES — a requester may not approve their OWN request, UNLESS the owner granted
-  // distribusiApproveSelf (and the txn is within their self-approval ceiling). Rejecting your own
+  // SEGREGATION OF DUTIES — a requester may approve their OWN correction / void only when they hold
+  // approval access (owner 2026-10-02) or the distribusiApproveSelf waiver, within their self-approval ceiling. Rejecting your own
   // request is always fine (it changes nothing). `selfApproved` is stamped on the record + audit so
   // the waiver is never silent. Enforced here regardless of what the client showed.
   const isSelf = !!(decision === 'approve' && req.requestedById && actor && req.requestedById === actor.id);
-  if (isSelf) assertSelfApprovalAllowed(snap, txn.amount, 'pengajuan');
+  if (isSelf) assertSelfApprovalAllowed(snap, txn.amount, 'pengajuan', { koreksi: true });
 
   if (decision === 'reject') {
     const note = String(body.note || '').trim();
@@ -2341,7 +2348,7 @@ async function decideReassign(req, decision, body, actor, snap) {
     throw ApiError.badRequest(inv ? `Transaksi ${inv.ref} kini ada di faktur ${inv.invoice} — tidak bisa dipindahkan.` : 'Periode transaksi sudah ditutup — tidak bisa dipindahkan.', { blocks: impact.blocks });
   }
   const isSelf = !!(req.requestedById && actor && req.requestedById === actor.id);
-  if (isSelf) assertSelfApprovalAllowed(snap, impact.movedOldTotal, 'pemindahan');
+  if (isSelf) assertSelfApprovalAllowed(snap, impact.movedOldTotal, 'pemindahan', { koreksi: true });
   const fromId = impact.fromCustomer.id, toId = impact.toCustomer.id, priceMode = impact.priceMode;
   await prisma.$transaction(async (db) => {
     await claimPending(db, req.id, { status: 'approved', decidedById: snap.actorId, decidedByName: snap.actorName, decidedByRole: snap.actorRole, decidedAt: new Date(), selfApproved: isSelf });
