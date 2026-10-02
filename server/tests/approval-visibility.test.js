@@ -82,11 +82,7 @@ describe('approval UI end-to-end (seeded pending request)', () => {
   it('the staff requester CANNOT read the inbox or approve their own request (403)', async () => {
     expect((await listReqs(staff, '?status=pending')).status).toBe(403);
     expect((await approve(staff, reqId)).status).toBe(403);
-    // even granted the cap, a requester can't self-approve
-    await request(app).patch(`/api/v1/users/${staffId}`).set(auth(gmLegacy)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiApprove: true } });
-    const selfTok = await login('staff_av', 'secret123');
-    expect((await approve(selfTok, reqId)).status).toBe(403);
-    await request(app).patch(`/api/v1/users/${staffId}`).set(auth(gmLegacy)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiApprove: false } });
+    // (owner 2026-10-02: WITH approval access a requester may self-approve a koreksi — self-approval-koreksi.test.js)
   });
 
   it('REJECT requires a note and leaves the transaction unchanged', async () => {

@@ -69,14 +69,10 @@ describe('Distribusi — approval-gated structured corrections', () => {
     expect((await voidReq(staff, bonId, { reason: 'batalkan' })).status).toBe(400);
   });
 
-  it('the requester can NOT approve their own request (even if they had the cap)', async () => {
-    // give the staff the approve cap temporarily → still blocked because they are the requester
-    await request(app).patch(`/api/v1/users/${staffId}`).set(auth(gm)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiVoid: true, distribusiApprove: true } });
-    const selfTok = await login('staff_cr', 'secret123');
-    expect((await approve(selfTok, reqId)).status).toBe(403);
-    // revoke again
-    await request(app).patch(`/api/v1/users/${staffId}`).set(auth(gm)).send({ permissions: { distribusi: true, distribusiInput: true, distribusiKoreksi: true, distribusiVoid: true, distribusiApprove: false } });
-    staff = await login('staff_cr', 'secret123');
+  it('a requester with correction access only can NOT approve their own request', async () => {
+    // owner 2026-10-02: approval access would let them self-approve (self-approval-koreksi.test.js);
+    // correction access alone never can.
+    expect((await approve(staff, reqId)).status).toBe(403);
   });
 
   it('a non-approver gets 403 on the inbox + decide endpoints', async () => {
