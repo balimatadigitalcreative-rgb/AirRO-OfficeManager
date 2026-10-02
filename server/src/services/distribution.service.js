@@ -5427,7 +5427,7 @@ async function daySummary(user, query) {
 module.exports = {
   bonMapFor, afterPointChange, isTransferPayment,
   METHODS, DAY_CODES, PRICE_SCOPES, actorSnap,
-  gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, gallonDamageCharge, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
+  gallonSummary, gallonCorrection, setOpeningStock, reportGallonDamage, gallonDamageCharge, syncGantiRugiWriteOff, resetGallon, logDistAudit, gallonBalances, syncPurchaseMovement, retractPurchaseMovement,
   gallonMovementImpact, voidGallonMovement, restoreGallonMovement, hardDeleteGallonMovement, openingResetImpact, resetOpeningStock,
   gallonInvariant, scopedGallonStock, planOpeningReset, stockOpname, opnameHistory, gallonIntegrityCheck, gallonIntegrityRepair, resetTotalGallon, restoreResetTotal, gallonResetReassurance, openingRowsPanel, openingRowsBulk, restoreOpeningRowsBatch,
   recordPosition, myPosition, listPositions, listCustomers, getCustomer, createCustomer, updateCustomer, setCustomerLocation, clearCustomerLocation, revertCustomerLocation, listLocationHistory, locationCoverage, bulkClearPreview, bulkClearLocations, setLocationPhoto, importCustomers, importLegacyTransactions, undoLegacyBatch, updatePrice, pricePreview, cancelPriceAdjustment,

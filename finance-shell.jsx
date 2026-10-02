@@ -2157,7 +2157,7 @@ function FApp() {
               ))}
             </div>
             {biayaTab === 'langganan' && ACCT.SubscriptionScreen && <ACCT.SubscriptionScreen canRun={!!p.reports} />}
-            {biayaTab === 'aset' && ACCT.AssetsScreen && <ACCT.AssetsScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} />}
+            {biayaTab === 'aset' && ACCT.AssetsScreen && <ACCT.AssetsScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} isOwner={!!(user && user.role === 'owner')} />}
             {biayaTab === 'akrual' && ACCT.AccrualScreen && <ACCT.AccrualScreen canRun={!!p.reports} />}
           </>)}
           {screen === 'acct-costing' && p.reports && ACCT.CostingScreen && (<ACCT.CostingScreen canRun={user && (user.role === 'owner' || user.role === 'gm')} />)}

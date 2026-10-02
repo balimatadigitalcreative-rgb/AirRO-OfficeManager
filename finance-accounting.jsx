@@ -1238,7 +1238,7 @@
   const AS_STATUSES = ['aktif', 'dijual', 'dilepas', 'rusak'];
   const asCat = (c) => trA('as.cat_' + c) || c;
 
-  function AssetsScreen({ canRun }) {
+  function AssetsScreen({ canRun, isOwner }) {
     const [fCat, setFCat] = aS(''); const [fStatus, setFStatus] = aS('aktif');
     const [form, setForm] = aS(false); const [imp, setImp] = aS(false); const [detail, setDetail] = aS(null);
     const [busy, setBusy] = aS(''); const [err, setErr] = aS(''); const [toast, setToast] = aS('');
@@ -1291,7 +1291,7 @@
         </div>
         {form && <AssetForm onClose={() => setForm(false)} onDone={() => { setForm(false); q.reload(); flash(trA('as.saved')); }} />}
         {imp && <AssetImport onClose={() => setImp(false)} onDone={(n) => { setImp(false); q.reload(); flash(trA('as.importDone', { n })); }} />}
-        {detail && <AssetDetail id={detail} canRun={canRun} onClose={() => setDetail(null)} onChanged={() => q.reload()} />}
+        {detail && <AssetDetail id={detail} canRun={canRun} isOwner={isOwner} onClose={() => setDetail(null)} onChanged={() => q.reload()} />}
         {toast && <div className="dist-toast"><span className="dist-toast-ic"><IconCheck s={15} /></span>{toast}</div>}
       </div>
     );
@@ -1327,7 +1327,7 @@
     );
   }
 
-  function AssetDetail({ id, canRun, onClose, onChanged }) {
+  function AssetDetail({ id, canRun, isOwner, onClose, onChanged }) {
     const q = useAcct(() => ACC().assetGet(id), [id]);
     const [busy, setBusy] = aS(''); const [err, setErr] = aS('');
     const [disp, setDisp] = aS(null); const [poolQty, setPoolQty] = aS(''); const [recon, setRecon] = aS(null);
@@ -1356,6 +1356,7 @@
                 <button className="btn btn-ghost btn-sm" disabled={!!busy} onClick={doReconcile}>{trA('as.reconcile')}</button>
                 {recon && <div className="dist-hint" style={{ marginTop: 8 }}>{trA('as.poolQty')}: <b>{recon.poolQuantity}</b> · {trA('as.ledgerOwned')}: <b>{recon.totalOwned}</b> · {trA('as.ledgerDimiliki')}: <b>{recon.totalDimiliki}</b> · {trA('as.drift')}: <b className={recon.drift === 0 ? 'amt-pos' : 'amt-neg'}>{recon.drift}</b></div>}
                 {canRun && a.status === 'aktif' && <div className="dist-form-row" style={{ marginTop: 8 }}><div style={{ flex: 1 }}><input className="fld tnum" inputMode="numeric" placeholder={trA('as.lossQty')} value={poolQty} onChange={(e) => setPoolQty(e.target.value.replace(/\D/g, ''))} /></div><button className="btn btn-ghost btn-sm danger" disabled={!(+poolQty > 0) || !!busy} onClick={doPoolLoss}>{trA('as.poolLoss')}</button></div>}
+                {isOwner && a.status === 'aktif' && <AssetGantiRugiOld onApplied={() => { onChanged(); q.reload(); }} />}
               </div>
             )}
             <div className="sec-title" style={{ fontSize: 13, marginBottom: 6 }}>{trA('as.schedule')}</div>
@@ -1374,6 +1375,33 @@
           </>}
         </div>
       </div></div>
+    );
+  }
+
+  // OLD GANTI RUGI (owner 2026-10-02): ganti rugi recorded before they wrote the gallons off the asset pool.
+  // The owner sees the list first, then applies — each one is written off exactly as a new ganti rugi is.
+  function AssetGantiRugiOld({ onApplied }) {
+    const [pv, setPv] = aS(null); const [busy, setBusy] = aS(''); const [err, setErr] = aS(''); const [done, setDone] = aS(null); const [confirm, setConfirm] = aS(false);
+    const load = async () => { setBusy('p'); setErr(''); setDone(null); try { const r = await ACC().gantiRugiBackfill(false); setPv(r.data); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    const apply = async () => { setBusy('a'); setErr(''); try { const r = await ACC().gantiRugiBackfill(true); setDone(r.data); setConfirm(false); setPv(null); onApplied(); } catch (e) { setErr(msgOf(e)); } finally { setBusy(''); } };
+    return (
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+        <button className="btn btn-ghost btn-sm" disabled={!!busy} onClick={load}>{busy === 'p' ? '…' : trA('as.grOld')}</button>
+        {done && <div className="dist-hint" style={{ marginTop: 8 }}>{trA('as.grApplied', { n: done.applied, g: done.gallons })}</div>}
+        {pv && pv.count === 0 && <div className="dist-hint" style={{ marginTop: 8 }}>{trA('as.grOldNone')}</div>}
+        {pv && pv.count > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div className="dist-hint">{trA('as.grOldLine', { n: pv.count, g: pv.gallons })}</div>
+            <div className="fin-tablewrap" style={{ maxHeight: 200, overflow: 'auto', marginTop: 6 }}><table className="fin-table fin-cards"><thead><tr><th className="fin-th">{trA('as.grColDate')}</th><th className="fin-th">{trA('as.grColCust')}</th><th className="fin-th fin-r">{trA('as.grColQty')}</th></tr></thead>
+              <tbody>{pv.rows.map((r) => <tr key={r.id} className="fin-trow"><td className="fin-td tnum" data-label={trA('as.grColDate')}>{r.txnDate}</td><td className="fin-td" data-label={trA('as.grColCust')}>{r.customerName || '—'}</td><td className="fin-td fin-r tnum" data-label={trA('as.grColQty')}>{r.qty}</td></tr>)}</tbody>
+            </table></div>
+            {!confirm ? <button className="btn btn-ghost btn-sm danger" style={{ marginTop: 8 }} disabled={!!busy} onClick={() => setConfirm(true)}>{trA('as.grApply')}</button>
+              : <div className="card" style={{ padding: 10, marginTop: 8 }}><div className="dist-hint">{trA('as.grApplyConfirm', { n: pv.count, g: pv.gallons })}</div>
+                <div className="modal-foot" style={{ padding: '8px 0 0' }}><button className="btn btn-ghost" onClick={() => setConfirm(false)}>{trA('common.cancel')}</button><button className="btn btn-primary" disabled={!!busy} onClick={apply}>{busy === 'a' ? '…' : trA('as.grApply')}</button></div></div>}
+          </div>
+        )}
+        {err && <div className="add-err" style={{ marginTop: 8 }}><IconClose s={14} />{err}</div>}
+      </div>
     );
   }
 

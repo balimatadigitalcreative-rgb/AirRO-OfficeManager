@@ -93,6 +93,9 @@ const assetsImportPreview = asyncHandler(async (req, res) => res.json({ data: aw
 const assetsImportCommit = asyncHandler(async (req, res) => res.json({ data: await depreciation.commitImport(req.body && req.body.rows, req.user) }));
 const gallonPoolReconcile = asyncHandler(async (req, res) => res.json({ data: await depreciation.reconcileGallonPool(req.params.id, req.user) }));
 const gallonPoolLoss = asyncHandler(async (req, res) => res.json({ data: await depreciation.gallonPoolLoss(req.params.id, req.body, req.user) }));
+// Old ganti rugi → gallon pool (owner 2026-10-02): preview, then apply on the owner's click.
+const gantiRugiBackfillPreview = asyncHandler(async (req, res) => res.json({ data: await depreciation.gantiRugiBackfill({}, req.user) }));
+const gantiRugiBackfillApply = asyncHandler(async (req, res) => res.json({ data: await depreciation.gantiRugiBackfill({ apply: true }, req.user) }));
 
 // HPP / PRODUCT COSTING — standards, production runs, variance analysis, reports.
 const stdList = asyncHandler(async (req, res) => res.json(await costing.listStandards(req.query)));
@@ -114,5 +117,5 @@ module.exports = { trialBalance, balanceSheet, incomeStatement, cashFlow, genera
   billsList, billGet, billCreate, billUpdate, billIssue, billPay, billVoid, apAging, apDue, suppliersList, supplierCreate,
   accrualsList, accrualCreate, accrualVoid, schedulesList, scheduleCreate, amortize,
   subsList, subGet, subCreate, subUpdate, subPause, subResume, subCancel, subSkip, subRun, subsDue,
-  assetsList, assetGet, assetCreate, assetDispose, depreciate, assetsImportPreview, assetsImportCommit, gallonPoolReconcile, gallonPoolLoss,
+  assetsList, assetGet, assetCreate, assetDispose, depreciate, assetsImportPreview, assetsImportCommit, gallonPoolReconcile, gallonPoolLoss, gantiRugiBackfillPreview, gantiRugiBackfillApply,
   stdList, stdGet, stdCreate, stdRequestActivate, runList, runGet, runCreate, runComplete, varReport, varClose, costingGallonLoss, costingInventory, costingHpp, costingMargin };

@@ -217,6 +217,7 @@
       assetsImportCommit: (b) => req('POST', '/accounting/assets/import', b),           // { rows } → commit valid rows
       gallonPoolReconcile: (id) => req('GET', '/accounting/assets/' + id + '/reconcile-pool'),
       gallonPoolLoss: (id, b) => req('POST', '/accounting/assets/' + id + '/pool-loss', b), // { qty, kind, reason }
+      gantiRugiBackfill: (apply) => req(apply ? 'POST' : 'GET', '/accounting/gallon-pool/ganti-rugi-backfill', apply ? {} : undefined),   // old ganti rugi → pool (owner)
       // HPP / PRODUCT COSTING
       costStandards: (p) => req('GET', '/accounting/cost-standards' + acctQs(p)),
       costStandardGet: (id) => req('GET', '/accounting/cost-standards/' + id),

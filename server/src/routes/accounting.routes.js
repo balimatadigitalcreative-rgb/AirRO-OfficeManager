@@ -68,6 +68,9 @@ router.post('/assets', requireRole('owner', 'gm'), ctrl.assetCreate);
 router.post('/assets/:id/dispose', requireRole('owner', 'gm'), ctrl.assetDispose);
 router.get('/assets/:id/reconcile-pool', ctrl.gallonPoolReconcile);       // gallon pool vs ledger total-owned
 router.post('/assets/:id/pool-loss', requireRole('owner', 'gm'), ctrl.gallonPoolLoss);
+// Old ganti rugi that never left the gallon pool: owner reviews the list, then applies (owner 2026-10-02).
+router.get('/gallon-pool/ganti-rugi-backfill', requireRole('owner'), ctrl.gantiRugiBackfillPreview);
+router.post('/gallon-pool/ganti-rugi-backfill', requireRole('owner'), ctrl.gantiRugiBackfillApply);
 
 // HPP / PRODUCT COSTING — standards + production runs + variance analysis. Reads for any reports user;
 // create/complete/activate/close are owner/GM-tier. Static paths before ':id'.

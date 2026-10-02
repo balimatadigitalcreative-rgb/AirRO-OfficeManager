@@ -405,8 +405,29 @@ async function restorePool({ asset, qty, cost, accum, salvage, date, sourceType,
   } });
 }
 
+// OLD GANTI RUGI (before 2026-10-02 they never touched the pool): live money ganti rugi without a live
+// write-off. Preview first (owner reviews the list); apply = the same sync a new one runs, one
+// transaction each, so a failure leaves the rest intact and re-running only picks up what is left.
+async function gantiRugiBackfill({ apply } = {}, actor) {
+  const rows = await prisma.distTransaction.findMany({ where: { kind: 'ganti_rugi', status: { not: 'void' }, payMethod: { not: 'ganti_galon' }, gallonQty: { gt: 0 } }, orderBy: [{ txnDate: 'asc' }, { createdAt: 'asc' }], include: { customer: { select: { name: true } } } });
+  const done = new Set((await prisma.gallonPoolWriteOff.findMany({ where: { reversedAt: null }, select: { transactionId: true } })).map((w) => w.transactionId));
+  const todo = rows.filter((t) => !done.has(t.id));
+  if (!apply) {
+    return { count: todo.length, gallons: todo.reduce((s, t) => s + (t.gallonQty || 0), 0), hasPool: !!(await findGallonPool('')),
+      rows: todo.map((t) => ({ id: t.id, txnDate: t.txnDate, customerName: t.customer ? t.customer.name : '', qty: t.gallonQty, amount: n(t.amount) })) };
+  }
+  const dist = require('./distribution.service');
+  let applied = 0, gallons = 0;
+  for (const t of todo) {
+    const { customer, ...txn } = t;
+    const w = await prisma.$transaction((tx) => dist.syncGantiRugiWriteOff(txn, actor, tx));
+    if (w && !w.reversedAt) { applied++; gallons += w.qty; }
+  }
+  return { applied, gallons };
+}
+
 module.exports = {
-  findGallonPool, writeOffPool, restorePool, accumulatedOf,
+  findGallonPool, writeOffPool, restorePool, accumulatedOf, gantiRugiBackfill,
   CATEGORIES, METHODS, STATUSES, buildSchedule, methodFormula, firstMonthPolicy,
   createAsset, listAssets, getAsset, postDepreciation, pendingDepreciation, pendingDepreciationCount,
   disposeAsset, previewImport, commitImport, reconcileGallonPool, gallonPoolLoss,
