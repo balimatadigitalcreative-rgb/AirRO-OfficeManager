@@ -125,3 +125,82 @@ it('client: the invoice viewer + printed statement label ganti rugi and show its
   expect((i18n.match(/'pc\.ketGantiRugi':/g) || []).length).toBe(2);
   expect((i18n.match(/'dist\.gmDamageCust':/g) || []).length).toBe(2);
 });
+
+describe('owner 2026-10-02: ganti rugi takes the gallons off the asset pool, unless replaced by a new gallon', () => {
+  let poolId, owner, gmUser;
+  const svc = require('../src/services/distribution.service');
+  const asActor = () => ({ id: gmUser.id, role: gmUser.role, username: gmUser.username });
+  beforeAll(async () => {
+    await require('../src/services/accounting.service').seedChart();
+    owner = (await request(app).post('/api/v1/auth/register').send({ name: 'Pemilik', username: 'gd_owner', password: 'secret123', role: 'owner' })).body.token;
+    gmUser = await prisma.user.findFirst({ where: { username: 'gd_gm' } });
+    poolId = (await request(app).post('/api/v1/accounting/assets').set(auth(owner)).send({ code: 'GAL-P', name: 'Galon', category: 'galon', acquisitionDate: '2026-01-01', acquisitionCost: 400000, salvageValue: 0, usefulLifeMonths: 40, quantity: 100 })).body.data.id;
+    await request(app).post(`${D}/transactions`).set(auth(gm)).send({ customerId: cid, qty: 6, method: 'lunas', txnDate: today, gallonOut: 6, gallonIn: 0 });   // enough gallons held
+  });
+  const pool = () => prisma.fixedAsset.findUnique({ where: { id: poolId } });
+
+  it('a cash ganti rugi writes 1 gallon off the pool (Cr 1-1440, Dr 6-8500) once, idempotently', async () => {
+    const lossBefore = await debitBal('6-8500');
+    const r = await charge({ qty: 1, kind: 'retak', payMethod: 'tunai', clientRef: 'gr-pool-0001' });
+    expect(r.status).toBe(201);
+    expect((await pool()).quantity).toBe(99);
+    const w = await prisma.gallonPoolWriteOff.findUnique({ where: { transactionId: r.body.data.transaction.id } });
+    expect(w.qty).toBe(1);
+    expect(Number(w.cost)).toBe(4000);
+    expect(await debitBal('6-8500')).toBe(lossBefore + 4000 - Number(w.accum));
+    const again = await charge({ qty: 1, kind: 'retak', payMethod: 'tunai', clientRef: 'gr-pool-0001' });   // replay
+    expect(again.body.data.replay).toBe(true);
+    expect((await pool()).quantity).toBe(99);
+  });
+
+  it('"Diganti galon baru": no money, no journal, the pool and the good stock stay whole', async () => {
+    const before = await gallon();
+    const q0 = (await pool()).quantity;
+    const r = await charge({ qty: 1, kind: 'pecah', payMethod: 'ganti_galon' });
+    expect(r.status).toBe(201);
+    const t = r.body.data.transaction;
+    expect(Number(t.amount)).toBe(0);
+    expect(t.payMethod).toBe('ganti_galon');
+    expect((await pool()).quantity).toBe(q0);
+    expect(await prisma.journalEntry.count({ where: { sourceType: 'dist_txn', sourceId: t.id } })).toBe(0);
+    const after = await gallon();
+    expect(after.stock.totalOwned).toBe(before.stock.totalOwned);
+    expect(after.stock.rusakHilang).toBe(before.stock.rusakHilang + 1);
+    expect(after.stock.atCustomers).toBe(before.stock.atCustomers - 1);
+    expect(after.invariant.ok).toBe(true);
+    expect(after.movements.some((m) => m.type === 'replace_customer' && m.qty === 1)).toBe(true);
+  });
+
+  it('voiding a ganti rugi puts the gallons back in the pool; un-voiding takes them off again', async () => {
+    const r = await charge({ qty: 1, kind: 'pecah', payMethod: 'transfer' });
+    const id = r.body.data.transaction.id;
+    const q1 = (await pool()).quantity;
+    const lossAfterCharge = await debitBal('6-8500');
+    await svc.voidTransaction(id, { reason: 'salah catat' }, asActor());
+    expect((await pool()).quantity).toBe(q1 + 1);
+    expect((await prisma.gallonPoolWriteOff.findUnique({ where: { transactionId: id } })).reversedAt).not.toBeNull();
+    const w = await prisma.gallonPoolWriteOff.findUnique({ where: { transactionId: id } });
+    expect(await debitBal('6-8500')).toBe(lossAfterCharge - (Number(w.cost) - Number(w.accum)));
+    // bulk void + restore (un-void) on another one: the pool follows both ways, exactly
+    const r2 = await charge({ qty: 2, kind: 'hilang', payMethod: 'tunai' });
+    const id2 = r2.body.data.transaction.id;
+    const q2 = (await pool()).quantity;
+    const b = await request(app).post(`${D}/transactions/bulk`).set(auth(gm)).send({ ids: [id2], action: 'batal', note: 'uji batal' });
+    expect(b.status).toBe(200);
+    expect((await pool()).quantity).toBe(q2 + 2);
+    const rs = await request(app).post(`${D}/transactions/bulk/restore`).set(auth(gm)).send({ batchId: b.body.data.batchId });
+    expect(rs.status).toBe(200);
+    expect((await pool()).quantity).toBe(q2);
+    const w2 = await prisma.gallonPoolWriteOff.findUnique({ where: { transactionId: id2 } });
+    expect(w2.reversedAt).toBeNull();
+    expect(w2.version).toBe(2);
+  });
+
+  it('with no gallon pool registered the ganti rugi still saves (nothing to write off)', async () => {
+    await prisma.fixedAsset.update({ where: { id: poolId }, data: { status: 'dilepas' } });
+    const r = await charge({ qty: 1, kind: 'pecah', payMethod: 'tunai' });
+    expect(r.status).toBe(201);
+    expect(await prisma.gallonPoolWriteOff.findUnique({ where: { transactionId: r.body.data.transaction.id } })).toBeNull();
+    await prisma.fixedAsset.update({ where: { id: poolId }, data: { status: 'aktif' } });
+  });
+});

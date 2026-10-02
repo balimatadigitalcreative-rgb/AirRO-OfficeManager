@@ -317,3 +317,16 @@ describe('Plan 3C: corrections in practice follow the server', () => {
     expect(api.exportState().closeouts.length).toBe(1);
   });
 });
+
+describe('ganti rugi — diganti galon baru (owner 2026-10-02)', () => {
+  it('practice copy: "Diganti galon baru" costs nothing and needs no price; money choices still need it', async () => {
+    const snap = SNAP(); snap.context.rules.hargaGantiRugiGalon = 0;
+    const api = SB.createSandbox(SB.fromSnapshot(snap, { key: 'u1' }), { planRit, onChange: () => {} });
+    const ph = await api.uploadPhoto({ data: 'x' });
+    expect(await code(api.gallonDamage('c2', { qty: 1, kind: 'pecah', payMethod: 'tunai', photoId: ph.id }))).toBe('NO_PRICE');
+    const r = await api.gallonDamage('c2', { qty: 1, kind: 'pecah', payMethod: 'ganti_galon', photoId: ph.id });
+    expect(r.transaction).toMatchObject({ kind: 'ganti_rugi', amount: 0, payMethod: 'ganti_galon', method: 'lunas', gallonQty: 1 });
+    expect(r.gallonsHeld).toBe(2);
+    expect(r.sisaBon).toBe(0);
+  });
+});

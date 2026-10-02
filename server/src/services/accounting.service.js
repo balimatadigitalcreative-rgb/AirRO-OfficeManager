@@ -277,6 +277,7 @@ async function hppOnSaleLines(t, db) {
 // lives inside the bon/pelunasan branches only — never suppressing a lunas sale.
 async function distTxnLines(t, db = prisma) {
   if (t.status === 'void') return [];
+  if (t.kind === 'ganti_rugi' && t.payMethod === 'ganti_galon') return [];   // a new gallon handed over (owner 2026-10-02): no money moved
   const f = t.fleetId || '';
   // Where the money landed: a transfer (sale or settlement) is BANK; everything else KAS. Only the
   // payMethod column decides — a legacy row tagged "· Transfer" in its note keeps posting to Kas until

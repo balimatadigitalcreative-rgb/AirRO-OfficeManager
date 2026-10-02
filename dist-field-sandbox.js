@@ -280,11 +280,12 @@
         if (!b.photoId) throw fail(400, 'Foto galon rusak wajib dilampirkan.', 'PROOF_REQUIRED');
         if (!photoOk(b.photoId)) throw fail(400, 'Foto tidak ditemukan — unggah ulang fotonya.', 'PROOF_MISSING');
         if (qty > c.gallonsHeld) throw fail(400, 'Pelanggan hanya memegang ' + c.gallonsHeld + ' galon — tidak bisa mengganti rugi ' + qty + '.', null, { held: c.gallonsHeld });
-        var price = int(rules().hargaGantiRugiGalon); if (!price) throw fail(400, 'Harga ganti rugi galon belum diatur pemilik.', 'NO_PRICE');
-        if (['tunai', 'bon', 'transfer'].indexOf(b.payMethod) < 0) throw fail(400, 'Pilih cara bayar ganti rugi.');
+        if (['tunai', 'bon', 'transfer', 'ganti_galon'].indexOf(b.payMethod) < 0) throw fail(400, 'Pilih cara bayar ganti rugi.');
+        var money = b.payMethod !== 'ganti_galon';   // "diganti galon baru": no money, no price needed
+        var price = money ? int(rules().hargaGantiRugiGalon) : 0; if (money && !price) throw fail(400, 'Harga ganti rugi galon belum diatur pemilik.', 'NO_PRICE');
         if (['pecah', 'bocor', 'retak', 'hilang'].indexOf(b.kind) < 0) throw fail(400, 'Pilih jenis kerusakan.');
         var pay = b.payMethod; var kind = b.kind;
-        var t = pushTxn({ clientRef: b.clientRef || null, customerId: c.id, qty: 0, unitPriceLocked: price, amount: qty * price, method: pay === 'bon' ? 'bon' : 'lunas', payMethod: pay === 'bon' ? '' : pay, kind: 'ganti_rugi', gallonQty: qty, gallonOut: 0, gallonIn: 0, proofPhotoId: b.photoId, note: 'Ganti rugi ' + qty + ' galon ' + kind });
+        var t = pushTxn({ clientRef: b.clientRef || null, customerId: c.id, qty: 0, unitPriceLocked: price, amount: money ? qty * price : 0, method: pay === 'bon' ? 'bon' : 'lunas', payMethod: pay === 'bon' ? '' : pay, kind: 'ganti_rugi', gallonQty: qty, gallonOut: 0, gallonIn: 0, proofPhotoId: b.photoId, note: 'Ganti rugi ' + qty + ' galon ' + kind });
         c.gallonsHeld -= qty; if (pay === 'bon') c.sisaBon += qty * price;
         return W({ transaction: t, gallonsHeld: c.gallonsHeld, sisaBon: c.sisaBon });
       }),

@@ -5315,6 +5315,7 @@ const GM_META = {
   loss: { l: 'dist.gmLoss', cls: 'dmg', sign: '−' },
   damage_customer: { l: 'dist.gmDamageCust', cls: 'dmg', sign: '−' },   // ganti rugi galon: pelanggan → rusak
   loss_customer: { l: 'dist.gmLossCust', cls: 'dmg', sign: '−' },       // ganti rugi galon: pelanggan → hilang
+  replace_customer: { l: 'dist.gmReplaceCust', cls: 'purchase', sign: '+' },   // ganti rugi "diganti galon baru": galon baru → depot
 };
 // POSISI GALON — the single four-location card. A gallon is never destroyed, only relocated:
 // depot + armada + pelanggan + rusak/hilang = total dimiliki. A warning banner shows if the ledger

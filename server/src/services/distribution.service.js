@@ -1747,6 +1747,7 @@ async function voidTransaction(txnId, body, actor) {
     // LIVE POSTING: a void APPENDS an adjusting journal that fully reverses this txn (desired = []),
     // never editing the original, plus the AR reclass — same transaction (flag-gated).
     if (config.accountingV2) { await acc.reconcileDistTxn(row, 'void', actor, tx); await acc.postReceivablesReclass(txn.customerId, actor, tx); }
+    await syncGantiRugiWriteOff(row, actor, tx);   // a voided ganti rugi puts its gallons back in the asset pool
     return row;
   });
   await logAudit('batal', `Batalkan transaksi: ${txn.customer ? txn.customer.name : ''}`, `${shortRefServer(txn.id)} · ${txn.method} ${txn.amount} · ${reason}`, snap, txn.fleetId);
@@ -2172,9 +2173,10 @@ async function decideChangeRequest(id, decision, body, actor) {
     });
     if (req.kind === 'void') {
       await db.gallonMovement.updateMany({ where: { transactionId: txn.id, active: true }, data: { active: false } });
-      await db.distTransaction.update({ where: { id: txn.id }, data: {
+      const vrow = await db.distTransaction.update({ where: { id: txn.id }, data: {
         status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedByRole: snap.actorRole, voidedAt: new Date(), voidReason: req.reason,
       } });
+      await syncGantiRugiWriteOff(vrow, actor, db);   // a voided ganti rugi puts its gallons back in the asset pool
     } else if (isGallonSale(txn)) {
       // Rewrite this sale's gallon movements to the corrected out/in (append-only: deactivate + add).
       // ARCHIVE rows never had a gallon ledger (legacy import creates NO movements), so skip that entirely
@@ -2850,6 +2852,7 @@ async function bulkExecuteTransactions(ids, action, body, actor) {
           await tx.distTransaction.update({ where: { id }, data: { status: 'void', voidedById: snap.actorId, voidedByName: snap.actorName, voidedByRole: snap.actorRole, voidedAt: new Date(), voidReason: reason || note } });
           // LIVE POSTING: same append-only full reversal as a single void, + AR reclass (flag-gated).
           if (config.accountingV2) { await acc.reconcileDistTxn({ ...t, status: 'void' }, 'void', actor, tx); await acc.postReceivablesReclass(t.customerId, actor, tx); }
+          await syncGantiRugiWriteOff({ ...t, status: 'void' }, actor, tx);
         });
         snapshots.push({ id, action: 'batal' });
       } else if (action === 'arsip') {
@@ -2907,6 +2910,7 @@ async function restoreBulk(batchId, actor) {
           // Un-void → append an adjusting entry that restores the txn's journals to its live figure (the
           // prior void reversal stays; this cancels it) + AR reclass (flag-gated).
           if (config.accountingV2) { await acc.reconcileDistTxn(row, 'unvoid', actor, tx); await acc.postReceivablesReclass(row.customerId, actor, tx); }
+          await syncGantiRugiWriteOff(row, actor, tx);   // un-void → the gallons leave the asset pool again
         });
         restored.push(s.id);
       } else if (s.action === 'arsip') {
@@ -3250,8 +3254,10 @@ const custEffect = (m) => (m.type === 'delivery_out' ? m.qty : m.type === 'retur
 // 'opening' is a depot baseline (owned + at depot, never at a customer). Its qty is a signed
 // delta so an adjustment (nilai_baru − nilai_lama) is another append, never an overwrite.
 // 'damage'/'loss' remove good gallons from the depot (broken/lost), qty positive → negative effect.
+// 'replace_customer' (owner 2026-10-02): a customer hands over a NEW gallon in place of the one they broke
+// (ganti rugi "diganti galon baru") — it joins the good stock at the depot, like a purchase.
 const totalEffect = (m) => {
-  if (m.type === 'purchase' || m.type === 'opening') return m.qty;
+  if (m.type === 'purchase' || m.type === 'opening' || m.type === 'replace_customer') return m.qty;
   if (m.type === 'damage' || m.type === 'loss' || CUSTOMER_DAMAGE.has(m.type)) return -Math.abs(m.qty);
   if (m.type === 'correction' && !m.customerId) return m.qty;
   if (m.type === 'penyesuaian') return m.qty;   // a customer gallon adjustment changes total owned too (at-depot unchanged)
@@ -3285,7 +3291,7 @@ const armadaEffect = (m, cutoverMs) => {
 // pre-cutover fleet armadaEffect is 0 everywhere, so depotEffect reduces to the historical
 // atDepot = good − atCustomers and existing tests stay byte-identical.
 const depotEffect = (m, cutoverMs) => {
-  if (m.type === 'opening' || m.type === 'purchase') return m.qty;
+  if (m.type === 'opening' || m.type === 'purchase' || m.type === 'replace_customer') return m.qty;
   if (m.type === 'load_out') return -m.qty;
   if (m.type === 'load_return') return m.qty;
   const armadaEra = cutoverMs != null && movMs(m) >= cutoverMs;
@@ -3754,7 +3760,10 @@ async function reportGallonDamage({ qty, kind, reason, fleetId, proof }, actor) 
 //      deactivates it like any sale movement;
 //   2. a money-only DistTransaction kind 'ganti_rugi' (qty 0 → never a gallon sale; gallonQty = count):
 //      tunai/transfer → method 'lunas' (+payMethod), bon → method 'bon' (feeds Sisa Bon);
-//   3. journal via distTxnLines (Kas/Bank or Piutang / Pendapatan Lain) + AR reclass for a bon.
+//   3. journal via distTxnLines (Kas/Bank or Piutang / Pendapatan Lain) + AR reclass for a bon;
+//   4. (owner 2026-10-02) the gallons are written off the gallon asset pool — unless payMethod
+//      'ganti_galon': the customer hands over a new gallon (no money, no journal, pool kept whole,
+//      a replace_customer movement brings the new gallon into the good stock).
 const DAMAGE_KINDS = ['pecah', 'bocor', 'retak', 'hilang'];
 async function gallonDamageCharge(customerId, body, actor) {
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -3765,20 +3774,21 @@ async function gallonDamageCharge(customerId, body, actor) {
   const qty = int(body.qty);
   if (qty <= 0) throw ApiError.badRequest('Jumlah galon harus lebih dari 0.');
   const kind = DAMAGE_KINDS.includes(body.kind) ? body.kind : 'pecah';
-  const pay = ['tunai', 'bon', 'transfer'].includes(body.payMethod) ? body.payMethod : 'tunai';
+  const pay = ['tunai', 'bon', 'transfer', 'ganti_galon'].includes(body.payMethod) ? body.payMethod : 'tunai';
+  const money = pay !== 'ganti_galon';
   if (!body.photoId) throw ApiError.badRequest('Foto galon rusak wajib dilampirkan.', { code: 'PROOF_REQUIRED' });
   const att = await prisma.attachment.findUnique({ where: { id: String(body.photoId) }, select: { id: true } });
   if (!att) throw ApiError.badRequest('Foto tidak ditemukan — unggah ulang fotonya.', { code: 'PROOF_MISSING' });
   const held = await gallonBalanceOf(customer.id);
   if (qty > held) throw ApiError.badRequest(`Pelanggan hanya memegang ${held} galon — tidak bisa mengganti rugi ${qty}.`, { held });
-  const price = (await require('./fieldRules.service').getRules()).hargaGantiRugiGalon;
-  if (!price) throw ApiError.badRequest('Harga ganti rugi galon belum diatur pemilik.', { code: 'NO_PRICE' });
-  const amount = qty * price;
+  const price = money ? (await require('./fieldRules.service').getRules()).hargaGantiRugiGalon : 0;
+  if (money && !price) throw ApiError.badRequest('Harga ganti rugi galon belum diatur pemilik.', { code: 'NO_PRICE' });
+  const amount = money ? qty * price : 0;
   if (overCeiling(amount)) throw ApiError.badRequest(ceilingMsg, { amount });
   const txnDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.txnDate || '')) ? body.txnDate : todayISO();
   const fleetId = customer.armada || '';
   const snap = await actorSnap(actor);
-  const note = `Ganti rugi ${qty} galon ${kind}${body.note ? ' · ' + String(body.note).trim().slice(0, 200) : ''}`;
+  const note = `Ganti rugi ${qty} galon ${kind}${money ? '' : ' (diganti galon baru)'}${body.note ? ' · ' + String(body.note).trim().slice(0, 200) : ''}`;
   let clash = null;
   const txn = await prisma.$transaction(async (tx) => {
     const t = await tx.distTransaction.create({ data: { clientRef: body && body.clientRef ? String(body.clientRef) : null,
@@ -3790,12 +3800,47 @@ async function gallonDamageCharge(customerId, body, actor) {
       type: kind === 'hilang' ? 'loss_customer' : 'damage_customer', qty, customerId: customer.id, transactionId: t.id, fleetId,
       active: true, note, proof: JSON.stringify({ attachmentId: att.id }), actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName,
     } });
+    if (!money) await tx.gallonMovement.create({ data: { type: 'replace_customer', qty, customerId: null, transactionId: t.id, fleetId, active: true,
+      note: `Galon baru dari pelanggan pengganti ${qty} galon ${kind}`, actorId: snap.actorId, actorRole: snap.actorRole, actorName: snap.actorName } });
     if (config.accountingV2) { await acc.postDistTransaction(t, actor, tx); if (pay === 'bon') await acc.postReceivablesReclass(customer.id, actor, tx); }
+    await syncGantiRugiWriteOff(t, actor, tx);
     return t;
   }).catch(async (err) => { clash = await onClientRefClash(err, async () => { const rp = await replayByClientRef(body.clientRef, customer.id); return rp && { transaction: rp.txn, gallonsHeld: rp.gallonsHeld, sisaBon: rp.sisaBon, replay: true }; }); return null; });
   if (clash) return clash;
-  await logAudit('input', `Ganti rugi galon: ${customer.name}`, `${qty} galon ${kind} × ${price} = ${amount} (${pay})`, snap, fleetId);
+  await logAudit('input', `Ganti rugi galon: ${customer.name}`, money ? `${qty} galon ${kind} × ${price} = ${amount} (${pay})` : `${qty} galon ${kind} · diganti galon baru (tanpa uang)`, snap, fleetId);
   return { transaction: txn, gallonsHeld: await gallonBalanceOf(customer.id), sisaBon: await customerBonBalance(customer.id) };
+}
+// GANTI RUGI ↔ GALLON POOL (owner 2026-10-02). A live ganti rugi paid in money (tunai/bon/transfer) means the
+// broken/lost gallons are gone → written off the pooled gallon asset; "diganti galon baru" (a new gallon
+// handed over) keeps the pool whole; a void puts back exactly what was taken. Idempotent: call it after any
+// create / void / un-void — it moves the write-off to the state the transaction is in now. Never throws
+// for a missing pool (nothing to write off; the backfill preview lists it).
+async function syncGantiRugiWriteOff(t, actor, tx) {
+  if (!t || t.kind !== 'ganti_rugi') return null;
+  const dep = require('./depreciation.service');
+  const period = require('./period.service');
+  const want = t.status !== 'void' && t.payMethod !== 'ganti_galon' && (t.gallonQty || 0) > 0;
+  const row = await tx.gallonPoolWriteOff.findUnique({ where: { transactionId: t.id } });
+  const live = !!(row && !row.reversedAt);
+  // never post into a closed period: a closed transaction month books the write-off (or its undo) today
+  const dateFor = async (d) => (period.LOCKED.includes(await period.statusForKey(String(d || '').slice(0, 7))) ? todayISO() : d);
+  if (want && !live) {
+    const asset = await dep.findGallonPool(t.fleetId || '', tx);
+    if (!asset) return null;
+    const version = row ? row.version + 1 : 1;
+    const date = await dateFor(t.txnDate || todayISO());
+    const kind = /hilang/.test(String(t.note || '')) ? 'hilang' : 'rusak';
+    const w = await dep.writeOffPool({ asset, qty: t.gallonQty, date, kind, sourceType: 'ganti_rugi_writeoff', sourceId: `${t.id}:v${version}`, actor }, tx);
+    if (!w.qty) return null;
+    const data = { assetId: asset.id, qty: w.qty, cost: BigInt(w.cost), accum: BigInt(w.accum), salvage: BigInt(w.salvage), date, version, reversedAt: null };
+    return row ? tx.gallonPoolWriteOff.update({ where: { id: row.id }, data }) : tx.gallonPoolWriteOff.create({ data: { transactionId: t.id, ...data } });
+  }
+  if (!want && live) {
+    const asset = await tx.fixedAsset.findUnique({ where: { id: row.assetId } });
+    if (asset) await dep.restorePool({ asset, qty: row.qty, cost: row.cost, accum: row.accum, salvage: row.salvage, date: await dateFor(todayISO()), sourceType: 'ganti_rugi_writeoff', sourceId: `${t.id}:v${row.version}`, actor }, tx);
+    return tx.gallonPoolWriteOff.update({ where: { id: row.id }, data: { reversedAt: new Date() } });
+  }
+  return row;
 }
 // Public helper so sibling modules (Gudang) can append a Distribusi audit row using the same
 // actor-snapshot + trail. Keeps sensitive cross-module events in one auditable place.

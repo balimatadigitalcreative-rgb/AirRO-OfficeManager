@@ -56,7 +56,7 @@ const bulkPreviewSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(
 const bulkClearSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(500), note: z.string().min(3).max(300) });
 const locationPhotoSchema = z.object({ photoId: z.string().max(60).nullable().optional() });
 // GANTI RUGI GALON — the service requires the photo (400 with a clear message rather than a zod error).
-const gallonDamageSchema = z.object({ qty: z.number().int().positive(), kind: z.enum(['pecah', 'bocor', 'retak', 'hilang']), payMethod: z.enum(['tunai', 'bon', 'transfer']), photoId: z.string().max(60).optional(), note: z.string().max(200).optional(), txnDate: DATE.optional(), clientRef: z.string().min(8).max(64).optional() });
+const gallonDamageSchema = z.object({ qty: z.number().int().positive(), kind: z.enum(['pecah', 'bocor', 'retak', 'hilang']), payMethod: z.enum(['tunai', 'bon', 'transfer', 'ganti_galon']), photoId: z.string().max(60).optional(), note: z.string().max(200).optional(), txnDate: DATE.optional(), clientRef: z.string().min(8).max(64).optional() });
 const importSchema = z.object({ customers: z.array(customerSchema.partial({ masterPrice: true, phone: true, type: true })).max(5000), skipped: z.number().int().nonnegative().optional() });
 // Per-customer legacy (archive) transaction import — customerId comes from the route, NOT the body.
 // Columns: Tanggal · Harga · Pembelian Lunas · Pembelian Bon · Pembayaran Bon · Catatan. A single
