@@ -152,8 +152,9 @@ describe('Atur titik — Peta / Satelit (owner 2026-10-02)', () => {
     expect(f()).toMatch(/L\.control\.attribution\(\{ position: 'topright', prefix: false \}\)\.addTo\(map\);/);
     expect(css).toMatch(/\.mlap-pinmap \.leaflet-top \{ top: calc\(142px \+ env\(safe-area-inset-top\)\); \}/);
   });
-  it('a tile error on Satelit falls back to Peta and says why', () => {
-    expect(f()).toMatch(/sat\.on\('tileerror', /);
+  it('a tile error on Satelit falls back to Peta and says why — only when no satellite tile ever loaded (flaky data is not a bad key)', () => {
+    expect(f()).toMatch(/sat\.on\('tileload', \(\) => \{ satOk = true; \}\);/);
+    expect(f()).toMatch(/sat\.on\('tileerror', \(\) => \{ if \(!satOk\) \{ setSatErr\(true\); setLayer\('peta'\); \} \}\);/);
     expect(f()).toMatch(/trFl\('fld\.satErr'\)/);
   });
   it('the owner pastes the key on Aturan lapangan; it is part of the full save', () => {

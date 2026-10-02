@@ -236,8 +236,13 @@ function FldPinMap({ api, cust: c, depot, rules, onDone, onBack }) {
       const sat = satKey ? L.tileLayer('https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=' + encodeURIComponent(satKey), {
         maxZoom: 19, attribution: 'Powered by <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> | Esri, Maxar, Earthstar Geographics',
       }) : null;
-      // a bad / expired key (or no network to Esri) → back to the street map, and say why
-      if (sat) sat.on('tileerror', () => { setSatErr(true); setLayer('peta'); });
+      // a bad / expired key (or no network to Esri) → back to the street map, and say why. Once a satellite
+      // tile has loaded, a later failed tile is a patchy signal, not a bad key: the driver stays on Satelit.
+      let satOk = false;
+      if (sat) {
+        sat.on('tileload', () => { satOk = true; });
+        sat.on('tileerror', () => { if (!satOk) { setSatErr(true); setLayer('peta'); } });
+      }
       osm.addTo(map);
       layersRef.current = { osm, sat };
       if (had) L.circleMarker([c.lat, c.lng], { radius: 7, color: '#5B6B75', weight: 2, fillOpacity: 0.15, interactive: false }).addTo(map);
