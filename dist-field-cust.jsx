@@ -194,8 +194,13 @@ function FldComplete({ api, cust: c, onPin, onDone, onBack }) {
 // ATUR TITIK LOKASI — a draggable pin over the map. The phone's own GPS fix (with its accuracy circle)
 // and the old pin are shown; a pin moved > 150 m from the phone asks to confirm. Saved as a "geser" with
 // the device fix, so the history says how far it was moved from the phone's GPS.
-function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
+function FldPinMap({ api, cust: c, depot, rules, onDone, onBack }) {
   const had = typeof c.lat === 'number' && typeof c.lng === 'number';
+  // SATELIT (owner 2026-10-02): Esri World Imagery with the owner's ArcGIS key (Aturan lapangan); no key → no switch
+  const satKey = (rules && rules.satelliteKey) || '';
+  const [layer, setLayer] = uSfl('peta');
+  const [satErr, setSatErr] = uSfl(false);
+  const layersRef = uRfl(null);
   const [dev, setDev] = uSfl(null);
   const [pin, setPin] = uSfl(had ? { lat: c.lat, lng: c.lng } : null);
   const [mapErr, setMapErr] = uSfl(false);
@@ -222,11 +227,19 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
     let live = true;
     znLoadLeaflet().then((L) => {
       if (!live || !mapEl.current) return;
-      const map = L.map(mapEl.current, { zoomControl: false, attributionControl: true });
+      const map = L.map(mapEl.current, { zoomControl: false, attributionControl: false });
+      L.control.attribution({ position: 'topright', prefix: false }).addTo(map);   // the sheet covers the bottom: keep the OSM / Esri credit visible
       mapRef.current = map;
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
-      }).addTo(map);
+      });
+      const sat = satKey ? L.tileLayer('https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=' + encodeURIComponent(satKey), {
+        maxZoom: 19, attribution: 'Powered by <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> | Esri, Maxar, Earthstar Geographics',
+      }) : null;
+      // a bad / expired key (or no network to Esri) → back to the street map, and say why
+      if (sat) sat.on('tileerror', () => { setSatErr(true); setLayer('peta'); });
+      osm.addTo(map);
+      layersRef.current = { osm, sat };
       if (had) L.circleMarker([c.lat, c.lng], { radius: 7, color: '#5B6B75', weight: 2, fillOpacity: 0.15, interactive: false }).addTo(map);
       map.setView([pin.lat, pin.lng], 18);   // first: Leaflet fires zoomstart on the first view, which is not the driver
       // the pin stays in the centre; the driver moves the map under it (drag anywhere, mockup)
@@ -246,6 +259,14 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
     const dot = L.circleMarker([dev.lat, dev.lng], { radius: 5, color: '#fff', weight: 2, fillColor: '#065489', fillOpacity: 1, interactive: false }).addTo(mapRef.current);
     return () => { circle.remove(); dot.remove(); };
   }, [dev, mapReady]);
+  // swap the base layer (the pin, the GPS circle and the view stay where they are)
+  uEfl(() => {
+    const map = mapRef.current; const ls = layersRef.current;
+    if (!mapReady || !map || !ls) return;
+    const want = layer === 'sat' && ls.sat ? ls.sat : ls.osm; const other = want === ls.osm ? ls.sat : ls.osm;
+    if (other && map.hasLayer(other)) map.removeLayer(other);
+    if (!map.hasLayer(want)) want.addTo(map);
+  }, [layer, mapReady]);
   uEfl(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } }, []);
   const mv = FIELDLOGIC.pinMove({ device: dev, pin });
   const save = (confirmFar) => {
@@ -268,7 +289,7 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
       ) : null}
       <div className="mlap-mapbar">
         <button type="button" className="mlap-round" aria-label={trFl('fld.back')} onClick={onBack}><FldSvg n="back" s={18} sw={2.4} /></button>
-        <div className="mlap-glass mlap-mappill">{trFl('fld.pinT')}</div>
+        {satKey ? <div className="mlap-glass mlap-mapseg" role="group" aria-label={trFl('fld.mapType')}>{[['peta', trFl('fld.layerMap')], ['sat', trFl('fld.layerSat')]].map(([k, t]) => <button key={k} type="button" aria-pressed={layer === k} className={'mlap-mapseg-b' + (layer === k ? ' on' : '')} onClick={() => { setSatErr(false); setLayer(k); }}>{t}</button>)}</div> : <div className="mlap-glass mlap-mappill">{trFl('fld.pinT')}</div>}
         {dev && mapReady ? <button type="button" className="mlap-round mlap-map-locate" aria-label={trFl('fld.useMyLoc')} onClick={() => mapRef.current.setView([dev.lat, dev.lng], 18)}><FldSvg n="locate" s={19} /></button> : <span className="mlap-roundsp" aria-hidden="true" />}
       </div>
       {!mapErr && pin ? <div className="mlap-glass mlap-pinhint"><FldSvg n="hand" s={14} sw={2.2} />{trFl('fld.pinPan')}</div> : null}
@@ -282,6 +303,7 @@ function FldPinMap({ api, cust: c, depot, onDone, onBack }) {
         </div>
         <span className={'mlap-after' + (mv.far || (fallback && !moved) ? ' far' : '')}>{mv.far ? trFl('fld.pinFar') : fallback && !moved ? trFl('fld.pinNoGpsMove') : trFl('fld.pinAudit')}</span>
         {mapErr && dev ? <button type="button" className="mlap-btn mlap-wide" onClick={() => setPin({ lat: dev.lat, lng: dev.lng })}>{trFl('fld.useMyLoc')}</button> : null}
+        {satErr ? <div className="mlap-err" role="alert">{trFl('fld.satErr')}</div> : null}
         {err && <div className="mlap-err" role="alert">{err}</div>}
         <button type="button" className="mlap-btn primary mlap-wide" disabled={busy || !pin || (fallback && !moved)} onClick={() => save(false)}>{trFl('fld.savePin')}</button>
       </div>

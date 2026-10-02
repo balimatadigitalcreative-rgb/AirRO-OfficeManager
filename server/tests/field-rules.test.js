@@ -29,7 +29,7 @@ describe('field rules', () => {
     expect(r.body.data).toEqual({
       ritSop: { enabled: false, minLoad: 80 }, fleetCapacity: {},
       wajibFotoTransaksi: false, wajibFotoPengeluaran: false, wajibAlasanBatal: false,
-      hargaGantiRugiGalon: 0, fieldUiDefault: 'old',
+      hargaGantiRugiGalon: 0, fieldUiDefault: 'old', satelliteKey: '',
     });
   });
 
@@ -76,5 +76,21 @@ describe('the generic settings route cannot bypass the rules cap + audit', () =>
     expect(r.status).toBe(403);
     const rules = (await request(app).get(`${D}/field-rules`).set(auth(gm))).body.data;
     expect(rules.fieldUiDefault).toBe('old');
+  });
+});
+
+describe('satellite map key (owner 2026-10-02)', () => {
+  it('stores the satellite key, trims it, never echoes it into the audit; empty clears it', async () => {
+    const r = await request(app).put(`${D}/field-rules`).set(auth(gm)).send({ satelliteKey: '  AAPK-test-123  ' });
+    expect(r.status).toBe(200);
+    expect(r.body.data.satelliteKey).toBe('AAPK-test-123');
+    const audit = (await request(app).get(`${D}/audit`).set(auth(gm))).body.data;
+    const row = audit.find((a) => /Aturan lapangan/.test(a.title) && /kunci peta satelit diubah/.test(a.detail));
+    expect(row).toBeTruthy();
+    expect(audit.some((a) => /AAPK-test-123/.test(a.detail || ''))).toBe(false);
+    expect((await request(app).get(`${D}/field-rules`).set(auth(driver))).body.data.satelliteKey).toBe('AAPK-test-123');
+    const c = await request(app).put(`${D}/field-rules`).set(auth(gm)).send({ satelliteKey: '' });
+    expect(c.body.data.satelliteKey).toBe('');
+    expect((await request(app).put(`${D}/field-rules`).set(auth(gm)).send({ satelliteKey: 'x'.repeat(401) })).status).toBe(400);
   });
 });

@@ -13,6 +13,7 @@ const DEFAULT_RULES = Object.freeze({
   wajibAlasanBatal: false,
   hargaGantiRugiGalon: 0,
   fieldUiDefault: 'old',
+  satelliteKey: '',   // owner's ArcGIS API key — Atur titik offers a Satelit layer only when set (2026-10-02)
 });
 
 const posInt = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
@@ -31,6 +32,7 @@ function normalize(v) {
     wajibAlasanBatal: !!s.wajibAlasanBatal,
     hargaGantiRugiGalon: posInt(s.hargaGantiRugiGalon),
     fieldUiDefault: s.fieldUiDefault === 'new' ? 'new' : 'old',
+    satelliteKey: typeof s.satelliteKey === 'string' ? s.satelliteKey.trim().slice(0, 400) : '',
   };
 }
 
@@ -50,6 +52,7 @@ function describeChanges(a, b) {
   plates.forEach((p) => { if ((a.fleetCapacity[p] || 0) !== (b.fleetCapacity[p] || 0)) out.push(`kapasitas ${p}: ${a.fleetCapacity[p] || 'tanpa batas'} → ${b.fleetCapacity[p] || 'tanpa batas'}`); });
   [['wajibFotoTransaksi', 'foto wajib transaksi'], ['wajibFotoPengeluaran', 'foto wajib pengeluaran'], ['wajibAlasanBatal', 'alasan wajib batal']].forEach(([k, label]) => { if (a[k] !== b[k]) out.push(`${label} ${b[k] ? 'aktif' : 'mati'}`); });
   if (a.hargaGantiRugiGalon !== b.hargaGantiRugiGalon) out.push(`harga ganti rugi galon ${a.hargaGantiRugiGalon} → ${b.hargaGantiRugiGalon}`);
+  if (a.satelliteKey !== b.satelliteKey) out.push(b.satelliteKey ? 'kunci peta satelit diubah' : 'kunci peta satelit dihapus');   // never the key itself
   if (a.fieldUiDefault !== b.fieldUiDefault) out.push(b.fieldUiDefault === 'new' ? 'tampilan baru dijadikan tampilan utama' : 'tampilan lama dijadikan tampilan utama');
   return out;
 }
@@ -85,6 +88,11 @@ async function setRules(patch, actor) {
     const h = Math.round(Number(p.hargaGantiRugiGalon));
     if (!Number.isFinite(h) || h < 0 || h > 10000000) throw ApiError.badRequest('Harga ganti rugi galon tidak valid.');
     next.hargaGantiRugiGalon = h;
+  }
+  if (p.satelliteKey !== undefined) {
+    const k = String(p.satelliteKey == null ? '' : p.satelliteKey).trim();
+    if (k.length > 400) throw ApiError.badRequest('Kunci peta satelit terlalu panjang.');
+    next.satelliteKey = k;
   }
   if (p.fieldUiDefault !== undefined) {
     if (p.fieldUiDefault !== 'old' && p.fieldUiDefault !== 'new') throw ApiError.badRequest('Tampilan utama harus "old" atau "new".');

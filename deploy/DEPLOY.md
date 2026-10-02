@@ -162,6 +162,13 @@ tiles is out of scope. Consequences to keep in mind:
 - `/vendor/` is served `immutable` for a year: upgrading Leaflet means a NEW folder (e.g. `leaflet-1.9.5/`),
   never overwriting files in place.
 
+**Satellite tiles (Atur titik, opt-in — owner 2026-10-02).** With an ArcGIS Location Platform API key
+saved in Aturan lapangan & armada, Atur titik (Mode Lapangan) offers a Satelit layer from
+`ibasemaps-api.arcgis.com` (Esri World Imagery); the street map stays the default. The key is visible to
+the phones that use it — restrict it in the ArcGIS dashboard to the referrer `https://airrooffice.com/*`
+and to basemaps only. Without a key the button does not appear. The Esri attribution (`Powered by Esri`)
+is a licence condition and stays on the map. A bad/expired key falls back to the street map with a message.
+
 `integrity`/`crossorigin` attributes were dropped: they exist for cross-origin CDN
 fetches and are meaningless for same-origin files we ship ourselves.
 

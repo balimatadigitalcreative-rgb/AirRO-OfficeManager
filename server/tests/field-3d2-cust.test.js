@@ -137,3 +137,28 @@ describe('Ganti rugi — Diganti galon baru (owner 2026-10-02)', () => {
     expect(f).toMatch(/pay === 'ganti_galon' \? <span className="mlap-pricebox">—<\/span>/);
   });
 });
+
+describe('Atur titik — Peta / Satelit (owner 2026-10-02)', () => {
+  const f = () => fn(cust, 'FldPinMap');
+  it('with the owner key: a glass Peta/Satelit switch; Esri World Imagery with its attribution', () => {
+    expect(f()).toMatch(/function FldPinMap\(\{ api, cust: c, depot, rules, onDone, onBack \}\)/);
+    expect(f()).toMatch(/https:\/\/ibasemaps-api\.arcgis\.com\/arcgis\/rest\/services\/World_Imagery\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}\?token=/);
+    expect(f()).toMatch(/Esri, Maxar, Earthstar Geographics/);
+    expect(f()).toMatch(/satKey \? <div className="mlap-glass mlap-mapseg" role="group"/);
+    expect(shell).toMatch(/<FldPinMap api=\{api\} cust=\{view\.cust\} depot=\{ctx\.depot\} rules=\{ctx\.rules \|\| \{\}\}/);
+  });
+  it('the map attribution (OSM / Esri licence condition) stays visible: top right, below the hint (the sheet covers the bottom)', () => {
+    expect(f()).toMatch(/L\.map\(mapEl\.current, \{ zoomControl: false, attributionControl: false \}\);/);
+    expect(f()).toMatch(/L\.control\.attribution\(\{ position: 'topright', prefix: false \}\)\.addTo\(map\);/);
+    expect(css).toMatch(/\.mlap-pinmap \.leaflet-top \{ top: calc\(142px \+ env\(safe-area-inset-top\)\); \}/);
+  });
+  it('a tile error on Satelit falls back to Peta and says why', () => {
+    expect(f()).toMatch(/sat\.on\('tileerror', /);
+    expect(f()).toMatch(/trFl\('fld\.satErr'\)/);
+  });
+  it('the owner pastes the key on Aturan lapangan; it is part of the full save', () => {
+    const r = fn(shell, 'FldRules');
+    expect(r).toMatch(/value=\{r\.satelliteKey \|\| ''\}/);
+    expect(r).toMatch(/satelliteKey: r\.satelliteKey \|\| ''/);
+  });
+});

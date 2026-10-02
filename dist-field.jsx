@@ -195,7 +195,7 @@ function FldApp({ user, perms, pref, today, fleetList, fleetScope, refreshKey, o
       {ready && full && view.name === 'damage' && <FldDamage api={api} cust={view.cust} rules={ctx.rules || {}} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'exp' && <FldExpense api={api} refs={refs} onDone={done} onBack={() => setView(null)} />}
       {ready && full && view.name === 'complete' && <FldComplete api={api} cust={view.cust} onPin={(c) => setView({ name: 'pin', cust: c, back: view })} onDone={done} onBack={() => setView(null)} />}
-      {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} depot={ctx.depot} onDone={(m, pt) => { if (view.back) { setView(pt ? FIELDLOGIC.afterPin(view.back, view.cust.id, pt) : view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
+      {ready && full && view.name === 'pin' && <FldPinMap api={api} cust={view.cust} depot={ctx.depot} rules={ctx.rules || {}} onDone={(m, pt) => { if (view.back) { setView(pt ? FIELDLOGIC.afterPin(view.back, view.cust.id, pt) : view.back); flash(m); setCtxTick((t) => t + 1); } else done(m); }} onBack={() => setView(view.back || null)} />}
       {ready && full && view.name === 'koreksi' && <FldKoreksi api={api} target={view.target} can={can} onDone={(m) => { setView({ name: 'koreksiSaya' }); flash(m); setCtxTick((t) => t + 1); }} onBack={() => setView(null)} onSaya={() => setView({ name: 'koreksiSaya' })} />}
       {ready && full && view.name === 'koreksiSaya' && <FldKoreksiSaya api={api} tick={tick} onResubmit={(tg) => setView({ name: 'koreksi', target: tg })} onBack={() => setView(null)} onChanged={(m) => { flash(m); setCtxTick((t) => t + 1); }} />}
       {!full && (
@@ -303,7 +303,7 @@ function FldRules({ fleetList, canRelease, onSaved, onBack }) {
       plates.forEach((p) => { fc[p] = r.fleetCapacity[p] || 0; });
       Object.keys(r.fleetCapacity).forEach((p) => { fc[p] = r.fleetCapacity[p]; });
       Object.keys(loadedCap.current).forEach((p) => { if (!(p in fc)) fc[p] = 0; });
-      body = { ritSop: r.ritSop, fleetCapacity: fc, wajibFotoTransaksi: !!r.wajibFotoTransaksi, wajibFotoPengeluaran: !!r.wajibFotoPengeluaran, wajibAlasanBatal: !!r.wajibAlasanBatal, hargaGantiRugiGalon: r.hargaGantiRugiGalon || 0 };
+      body = { ritSop: r.ritSop, fleetCapacity: fc, wajibFotoTransaksi: !!r.wajibFotoTransaksi, wajibFotoPengeluaran: !!r.wajibFotoPengeluaran, wajibAlasanBatal: !!r.wajibAlasanBatal, hargaGantiRugiGalon: r.hargaGantiRugiGalon || 0, satelliteKey: r.satelliteKey || '' };
     }
     window.API.distribusi.fieldRules.set(body)
       .then((x) => {
@@ -359,6 +359,8 @@ function FldRules({ fleetList, canRelease, onSaved, onBack }) {
             {toggle('wajibAlasanBatal', trFl('fld.alasanBatal'))}
             <label className="mlap-field"><span className="lb">{trFl('fld.hargaGR')}</span>
               <input className="mlap-input" inputMode="numeric" value={r.hargaGantiRugiGalon || ''} onChange={(e) => set({ hargaGantiRugiGalon: +String(e.target.value).replace(/[^0-9]/g, '') || 0 })} /></label>
+            <label className="mlap-field"><span className="lb">{trFl('fld.satKeyL')}<span className="ht">{trFl('fld.satKeyH')}</span></span>
+              <input className="mlap-input" style={{ width: 160 }} autoComplete="off" spellCheck={false} value={r.satelliteKey || ''} onChange={(e) => set({ satelliteKey: e.target.value.slice(0, 400) })} aria-label={trFl('fld.satKeyL')} /></label>
           </div>
           {err && <div className="mlap-err" role="alert">{err}</div>}
           {canRelease && (

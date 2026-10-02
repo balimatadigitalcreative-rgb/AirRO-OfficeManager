@@ -740,3 +740,10 @@ input.mlap-stepval { width: 40px; font-size: 24px; }
   .mlap-dock { grid-template-columns: 1fr 1fr 62px 1fr 1fr; }
   .mlap-tab span { font-size: 10px; }
 }
+
+/* ── SATELIT (Atur titik, owner 2026-10-02): a glass Peta / Satelit switch in place of the title pill ── */
+.mlap-mapseg { flex: 1; min-width: 0; height: 44px; border-radius: 22px; padding: 3px; box-sizing: border-box; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; }
+.mlap-mapseg-b { border: 0; border-radius: 19px; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: var(--mlap-ink); cursor: pointer; min-height: 38px; }
+.mlap-mapseg-b.on { background: #FFFFFF; box-shadow: 0 1px 3px rgba(14,27,36,.14); }
+.mlap-mapseg-b:focus-visible { outline: 2px solid var(--mlap-teal, #22A7A1); outline-offset: 1px; }
+.mlap-pinmap .leaflet-top { top: calc(142px + env(safe-area-inset-top)); }   /* attribution below the glass bar + the hint pill */

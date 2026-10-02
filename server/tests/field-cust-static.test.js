@@ -117,7 +117,7 @@ describe('Final review fixes (customer screens)', () => {
   });
   it('Atur titik never dead-ends without GPS: starts at the warehouse and must be moved before saving', () => {
     const f = fn('FldPinMap');
-    expect(f).toMatch(/function FldPinMap\(\{ api, cust: c, depot, onDone, onBack \}\)/);
+    expect(f).toMatch(/function FldPinMap\(\{ api, cust: c, depot, rules, onDone, onBack \}\)/);
     expect(f).toMatch(/FIELDLOGIC\.pinStart\(\{ cust: c, device: p, depot \}\)/);
     expect(f).toMatch(/disabled=\{busy \|\| !pin \|\| \(fallback && !moved\)\}/);
     expect(f).toMatch(/'fld\.pinNoGpsMove'/);

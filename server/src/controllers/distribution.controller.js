@@ -235,6 +235,7 @@ const fieldRulesSchema = z.object({
   wajibFotoPengeluaran: z.boolean().optional(),
   wajibAlasanBatal: z.boolean().optional(),
   hargaGantiRugiGalon: z.number().int().optional(),
+  satelliteKey: z.string().max(600).optional(),   // trimmed + capped at 400 by the service (a clear message, not a zod blob)
   fieldUiDefault: z.string().max(10).optional(),
 });
 const routeQuery = z.object({
