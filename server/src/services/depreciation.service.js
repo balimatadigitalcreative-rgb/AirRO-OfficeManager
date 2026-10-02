@@ -393,8 +393,9 @@ async function writeOffPool({ asset, qty, date, kind, sourceType, sourceId, acto
   return { cost: s.cost, accum: s.accum, salvage: s.salvage, qty: s.take, journalId: je ? je.id : null };
 }
 // Undo one write-off exactly: reverse its journal and put the same cost / accumulated / salvage back.
-async function restorePool({ asset, qty, cost, accum, salvage, date, sourceType, sourceId, actor }, tx) {
-  if (config.accountingV2) {
+// journal:false = the caller deletes the write-off journals itself (a hard delete: as if it never happened).
+async function restorePool({ asset, qty, cost, accum, salvage, date, sourceType, sourceId, actor, journal }, tx) {
+  if (config.accountingV2 && journal !== false) {
     await acc.reverseJournal({ sourceType, sourceId, reversalSourceType: sourceType + '_rev', reversalSourceId: sourceId + ':rev', date, description: `Pembatalan hapus galon: ${asset.name} × ${qty}`, actor }, tx);
   }
   await tx.fixedAsset.update({ where: { id: asset.id }, data: {

@@ -1048,16 +1048,21 @@ async function deleteCustomer(id, actor) {
   if (!fleetAllows(actor, c.armada)) throw ApiError.notFound('Customer not found');   // out of scope
   const snap = await actorSnap(actor);
   const imp = await customerImpact(id);
-  await prisma.$transaction([
-    prisma.correction.deleteMany({ where: { transaction: { customerId: id } } }),
-    prisma.distTransaction.deleteMany({ where: { customerId: id } }),
-    prisma.delivery.deleteMany({ where: { customerId: id } }),
-    prisma.priceHistory.deleteMany({ where: { customerId: id } }),
-    prisma.distInvoice.deleteMany({ where: { customerId: id } }),
-    prisma.distAdjustment.deleteMany({ where: { customerId: id } }),
-    prisma.gallonMovement.deleteMany({ where: { customerId: id } }),
-    prisma.customer.delete({ where: { id } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    // ganti rugi of this customer: gallons back in the pool, write-off journals gone; the "galon baru"
+    // movement carries no customerId, so it goes by transaction id
+    const txnIds = (await tx.distTransaction.findMany({ where: { customerId: id }, select: { id: true } })).map((t) => t.id);
+    await dropGantiRugiWriteOff(txnIds, tx);
+    if (txnIds.length) await tx.gallonMovement.deleteMany({ where: { transactionId: { in: txnIds } } });
+    await tx.correction.deleteMany({ where: { transaction: { customerId: id } } });
+    await tx.distTransaction.deleteMany({ where: { customerId: id } });
+    await tx.delivery.deleteMany({ where: { customerId: id } });
+    await tx.priceHistory.deleteMany({ where: { customerId: id } });
+    await tx.distInvoice.deleteMany({ where: { customerId: id } });
+    await tx.distAdjustment.deleteMany({ where: { customerId: id } });
+    await tx.gallonMovement.deleteMany({ where: { customerId: id } });
+    await tx.customer.delete({ where: { id } });
+  });
   await logAudit('pelanggan', `Hapus permanen pelanggan: ${c.name}`, `${imp.txnCount} transaksi & sisa bon ${imp.sisaBon} ikut terhapus · tidak bisa dikembalikan`, snap, c.armada);
   return { ok: true, deleted: { id, name: c.name }, impact: imp };
 }
@@ -2754,6 +2759,7 @@ async function hardDeleteTransaction(txnId, body, actor) {
   // in the same transaction (no orphan journal), then the customer's AR reclasses (flag-gated).
   await prisma.$transaction(async (tx) => {
     if (config.accountingV2) await tx.journalEntry.deleteMany({ where: { OR: [{ sourceType: 'dist_txn', sourceId: txnId }, { sourceType: 'dist_txn_adj', ref: txnId }] } });
+    await dropGantiRugiWriteOff(txnId, tx);   // a deleted ganti rugi never left the gallon pool
     await tx.gallonMovement.deleteMany({ where: { transactionId: txnId } });
     await tx.correction.deleteMany({ where: { transactionId: txnId } });
     await tx.distTransaction.delete({ where: { id: txnId } });
@@ -2869,6 +2875,7 @@ async function bulkExecuteTransactions(ids, action, body, actor) {
         // with it in the same transaction, so no orphan journal is left, then the customer AR reclasses.
         await prisma.$transaction(async (tx) => {
           if (config.accountingV2) await tx.journalEntry.deleteMany({ where: { OR: [{ sourceType: 'dist_txn', sourceId: id }, { sourceType: 'dist_txn_adj', ref: id }] } });
+          await dropGantiRugiWriteOff(id, tx);   // a deleted ganti rugi never left the gallon pool
           await tx.gallonMovement.deleteMany({ where: { transactionId: id } });
           await tx.correction.deleteMany({ where: { transactionId: id } });
           await tx.distTransaction.delete({ where: { id } });
@@ -2926,6 +2933,7 @@ async function restoreBulk(batchId, actor) {
           // Re-post the recreated source's journal (skip-if-exists → fresh, since the delete removed it)
           // + AR reclass (flag-gated).
           if (config.accountingV2 && row.status !== 'void') { await acc.postDistTransaction(row, actor, tx); await acc.postReceivablesReclass(row.customerId, actor, tx); }
+          await syncGantiRugiWriteOff(row, actor, tx);   // a restored ganti rugi leaves the gallon pool again
         });
         restored.push(s.id);
       }
@@ -3841,6 +3849,23 @@ async function syncGantiRugiWriteOff(t, actor, tx) {
     return tx.gallonPoolWriteOff.update({ where: { id: row.id }, data: { reversedAt: new Date() } });
   }
   return row;
+}
+// HARD DELETE of a ganti rugi (single, bulk 'hapus', or with its customer): the source disappears, so its
+// write-off does too — gallons back in the pool, its journals (and any reversal) deleted, the row removed.
+// A bulk-delete restore recreates the transaction and runs syncGantiRugiWriteOff again.
+async function dropGantiRugiWriteOff(txnIds, tx) {
+  const ids = [].concat(txnIds || []).filter(Boolean);
+  if (!ids.length) return;
+  const dep = require('./depreciation.service');
+  const rows = await tx.gallonPoolWriteOff.findMany({ where: { transactionId: { in: ids } } });
+  for (const row of rows) {
+    if (!row.reversedAt) {
+      const asset = await tx.fixedAsset.findUnique({ where: { id: row.assetId } });
+      if (asset) await dep.restorePool({ asset, qty: row.qty, cost: row.cost, accum: row.accum, salvage: row.salvage, journal: false }, tx);
+    }
+    await tx.journalEntry.deleteMany({ where: { sourceType: { in: ['ganti_rugi_writeoff', 'ganti_rugi_writeoff_rev'] }, sourceId: { startsWith: row.transactionId + ':' } } });
+    await tx.gallonPoolWriteOff.delete({ where: { id: row.id } });
+  }
 }
 // Public helper so sibling modules (Gudang) can append a Distribusi audit row using the same
 // actor-snapshot + trail. Keeps sensitive cross-module events in one auditable place.

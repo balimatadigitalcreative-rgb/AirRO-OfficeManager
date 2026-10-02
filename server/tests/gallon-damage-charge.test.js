@@ -204,3 +204,57 @@ describe('owner 2026-10-02: ganti rugi takes the gallons off the asset pool, unl
     await prisma.fixedAsset.update({ where: { id: poolId }, data: { status: 'aktif' } });
   });
 });
+
+describe('final review: hard-deleting a ganti rugi (or its customer) puts the gallons back in the asset pool', () => {
+  let own, poolId2;
+  const wo = (id) => prisma.gallonPoolWriteOff.findUnique({ where: { transactionId: id } });
+  const woJournals = (id) => prisma.journalEntry.count({ where: { sourceType: { in: ['ganti_rugi_writeoff', 'ganti_rugi_writeoff_rev'] }, sourceId: { startsWith: id + ':' } } });
+  beforeAll(async () => {
+    own = (await request(app).post('/api/v1/auth/register').send({ name: 'Pemilik2', username: 'gd_owner2', password: 'secret123', role: 'owner' })).body.token;
+    poolId2 = (await prisma.fixedAsset.findFirst({ where: { pooled: true, category: 'galon', status: 'aktif' } })).id;
+    await request(app).post(`${D}/transactions`).set(auth(gm)).send({ customerId: cid, qty: 6, method: 'lunas', txnDate: today, gallonOut: 6, gallonIn: 0 });
+  });
+  const pq = async () => (await prisma.fixedAsset.findUnique({ where: { id: poolId2 } })).quantity;
+
+  it('single hard delete: pool back, no write-off journal or row left', async () => {
+    const q0 = await pq();
+    const id = (await charge({ qty: 2, kind: 'pecah', payMethod: 'tunai' })).body.data.transaction.id;
+    expect(await pq()).toBe(q0 - 2);
+    const r = await request(app).delete(`${D}/transactions/${id}`).set(auth(own)).send({ reason: 'salah input', confirm: 'HAPUS', password: 'secret123' });
+    expect(r.status).toBe(200);
+    expect(await pq()).toBe(q0);
+    expect(await wo(id)).toBeNull();
+    expect(await woJournals(id)).toBe(0);
+  });
+
+  it('bulk hapus puts them back; restoring the deletion writes them off again', async () => {
+    const q0 = await pq();
+    const id = (await charge({ qty: 1, kind: 'pecah', payMethod: 'transfer' })).body.data.transaction.id;
+    const b = await request(app).post(`${D}/transactions/bulk`).set(auth(own)).send({ ids: [id], action: 'hapus', note: 'uji hapus', confirm: 'HAPUS' });
+    expect(b.status).toBe(200);
+    expect(b.body.data.done).toBe(1);
+    expect(await pq()).toBe(q0);
+    expect(await wo(id)).toBeNull();
+    const rs = await request(app).post(`${D}/transactions/bulk/restore`).set(auth(own)).send({ batchId: b.body.data.batchId });
+    expect(rs.status).toBe(200);
+    expect(await pq()).toBe(q0 - 1);
+    expect((await wo(id)).reversedAt).toBeNull();
+  });
+
+  it('deleting the customer puts their ganti rugi gallons back and removes the new-gallon movement too', async () => {
+    const c2 = (await request(app).post(`${D}/customers`).set(auth(gm)).send({ name: 'Toko Hapus', type: 'reguler', masterPrice: 18000, armada: 'DK 1' })).body.data.id;
+    await request(app).post(`${D}/transactions`).set(auth(gm)).send({ customerId: c2, qty: 4, method: 'lunas', txnDate: today, gallonOut: 4, gallonIn: 0 });
+    const q0 = await pq();
+    const ch = (body) => request(app).post(`${D}/customers/${c2}/gallon-damage`).set(auth(gm)).send({ txnDate: today, photoId, ...body });
+    const id1 = (await ch({ qty: 1, kind: 'pecah', payMethod: 'tunai' })).body.data.transaction.id;
+    const id2 = (await ch({ qty: 1, kind: 'pecah', payMethod: 'ganti_galon' })).body.data.transaction.id;
+    expect(await pq()).toBe(q0 - 1);
+    const d = await request(app).delete(`${D}/customers/${c2}`).set(auth(own));
+    expect(d.status).toBe(200);
+    expect(await pq()).toBe(q0);
+    expect(await wo(id1)).toBeNull();
+    expect(await woJournals(id1)).toBe(0);
+    expect(await prisma.gallonMovement.count({ where: { transactionId: { in: [id1, id2] } } })).toBe(0);
+    expect((await gallon()).invariant.ok).toBe(true);
+  });
+});
